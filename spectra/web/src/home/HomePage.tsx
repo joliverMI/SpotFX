@@ -10,24 +10,28 @@
  * single `components/SongStrip` row is now the timeline on every route,
  * and this page drives its window through the shared view state
  * (components/songTimelineView.tsx) rather than drawing a second one. */
-import { useEngineStatus } from '../queries';
+import { useSongTimelineView } from '../components/songTimelineView';
 import HomeTimeline from './HomeTimeline';
 import HomeQuickRuns from './HomeQuickRuns';
 
 export default function HomePage({ showAudioShape = true }: { showAudioShape?: boolean }) {
-  const { data: status } = useEngineStatus();
-  const track = status?.bridge.track ?? null;
+  // THE LAST SONG COUNTS (the Admiral's Q2 answer, 2026-10-15): with
+  // nothing playing, Home shows the LAST song's shape DIMMED rather than
+  // a bare "Nothing playing" card. The shared view state holds that
+  // memory, so this shape and the timeline row above it are always
+  // showing the same song. The card below is now reachable only on a
+  // session where nothing has played at all.
+  const { track, showingLast } = useSongTimelineView();
   const uri = track?.uri ?? null;
 
   return (
     <div className="home-page">
       {track ? (
-        <HomeTimeline uri={uri} showAudioShape={showAudioShape} />
+        <HomeTimeline uri={uri} showAudioShape={showAudioShape} dimmed={showingLast} />
       ) : (
-        // The timeline row above already says "Nothing playing" and draws
-        // its own empty panel (it never unmounts — SongStrip.tsx's own
-        // rule), so this is only about the SHAPE having nothing to draw.
-        <div className="card home-no-track">Nothing playing.</div>
+        <div className="card home-no-track">
+          Nothing has played yet this session — the timeline above is waiting for a song.
+        </div>
       )}
       <HomeQuickRuns />
     </div>

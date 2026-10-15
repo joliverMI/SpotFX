@@ -31,6 +31,18 @@
  * a filter left off and then forgotten on another route would be
  * unreachable; a reload always comes back to everything shown.
  *
+ * IT REMEMBERS THE LAST SONG (the Admiral's Q2 answer, 2026-10-15: Home
+ * and the kiosk with nothing playing should show "the LAST song's
+ * timeline + audio shape dimmed ... never a bare 'Nothing playing'
+ * card"). `track` is the live track when there is one and the last one
+ * seen THIS SESSION otherwise, with `showingLast` saying which — so both
+ * the timeline row and Home's shape read ONE resolved track and cannot
+ * disagree about whether they are showing something live. It is held in
+ * memory only, deliberately: a remembered song is a courtesy for the
+ * minutes after the music stops, not a durable claim about his room, and
+ * persisting it would mean a cold load opening on a song from days ago
+ * dressed as "last played".
+ *
  * NO PER-FRAME STATE LIVES HERE. The window is read through its own
  * `getWin()` getter (useFollowWindow's own contract) by the rAF loops
  * that draw the strip and the canvas — this context re-renders only when
@@ -63,10 +75,28 @@ export function kindShown(kind: UpcomingKind, f: KindFilter): boolean {
 
 interface Snapshot { startMs: number; endMs: number; follow: boolean }
 
+/** The bits of `bridge.track` every consumer of this state needs. A
+ * structural type rather than an import of the whole status shape, so a
+ * remembered track can be held and handed on with no optional chaining
+ * through three levels at each use. */
+export interface TimelineTrack {
+  uri: string | null;
+  title: string | null;
+  artist: string | null;
+  duration_ms: number | null;
+  is_playing: boolean | null;
+}
+
 export interface SongTimelineView {
   /** The shared zoom window — the SAME object shape the Timeline page's
    * own canvas consumes, so `getWin` can be handed straight to it. */
   win: ReturnType<typeof useFollowWindow>;
+  /** The live track, or the last one seen this session (`showingLast`). */
+  track: TimelineTrack | null;
+  /** True when `track` is a REMEMBERED song rather than a playing one —
+   * every surface drawing it must say so and dim itself (his Q2 answer).
+   * False with nothing ever played, where `track` is null too. */
+  showingLast: boolean;
   durationMs: number;
   filters: KindFilter;
   toggleFilter: (k: keyof KindFilter) => void;
@@ -97,6 +127,8 @@ function useFallback(): SongTimelineView {
   const win = useFollowWindow({ getNowMs: () => null, durationMs: 1, keyPrefix: 'songtl-fallback' });
   return useMemo(() => ({
     win,
+    track: null,
+    showingLast: false,
     durationMs: 0,
     filters: { analysed: true, drop: true, lightShow: true },
     toggleFilter: () => {},
@@ -128,7 +160,21 @@ export function useSongTimelineShape(active: boolean): void {
 
 export function SongTimelineViewProvider({ children }: { children: ReactNode }) {
   const { data: status } = useEngineStatus();
-  const durationMs = status?.bridge.track?.duration_ms ?? 0;
+  const liveTrack = status?.bridge.track ?? null;
+
+  // THE LAST SONG, kept client-side (his Q2 answer). Written only when a
+  // real track with a uri arrives, so a momentary null between two songs
+  // — or a bridge blip — never erases what we are showing. `useState` +
+  // an effect rather than a ref, because the render below must re-run
+  // when it changes.
+  const [lastTrack, setLastTrack] = useState<TimelineTrack | null>(null);
+  useEffect(() => {
+    if (liveTrack?.uri) setLastTrack(liveTrack);
+  }, [liveTrack]);
+
+  const track: TimelineTrack | null = liveTrack?.uri ? liveTrack : lastTrack;
+  const showingLast = !liveTrack?.uri && !!lastTrack;
+  const durationMs = track?.duration_ms ?? 0;
 
   const getNow = useMemo(() => () => getShowClockMs(), []);
   const win = useFollowWindow({
@@ -189,6 +235,8 @@ export function SongTimelineViewProvider({ children }: { children: ReactNode }) 
 
   const value = useMemo<SongTimelineView>(() => ({
     win,
+    track,
+    showingLast,
     durationMs,
     filters,
     toggleFilter,
@@ -199,8 +247,8 @@ export function SongTimelineViewProvider({ children }: { children: ReactNode }) 
     canUndo: past.length > 0,
     canRedo: future.length > 0,
     addShapeOwner,
-  }), [win, durationMs, filters, toggleFilter, owners, pushHistory, undo, redo,
-       past.length, future.length, addShapeOwner]);
+  }), [win, track, showingLast, durationMs, filters, toggleFilter, owners, pushHistory,
+       undo, redo, past.length, future.length, addShapeOwner]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

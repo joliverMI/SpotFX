@@ -24,9 +24,25 @@ import DevicePreviewStrip from './DevicePreviewStrip';
 import ModeChip from './ModeChip';
 import EnergyBar from './EnergyBar';
 import LightShowStrip from './LightShowStrip';
+import SongNextBox, { useNextBoxInBar } from './SongNextBox';
 import WarningChip from './WarningChip';
+import { useEngineStatus, useUpcoming } from '../queries';
+import { kindShown, useSongTimelineView } from './songTimelineView';
 
 export default function TopBarStrip() {
+  // THE NEXT-EVENT BOX JOINS ROW 2 AT <=1100px (his Q1 answer,
+  // 2026-10-15): the timeline row's own 96px box squeezed the track
+  // beside it at the 1024 tablet and the 800 wall kiosk, and the bar's
+  // second row had width going spare. `useNextBoxInBar` is the one
+  // predicate this and SongStrip both ask, so it is never in both places
+  // and never in neither.
+  const nextInBar = useNextBoxInBar();
+  const { data: status } = useEngineStatus();
+  const uri = status?.bridge.track?.uri ?? null;
+  const { data: upcoming } = useUpcoming(nextInBar ? uri : null);
+  const { filters } = useSongTimelineView();
+  const barEvents = (upcoming?.events ?? []).filter((e) => kindShown(e.kind, filters));
+
   return (
     <div className="top-bar-strip">
       {/* House lighting's mode — FIRST, the resting state every page sits on.
@@ -35,6 +51,10 @@ export default function TopBarStrip() {
         * see App.tsx's own comment on the `display: contents` merge. */}
       <ModeChip />
       <EnergyBar />
+      {nextInBar && (
+        <SongNextBox events={barEvents}
+          durationMs={status?.bridge.track?.duration_ms ?? 0} host="bar" />
+      )}
       <LightShowStrip />
       {/* The mockup's fourth thin divider (`.sp .sepv`) — see tokens.css's
         * own `.one-bar-sep-*` block for why each one is named for the

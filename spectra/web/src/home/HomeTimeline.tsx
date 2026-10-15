@@ -99,9 +99,14 @@ export function alignCorrection(
 }
 
 export default function HomeTimeline({
-  uri, showAudioShape = true,
+  uri, showAudioShape = true, dimmed = false,
 }: {
   uri: string | null;
+  /** Nothing is playing and this is the LAST song's shape (his Q2
+   * answer) — drawn dimmed, with the row above it carrying the "last
+   * played" cue. Still fully interactive: the window, the filters and
+   * the lanes all work on a remembered song. */
+  dimmed?: boolean;
   /** The kiosk view's own small-screen rule (kiosk/kioskConfig.ts): drop
    * the audio shape rather than squeeze it illegible. With it off this
    * card renders nothing at all, and the timeline row above stays
@@ -259,7 +264,7 @@ export default function HomeTimeline({
   if (!showAudioShape) return null;
 
   return (
-    <div className="home-timeline card">
+    <div className={`home-timeline card${dimmed ? ' home-timeline-dimmed' : ''}`}>
       {/* ONE element carries the measured alignment, so the shape and its
         * control row move together and there is one geometry writer. */}
       <div ref={alignedRef} className="home-timeline-aligned">

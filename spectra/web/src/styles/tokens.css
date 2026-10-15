@@ -415,6 +415,10 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .one-bar .one-bar-sep-before-energy { order: 55; }
 .one-bar .energy-mark-group { order: 60; }
 .one-bar .one-bar-sep-before-show { order: 65; }
+/* The next-event box, when the bar is its host (<=1100px, his Q1 answer
+ * — components/SongNextBox.tsx). It is NOT mounted at all above that
+ * width, so this order is simply unused there. */
+.one-bar .song-strip-next-in-bar { order: 67; }
 .one-bar .light-show-strip { order: 70; }
 .one-bar .one-bar-sep-before-preview { order: 75; }
 .one-bar .device-preview-strip { order: 80; }
@@ -486,6 +490,22 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   /* Row 2 fills its own width, so the mockup's push-to-the-right spacer
      has nothing to push against and would just blank the middle. */
   .one-bar .one-bar-spacer { display: none; }
+  /* The 1180 tier's own 72px cap on the Light Show act name was there to
+   * keep a ONE-LINE row from scrolling sideways. Row 2 has its own whole
+   * width here, so the cap would now throw away the room the fill just
+   * bought — the slot's own `text-overflow: ellipsis` still protects a
+   * genuinely long name. */
+  .one-bar .light-show-act-name { max-width: none; }
+  /* ROW 2 FILLS THE ROW — "no left-aligned hole" (his Q1 answer,
+   * 2026-10-15). The Light Show slot is `flex: 0 1 200px` by default, so
+   * with ~800px of row to itself it sat at 200px and left the rest
+   * empty — AND truncated its own idle text to "Nothing a..." at the
+   * 800px kiosk, which he reported separately. Letting it take the slack
+   * fixes both at once: the hole closes and the text has room. The
+   * next-event box (hosted here at these widths) keeps its own fixed
+   * width so its countdown never reflows. */
+  .one-bar .light-show-strip { flex: 1 1 200px; }
+  .one-bar .song-strip-next-in-bar { flex: 0 0 auto; }
 }
 /* Between the two: 1180 still fits one line, but only with the swatch
  * count capped (measured: 2 fits, every favourite shown does not). */
@@ -2489,20 +2509,37 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
  * `.sp .ib` size: 36 wide, 34 tall, in a 48px bar (audit B1 — the live
  * build was 34x30 plus a separate ⓘ circle beside it, 56px in all).
  *
- * THE STATE COLOURS ARE UNCHANGED, deliberately: whether this button
- * should use the mockup's purple-lit/grey-off or the live green-on/
- * purple-music/amber-idle mapping is a design-choice question with the
- * Admiral (Q3, held on task ui-fidelity-fix). They are isolated to the
- * four rules below so the answer is a small change. */
+ * THE STATE COLOURS ARE THE MOCKUP'S (his Q3 answer, 2026-10-15: "house
+ * button per the mockup: purple lit when a mode drives the room, grey
+ * when house lighting is off, small music badge while music has the
+ * room, hold ring outside"), replacing the live build's own
+ * green-on/purple-music/amber-idle mapping:
+ *
+ *   on     a mode is resting on the room  -> PURPLE LIT
+ *   music  a mode owns the room, the show has it right now -> PURPLE LIT
+ *          plus the ♪ badge (his words put the music state in the BADGE,
+ *          not in a third colour — the mode still drives the room, which
+ *          is what the lit state says)
+ *   off    house lighting switched off, or no mode set -> GREY, dimmed
+ *   idle   a mode IS set but nothing is applied (SPECTRA does not hold
+ *          the room, or a standby) -> the plain unlit button. Not purple
+ *          (it is not driving) and not the off grey (it is not off) —
+ *          his three named states do not cover this fourth one, and
+ *          collapsing it into either would make the button claim
+ *          something untrue. The words stay in the tooltip/aria-label. */
 .mode-chip a {
   display: inline-flex; align-items: center; justify-content: center;
   width: 36px; height: 34px; border-radius: var(--radius);
   border: 1px solid var(--border); background: var(--surface); text-decoration: none;
+  color: var(--text-muted);
 }
-.mode-chip-on a { color: var(--ok); border-color: var(--ok); }
-.mode-chip-music a { color: var(--accent2); border-color: var(--accent2); }
-.mode-chip-idle a { color: var(--warning); border-color: var(--warning); }
-.mode-chip-off a { color: var(--text-muted); opacity: 0.7; }
+.mode-chip-on a, .mode-chip-music a {
+  color: var(--accent2);
+  border-color: var(--accent);
+  background: rgba(168, 85, 247, 0.18);
+}
+.mode-chip-idle a { color: var(--text); border-color: var(--border); }
+.mode-chip-off a { color: var(--text-muted); opacity: 0.6; }
 /* `touch-action: none`, same reasoning as .release-hold-btn above (found
  * 2026-10-09): `manipulation` let the browser cancel the hold on ordinary
  * finger drift via a native `pointercancel`. */
@@ -2941,6 +2978,9 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
    * it sat ABOVE the bar, where nothing of the bar's reached up into it. */
   z-index: 2;
 }
+/* WITH THE BOX IN THE BAR (<=1100px) the row drops that column outright
+ * rather than leaving a 96px gap where it used to be. */
+.song-strip-no-next { grid-template-columns: 220px minmax(0, 1fr) 100px; }
 .song-strip-song-tip { min-width: 0; }
 /* THE SONG BLOCK TAPS THROUGH TO HOME (audit T2) and carries the
  * mockup's own three-bar equaliser instead of an ⓘ circle. */
@@ -3078,6 +3118,22 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 /* Bold current time, muted total (audit T5). */
+/* THE BAR'S OWN COPY of the next-event box (his Q1 answer) — the same
+ * glyph/countdown/fill, sized and bordered like its bar neighbours
+ * (`.light-show-slot`'s own 34px) rather than the timeline row's 39px
+ * track-height box. One component, two hosts: components/SongNextBox.tsx. */
+.song-strip-next-in-bar {
+  height: 34px;
+  /* The SAME 96px the row's own copy is sized for — that width is what
+   * makes "99.9s", the widest string the countdown can ever hold, fit
+   * with no reflow (songStrip.ts::countdownParts' own boundary rule).
+   * A narrower bar copy would clip exactly the moment it matters. */
+  width: 96px;
+  flex: none;
+  color: var(--text);
+  text-decoration: none;
+}
+.song-strip-next-in-bar:hover { text-decoration: none; }
 .song-strip-time {
   font-size: 13px;
   color: var(--text-muted);
@@ -3093,9 +3149,11 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 
 @media (max-width: 1180px) {
   .song-strip { grid-template-columns: 176px minmax(0, 1fr) 96px 88px; gap: 12px; }
+  .song-strip-no-next { grid-template-columns: 176px minmax(0, 1fr) 88px; }
 }
 @media (max-width: 900px) {
   .song-strip { grid-template-columns: 128px minmax(0, 1fr) 92px 72px; gap: 10px; padding: 0 10px; }
+  .song-strip-no-next { grid-template-columns: 128px minmax(0, 1fr) 72px; }
   .song-strip-song-artist { display: none; }
   .song-strip-time { font-size: 11.5px; }
 }
@@ -3109,6 +3167,8 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   }
   .song-strip-song-tip { grid-row: 1; grid-column: 1; }
   .song-strip-time { grid-row: 1; grid-column: 2; }
+  /* The phone tier keeps its OWN next-event box (the box moves to the
+     bar only in the 521-1100 band — components/SongNextBox.tsx). */
   .song-strip-track { grid-row: 2; grid-column: 1; }
   .song-strip-next { grid-row: 2; grid-column: 2; grid-template-columns: 16px minmax(0, 1fr); padding: 0 6px; gap: 5px; }
   .song-strip-next-count { font-size: 14px; }
@@ -3118,6 +3178,21 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
  * Every measurement is the approved mockup's own `homePage()` block
  * (design-fidelity pass, 2026-10-14; audit H2-H7). */
 .home-page { display: flex; flex-direction: column; gap: 16px; }
+/* NOTHING PLAYING: the LAST song, DIMMED (the Admiral's Q2 answer,
+ * 2026-10-15 — "show the LAST song's timeline + audio shape dimmed ...
+ * never a bare 'Nothing playing' card"). Opacity only: every control
+ * still works on a remembered song, and the row above carries the words
+ * ("last played"), so the dimming is the at-a-glance cue rather than the
+ * whole statement. */
+.home-timeline-dimmed { opacity: 0.62; }
+.song-strip-last .song-strip-track,
+.song-strip-last .song-strip-next,
+.song-strip-last .song-strip-time { opacity: 0.62; }
+.song-strip-last .song-strip-song-artist {
+  color: var(--accent2);
+  font-style: italic;
+  opacity: 0.95;
+}
 .home-timeline { display: flex; flex-direction: column; gap: 8px; }
 /* THE ALIGNED BLOCK (the Admiral, 2026-10-15: "just make sure the audio
  * shape graph is aligned with the timeline"). Its left margin and width
@@ -3300,6 +3375,48 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
  * unit` grid with bounded 90-110px inputs, instead of a number field
  * stretched across the whole card. Isolated to this one block so the
  * answer to Q4 stays a small change. */
+/* THE GROUPED ROWS (his Q4 answer, 2026-10-15): `label | cell | cell`,
+ * each cell its own `name + input + unit`, so the three pairs he reaches
+ * for read as three lines rather than six of the ~35 flat rows below
+ * them. The "More" button is an ordinary disclosure — the grid it opens
+ * is `hidden` rather than unmounted, so a field's own draft state and
+ * focus survive a collapse. */
+.settings-group-rows { display: flex; flex-direction: column; gap: 2px; }
+.settings-group-row {
+  display: grid;
+  grid-template-columns: minmax(0, 120px) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(55, 37, 82, 0.6);
+}
+.settings-group-row-label { font-weight: 700; font-size: 12.5px; }
+.settings-group-cell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 84px auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.settings-group-cell input { width: 100%; min-width: 0; }
+.settings-more-toggle {
+  align-self: flex-start;
+  margin: 8px 0 2px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.settings-more-toggle:hover { color: var(--text); border-color: var(--accent); }
+@media (max-width: 720px) {
+  .settings-group-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
 .settings-drops-card .top-bar-group-field {
   display: grid;
   grid-template-columns: minmax(0, 230px) minmax(0, 1fr) 72px;

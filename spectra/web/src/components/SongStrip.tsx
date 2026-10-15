@@ -40,9 +40,9 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  countdownParts, eventLabel, FINAL_STRETCH_MS, fmtMMSS, kindGlyphSvg, MARKER_CY,
-  NEXT_EVENT_BOX_WIDTH, PLAYED_TINT, pickNext, ringCy, TRACK_HEIGHT, TRACK_PAD, trackX,
+  fmtMMSS, MARKER_CY, PLAYED_TINT, pickNext, ringCy, TRACK_HEIGHT, TRACK_PAD, trackX,
 } from './songStrip';
+import SongNextBox, { useNextBoxInBar } from './SongNextBox';
 import { paintTrack, type MarkNode } from './trackPainter';
 import { useEngineStatus, useUpcoming } from '../queries';
 import { useLibrosa } from '../timeline/queries';
@@ -52,7 +52,15 @@ import { kindShown, useSongTimelineView } from './songTimelineView';
 
 export default function SongStrip() {
   const { data: status } = useEngineStatus();
-  const track = status?.bridge.track ?? null;
+  // THE SHARED VIEW STATE (components/songTimelineView.tsx): which marker
+  // kinds draw (set from Home's own control row), the draggable window
+  // this row owns while Home's shape is listening, and THE RESOLVED
+  // TRACK — the live one, or the last one seen this session (his Q2
+  // answer, 2026-10-15): with nothing playing this row shows the LAST
+  // song's timeline, dimmed and labelled, rather than an empty panel.
+  // One resolved track for both surfaces, so Home's shape below is
+  // always showing the same song this row is.
+  const { filters, editable, win, pushHistory, track, showingLast } = useSongTimelineView();
   const uri = track?.uri ?? null;
   const { data: upcoming } = useUpcoming(uri);
   // The terrain's own source: librosa's per-section energy (approved idea
@@ -60,10 +68,10 @@ export default function SongStrip() {
   // song already looked at costs nothing here; `retry: false` means a song
   // with no analysis simply draws no terrain.
   const { data: librosa } = useLibrosa(uri);
-  // THE SHARED VIEW STATE: which marker kinds draw (set from Home's own
-  // control row), and — while Home's shape is listening — the draggable
-  // window this row then owns.
-  const { filters, editable, win, pushHistory } = useSongTimelineView();
+  // WHERE THE NEXT-EVENT BOX LIVES at this width (his Q1 answer) — the
+  // one predicate, shared with TopBarStrip, so it is never in both
+  // places and never in neither.
+  const nextInBar = useNextBoxInBar();
   const allEvents = upcoming?.events;
   const events = useMemo(
     () => (allEvents ?? []).filter((e) => kindShown(e.kind, filters)),
@@ -84,13 +92,7 @@ export default function SongStrip() {
   const ringRef = useRef<SVGCircleElement>(null);
   const playheadRef = useRef<SVGGElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
-  const nextIconRef = useRef<SVGSVGElement>(null);
-  const nextFillRef = useRef<HTMLDivElement>(null);
-  const nextCountRef = useRef<HTMLSpanElement>(null);
-  const nextUnitRef = useRef<HTMLElement>(null);
-  const nextBoxRef = useRef<HTMLDivElement>(null);
   const flashedKeyRef = useRef<string | null>(null);
-  const lastNextKindRef = useRef<string | null>(null);
   /** Every marker node by its own ms, so the rAF loop can fade a passed
    * marker (`.song-strip-mk-past`) and flash the one that just fired
    * (audit T6: the mockup flashes the MARKER, not only the box). */
@@ -163,37 +165,25 @@ export default function SongStrip() {
         }
       }
 
+      // THE "IT IS NEXT" RING AND THE MARKER FLASH stay here — both are
+      // drawn ON the track. The next-event BOX's own countdown/glyph/fill
+      // live in components/SongNextBox.tsx, which owns its own rAF loop
+      // because at <=1100px it is mounted in the BAR instead of here
+      // (his Q1 answer). Both pick the same event by the same `pickNext`,
+      // so they can never disagree about what is next.
       const next = now != null ? pickNext(events, now) : null;
       if (next) {
-        const remaining = next.ms - (now as number);
         const key = `${next.ms}:${next.kind}`;
-        const glyphKey = `${next.kind}:${next.num ?? ''}`;
-        if (nextIconRef.current && lastNextKindRef.current !== glyphKey) {
-          lastNextKindRef.current = glyphKey;
-          nextIconRef.current.innerHTML = kindGlyphSvg(next.kind, next.num);
-        }
-        const parts = countdownParts(remaining);
-        if (nextCountRef.current) nextCountRef.current.textContent = parts.value;
-        if (nextUnitRef.current) nextUnitRef.current.textContent = parts.unit ?? '';
-        if (nextBoxRef.current) nextBoxRef.current.title = eventLabel(next);
         if (ringGroupRef.current && ringRef.current && durationMs > 0 && svgW > 0) {
           const h = svgRect?.height ?? TRACK_HEIGHT;
           ringGroupRef.current.setAttribute('opacity', '1');
           ringRef.current.setAttribute('cx', atX(next.ms).toFixed(2));
           ringRef.current.setAttribute('cy', String(ringCy(next.kind) * (h / TRACK_HEIGHT)));
         }
-        const soon = remaining <= FINAL_STRETCH_MS;
-        if (nextFillRef.current) {
-          nextFillRef.current.style.transform =
-            `scaleX(${soon ? 1 - remaining / FINAL_STRETCH_MS : 0})`;
-        }
-        nextBoxRef.current?.classList.toggle('song-strip-next-soon', soon);
-        if (remaining <= 0 && flashedKeyRef.current !== key) {
+        if (next.ms - (now as number) <= 0 && flashedKeyRef.current !== key) {
           flashedKeyRef.current = key;
-          nextBoxRef.current?.classList.add('song-strip-next-flash');
-          setTimeout(() => nextBoxRef.current?.classList.remove('song-strip-next-flash'), 600);
-          // THE MARKER FLASHES TOO (audit T6 / approved idea 3) — the
-          // live strip only ever flashed the box.
+          // THE MARKER FLASHES (audit T6 / approved idea 3) — the live
+          // strip only ever flashed the box.
           for (const m of markNodesRef.current) {
             if (Math.abs(m.ms - next.ms) > 1) continue;
             m.node.classList.remove('song-strip-mk-flash');
@@ -204,12 +194,6 @@ export default function SongStrip() {
           }
         }
       } else {
-        if (nextCountRef.current) nextCountRef.current.textContent = '—';
-        if (nextUnitRef.current) nextUnitRef.current.textContent = '';
-        if (nextIconRef.current) { nextIconRef.current.innerHTML = ''; lastNextKindRef.current = null; }
-        if (nextBoxRef.current) nextBoxRef.current.title = durationMs > 0 ? 'Nothing left this song' : 'Nothing playing';
-        if (nextFillRef.current) nextFillRef.current.style.transform = 'scaleX(0)';
-        nextBoxRef.current?.classList.remove('song-strip-next-soon');
         ringGroupRef.current?.setAttribute('opacity', '0');
       }
 
@@ -275,7 +259,10 @@ export default function SongStrip() {
     window.addEventListener('pointercancel', up);
   };
 
-  const playing = Boolean(track?.is_playing);
+  // A REMEMBERED SONG IS NEVER "PLAYING" — its `is_playing` was true
+  // when it was captured, and an animating equaliser on a room that has
+  // gone quiet is exactly the claim the "last played" cue exists to deny.
+  const playing = !showingLast && Boolean(track?.is_playing);
   const title = track?.title ?? null;
   // UP NEXT ON HOVER (approved idea 7) — already on the wire
   // (bridge.status()'s own `next_track`, Show Playlists' read half), so
@@ -283,23 +270,33 @@ export default function SongStrip() {
   const upNext = status?.bridge.next_track?.title || null;
 
   return (
-    <div className="song-strip">
+    <div className={`song-strip${nextInBar ? ' song-strip-no-next' : ''}`
+        + `${showingLast ? ' song-strip-last' : ''}`}>
       {/* THE SONG BLOCK TAPS THROUGH TO HOME (audit T2) with an animated
         * three-bar equaliser while a song plays, title above artist, and
         * no circle of its own — the description lives on hover. */}
       <InfoTip
         className="song-strip-song-tip"
         topic="song-timeline"
-        text={`The whole song with the same markers Home shows, and the next thing that will actually fire — its type and a countdown. Tap to open Home.${
+        text={`${showingLast
+          ? 'The LAST song played — nothing is playing right now, so this is dimmed. '
+          : ''}The whole song with the same markers Home shows, and the next thing that will actually fire — its type and a countdown. Tap to open Home.${
           upNext ? ` Up next: ${upNext}.` : ''}`}
       >
-        <Link to="/" className="song-strip-song" aria-label={title ? `${title} — tap to open Home` : 'Nothing playing — tap to open Home'}>
+        <Link to="/" className="song-strip-song"
+            aria-label={title
+              ? `${title}${showingLast ? ' (last played, nothing playing now)' : ''} — tap to open Home`
+              : 'Nothing playing — tap to open Home'}>
           <span className={`song-strip-eq${playing ? '' : ' song-strip-eq-still'}`} aria-hidden>
             <i /><i /><i />
           </span>
           <span className="song-strip-song-text">
             <span className="song-strip-song-title">{title || 'Nothing playing'}</span>
-            <span className="song-strip-song-artist">{track?.artist || ''}</span>
+            <span className="song-strip-song-artist">
+              {/* A CLEAR "last played" CUE (his Q2 answer) — it must never
+                * be possible to read a remembered song as a playing one. */}
+              {showingLast ? 'last played' : (track?.artist || '')}
+            </span>
           </span>
         </Link>
       </InfoTip>
@@ -337,18 +334,9 @@ export default function SongStrip() {
         </div>
       </div>
 
-      <div ref={nextBoxRef} className="song-strip-next" style={{ width: NEXT_EVENT_BOX_WIDTH }}>
-        <div ref={nextFillRef} className="song-strip-next-fill" />
-        {/* The TYPE GLYPH IS THE MARKER SHAPE, filled and kind-coloured
-          * (songStrip.ts::kindGlyphSvg) — swapped with one innerHTML write
-          * from the rAF loop, never a React render. */}
-        <svg ref={nextIconRef} viewBox="0 0 16 16" width={18} height={18}
-            className="song-strip-next-icon" aria-hidden="true" />
-        <span className="song-strip-next-count tabular-nums">
-          <span ref={nextCountRef}>—</span>
-          <small ref={nextUnitRef} />
-        </span>
-      </div>
+      {/* AT <=1100px THIS BOX IS IN THE BAR INSTEAD (his Q1 answer) —
+        * mounted by TopBarStrip, never both at once. */}
+      {!nextInBar && <SongNextBox events={events} durationMs={durationMs} host="strip" />}
 
       <span className="song-strip-time tabular-nums">
         <b ref={timeRef}>—:—</b> / {durationMs > 0 ? fmtMMSS(durationMs) : '—:—'}

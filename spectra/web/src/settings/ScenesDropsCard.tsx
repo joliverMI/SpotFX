@@ -8,6 +8,12 @@
  * Scene (moved to the TOP, his edited ask), the scene-change tier, and
  * recent picks — this card is everything else.
  *
+ * SINCE HIS Q4 ANSWER (2026-10-15) it opens as three compact grouped
+ * rows — transition low/high, lull darkness/breath-hold, drop timing/
+ * Shockwave — with everything else behind a "More" expander. No setting
+ * was removed and none changed: the expander holds the same fields with
+ * the same bindings, one disclosure deeper.
+ *
  * Owns its own draft/commit cycle against `RoomControlState`, same shape
  * as DriftGradientPanel.tsx's — a separate page, so it cannot share
  * RoomControlsBar's local closure, and doesn't need to: every field here
@@ -23,6 +29,10 @@ export default function ScenesDropsCard() {
   const save = useSaveRoomControls();
   const [local, setLocal] = useState<RoomControlState | null>(null);
   const [musicDeviceDraft, setMusicDeviceDraft] = useState<string | null>(null);
+  // "More" is collapsed on open (his Q4 answer) and is plain local state:
+  // which disclosure he last left open is not worth persisting, and a
+  // remembered-open card would defeat the point of the grouping.
+  const [more, setMore] = useState(false);
 
   // Adopt server state unless a save is still in flight — the same
   // "don't snap a field back mid-edit" rule RoomControlsBar's own
@@ -45,31 +55,78 @@ export default function ScenesDropsCard() {
   return (
     <div className="card settings-drops-card">
       <div className="card-title">Scenes &amp; drops</div>
-      <div className="settings-field-grid">
+      {/* THE MOCKUP'S OWN COMPACT GROUPED ROWS (his Q4 answer,
+        * 2026-10-15): the six numbers he actually reaches for, as three
+        * labelled pairs, with every other setting behind "More". NOTHING
+        * IS REMOVED OR CHANGED — the rest of the card is the same fields,
+        * the same bindings and the same commit path, one disclosure
+        * deeper. The card used to open as a flat grid of ~35 inputs, so
+        * the two transition numbers he tunes most sat among stale-drop
+        * rules and placement thresholds with no visual grouping at all. */}
+      <div className="settings-group-rows">
+        <div className="settings-group-row">
+          <InfoTip topic="intensity-scaled-transitions"
+            text="How long a scene crossfade takes at the quietest moments and at the loudest; the room interpolates between them.">
+            <span className="settings-group-row-label">Transition</span>
+          </InfoTip>
+          <label className="settings-group-cell">
+            <span>low</span>
+            <input type="number" min={0} max={20000} step={50} {...field('scene_transition_ms_gentle')} />
+            <span className="settings-field-unit">ms</span>
+          </label>
+          <label className="settings-group-cell">
+            <span>high</span>
+            <input type="number" min={0} max={20000} step={50} {...field('scene_transition_ms_hard')} />
+            <span className="settings-field-unit">ms</span>
+          </label>
+        </div>
+        <div className="settings-group-row">
+          <InfoTip topic="lull-dark-cap"
+            text="How long a lull stays fully dark (half its length, capped here), and how long the lights hold true black right before the drop lands.">
+            <span className="settings-group-row-label">Lull</span>
+          </InfoTip>
+          <label className="settings-group-cell">
+            <span>darkness</span>
+            <input type="number" min={0} max={30} step={0.5} {...field('lull_dark_max_s')} />
+            <span className="settings-field-unit">s</span>
+          </label>
+          <label className="settings-group-cell">
+            <span>breath-hold</span>
+            <input type="number" min={0} max={3} step={0.1} {...field('lull_breath_hold_s')} />
+            <span className="settings-field-unit">s</span>
+          </label>
+        </div>
+        <div className="settings-group-row">
+          <InfoTip topic="drop-timing-offset"
+            text="How far off its mark every drop fires (negative = earlier), and whether a drop paints the Shockwave.">
+            <span className="settings-group-row-label">Drop</span>
+          </InfoTip>
+          <label className="settings-group-cell">
+            <span>timing</span>
+            <input type="number" min={-2000} max={2000} step={50} {...field('drop_timing_offset_ms')} />
+            <span className="settings-field-unit">ms</span>
+          </label>
+          <span className="settings-group-cell">
+            <span>shockwave</span>
+            <PowerButton
+              on={local.drop_shock_enabled}
+              onChange={(on) => commit({ ...local, drop_shock_enabled: on })}
+              size={22}
+              ariaLabel="Drop Shockwave"
+            />
+          </span>
+        </div>
+      </div>
+      <button type="button" className="settings-more-toggle"
+        aria-expanded={more}
+        onClick={() => setMore((v) => !v)}>
+        {more ? 'Less' : 'More'} — every other scene &amp; drop setting
+      </button>
+      <div className="settings-field-grid" hidden={!more}>
         <div className="top-bar-group-field">
           <label>Transition</label>
           <input type="number" min={0} max={20000} step={100} {...field('global_transition_ms')} />
           <span className="settings-field-unit">ms (0 = use the two below)</span>
-        </div>
-        <div className="top-bar-group-field">
-          <InfoTip topic="intensity-scaled-transitions" text="How long a scene crossfade takes at the quietest moments; the high-intensity value below is the other end, and the room interpolates between them.">
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>Transition @ low intensity</label>
-          </InfoTip>
-          <input type="number" min={0} max={20000} step={50} {...field('scene_transition_ms_gentle')} />
-          <span className="settings-field-unit">ms</span>
-        </div>
-        <div className="top-bar-group-field">
-          <label>Transition @ high intensity</label>
-          <input type="number" min={0} max={20000} step={50} {...field('scene_transition_ms_hard')} />
-          <span className="settings-field-unit">ms</span>
-        </div>
-        <div className="top-bar-group-field">
-          <InfoTip topic="lull-dark-cap" text="The longest a lull stays fully dark on Black Hole, Squiggles, Pulse and Star. A lull is dark for half its length, never longer than this.">
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-            title="The longest a lull stays fully dark on Black Hole, Squiggles, Pulse and Star. A lull is dark for half its length, never longer than this.">Lull darkness (max)</label>
-          </InfoTip>
-          <input type="number" min={0} max={30} step={0.5} {...field('lull_dark_max_s')} />
-          <span className="settings-field-unit">s</span>
         </div>
         <div className="top-bar-group-field">
           <InfoTip topic="strip-phases" text="How strongly the strip effects answer a charge, lull and drop. Never adds white. 0 = off.">
@@ -78,34 +135,6 @@ export default function ScenesDropsCard() {
           </InfoTip>
           <input type="number" min={0} max={1.5} step={0.05} {...field('strip_phase_strength')} />
           <span className="settings-field-unit">×</span>
-        </div>
-        <div className="top-bar-group-field">
-          <InfoTip topic="drop-breath-hold" text="How long the lights go to true black right before a drop lands.">
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-            title="How long the lights go to true black right before a drop lands.">Breath-hold before drop</label>
-          </InfoTip>
-          <input type="number" min={0} max={3} step={0.1} {...field('lull_breath_hold_s')} />
-          <span className="settings-field-unit">s</span>
-        </div>
-        <div className="top-bar-group-field">
-          <InfoTip topic="drop-timing-offset" text="How far off its mark every drop fires, in ms: negative = earlier, 0 = on the mark.">
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-            title="How far off its mark every drop fires, in ms: negative = earlier, 0 = on the mark.">Drop timing</label>
-          </InfoTip>
-          <input type="number" min={-2000} max={2000} step={50} {...field('drop_timing_offset_ms')} />
-          <span className="settings-field-unit">ms</span>
-        </div>
-        <div className="top-bar-group-field">
-          <InfoTip topic="drop-shockwave-switches" text="A pink wave and a colour flood on the drop, composed from the set's own colours — never white.">
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-            <PowerButton
-              on={local.drop_shock_enabled}
-              onChange={(on) => commit({ ...local, drop_shock_enabled: on })}
-              size={22}
-              ariaLabel="Drop Shockwave"
-            />
-            Drop Shockwave</label>
-          </InfoTip>
         </div>
         {local.drop_shock_enabled && (
           <div className="top-bar-group-field">

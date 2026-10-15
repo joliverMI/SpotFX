@@ -105,6 +105,127 @@ PAIRS = [
 # tens of px, which is what this catches.
 SHAPE_H_TOLERANCE_PX = 4
 
+# HIS Q4 ANSWER's own probe: the three grouped rows, the collapsed
+# "More" expander, and what it holds.
+SCENES_DROPS_PROBE = """(() => {
+  const card = document.querySelector('.settings-drops-card');
+  if (!card) return JSON.stringify({ rows: 0, rowLabels: [], cells: 0,
+    moreBtn: false, moreOpen: false, hiddenFields: 0 });
+  const rows = [...card.querySelectorAll('.settings-group-row')];
+  const grid = card.querySelector('.settings-field-grid');
+  const btn = card.querySelector('.settings-more-toggle');
+  return JSON.stringify({
+    rows: rows.length,
+    rowLabels: rows.map((r) => {
+      const l = r.querySelector('.settings-group-row-label');
+      return l ? l.textContent.trim() : null;
+    }),
+    cells: card.querySelectorAll('.settings-group-cell').length,
+    moreBtn: !!btn,
+    moreOpen: btn ? btn.getAttribute('aria-expanded') === 'true' : false,
+    hiddenFields: grid && grid.hidden
+      ? grid.querySelectorAll('.top-bar-group-field').length : 0,
+  });
+})()"""
+
+SCENES_DROPS_CLICK_MORE = """(() => {
+  const btn = document.querySelector('.settings-drops-card .settings-more-toggle');
+  if (btn) btn.click();
+  return !!btn;
+})()"""
+
+SCENES_DROPS_OPENED = """(() => {
+  const card = document.querySelector('.settings-drops-card');
+  const btn = card && card.querySelector('.settings-more-toggle');
+  const grid = card && card.querySelector('.settings-field-grid');
+  return JSON.stringify({
+    moreOpen: btn ? btn.getAttribute('aria-expanded') === 'true' : false,
+    visibleFields: grid && !grid.hidden
+      ? grid.querySelectorAll('.top-bar-group-field').length : 0,
+  });
+})()"""
+
+
+# HIS Q2 ANSWER's own driver and probe. The STOP patches the canned
+# fetch so `/api/engine/status` answers with `track: null`, then
+# invalidates react-query's cache the way a real poll would, so the app
+# genuinely transitions from playing to stopped.
+LAST_PLAYED_STOP = """(() => {
+  const real = window.fetch;
+  window.fetch = async (input, init) => {
+    const url = String(typeof input === 'string' ? input : (input && input.url) || input);
+    const res = await real(input, init);
+    if (!/\\/api\\/engine\\/status/.test(url)) return res;
+    const body = await res.json();
+    if (body && body.bridge) { body.bridge.track = null; body.bridge.next_track = null; }
+    return new Response(JSON.stringify(body), {
+      status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  window.__stoppedPatched = true;
+  return true;
+})()"""
+
+LAST_PLAYED_PROBE = """(() => {
+  const strip = document.querySelector('.song-strip');
+  const card = [...document.querySelectorAll('.home-no-track')];
+  return JSON.stringify({
+    stopped: !!window.__stoppedPatched
+      && !!document.querySelector('.song-strip-last'),
+    strip: !!strip,
+    stripLast: !!document.querySelector('.song-strip-last'),
+    cue: (document.querySelector('.song-strip-last .song-strip-song-artist') || {}).textContent,
+    title: (document.querySelector('.song-strip-song-title') || {}).textContent,
+    shape: !!document.querySelector('.home-timeline-shape canvas'),
+    shapeDimmed: !!document.querySelector('.home-timeline-dimmed'),
+    bareCard: card.length > 0,
+    quickRuns: !!document.querySelector('.home-quick-card'),
+  });
+})()"""
+
+
+# HIS Q1 ANSWER's own probe: where the next-event box is, whether it
+# shares row 2 with the Light Show slot, how much of that row is left
+# unfilled at its right edge, and whether the slot's text is clipped.
+ROW2_PROBE = """(() => {
+  const inBar = document.querySelector('.song-strip-next-in-bar');
+  const inRow = document.querySelector('.song-strip .song-strip-next');
+  const show = document.querySelector('.one-bar .light-show-strip');
+  const bar = document.querySelector('.one-bar');
+  const mates = inBar && show ? [inBar, show] : [];
+  const rowTop = mates.length ? Math.round(mates[0].getBoundingClientRect().top) : null;
+  // How far the LAST occupant of that row reaches, against the bar's own
+  // inner width — a hole shows up as a short row.
+  let rowRight = null, innerRight = null;
+  if (bar && rowTop != null) {
+    const br = bar.getBoundingClientRect();
+    const cs = getComputedStyle(bar);
+    innerRight = br.right - parseFloat(cs.paddingRight || 0);
+    // `.one-bar`'s own children are the TWO `display: contents`
+    // wrappers (RoomControlsBar / TopBarStrip), whose boxes say nothing
+    // about where anything sits — enumerate the real occupants.
+    const rights = [...bar.querySelectorAll(':scope > * > *')]
+      .filter((c) => getComputedStyle(c).display !== 'none')
+      .map((c) => c.getBoundingClientRect())
+      .filter((r) => r.width > 0 && Math.abs(Math.round(r.top) - rowTop) <= 20)
+      .map((r) => r.right);
+    rowRight = rights.length ? Math.max(...rights) : null;
+  }
+  return JSON.stringify({
+    inBar: !!inBar, inRow: !!inRow,
+    sameRow: mates.length === 2
+      && Math.abs(Math.round(mates[0].getBoundingClientRect().top)
+        - Math.round(mates[1].getBoundingClientRect().top)) <= 20,
+    gapToEdge: rowRight != null && innerRight != null
+      ? Math.round(innerRight - rowRight) : null,
+    showName: (() => {
+      const n = document.querySelector('.light-show-act-name');
+      if (!n) return null;
+      return { text: n.textContent, clipped: n.scrollWidth > n.clientWidth + 1 };
+    })(),
+  });
+})()"""
+
+
 EMPTY_VIEWS = [
     ("empty-1440", "view=bar&nothing=1", 1440, 420),
     ("empty-home-1440", "view=home&nothing=1", 1440, 900),
@@ -517,6 +638,22 @@ async def run(app_url: str, artifact_url: str) -> int:
                 sepW: (() => { const s = document.querySelector('.one-bar .one-bar-sep');
                   return s ? Math.round(s.getBoundingClientRect().width) : null; })(),
                 modeBtn: box('.mode-group-btn'),
+                // HIS Q3 ANSWER (2026-10-15): purple LIT while a mode
+                // drives the room, grey when house lighting is off, the
+                // small ♪ badge while music has it, the hold ring
+                // outside. The live build used green-on/amber-idle.
+                house: (() => {
+                  const chip = document.querySelector('.mode-chip');
+                  const a = chip && chip.querySelector('a');
+                  if (!chip || !a) return null;
+                  const c = getComputedStyle(a);
+                  return {
+                    tone: [...chip.classList].find((k) => k.startsWith('mode-chip-')) || null,
+                    color: c.color, border: c.borderTopColor, bg: c.backgroundColor,
+                    glyph: !!a.querySelector('svg'),
+                    badge: !!chip.querySelector('.mode-chip-music-badge'),
+                  };
+                })(),
                 disc: box('.display-mode-disc'),
                 bulb: !!document.querySelector('.ambient-group-btn svg'),
                 bulbEmoji: (document.querySelector('.ambient-group-btn') || {}).textContent || '',
@@ -619,6 +756,23 @@ async def run(app_url: str, artifact_url: str) -> int:
                f"the display-mode button is the mockup's 36x34 (got {m['modeBtn']['w']}x{m['modeBtn']['h']})")
             ok(m["disc"] is not None and m["disc"]["w"] == 16 and m["disc"]["h"] == 16,
                "the display mode is a 16px DISC, not a filled rectangle (audit B2)")
+            # HIS Q3 ANSWER — the harness's canned lighting is a live
+            # `Standard` mode with `phase: "music"`, i.e. a mode driving
+            # the room with music on it, so the button must be LIT and
+            # badged. What must never come back is the old green `--ok`.
+            if m["house"] is None:
+                notes.append("the house button never rendered in this harness run")
+            else:
+                hb = m["house"]
+                ok(hb["tone"] in ("mode-chip-on", "mode-chip-music"),
+                   f"the house button reads as a mode DRIVING the room (tone {hb['tone']})")
+                ok(hb["color"] == "rgb(232, 121, 249)",
+                   f"and it is PURPLE-LIT, not the old green (got {hb['color']})")
+                ok(hb["bg"] not in ("rgba(0, 0, 0, 0)", "transparent"),
+                   f"with a lit purple wash behind the glyph (got {hb['bg']})")
+                ok(hb["glyph"], "its house glyph is a drawn icon")
+                ok(hb["badge"],
+                   "and the small ♪ badge is on it while music has the room (his Q3 answer)")
             ok(m["disc"] and m["disc"]["br"].startswith("50%"), "the disc is round")
             ok(m["bulb"] and "💡" not in m["bulbEmoji"],
                "Hue Hold draws the registry's bulb PATH, not the 💡 emoji (audit B3)")
@@ -954,6 +1108,35 @@ async def run(app_url: str, artifact_url: str) -> int:
                    f"preview favourites are inline chips, not a checkbox form (got {st['favouriteChips']})")
                 ok(st["helpCircles"] == 0,
                    f"no '?' circle inside a Settings card's rows (audit S3 — found {st['helpCircles']})")
+                # HIS Q4 ANSWER (2026-10-15): "Scenes & drops" opens as the
+                # mockup's compact grouped rows — transition low/high, lull
+                # darkness/breath-hold, drop timing/shockwave — with every
+                # other setting behind a "More" expander, and NO setting
+                # removed or changed. So this asserts the three rows, the
+                # collapsed expander, and — the half that matters — that
+                # opening it brings the whole rest of the card back.
+                q4 = json.loads(await evaluate(ws, nid, SCENES_DROPS_PROBE))
+                ok(q4["rows"] == 3,
+                   f"'Scenes & drops' opens as THREE compact grouped rows (got {q4['rows']})")
+                ok(q4["rowLabels"] == ["Transition", "Lull", "Drop"],
+                   f"labelled Transition / Lull / Drop, as drawn (got {q4['rowLabels']})")
+                ok(q4["cells"] == 6,
+                   f"each row carrying its own pair of controls (got {q4['cells']} cells)")
+                ok(q4["moreBtn"] and not q4["moreOpen"],
+                   f"with a 'More' expander, collapsed on open (button: {q4['moreBtn']}, "
+                   f"open: {q4['moreOpen']})")
+                ok(q4["hiddenFields"] > 10,
+                   f"and the rest of the settings waiting inside it (got {q4['hiddenFields']})")
+                # The click and the measurement need SEPARATE round trips:
+                # React has not flushed the state update inside the same
+                # `Runtime.evaluate` tick (the same reason this script's
+                # own nav-dropdown check is split in two).
+                await evaluate(ws, nid, SCENES_DROPS_CLICK_MORE)
+                await asyncio.sleep(0.5)
+                opened = json.loads(await evaluate(ws, nid, SCENES_DROPS_OPENED))
+                ok(opened["visibleFields"] > 10 and opened["moreOpen"],
+                   "opening 'More' brings every other setting back — nothing was removed "
+                   f"(visible after opening: {opened['visibleFields']})")
                 await shoot(ws, nid, OUT_DIR / "live-settings-1024.png")
                 live_shots["settings-1024"] = OUT_DIR / "live-settings-1024.png"
                 if "settings-1024" in mock_shots:
@@ -991,6 +1174,45 @@ async def run(app_url: str, artifact_url: str) -> int:
                    f"{width}px is {expected} row(s) ({band} — measured {got['rows']})")
                 ok(got["scrollW"] <= got["clientW"],
                    f"{width}px has no horizontal page scroll ({got['scrollW']} <= {got['clientW']})")
+
+                # HIS Q1 ANSWER (2026-10-15): at <=1100px the next-event
+                # countdown box MOVES OUT of the timeline row into the
+                # bar's second row, and that row is "laid out to fill the
+                # row - no left-aligned hole". Above 1100 the box belongs
+                # to the row and must NOT be in the bar. The Light Show
+                # slot's own text must also stop truncating ("Nothing a…"
+                # at the 800px kiosk), which the same fill fixes.
+                row2 = json.loads(await evaluate(ws, nid, ROW2_PROBE))
+                # 521-1100 ONLY — his Q1 answer's own band, and the band
+                # tokens.css gives its deliberate two rows. The PHONE tier
+                # (<=520) keeps the box in the timeline row, which has its
+                # own next-box column there: adding a 92px occupant to a
+                # row the phone already wraps by content measured THREE
+                # rows (see components/SongNextBox.tsx's own note).
+                if 521 <= width <= 1100:
+                    ok(row2["inBar"] and not row2["inRow"],
+                       f"{width}px: the next-event box is in the BAR, not the timeline row "
+                       f"(his Q1 answer — in bar: {row2['inBar']}, still in row: {row2['inRow']})")
+                    ok(row2["sameRow"],
+                       f"{width}px: it shares row 2 with the Light Show slot "
+                       f"(measured same row: {row2['sameRow']})")
+                    # "no left-aligned hole": the row reaches the bar's own
+                    # inner right edge. A generous bound — this is about a
+                    # hundreds-of-px hole, not a px of rounding.
+                    ok(row2["gapToEdge"] is not None and row2["gapToEdge"] <= 24,
+                       f"{width}px: row 2 FILLS the row — no left-aligned hole "
+                       f"({row2['gapToEdge']}px left over at its right edge)")
+                else:
+                    ok(not row2["inBar"] and row2["inRow"],
+                       f"{width}px: the next-event box stays in the timeline row, not the bar "
+                       f"(in bar: {row2['inBar']}, in row: {row2['inRow']})")
+                if row2["showName"] is None:
+                    notes.append(f"the Light Show slot's name never rendered at {width}")
+                else:
+                    ok(not row2["showName"]["clipped"],
+                       f"{width}px: the Light Show slot's text is not truncated "
+                       f"(his separate kiosk report 'Nothing a…' — got "
+                       f"{row2['showName']['text']!r})")
 
             # ── 5b. THE EXPANDED DEVICE PREVIEW IS VISIBLE ─────────────
             print("\nFIVE-B — expanding the device preview actually shows it")
@@ -1126,6 +1348,91 @@ async def run(app_url: str, artifact_url: str) -> int:
                 ok(k["scrollH"] <= k["clientH"],
                    "the kiosk PAGE never scrolls — only its own `main` does, so the bar "
                    f"can never be scrolled off the wall panel ({k['scrollH']} <= {k['clientH']})")
+                # HIS Q1 ANSWER AT THE WIDTH HE NAMED: the 800px kiosk is
+                # in the 521-1100 band, so the next-event box is in its
+                # bar's row 2 beside the Light Show slot, and that row
+                # fills.
+                krow = json.loads(await evaluate(ws, nid, ROW2_PROBE))
+                ok(krow["inBar"] and krow["sameRow"],
+                   "the 800px kiosk puts the next-event box in the bar beside the Light Show "
+                   f"slot (his Q1 answer — {krow['inBar']}/{krow['sameRow']})")
+                ok(krow["gapToEdge"] is not None and krow["gapToEdge"] <= 24,
+                   f"and its row 2 fills the row ({krow['gapToEdge']}px left over)")
+
+            # HIS OWN "Nothing a…" REPORT, at the width and in the state he
+            # saw it: the kiosk, with NOTHING ARMED, where the slot draws
+            # its idle words instead of an action's name. The armed name is
+            # measured in FIVE above; this is the idle text, which is the
+            # longer of the two and the one he reported clipped.
+            if await goto(ws, nid, f"{app_url}?kiosk=1&nothing=1",
+                          "!!document.querySelector('.light-show-act-name')"):
+                await asyncio.sleep(0.8)
+                idle = json.loads(await evaluate(ws, nid, """(() => {
+                  const n = document.querySelector('.light-show-act-name');
+                  const w = document.querySelector('.light-show-act-when');
+                  const clip = (e) => (e ? e.scrollWidth > e.clientWidth + 1 : null);
+                  return JSON.stringify({
+                    name: n ? n.textContent : null, nameClipped: clip(n),
+                    when: w ? w.textContent : null, whenClipped: clip(w),
+                  });
+                })()"""))
+                ok(idle["nameClipped"] is False,
+                   "the 800px kiosk's IDLE Light Show text is not truncated — his own "
+                   f"'Nothing a…' report (got {idle['name']!r})")
+                ok(idle["whenClipped"] is False,
+                   f"nor its second line (got {idle['when']!r})")
+            else:
+                notes.append("the kiosk's idle Light Show slot never rendered — "
+                             "his 'Nothing a…' case was not measured")
+
+            # ── 6. HIS Q2 ANSWER: nothing playing shows the LAST song ──
+            print("\nSIX — nothing playing: the LAST song, dimmed, never a bare card")
+            # His own words (2026-10-15): "Home and kiosk with nothing
+            # playing: show the LAST song's timeline + audio shape dimmed
+            # (keep the last track's data client-side; a clear 'last
+            # played' cue), quick runs below - never a bare 'Nothing
+            # playing' card".
+            #
+            # The harness cannot be asked to stop playing mid-run (its
+            # clock and status are canned per page load), so this drives
+            # the real mechanism the way the app does: load Home WITH a
+            # song so the remembered track is written, then make the
+            # status poll answer with no track and let react-query
+            # refetch. Both halves are the production code path — the
+            # memory lives in components/songTimelineView.tsx, not in
+            # anything this check installs.
+            await cdp(ws, nid, "Emulation.setDeviceMetricsOverride", {
+                "width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False})
+            if not await goto(ws, nid, f"{app_url}?view=home",
+                              "!!document.querySelector('.home-timeline')"):
+                notes.append("Home never rendered — the last-played state not measured")
+            else:
+                await asyncio.sleep(1.2)
+                # Swap the canned status for a track-less one and force the
+                # poll to re-read it.
+                await evaluate(ws, nid, LAST_PLAYED_STOP)
+                await asyncio.sleep(2.0)
+                lp = json.loads(await evaluate(ws, nid, LAST_PLAYED_PROBE))
+                if not lp["stopped"]:
+                    notes.append("could not make the harness report a stopped room — "
+                                 "the last-played state was not measured")
+                else:
+                    ok(lp["strip"] and lp["stripLast"],
+                       "with nothing playing the timeline row still draws the LAST song, "
+                       f"dimmed (row present: {lp['strip']}, dimmed: {lp['stripLast']})")
+                    ok(lp["cue"] is not None and "last played" in (lp["cue"] or "").lower(),
+                       f"with a clear 'last played' cue (got {lp['cue']!r})")
+                    ok(lp["title"] and lp["title"] != "Nothing playing",
+                       f"and it is the last song's own title, not 'Nothing playing' "
+                       f"(got {lp['title']!r})")
+                    ok(lp["shape"] and lp["shapeDimmed"],
+                       "Home still draws that song's audio shape, dimmed "
+                       f"(shape: {lp['shape']}, dimmed: {lp['shapeDimmed']})")
+                    ok(not lp["bareCard"],
+                       "and there is NO bare 'Nothing playing' card "
+                       f"(found one: {lp['bareCard']})")
+                    ok(lp["quickRuns"],
+                       "with the quick-run cards still below it")
     finally:
         try:
             os.killpg(proc.pid, signal.SIGTERM)
