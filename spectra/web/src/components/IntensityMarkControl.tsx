@@ -4,103 +4,153 @@
  * never does." Sibling of LiveEnergyReadout on the shared TopBarStrip —
  * that shows the live per-moment energy number, this shows the per-song
  * FACTOR that scales it (auto, always <=125%, or a manual mark up to
- * 200%). See help topic "intensity-mark". */
-import { useState } from 'react';
-import InfoTip from './InfoTip';
+ * 200%). See help topic "intensity-mark".
+ *
+ * ONE FIXED 48px BOX, "MARK / 89%" (design-fidelity pass, 2026-10-14 —
+ * the approved mockup's own `.sp .mark`), with every editable thing in a
+ * panel it opens. Two audit items at once: B6 (the face was loose text
+ * plus its own ⓘ circle, and below 1180px only the WORD was hidden,
+ * leaving a dangling "ⓘ —" after the meter) and N2 (the face used to
+ * change between "Mark —", "Mark 89%" and "Mark 89% [Clear]", shifting
+ * everything after it — Clear now lives in the panel, so the face is one
+ * size whatever the state).
+ *
+ * `compact` is the mockup's own fold: at <=1180px the Mark box is hidden
+ * (`@container sp (max-width: 1180px) { .mark { display: none } }`) and
+ * the Energy slot opens this panel instead — Q12, decided yes. The two
+ * halves are wired by EnergyBar.tsx, which owns the open/closed state so
+ * either control can open the one panel. */
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   useClearIntensityScaleMark, useEngineStatus, useIntensityScaleMark, useSetIntensityScaleMark,
 } from '../queries';
+import InfoTip from './InfoTip';
 
-export default function IntensityMarkControl() {
+export default function IntensityMarkControl({
+  open, onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const { data: st } = useEngineStatus();
   const uri = st?.bridge.track?.uri ?? null;
   const { data: mark } = useIntensityScaleMark(uri);
   const setMark = useSetIntensityScaleMark(uri);
   const clearMark = useClearIntensityScaleMark(uri);
-  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
-  if (!uri || !mark) {
-    return (
-      <div className="intensity-mark" title="No song playing — nothing to mark">
-        <span className="intensity-mark-label">Mark</span>
-        <span className="intensity-mark-value">—</span>
-      </div>
-    );
-  }
+  const isMarked = mark?.mark != null;
+  const effectivePct = mark ? Math.round(mark.effective_factor * 100) : null;
+  const autoPct = mark ? Math.round(mark.auto_factor * 100) : 100;
+  const minPct = mark ? Math.round(mark.manual_min * 100) : 0;
+  const maxPct = mark ? Math.round(mark.manual_max * 100) : 200;
 
-  const isMarked = mark.mark != null;
-  const effectivePct = Math.round(mark.effective_factor * 100);
-  const autoPct = Math.round(mark.auto_factor * 100);
-  const minPct = Math.round(mark.manual_min * 100);
-  const maxPct = Math.round(mark.manual_max * 100);
+  // Seed the draft from the live value every time the panel opens, so it
+  // never shows a stale number from a previous song or a cancelled edit.
+  useEffect(() => {
+    if (open && mark) setDraft(String(isMarked ? Math.round((mark.mark as number) * 100) : autoPct));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mark]);
 
-  if (editing) {
-    const parsed = parseFloat(draft);
-    const sliderPct = Number.isNaN(parsed) ? minPct : Math.max(minPct, Math.min(maxPct, parsed));
-    return (
-      <div className="intensity-mark intensity-mark-editing">
-        <span className="intensity-mark-label">Mark</span>
-        <input
-          type="range"
-          className="intensity-mark-slider"
-          step={1}
-          min={minPct}
-          max={maxPct}
-          value={sliderPct}
-          onChange={(e) => setDraft(e.target.value)}
-        />
-        <input
-          type="number"
-          step={1}
-          min={minPct}
-          max={maxPct}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          autoFocus
-        />
-        <span>%</span>
-        <button
-          onClick={() => {
-            const pct = parseFloat(draft);
-            if (!Number.isNaN(pct)) setMark.mutate(pct / 100);
-            setEditing(false);
-          }}
-        >
-          Save
-        </button>
-        <button onClick={() => setEditing(false)}>Cancel</button>
-      </div>
-    );
-  }
+  // The panel is a `position: fixed` PORTAL, placed off the control's own
+  // rect — `.one-bar` is an `overflow-x: auto` scroll container, so an
+  // absolutely-positioned panel inside it is clipped at the bar's own
+  // bottom edge (the same reason TopBarGroupButton and InfoTip both
+  // portal their panels; see TopBarGroupButton.tsx's docstring).
+  useLayoutEffect(() => {
+    if (!open) return;
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = Math.min(240, window.innerWidth - 16);
+    setPos({
+      top: rect.bottom + 6,
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - 8 - width)),
+    });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t)) return;
+      if ((t as HTMLElement).closest?.('.intensity-mark-panel')) return;
+      if ((t as HTMLElement).closest?.('[data-mark-opener]')) return;
+      onOpenChange(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open, onOpenChange]);
+
+  const title = !uri || !mark
+    ? 'No song playing — nothing to mark'
+    : isMarked
+      ? `Manually marked at ${Math.round((mark.mark as number) * 100)}% — the automatic 75% ceiling doesn't apply to this song. Automatic would be ${autoPct}%. Tap to change.`
+      : `Automatic scale: ${autoPct}% (genre + bass, capped at a 75% delivered intensity). Tap to mark this track higher.`;
+
+  const parsed = parseFloat(draft);
+  const sliderPct = Number.isNaN(parsed) ? minPct : Math.max(minPct, Math.min(maxPct, parsed));
 
   return (
-    <div
-      className={isMarked ? 'intensity-mark intensity-mark-set' : 'intensity-mark'}
-      title={isMarked
-        ? `Manually marked at ${Math.round((mark.mark as number) * 100)}% — the automatic 75% ceiling doesn't apply to this song. Automatic would be ${autoPct}%.`
-        : `Automatic scale: ${autoPct}% (genre + bass, capped at a 75% delivered intensity). Mark this track to push it higher.`}
-    >
-      <span className="intensity-mark-label">Mark</span>
-      <span className="intensity-mark-value">{effectivePct}%</span>
-      <button
-        className="intensity-mark-edit-btn"
-        onClick={() => {
-          setDraft(String(isMarked ? Math.round((mark.mark as number) * 100) : autoPct));
-          setEditing(true);
-        }}
-      >
-        {isMarked ? 'Edit' : 'Mark'}
-      </button>
-      {isMarked && (
-        <button className="intensity-mark-clear-btn" onClick={() => clearMark.mutate()}>
-          Clear
-        </button>
-      )}
+    <div className="intensity-mark-wrap" ref={wrapRef}>
       <InfoTip
         topic="intensity-mark"
         text="This song's intensity scaling factor. Automatic always tops out at 75%; Mark is the one way past that ceiling, up to 200%."
-      />
+      >
+        <button
+          type="button"
+          className={`intensity-mark${isMarked ? ' intensity-mark-set' : ''}`}
+          title={title}
+          disabled={!uri || !mark}
+          aria-label={`Intensity mark${effectivePct != null ? ` ${effectivePct}%` : ' unavailable'}`}
+          onClick={() => onOpenChange(!open)}
+        >
+          <small>Mark</small>
+          <span className="intensity-mark-value tabular-nums">
+            {effectivePct != null ? `${effectivePct}%` : '—'}
+          </span>
+        </button>
+      </InfoTip>
+      {open && mark && pos && createPortal((
+        <div className="intensity-mark-panel" role="dialog" aria-label="Intensity mark"
+          style={{ top: pos.top, left: pos.left }}>
+          <div className="intensity-mark-panel-row">
+            <input
+              type="range"
+              className="intensity-mark-slider"
+              step={1} min={minPct} max={maxPct}
+              value={sliderPct}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            <input
+              type="number" step={1} min={minPct} max={maxPct}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              // eslint-disable-next-line jsx-a11y/no-autofocus
+              autoFocus
+            />
+            <span>%</span>
+          </div>
+          <div className="intensity-mark-panel-row">
+            <button type="button" onClick={() => {
+              const pct = parseFloat(draft);
+              if (!Number.isNaN(pct)) setMark.mutate(pct / 100);
+              onOpenChange(false);
+            }}>Save</button>
+            <button type="button" onClick={() => onOpenChange(false)}>Cancel</button>
+            {isMarked && (
+              <button type="button" onClick={() => { clearMark.mutate(); onOpenChange(false); }}>
+                Clear
+              </button>
+            )}
+          </div>
+          <span className="intensity-mark-panel-note">
+            Automatic would be {autoPct}% (always ≤125%, i.e. ≤75% delivered).
+          </span>
+        </div>
+      ), document.body)}
     </div>
   );
 }

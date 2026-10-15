@@ -75,6 +75,18 @@ export interface LayerDataBag {
    *  ./lightShowLayer.ts, ../lightShowMarkers.ts) — shown whether or not
    *  anything is armed on them; empty/absent = the layer draws nothing. */
   lightShow?: import('../lightShowMarkers').LightShowCueMarker[];
+  /** THE PER-BEAT SCORE STRIPS (./layers.ts's `beatStrips`: rms_total,
+   *  rms_bass, onset, bass_onset, harmonic, and optionally snare/mfcc) —
+   *  five-plus 21px lanes under the waveform, reserved whenever the song
+   *  has beats at all. Absent or true keeps that, which is every caller
+   *  that had this canvas before. FALSE drops them, height included:
+   *  Home's own copy of the canvas is a glance view whose beats carry no
+   *  per-beat scores to show, so the lanes rendered as empty bands and
+   *  made its shape half as tall again as the approved mockup's.
+   *  The beat TICKS in the main area are a different layer
+   *  (`librosaOverlays`, gated by `view.librosaFilters.beats`) and are
+   *  unaffected. */
+  beatStrips?: boolean;
   /** A Light Show flag being dragged directly on the canvas right now
    *  (hooks/useLightShowDrag.ts) — the live ghost position, drawn in place
    *  of the flag's stored ms until the drag ends and it saves. Null/absent
@@ -178,8 +190,11 @@ export function snapRailHFor(data: Pick<LayerDataBag, 'dropSeq'>): number {
   return data.dropSeq?.rails ? SNAP_RAIL_H : 0;
 }
 
-export function stripCountFor(data: Pick<LayerDataBag, 'librosa' | 'mfccDistances'>,
-                              lib: ViewState['librosaFilters']): number {
+export function stripCountFor(
+  data: Pick<LayerDataBag, 'librosa' | 'mfccDistances' | 'beatStrips'>,
+  lib: ViewState['librosaFilters'],
+): number {
+  if (data.beatStrips === false) return 0;
   if (!data.librosa?.beats?.length) return 0;
   let n = 5; // rms_total, rms_bass, onset, bass_onset, harmonic
   const hasSnare = data.librosa.beats.some((b) => (b.snare_onset_score ?? 0) > 0);

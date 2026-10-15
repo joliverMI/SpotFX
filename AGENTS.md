@@ -11930,7 +11930,10 @@ timeline, the global read-only song timeline, `show_clock_ms` and
   timeline filter toggles, `home/HomeTimeline.tsx`) and `InfoTip.tsx` (a
   rich hover/long-press tooltip carrying a short description plus a
   `HelpLink`, replacing a bare "?" circle where one control deserves its
-  own explanation — used on the Light Show bar slot). **Since 2026-10-14
+  own explanation — used on the Light Show bar slot). **IT DRAWS NO
+  TRIGGER OF ITS OWN SINCE THE DESIGN-FIDELITY PASS** — callers wrap
+  their control in it; see "THE DESIGN-FIDELITY GATE" below, which is the
+  current account of idea 5. **Since 2026-10-14
   (idea 5, "one help '?' per page") it also replaces the four
   always-visible bar circles** (`ModeChip`/`LiveEnergyReadout`/
   `IntensityMarkControl`/`DevicePreviewStrip`) **and each card's own
@@ -11942,8 +11945,13 @@ timeline, the global read-only song timeline, `show_clock_ms` and
   always-visible circles this pass targeted. Neither component is wired
   into every page; a future pass choosing to do that inherits these.
 - **Icons**: `dash`/`cube`/`gauge`/`chevronDown`/`plug`/`info`/`wave`/
-  `wait` added to `iconRegistry.ts` for this build — see that file before
-  adding a near-duplicate.
+  `wait` added to `iconRegistry.ts` for this build; the design-fidelity
+  pass then lifted the approved artifact's OWN icon table into the same
+  registry (`spark`/`note`/`pause`/`play`/`undo`/`redo`/`follow`/`full`/
+  `plus`/`more`/`clock`/`palette`/`layers`/`devices`/`rooms`/`roomfx`/
+  `bug`/`sync`/`flask`/`timeline`/`chat`/`review`/`warn`) — see that file
+  before adding a near-duplicate, and re-lift from the artifact rather
+  than redrawing a glyph by eye.
 - **Tests**: `scripts/check_nav_menu.mjs` (the menu: every route
   reachable, keyboard open/close, the unsaved guard still intercepts a
   dropdown item), `scripts/check_light_show_now_next.mjs`
@@ -12014,37 +12022,114 @@ the row COUNT per width, not just a height ceiling — a stray third row
 or a silent collapse back to one are both regressions this now catches
 that a pure height check cannot.
 
-## SONG TIMELINE MARKERS — the `preserveAspectRatio="none"` SVG stretch, and why BOTH axes need compensating
+## SONG TIMELINE MARKERS — superseded, see "THE DESIGN-FIDELITY GATE" below
 
-`SongStrip.tsx`/`HomeTimeline.tsx` draw their markers (scene squares,
-flare circles, charge/lull/drop bars, High/Low flags) into an SVG whose
-`viewBox="0 0 100 39"` is force-stretched to the rendered box
-(`preserveAspectRatio="none"`) so a scene/colour name of any length still
-positions correctly via `%`-string `x`/`cx` (SVG resolves a `%` length
-against the rendered viewport directly, bypassing the viewBox transform).
-**Every SIZE attribute — `width`/`height`, `r`, a rounded rect's `rx`, a
-line's `stroke-width` — was a bare, unscaled viewBox number, which gets
-stretched by whatever the viewBox-to-viewport ratio happens to be: X
-stretches by `renderedWidthPx/100` (a few px/unit on a phone, well over
-ten on a wide desktop bar) and Y — found live, NOT exactly 1:1 the way a
-first draft of this fix assumed, because a border-box border eats a
-couple of the container's nominal 39px — stretches by its own, separate
-`renderedHeightPx/39`.** A "circle" with the same raw number for both
-axes therefore rendered as a wide ellipse, a "square" as a slab — the
-Admiral's own report, "the little icons on the top timeline are stretched
-really wide." Fix: `songStrip.ts`'s `axisScale(renderedPx, viewBoxUnits)`
-+ `compensate(desiredPx, scale)`, measured fresh off the SVG's own
-`getBoundingClientRect()` on EVERY marker rebuild (a `ResizeObserver` on
-SongStrip's own rebuild-on-data-change effect; HomeTimeline already
-redraws on a 500ms interval, so no observer needed there) and applied to
-every size on BOTH axes — never assume either axis is 1:1, measure both.
-The charge/lull/drop bars are a deliberately OBLONG pill (10:6 or 4:6),
-not meant to land at ratio 1 — the fix preserves THEIR intended ratio,
-not a blanket "make everything round." Spec:
-`scripts/check_song_strip.mjs` §FIVE (pure math, including a red control
-against the pre-fix formula) — the real on-screen pixel sizes were
-independently confirmed in a live headless-Chromium render before
-trusting the math alone.
+The original fix for the stretched-icon report (a `viewBox="0 0 100 39"`
+force-stretched to the rendered box, so a marker's raw size scaled by a
+different factor per axis) was a per-axis `axisScale`/`compensate`
+compensation in `songStrip.ts`. The design-fidelity pass's
+`trackPainter.paintTrack` replaced the stretched viewBox with a 1:1-pixel
+one at its source instead (an x is a pixel, a circle is a circle) —
+`axisScale`/`compensate` are REMOVED, not merely superseded, and nothing
+in this codebase calls them any more. See `songStrip.ts`'s own `trackX`
+docstring and "THE DESIGN-FIDELITY GATE" below for the current mechanism.
+
+## THE DESIGN-FIDELITY GATE — compare the page to the mockup, or it drifts (2026-10-14)
+
+The Admiral, reviewing the shipped UI declutter: "why doesnt the spectra
+ui upgrade look like the artifact? its much worse than i remember." The
+read-only audit (`data/ui-fidelity-audit/report.md`) found 8 glaring, 19
+noticeable and 14 minor drift gaps and named the cause in one line:
+**the structure shipped and the DRAWING did not, because nothing compared
+a pixel to the mockup.** Every acceptance check PRs 422-425 added
+measures heights, rows, overflow, routes, maths or fps — and every one of
+them PASSED on the build he called much worse. Four things now hold:
+
+- **THE APPROVED MOCKUPS ARE THE DESIGN, and they are DOM frames, not
+  text.** `data/ui-layout-plan/explainer-final.html` (fleet-spotfx home)
+  is the artifact he edited and approved; its mockups are `.fw > .frame`
+  nodes populated by its own `<script>` at load, so a brief that says
+  "read its text" reads empty divs — which is exactly what happened.
+  `docs/design/spectra-ui-mockups.html` is the frozen in-repo reference,
+  derived MECHANICALLY by `scripts/regenerate_ui_mockups.py` (its
+  `<style>` and `<script>` copied verbatim, its prose and its base64
+  screenshots of the old app dropped). Re-derive it, never retype it.
+- **THE GATE IS `scripts/check_ui_fidelity.py`** (`tests/
+  test_ui_fidelity.py` runs it, so it fires on a full test run): it
+  renders every mockup frame at its native width and the live chrome at
+  the same size, writes the stacked pairs to `docs/evidence/ui-fidelity/`
+  for a person to EYE, and asserts ~90 measurable things (sizes, weights,
+  colours, dividers, rows per width, tabular digits, no help circles,
+  the empty states). It runs against the repo's own mocked harness page
+  (`spectra/web/harness/fidelity.tsx` — the REAL NavBar/SongStrip/one-bar/
+  Home with the artifact's own canned song, plus `?nothing=1` for the
+  empty state); `--app-url http://127.0.0.1:8000/spectra/` points it at
+  the live app after a deploy. A machine with no Chromium/harness build
+  SKIPS, saying why.
+- **A CONTROL THAT UNMOUNTS IS HALF THE DRIFT.** The song timeline and
+  the Light Show slot each returned `null` when nothing was playing or
+  armed — his own evening state — so the two elements the plan made the
+  centre of the chrome were absent most of the day, and their arrival was
+  itself a layout jump. Both now draw an EMPTY STATE the mockup specifies
+  ("—" in the next box, "Nothing armed · tap to run an action"), and the
+  Scenes/Colour slots read "—" rather than dropping their name span. When
+  a plan says "nothing jumps", a conditional `return null` in the chrome
+  is the thing to look for first.
+- **`button { padding: 6px 12px }` IS WHY ICONS RENDER TINY.** Every
+  fixed-size icon button in `tokens.css` must set `padding: 0`: a 30px
+  button that inherits the global rule has 30 - 24 - 2 = FOUR pixels of
+  content box, and flex squeezes a 16px glyph to 4px wide while leaving
+  it 16px tall. That was the audit's "icons render tiny (~6px glyphs)" —
+  not the icon paths, which were right all along. The gate asserts the
+  RENDERED glyph box of every small icon button, because every
+  attribute-level check reads correct while this is broken.
+
+**THE CHROME IS ONE COMPOSITION, `components/AppChrome.tsx`** — MENU,
+then TIMELINE, then BAR, the mockups' own order. App.tsx, the kiosk and
+the fidelity harness all render it (`showSongStrip`/`showNav` are the two
+places that genuinely differ). It exists because the ORDER drifted and
+the gate could not see it: App.tsx rendered the bar second and the strip
+third while the harness drew the mockup's order, so the pair images
+looked right because the HARNESS was right. A harness that models the
+app rather than rendering it proves nothing about the app — the gate now
+asserts nav < strip < bar from the measured tops.
+
+**AND THE STRIP IS NOT ON EVERY PAGE — `showsSongStrip(pathname)`, in
+that same module, is the one rule**: Home and `/timeline` draw their OWN
+editable timeline card (§13 decision 5), so the GLOBAL strip is theirs
+to omit, not to stack a second copy under. Home's own card holds the
+mockup's flat 230px audio shape with NO beat-strip lanes under it
+(`HomeTimeline.tsx` passes `beatStrips: false`, which `canvas/frame.ts`'s
+`stripCountFor` answers with zero before it looks at anything else, and
+`rails: null`); growing the canvas per lane is the Timeline page's own
+behaviour and belongs there. The gate asserts both — no `.song-strip` on
+either route, and Home's canvas within a few px of the height MEASURED
+off the mockup — because both read as ordinary-looking pages until a
+pair image is put beside the artifact.
+
+**ONE HELP "?" PER PAGE IS STRUCTURAL NOW** (idea 5): `InfoTip.tsx`
+renders NO trigger of its own — callers WRAP their control in it, and
+hovering/long-pressing that control opens the panel (which still carries
+the `HelpLink`, so no topic is orphaned — AGENTS.md's own orphan rule).
+The one visible circle in the chrome is the menu row's own page "?".
+A Settings card's field rows carry their help the same way. The gate
+counts `.info-tip-btn` (must be 0) and `.help-link` inside the bar, the
+strip, Home's card head and a Settings row (0) versus the nav (exactly 1).
+
+**THE TRACK IS PAINTED ONCE, BY ONE FUNCTION, IN 1:1 PIXEL SPACE.**
+`spectra/web/src/components/trackPainter.ts` draws the inset panel, the
+energy terrain (approved idea 4 — librosa's own per-section `energy_rms`,
+never a synthesised curve and never re-derived from a marker's RANK,
+which orders a boundary's energy CHANGE), the drop sequences' gold→sky→
+numbered-pink band, the flags and the rank-sized markers — for BOTH the
+global strip and Home's editable copy, which had drifted into two
+implementations. It rewrites the SVG's `viewBox` to the measured pixel
+box every build, so an x is a pixel and a circle is a circle; the
+stretched `0 0 100 39` viewBox that forced `axisScale`/`compensate` (see
+the section above — both functions are now dead and removed) is gone
+from these two. An SVG geometry attribute takes no `calc()`, which is
+the other reason: the mockup's pill-offset-by-half-its-width and
+triangular flag heads cannot be expressed in percent at all.
 
 ## Maintaining this file
 

@@ -25,6 +25,7 @@ import GradientEditor2D, { type XMode } from './GradientEditor2D';
 import GradientSquarePreview from './GradientSquarePreview';
 import { useToast } from './Toast';
 import HelpLink from '../help/HelpLink';
+import Icon from './Icon';
 import { uuid } from '../lib/uid';
 import {
   useGradient2dProfiles, useRoomControls, useSaveGradient2dProfiles, useSaveRoomControls,
@@ -35,7 +36,7 @@ const newProfile = (): DriftGradientProfile => ({
   id: uuid(), name: 'New Gradient', top: '#ffff00', bottom: '#0000ff', x_mode: 'loop',
 });
 
-export default function DriftGradientPanel() {
+export default function DriftGradientPanel({ compact = false }: { compact?: boolean }) {
   const toast = useToast();
   const { data: room } = useRoomControls();
   const { data: profiles = {} } = useGradient2dProfiles();
@@ -117,6 +118,69 @@ export default function DriftGradientPanel() {
       toast(`Delete failed: ${e}`, 'error');
     }
   };
+
+  if (compact) {
+    // THE MOCKUP'S OWN ROW (design-fidelity pass, 2026-10-14 — audit S1:
+    // "Drift gradient as a dropdown + New"): a select naming the active
+    // gradient plus one ＋ New button, with the full editor appearing
+    // below only while a draft is open. The four large swatch tiles and
+    // the two explanatory sentences the Settings card used to show
+    // verbatim are gone from the row — the sentences moved onto the
+    // label's own hover description (settings/RoomCard.tsx).
+    return (
+      <div className="drift-gradient-compact">
+        <div className="drift-gradient-compact-row">
+          <select
+            className="drift-gradient-select"
+            value={activeId ?? ''}
+            onChange={(e) => void setActive(e.target.value === '' ? null : e.target.value)}
+            title="Which 2-D drift gradient drives the room's colour, if any"
+          >
+            <option value="">Off — the colour journey drives the room</option>
+            {sortedProfiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <button type="button" className="drift-gradient-new" onClick={startNew}
+            title="Make a new gradient">
+            <Icon name="plus" size={13} /> New
+          </button>
+          {activeId && (
+            <button type="button" className="drift-gradient-new"
+              onClick={() => { const p = profiles[activeId]; if (p) setDraft({ ...p }); }}
+              title="Edit this gradient">Edit</button>
+          )}
+        </div>
+        {draft && (
+          <div className="drift-gradient-editor">
+            <input type="text" value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+              style={{ width: '100%', fontSize: 12, marginBottom: 6 }} placeholder="Gradient name" />
+            <GradientEditor2D
+              top={draft.top} bottom={draft.bottom} xMode={draft.x_mode as XMode}
+              onChangeTop={(v) => setDraft({ ...draft, top: v })}
+              onChangeBottom={(v) => setDraft({ ...draft, bottom: v })}
+              onChangeXMode={(v) => setDraft({ ...draft, x_mode: v })}
+            />
+            <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+              <button className="primary" style={{ fontSize: 11, padding: '2px 8px' }}
+                onClick={() => void save(draft, true)}>
+                {profiles[draft.id] ? 'Save (overwrite)' : 'Save'}
+              </button>
+              <button style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => void saveAsNew()}>
+                Save as new…
+              </button>
+              <button style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => setDraft(null)}>
+                Close
+              </button>
+              {profiles[draft.id] && (
+                <button className="danger" style={{ fontSize: 11, padding: '2px 8px' }}
+                  onClick={() => void del()}>✕ Delete</button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="drift-gradient-panel">

@@ -6,6 +6,18 @@
  * Tapping goes to the Sequence run page while a sequence is running, else
  * the plain Run page (showNowNext()'s own `href`).
  *
+ * IT NEVER UNMOUNTS (design-fidelity pass, 2026-10-14 — audit B7/N2, one
+ * of the two biggest reasons the live bar did not look like the approved
+ * artifact). `if (!current && !brief?.active) return null;` removed the
+ * whole slot whenever nothing was armed — his own state the evening he
+ * reviewed the deploy — so the element the plan made the CENTRE of the
+ * bar was absent most of the day, and its arrival/departure moved
+ * everything after it. The mockup keeps the slot on screen with its own
+ * third state (`showSlot('idle')`): the sparkle, "Nothing armed", and
+ * "tap to run an action". Drawn as a bordered 34px slot
+ * (`.sp .show`/`.sp .act`) with the holds count as a badge on the
+ * sparkle, not as 0.85em inline text behind a "◈" glyph.
+ *
  * Reads three already-existing sources, no new server work: `useEngineStatus`
  * (the `light_show` brief, already on the wire — spectra/services/engine.py's
  * `_light_show_brief()` — plus `bridge.track` for the live countdown clock),
@@ -21,30 +33,43 @@ import {
 import { useLivePosition } from '../lib/useLivePosition';
 import Icon from './Icon';
 import InfoTip from './InfoTip';
+import { countdownParts } from './songStrip';
 import { showNowNext, type ShowNowNextItem } from '../lightshow/showSummary';
 import type { ShowBrief } from '../lightshow/types';
 
-/** "12.4s" under a minute, "1:04.2" over — a tenth-of-a-second countdown
- * against the live, interpolated song position, never the raw 3s/10s poll
- * value alone. */
-function tenthsCountdown(dueMs: number, nowMs: number): string {
-  const remaining = Math.max(0, dueMs - nowMs) / 1000;
-  if (remaining < 60) return `${remaining.toFixed(1)}s`;
-  const m = Math.floor(remaining / 60);
-  const s = remaining - m * 60;
-  return `${m}:${s.toFixed(1).padStart(4, '0')}`;
+/** The countdown goes bold/white inside this many ms of the mark — the
+ * mockup's own 10s lead-in (his edited decision). */
+const NEAR_MS = 10_000;
+
+/** The SAME countdown rule the song timeline's own next-event box uses
+ * (components/songStrip.ts::countdownParts, the mockup's `cd()`): tenths
+ * up to 99.95s, plain m:ss above it — never a tenth that keeps changing
+ * for minutes. The unit is its own `<small>`, as the mockup draws it
+ * (`.sp .act .wh small`). Against the live, interpolated song position,
+ * never the raw 3s/10s poll value alone. */
+function tenthsCountdown(dueMs: number, nowMs: number): { value: string; unit: string | null } {
+  return countdownParts(dueMs - nowMs);
 }
 
-function NowNextItem({ item, livePositionMs }: { item: ShowNowNextItem; livePositionMs: number | null }) {
+function NowNextItem({
+  item, livePositionMs, role,
+}: {
+  item: ShowNowNextItem;
+  livePositionMs: number | null;
+  role: 'cur' | 'nxt';
+}) {
   const live = item.dueMs != null && livePositionMs != null;
   const remainingMs = live ? item.dueMs! - livePositionMs! : null;
-  const near = remainingMs != null && remainingMs <= 10_000 && remainingMs >= 0;
+  const near = remainingMs != null && remainingMs <= NEAR_MS && remainingMs >= 0;
+  const cd = live ? tenthsCountdown(item.dueMs!, livePositionMs!) : null;
   return (
-    <span className={`light-show-item${near ? ' light-show-item-near' : ''}`}>
-      <Icon name={item.icon} size={13} />
-      <span className="light-show-item-label">{item.label}</span>
-      <span className="light-show-item-when">
-        {live ? tenthsCountdown(item.dueMs!, livePositionMs!) : item.whenText}
+    <span className={`light-show-act light-show-act-${role}${near ? ' light-show-act-near' : ''}`}>
+      <span className="light-show-act-tag"><Icon name={item.icon} size={11} /></span>
+      <span className="light-show-act-text">
+        <span className="light-show-act-name">{item.label}</span>
+        <span className="light-show-act-when tabular-nums">
+          {cd ? <>{cd.value}{cd.unit && <small>{cd.unit}</small>}</> : item.whenText}
+        </span>
       </span>
     </span>
   );
@@ -60,27 +85,55 @@ export default function LightShowStrip() {
   const livePositionMs = useLivePosition(st?.bridge.track);
 
   const { current, next, href, holdsCount } = showNowNext(brief, arms, sequence);
-
-  if (!current && !brief?.active) return null;
+  const idle = !current;
 
   return (
-    <span className="light-show-strip">
-      <Link to={href} className="light-show-link" aria-label="Light Show — tap for the run page">
-        <span className="light-show-diamond" title={holdsCount > 0 ? `${holdsCount} thing(s) the show is holding` : undefined}>
-          ◈{holdsCount > 0 && <span className="light-show-holds-badge">{holdsCount}</span>}
+    <InfoTip
+      className="light-show-strip"
+      topic="show-strip"
+      text="What the Light Show is doing right now and what's armed next — tap to open the run page."
+    >
+      <Link
+        to={href}
+        className={`light-show-slot${idle ? ' light-show-slot-idle' : ''}`}
+        aria-label={idle
+          ? 'Light Show — nothing armed. Tap to run an action.'
+          : `Light Show — now ${current.label}${next ? `, next ${next.label}` : ''}. Tap for the run page.`}
+        title={idle
+          ? 'Light Show: nothing armed — tap for the Run page'
+          : 'Light Show — tap for the Run page'}
+      >
+        <span className="light-show-spark">
+          <Icon name="spark" size={18} />
+          {holdsCount > 0 && (
+            <span className="light-show-holds-badge"
+              title={`${holdsCount} thing(s) the show is holding`}>{holdsCount}</span>
+          )}
         </span>
-        {current ? <NowNextItem item={current} livePositionMs={livePositionMs} /> : <span className="light-show-item-when">Nothing armed</span>}
-        {next && (
+        {idle ? (
+          <span className="light-show-act light-show-act-cur light-show-act-wide">
+            <span className="light-show-act-text">
+              <span className="light-show-act-name light-show-act-name-idle">Nothing armed</span>
+              <span className="light-show-act-when">tap to run an action</span>
+            </span>
+          </span>
+        ) : (
           <>
-            <span className="light-show-sep">›</span>
-            <NowNextItem item={next} livePositionMs={livePositionMs} />
+            <NowNextItem item={current} livePositionMs={livePositionMs} role="cur" />
+            <span className="light-show-chev"><Icon name="chevron" size={12} /></span>
+            {next ? (
+              <NowNextItem item={next} livePositionMs={livePositionMs} role="nxt" />
+            ) : (
+              <span className="light-show-act light-show-act-nxt">
+                <span className="light-show-act-tag light-show-act-tag-dim"><Icon name="more" size={11} /></span>
+                <span className="light-show-act-text">
+                  <span className="light-show-act-name light-show-act-name-idle">nothing after</span>
+                </span>
+              </span>
+            )}
           </>
         )}
       </Link>
-      <InfoTip
-        topic="show-strip"
-        text="What the Light Show is doing right now and what's armed next — tap the icon to open the run page."
-      />
-    </span>
+    </InfoTip>
   );
 }

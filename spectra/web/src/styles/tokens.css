@@ -34,21 +34,41 @@ a:hover { text-decoration: underline; }
 
 #root { display: flex; flex-direction: column; min-height: 100vh; }
 
+/* The approved mockup's own `.sp .nav`: a fixed 46px row, 4px gaps, and
+ * the group items 34px tall inside it (design-fidelity pass, 2026-10-14
+ * — data/ui-layout-plan/explainer-final.html; audit M1-M5). */
 nav {
   display: flex;
   align-items: center;
   gap: 4px;
+  height: 46px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  padding: 8px 16px;
+  padding: 0 16px;
   flex-wrap: wrap;
+  position: relative;
+  z-index: 6;
 }
+/* A DRAWN GEM, not a font glyph: a 14px accent square rotated 45°, then
+ * "SPECTRA" letter-spaced at the mockup's own 17px (audit M1). `◆` was a
+ * Unicode character and therefore font-dependent — the class of defect
+ * iconRegistry.ts's own docstring exists to end. */
 nav .logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 800;
-  font-size: 18px;
+  font-size: 17px;
   letter-spacing: 0.14em;
   color: var(--accent);
-  margin-right: 12px;
+  margin-right: 14px;
+  white-space: nowrap;
+}
+nav .logo-gem {
+  width: 14px; height: 14px; flex: none;
+  background: var(--accent);
+  transform: rotate(45deg);
+  border-radius: 2px;
 }
 nav a {
   padding: 6px 12px;
@@ -67,10 +87,12 @@ nav a:hover, nav a.active {
 /* THE GROUPED TOP MENU (UI declutter plan §2, nav/NavBar.tsx + NavMenu.tsx):
  * Home | Artifacts ▾ | Engine ▾ | Settings, replacing the old 17-link row. */
 .nav-plain-link, .nav-group-trigger {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: 7px;
+  height: 34px;
+  padding: 0 12px;
   border-radius: var(--radius);
   color: var(--text-muted);
   font-size: 13px;
@@ -86,46 +108,73 @@ nav a:hover, nav a.active {
   color: var(--text);
   text-decoration: none;
 }
-/* The active GROUP (its dropdown holds the current page) gets a second,
- * stronger mark — a 2px accent underline — distinct from plain hover. */
-.nav-group-trigger.active { box-shadow: inset 0 -2px 0 var(--accent); }
+/* THE ACTIVE MARK IS THE MOCKUP'S OWN INSET UNDERLINE (audit M3): a 2px
+ * accent bar 12px in from each end, 3px above the bottom — on the active
+ * PAGE (Home/Settings) as well as the active GROUP, where the live build
+ * gave Home a pill alone and the group a full-width inset box-shadow. */
+.nav-plain-link.active::after, .nav-group-trigger.active::after {
+  content: '';
+  position: absolute;
+  left: 12px; right: 12px; bottom: 3px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
 .nav-group-caret { transition: transform 0.15s; opacity: 0.7; }
 .nav-group-caret-open { transform: rotate(180deg); }
 .nav-group { position: relative; display: inline-flex; }
+/* The mockup's own `.sp .menu`: 236px wide, 12px radius, a deeper
+ * shadow, 36px rows each carrying a 16px stroke glyph (audit M4 — the
+ * live build drew plain 160px-wide text rows, which read as a bare
+ * list). */
 .nav-group-menu {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + 2px);
   left: 0;
   z-index: 50;
-  min-width: 160px;
+  min-width: 236px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-  padding: 4px;
+  border-radius: 12px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
+  padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 .nav-group-item {
-  padding: 8px 12px;
-  border-radius: calc(var(--radius) - 2px);
-  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: var(--radius);
+  color: var(--text);
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
 }
+.nav-group-item svg { color: var(--text-muted); flex: none; }
 .nav-group-item:hover, .nav-group-item:focus-visible {
   background: var(--surface2);
   color: var(--text);
   text-decoration: none;
   outline: none;
 }
-.nav-group-item.active { color: var(--accent2); box-shadow: inset 2px 0 0 var(--accent2); }
+/* The current page's own row: a FILLED row plus a 3px accent left bar and
+ * an accent glyph (the mockup's `.mi.cur`), not pink text on nothing. */
+.nav-group-item.active {
+  background: var(--surface2);
+  color: var(--text);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.nav-group-item.active svg { color: var(--accent); }
 /* Touch: 46px rows under a coarse pointer (his own figure — §2), 36px
  * with a mouse. */
 @media (pointer: coarse) {
-  .nav-group-item { padding: 12px 14px; min-height: 46px; display: flex; align-items: center; }
+  .nav-group-item { height: 46px; font-size: 14px; }
+  .nav-plain-link, .nav-group-trigger { height: 40px; }
+  nav { height: auto; min-height: 46px; padding: 4px 16px; }
 }
 
 main { flex: 1; padding: 16px; max-width: 1200px; margin: 0 auto; width: 100%; }
@@ -136,8 +185,9 @@ main.home-route { max-width: none; }
 /* Phone portrait: the nav keeps one row (icons + "?") and content padding
  * narrows so cards use the width — labels hide, only icons/carets show. */
 @media (max-width: 520px) {
-  nav { padding: 6px 8px; gap: 2px; }
-  nav .logo { font-size: 15px; margin-right: 4px; letter-spacing: 0.08em; }
+  nav { padding: 0 8px; gap: 2px; }
+  nav .logo { font-size: 15px; margin-right: 6px; letter-spacing: 0.08em; }
+  nav .logo-text { display: none; }
   .nav-plain-link, .nav-group-trigger { padding: 6px 8px; }
   .nav-plain-link-label, .nav-group-label { display: none; }
   main { padding: 10px; }
@@ -264,13 +314,16 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 .one-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 7px;
   flex-wrap: nowrap;
-  padding: 6px 16px;
+  height: 48px;
+  padding: 0 16px;
   background: var(--surface2);
   border-bottom: 1px solid var(--border);
   font-size: 12px;
   overflow-x: auto;
+  position: relative;
+  z-index: 3;
 }
 .one-bar > .room-controls-bar, .one-bar > .top-bar-strip {
   display: contents;
@@ -295,32 +348,80 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
  * (check_onebar_layout.py), not eyeballed. */
 @media (max-width: 1180px) {
   .one-bar { gap: 6px; }
-  .light-show-item-label { max-width: 64px; }
+  .light-show-act-name { max-width: 72px; }
 }
+/* PHONE: A DELIBERATE TWO ROWS, the mockup's own `@container sp
+ * (max-width: 520px)` rule (audit M6 — the live bar wrapped to THREE,
+ * because the two name slots kept the fixed 120px width the tablet tier
+ * gives them and could not share one row with the three icon buttons).
+ * The mockup makes them FLEXIBLE here instead: each takes half of
+ * whatever is left after the three 34px icon buttons and the gaps, so
+ * row 1 is house/mode/bulb/Scene/Colour and row 2 is everything else.
+ * The no-jump property survives — both slots are always exactly half the
+ * leftover, whatever the names say, and each still ellipsises. */
 @media (max-width: 520px) {
-  .one-bar { flex-wrap: wrap; overflow-x: visible; }
+  .one-bar { flex-wrap: wrap; overflow-x: visible; height: auto; padding: 6px 10px; row-gap: 6px; }
+  .one-bar .one-bar-sep, .one-bar .one-bar-spacer { display: none; }
+  .one-bar .scenes-group-btn {
+    /* Share whatever is left of row 1 after the three 36px icon
+       buttons, shrinking as far as the name's own ellipsis allows. */
+    flex: 1 1 0;
+    width: auto;
+    min-width: 72px;
+  }
+  /* Row 2 — the Light Show slot takes the slack but never collapses to
+     nothing (a `flex: 1 1 0` with no floor measured 13px wide). */
+  .one-bar .light-show-strip { flex: 1 1 110px; min-width: 110px; }
+  .one-bar .device-preview-device:nth-of-type(n + 4) { display: none; }
 }
 /* The explicit left-to-right sequence (see the `.one-bar` comment above).
  * Ties (both Scenes and Colour are `.scenes-group-btn`) resolve by DOM
  * source order, which already has Scenes before Colour — no extra class
  * needed to tell them apart. `.device-preview-expanded-row` is ordered
  * AFTER the warning chip and the release button (not tied with its own
- * collapsed swatches at order 8) on purpose: flex wrapping never backfills
+ * collapsed swatches at order 80) on purpose: flex wrapping never backfills
  * an earlier line, so if the expanded row wrapped ahead of them, THEY
  * would wrap again behind it onto a third line instead of staying on the
- * bar's first row the way every other icon does. Order 5 is deliberately
- * left unused — the deliberate-two-row rule below plants its own forced
- * line-break there. */
-.one-bar .mode-chip { order: 1; }
-.one-bar .mode-group-btn { order: 2; }
-.one-bar .ambient-group-btn { order: 3; }
-.one-bar .scenes-group-btn { order: 4; }
-.one-bar .energy-mark-group { order: 6; }
-.one-bar .light-show-strip { order: 7; }
-.one-bar .device-preview-strip { order: 8; }
-.one-bar .warning-chip { order: 9; }
-.one-bar .release-hold-wrap { order: 10; }
-.one-bar .device-preview-expanded-row { order: 11; }
+ * bar's first row the way every other icon does. The orders are spaced
+ * in TENS, with the gaps holding the four thin dividers and the row-2
+ * spacer, so a future occupant can be slotted between two without
+ * renumbering the row; order 50 is deliberately left unused — the
+ * deliberate-two-row rule below plants its own forced line-break
+ * there. */
+.one-bar .mode-chip { order: 10; }
+.one-bar .mode-group-btn { order: 20; }
+.one-bar .ambient-group-btn { order: 30; }
+.one-bar .one-bar-sep-before-names { order: 35; }
+.one-bar .scenes-group-btn { order: 40; }
+.one-bar .one-bar-sep-before-energy { order: 55; }
+.one-bar .energy-mark-group { order: 60; }
+.one-bar .one-bar-sep-before-show { order: 65; }
+.one-bar .light-show-strip { order: 70; }
+.one-bar .one-bar-sep-before-preview { order: 75; }
+.one-bar .device-preview-strip { order: 80; }
+.one-bar .one-bar-spacer { order: 85; flex: 1; min-width: 0; }
+.one-bar .warning-chip { order: 90; }
+.one-bar .release-hold-wrap { order: 100; }
+.one-bar .device-preview-expanded-row { order: 110; }
+
+/* THE MOCKUP'S OWN THIN DIVIDERS between control groups (`.sp .sepv`,
+ * audit B10 — the live bar had none). Each one is NAMED FOR THE `order`
+ * IT IS GIVEN, not for its DOM neighbour, because `.one-bar` sequences
+ * every occupant by `order` across two `display: contents` components:
+ * `-before-names` is written after the display-mode button in
+ * RoomControlsBar.tsx but lands after Hue Hold. They render only inside
+ * `.one-bar` (a standalone render of either component shows none), and
+ * never at the head of a wrapped row — see the two-row rule below. */
+.one-bar-sep { display: none; }
+.one-bar .one-bar-sep {
+  display: block;
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+  flex: none;
+  margin: 0 2px;
+}
+.one-bar-spacer { display: none; }
 
 /* NO OCCUPANT GROWS TALLER (spotfx-onebar-tablet-height) — the bar was
  * 43px at 1440 but 69px/172px at 1180/1024, because two occupants
@@ -343,7 +444,7 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
  * width: "extend the phone two-row top-bar rule from <=520px up to about
  * 1100px... do not shed swatches or hide controls to force one line").
  * `.one-bar::before` is a zero-height flex item planted at the unused
- * order 5, between Colour (4) and Energy+Mark (6) — `flex-basis: 100%`
+ * order 50, between Colour (40) and Energy+Mark (60) — `flex-basis: 100%`
  * forces every later-ordered occupant onto a fresh line regardless of
  * how wide row 1's own content happens to be, which is what makes this a
  * DETERMINISTIC two-row split rather than organic reflow (robust against
@@ -358,8 +459,14 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
  * its own content naturally reflowing, not this forced break — adding
  * the break there too was not asked for and not measured). */
 @media (min-width: 521px) and (max-width: 1100px) {
-  .one-bar { flex-wrap: wrap; }
-  .one-bar::before { content: ""; order: 5; flex-basis: 100%; height: 0; }
+  .one-bar { flex-wrap: wrap; height: auto; padding: 6px 16px; row-gap: 6px; }
+  .one-bar::before { content: ""; order: 50; flex-basis: 100%; height: 0; }
+  /* A divider must never open a wrapped row (it would read as a stray
+     tick at the left edge of row 2). */
+  .one-bar .one-bar-sep-before-energy { display: none; }
+  /* Row 2 fills its own width, so the mockup's push-to-the-right spacer
+     has nothing to push against and would just blank the middle. */
+  .one-bar .one-bar-spacer { display: none; }
 }
 /* Between the two: 1180 still fits one line, but only with the swatch
  * count capped (measured: 2 fits, every favourite shown does not). */
@@ -481,9 +588,13 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   align-items: center;
   justify-content: center;
   gap: 1px;
-  min-width: 64px;
-  height: 30px;
-  padding: 0 12px;
+  /* THE MOCKUP'S OWN ICON SQUARE (`.sp .ib`): 36 wide, 34 tall, inside a
+   * 48px bar (audit B10 — the live build was 64x30 with a text label).
+   * The two NAME slots (Scenes/Colour) override both below. */
+  width: 36px;
+  min-width: 36px;
+  height: 34px;
+  padding: 0;
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--surface2);
@@ -497,28 +608,12 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   -webkit-user-select: none;
   user-select: none;
 }
-.top-bar-group-btn-label {
-  font-size: 9px;
-  font-weight: 500;
-  opacity: 0.75;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  line-height: 1.1;
-}
-/* Scenes/Colour show a live name here (current scene / current-or-last-
- * drifting colour set, his ask 2026-10-07) — names are his, length
- * unbounded, so this must truncate rather than widen the button and wrap
- * the bar. max-width is tuned to still read at phone width (390px) inside
- * room-controls-bar's existing flex-wrap row. */
-.top-bar-group-btn-value {
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.1;
-  max-width: 100px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* `.top-bar-group-btn-label` / `-value` are RETIRED — the Scenes/Colour
+ * faces draw the approved mockup's own name slot instead
+ * (`.bar-slot-label` / `.bar-slot-name` / `.bar-slot-swatch`, further
+ * down; audit B4), and no group button carries a text label any more.
+ * The no-jump rule they used to serve lives on `.scenes-group-btn`'s own
+ * fixed width and `.bar-slot-name`'s ellipsis. */
 .top-bar-group-btn-dot {
   position: absolute;
   top: -3px;
@@ -559,15 +654,38 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
  * edge stays visible whichever fill is showing (his own requirement: a
  * black button must not vanish against this bar's dark background, a white
  * one must not vanish against a light one). */
-.mode-group-btn { border-width: 2px; }
+.mode-group-btn { border-width: 2px; border-color: var(--accent); background: var(--surface); }
+/* THE MODE IS A 16px DISC, not the button's own fill (audit B2 — the
+ * live build was the empty black 64x30 rectangle the artifact's own slot
+ * table lists under "Was"). Half-filled = Hybrid, black = Dark, white =
+ * Light: the mockup's own `.sp .dm .disc`, and the same white=Light /
+ * black=Dark / grey=Hybrid mapping he asked for in 2026-08-17, just drawn
+ * as a disc inside the button instead of as the whole button. */
+.display-mode-disc {
+  width: 16px; height: 16px; border-radius: 50%; flex: none;
+  border: 2px solid var(--text);
+}
+.display-mode-disc-hybrid { background: linear-gradient(90deg, var(--text) 50%, transparent 50%); }
+.display-mode-disc-dark { background: #000; border-color: var(--text-muted); }
+.display-mode-disc-light { background: #fff; }
 
-.ambient-group-btn { font-size: 18px; }
+.ambient-group-btn { color: var(--text); background: var(--surface); }
 .ambient-group-btn.ambient-group-btn-off { opacity: 0.5; filter: grayscale(1); }
-/* "Turning on…" / "Turning off…" — the in-flight label (his ask: the button
- * must say which way it is going, because the transition takes 15-22s on
- * his real room). nowrap so it can never wrap the button taller, the same
- * lesson fixedSizeToggleStyle.ts exists for. */
-.ambient-group-btn-phase { white-space: nowrap; font-size: 8px; }
+/* "Turning on…" / "turning off…" is a SLOW PULSE, the mockup's own rule
+ * for this slot (the words stay in the button's title/aria-label, the
+ * panel's own toggle and the live status badge — a 36px square cannot
+ * hold them, and a label that appears only while a transition runs is
+ * the one control in the bar whose width would change with state). */
+.ambient-group-btn.ambient-group-btn-turning {
+  animation: ambient-turning 1.6s ease-in-out infinite alternate;
+}
+@keyframes ambient-turning {
+  from { border-color: var(--border); color: var(--text-muted); }
+  to { border-color: var(--accent); color: var(--accent2); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ambient-group-btn.ambient-group-btn-turning { animation: none; border-color: var(--accent); }
+}
 /* The panel's own copy of the toggle, so the state is readable as words and
  * not only as the button's dimming. */
 .ambient-toggle-btn {
@@ -586,13 +704,55 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
 /* NO-JUMPING FIX (UI declutter plan §6): Scenes/Colour used to size
  * between 64-126px depending on the current scene/colour-set NAME
  * (`min-width: 64px` on the shared `.top-bar-group-btn` racing
- * `.top-bar-group-btn-value`'s own `max-width: 100px`), moving the
+ * the value span's own `max-width: 100px`), moving the
  * control after them by up to 61px over 90s of ordinary playing
  * (measured). A FIXED width — no min-width/max-width race — plus
  * ellipsis on the value (already set) stops that: the button is always
  * exactly 132px, whatever the name. */
-.scenes-group-btn { width: 132px; min-width: 132px; }
-.scenes-group-btn .top-bar-group-btn-value { max-width: 100%; }
+/* THE MOCKUP'S OWN NAME SLOT (`.sp .nb`, audit B4): 156px, a glyph or a
+ * colour swatch on the left, a small uppercase label over a LEFT-aligned
+ * bold 12.5px name with an ellipsis — not centred 12px text under a
+ * plural "SCENES" with no icon at all. The fixed width (no min/max race)
+ * is unchanged and still what keeps a long name from moving the control
+ * after it (plan §6, proven by check_onebar_layout.py). */
+.scenes-group-btn {
+  width: 156px;
+  min-width: 156px;
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 10px;
+  background: var(--surface);
+  text-align: left;
+}
+.bar-slot-icon { flex: none; color: var(--text-muted); }
+.bar-slot-swatch {
+  width: 18px; height: 18px; flex: none;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+.bar-slot-text { display: flex; flex-direction: column; min-width: 0; align-items: flex-start; }
+.bar-slot-label {
+  font-size: 8.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  line-height: 1;
+}
+.bar-slot-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+@media (max-width: 1180px) { .scenes-group-btn { width: 140px; min-width: 140px; } }
+@media (max-width: 900px) {
+  .scenes-group-btn { width: 120px; min-width: 120px; padding: 0 8px; gap: 6px; }
+}
 
 /* The panel a hold (Mode/Ambient) or a tap (Scenes) expands into — always
  * `position: fixed` below the trigger (TopBarGroupButton computes top/
@@ -694,81 +854,240 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
+/* THE MOCKUP'S OWN ENERGY SLOT (`.sp .en`, audit B5): a bordered 34px
+ * box, 110px wide, holding a 14px bolt in the warning colour, a 6px
+ * purple→magenta meter, and a bold tabular value — not unboxed "⚡ Energy"
+ * emoji text with a loose value and its own ⓘ circle. Below desktop width
+ * it also OPENS Mark (Q12's fold), so it is a real <button>. */
+.energy-mark-group { display: inline-flex; align-items: center; gap: 7px; position: relative; }
 .energy-readout {
-  display: flex;
+  flex: none;
+  width: 110px;
+  height: 34px;
+  display: grid;
+  grid-template-columns: 14px 40px 34px;
+  gap: 6px;
   align-items: center;
-  gap: 8px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
   color: var(--text-muted);
-  white-space: nowrap;
+  cursor: pointer;
 }
-.energy-readout-label { font-weight: 600; }
+.energy-readout-bolt { color: var(--warning); }
 .energy-meter {
-  display: inline-block;
-  width: 64px;
+  display: block;
+  width: auto;
   height: 6px;
   border-radius: 3px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
+  background: var(--bg);
+  border: none;
   overflow: hidden;
 }
 .energy-meter-fill {
   display: block;
   height: 100%;
-  background: var(--accent);
-  transition: width 0.3s ease;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  transition: width 0.4s ease;
 }
-.energy-readout-value { min-width: 32px; color: var(--text); font-variant-numeric: tabular-nums; }
-
-.intensity-mark {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.intensity-mark-label { font-weight: 600; }
-.intensity-mark-value { min-width: 32px; color: var(--text); font-variant-numeric: tabular-nums; }
-.intensity-mark-set .intensity-mark-value { color: var(--accent); font-weight: 600; }
-.intensity-mark button {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: var(--surface2);
+.energy-readout-value {
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--text);
-  cursor: pointer;
-}
-.intensity-mark button:hover { background: var(--surface3, var(--surface2)); }
-.intensity-mark-editing input[type='number'] {
-  width: 56px;
-  padding: 2px 4px;
+  text-align: right;
   font-variant-numeric: tabular-nums;
 }
-/* The draggable slider sits next to the number field so a drag gets you
- * close and the number field still lands the exact value — a slider alone
- * can't reliably hit one specific percent, and this factor drives how loud
- * the room gets. */
-.intensity-mark-slider {
-  width: 100px;
+
+/* THE MARK BOX IS ONE FIXED 48px SLOT, "MARK / 89%" (the mockup's own
+ * `.sp .mark`; audit B6 and N2): everything editable moved into a
+ * portalled panel, so the face never changes size between "—", "89%" and
+ * "89% [Clear]" and nothing after it shifts. */
+.intensity-mark-wrap { position: relative; display: inline-flex; flex: none; }
+.intensity-mark {
+  flex: none;
+  width: 48px;
+  height: 34px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
 }
-@media (max-width: 720px) {
-  /* Bigger thumb on touch so a finger can grab and hold it accurately,
-   * not just a mouse pointer. */
-  .intensity-mark-slider { width: 84px; height: 24px; }
+.intensity-mark small {
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-weight: 600;
+  line-height: 1;
+}
+.intensity-mark-value { color: var(--text); font-variant-numeric: tabular-nums; }
+.intensity-mark-set { border-color: var(--accent); }
+.intensity-mark-set .intensity-mark-value { color: var(--accent); }
+.intensity-mark:disabled { opacity: 0.6; cursor: default; }
+.intensity-mark-panel {
+  position: fixed;
+  z-index: 2000;
+  width: 240px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.intensity-mark-panel-row { display: flex; align-items: center; gap: 6px; }
+.intensity-mark-panel-row input[type='number'] { width: 56px; font-variant-numeric: tabular-nums; }
+.intensity-mark-panel-row button {
+  font-size: 11px; padding: 3px 8px; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text); cursor: pointer;
+}
+.intensity-mark-slider { flex: 1; min-width: 0; }
+.intensity-mark-panel-note { font-size: 11px; opacity: 0.8; }
+/* THE FOLD (Q12, decided yes): at <=1180px the mockup hides the Mark box
+ * and the Energy slot opens it instead (`@container sp (max-width: 1180px)
+ * { .mark { display: none } }`). Only the FACE hides — the wrap stays so
+ * the portalled panel still has an anchor to measure. */
+@media (max-width: 1180px) {
+  .intensity-mark { display: none; }
+  .energy-mark-group { gap: 0; }
+  .energy-readout { width: 96px; grid-template-columns: 14px 28px 32px; }
+}
+@media (max-width: 900px) {
+  .energy-readout { width: 78px; grid-template-columns: 14px 0 32px; gap: 4px; }
+  .energy-readout .energy-meter { display: none; }
+}
+@media (max-width: 520px) {
+  .energy-readout { width: 58px; grid-template-columns: 12px 0 34px; padding: 0 6px; gap: 2px; }
 }
 
-/* Device-preview strip (DevicePreviewStrip.tsx) — the top-bar strip's
- * second occupant. A compact swatch per favourite device by default;
- * "Expand" swaps it for the same shaped-fixture stage the Devices page's
- * Live tab draws (live/useLiveStageCanvas.ts, live/positions.ts), sized to
- * fit the strip — see `.device-preview-live*` below. No text label: he
- * knows what he's looking at. */
+/* THE LIGHT SHOW SLOT (`.sp .show`, audit B7): a bordered 34px slot,
+ * "current › next", each with its own 18px tag glyph, name and tabular
+ * countdown — and its own IDLE state, so the slot never disappears (see
+ * LightShowStrip.tsx's own docstring on why that unmount was half of why
+ * the live bar looked empty). */
+.light-show-strip { flex: 0 1 316px; min-width: 136px; display: flex; }
+.light-show-slot {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 12px minmax(0, 0.82fr);
+  gap: 7px;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  position: relative;
+}
+.light-show-slot:hover { text-decoration: none; }
+.light-show-slot-idle { grid-template-columns: 18px minmax(0, 1fr); }
+.light-show-spark { position: relative; display: flex; color: var(--accent2); }
+.light-show-holds-badge {
+  position: absolute;
+  top: -8px; right: -9px;
+  min-width: 14px; height: 14px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #14061f;
+  font-size: 9px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+}
+.light-show-act {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+.light-show-act-wide { grid-template-columns: minmax(0, 1fr); }
+.light-show-act-tag {
+  width: 18px; height: 18px; flex: none;
+  border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+}
+.light-show-act-tag-dim { opacity: 0.5; }
+.light-show-act-cur .light-show-act-tag { border-color: var(--accent2); color: var(--accent2); }
+.light-show-act-nxt { opacity: 0.78; }
+.light-show-act-text { min-width: 0; line-height: 1.15; }
+.light-show-act-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.light-show-act-name-idle { font-weight: 600; color: var(--text-muted); }
+.light-show-act-when {
+  display: block;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.light-show-act-cur .light-show-act-when {
+  font-size: 12.5px;
+  font-weight: 750;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.light-show-act-cur .light-show-act-when small {
+  font-size: 9px; font-weight: 600; color: var(--text-muted); margin-left: 1px;
+}
+.light-show-act-near .light-show-act-when { color: var(--accent2); }
+.light-show-chev { display: flex; color: var(--text-muted); }
+@media (max-width: 1180px) { .light-show-strip { flex-basis: 262px; } }
+@media (max-width: 900px) {
+  .light-show-strip { flex-basis: 200px; }
+  .light-show-slot { grid-template-columns: 18px minmax(0, 1fr) 10px 22px; }
+  .light-show-act-nxt .light-show-act-text { display: none; }
+}
+@media (max-width: 520px) {
+  .light-show-strip { flex: 1 1 0; min-width: 0; }
+  .light-show-slot { grid-template-columns: 18px minmax(0, 1fr); }
+  .light-show-chev, .light-show-act-nxt { display: none; }
+}
+
+/* THE MOCKUP'S OWN BORDERED SWATCH GROUP (`.sp .pv`, audit B8): one 34px
+ * box holding 16px rounded swatches and the pause glyph, with the
+ * swatches themselves as the expand/collapse toggle (plan §2 — no Expand
+ * button) — not four loose 20x14 rectangles plus a separate 30px circle
+ * and an ⓘ. */
 .device-preview-strip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
+  height: 34px;
+  padding: 0 6px 0 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
   color: var(--text-muted);
-  flex-wrap: wrap;
+  flex: none;
   max-width: 100%;
 }
 .device-preview-empty { font-style: italic; }
@@ -779,11 +1098,13 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
  * reconnecting-or-unavailable (amber/↻). 30px square keeps it a comfortable
  * touch target on a phone without the button ever needing a text label. */
 .device-preview-status-btn {
-  width: 30px;
-  height: 30px;
+  width: 22px;
+  height: 22px;
+  margin-left: 2px;
   padding: 0;
   border-radius: 50%;
-  border: 1px solid var(--border);
+  border: none;
+  background: none;
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
@@ -792,28 +1113,37 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   justify-content: center;
   flex: none;
 }
-.device-preview-status-purple { background: #2a1444; color: var(--accent); }
-.device-preview-status-gray { background: var(--surface2); color: var(--text-muted); }
-.device-preview-status-blue { background: #0e2a3a; color: #6ab0f3; }
-.device-preview-status-amber { background: #3a2c0e; color: var(--warning); }
+.device-preview-status-purple { color: var(--accent); }
+.device-preview-status-gray { color: var(--text-muted); }
+.device-preview-status-blue { color: #6ab0f3; }
+.device-preview-status-amber { color: var(--warning); }
 .device-preview-status-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 /* Now a <button> (plan §2: the swatches themselves are the expand/
  * collapse toggle) — reset button chrome, keep the same flex layout, add
  * an outline while expanded so it still reads as "currently open". */
 .device-preview-chips {
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; max-width: 100%;
-  background: none; border: 1px solid transparent; border-radius: var(--radius);
-  padding: 2px 4px; cursor: pointer;
+  display: flex; align-items: center; gap: 5px; flex-wrap: nowrap; max-width: 100%;
+  background: none; border: none; padding: 0; cursor: pointer;
 }
-.device-preview-chips-open { border-color: var(--accent); }
+/* "Currently open" marks the GROUP, the mockup's own `.pv.open`
+ * (accent border + an inset accent underline), not a box round the
+ * swatches alone. */
+.device-preview-strip:has(.device-preview-chips-open) {
+  border-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
 .device-preview-device { display: flex; align-items: center; }
 .device-preview-swatch {
   display: inline-block;
-  width: 20px;
-  height: 14px;
-  border-radius: 3px;
-  border: 1px solid var(--border);
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
   transition: background-color 0.2s linear;
+}
+@media (max-width: 520px) {
+  .device-preview-swatch { width: 12px; height: 12px; border-radius: 3px; }
+  .device-preview-strip { gap: 4px; padding: 0 4px 0 6px; }
 }
 /* Expanded: the SAME renderer the Devices page's Live tab draws with
  * (its own `.live-stage`/`.live-canvas`/`.live-hit` classes, reused
@@ -1054,20 +1384,51 @@ input[type='range'] { accent-color: var(--accent); }
 .help-link:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
 nav .help-link { margin-left: auto; width: 22px; height: 22px; font-size: 12px; padding: 0; }
 
-/* InfoTip.tsx — a rich hover/long-press tooltip (plan idea 5). */
-.info-tip { position: relative; display: inline-flex; }
-.info-tip-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 18px; height: 18px; border-radius: 50%;
-  border: 1px solid var(--border); background: var(--surface2);
-  color: var(--text-muted); cursor: pointer; padding: 0;
-}
-.info-tip-btn:hover, .info-tip-btn:focus-visible { border-color: var(--accent); color: var(--accent); }
-.info-tip-panel {
+/* ── TWO SHARED UTILITIES THE APP ALREADY USED AND NEVER DEFINED ─────── */
+
+/* `tabular-nums` was applied as a className in SongStrip.tsx and
+ * HomeTimeline.tsx from the day they shipped and DEFINED NOWHERE (audit
+ * T5/N3): computed `font-variant-numeric` was `normal`, so the countdown
+ * and the progress readout used proportional digits and visibly jiggled
+ * as the numbers changed — the exact opposite of plan §5's own "Tabular
+ * digits, fixed width — countdown, progress". One rule fixes every
+ * caller; the Energy/Mark values keep their own property too (they were
+ * already correct). */
+.tabular-nums { font-variant-numeric: tabular-nums; }
+
+/* Visually hidden, still announced — used where the mockup draws no text
+ * but a screen reader still needs the words (ModeChip's hold progress). */
+.sr-only {
   position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 40;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* InfoTip.tsx — a rich hover/long-press tooltip (plan idea 5). */
+/* IT DRAWS NO TRIGGER OF ITS OWN (audit B11/M2/S3 — idea 5's "one help
+ * '?' per page"): the wrapper is a bare inline box around whatever
+ * control it describes, and only the panel has chrome. The old 18px
+ * circled-ⓘ button is gone; `.info-tip-btn` with it. */
+.info-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  /* No `touch-action` here — see InfoTip.tsx's own note. These two only
+     stop a held finger raising the platform's text-selection callout;
+     neither blocks a scroll. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.info-tip-panel {
+  position: fixed;
+  z-index: 2100;
   width: 240px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1082,12 +1443,26 @@ nav .help-link { margin-left: auto; width: 22px; height: 22px; font-size: 12px; 
 }
 .info-tip-panel p { margin: 0; }
 
+/* EngineStatusStrip.tsx's bridge badge — pushed to the end of the
+ * strip's flex row, same as before it was wrapped in InfoTip. */
+.engine-status-bridge { margin-left: auto; }
+
 /* IconToggle.tsx — ONE 30px icon-toggle component (plan idea 6),
  * purple-tinted when on, used everywhere a boolean display filter is
  * toggled (Timeline/Home/Test Bed). */
+/* `padding: 0` IS LOAD-BEARING on every fixed-size icon button in this
+ * file. The global `button` rule (above) sets `padding: 6px 12px`, so a
+ * 30px-wide button that does not reset it has 30 - 24 - 2 = FOUR pixels
+ * of content box, and flex shrinks the glyph inside to 4px wide while
+ * leaving it 16px tall. That is the root cause of audit H2's "icons
+ * render tiny (~6px glyphs inside their 24-box)" — not the icon paths,
+ * which were the right size all along. Measured and fixed 2026-10-14;
+ * scripts/check_ui_fidelity.py asserts the RENDERED glyph size so it
+ * cannot come back. */
 .icon-toggle {
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: var(--radius);
+  padding: 0;
+  border-radius: 7px;
   border: 1px solid var(--border);
   background: var(--surface2);
   color: var(--text-muted);
@@ -1096,10 +1471,17 @@ nav .help-link { margin-left: auto; width: 22px; height: 22px; font-size: 12px; 
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .icon-toggle:hover { color: var(--text); }
+/* The mockup's own `.tgl.wide` — a short text label instead of a glyph
+ * (Home's T / B / M / H band toggles, "Marks", "sections", "beats"). */
+.icon-toggle-wide {
+  width: auto; padding: 0 8px; gap: 5px;
+  font-size: 11.5px; font-weight: 600;
+}
+.icon-toggle:disabled { opacity: 0.45; cursor: default; }
 .icon-toggle-on {
-  background: rgba(168, 85, 247, 0.18);
+  background: rgba(168, 85, 247, 0.22);
   border-color: var(--accent);
-  color: var(--accent2);
+  color: var(--text);
 }
 
 /* EnergyBar.tsx — Energy + Mark grouped; Mark folds into a compact form
@@ -2047,33 +2429,10 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .show-step-applied .show-step-status { color: var(--ok); }
 .show-step-failed .show-step-status, .show-step-refused .show-step-status { color: var(--danger); }
 .show-step-waiting .show-step-status { color: var(--warning); }
-.light-show-strip { display: inline-flex; gap: 4px; align-items: center; font-size: 0.85em; }
-.light-show-strip a { color: var(--accent2); text-decoration: none; font-weight: 600; }
-.light-show-link { display: inline-flex; align-items: center; gap: 6px; }
-.light-show-diamond { position: relative; display: inline-flex; }
-.light-show-holds-badge {
-  position: absolute; top: -6px; right: -8px;
-  min-width: 13px; height: 13px; padding: 0 2px;
-  border-radius: 999px; background: var(--accent);
-  color: #fff; font-size: 9px; font-weight: 700;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.light-show-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.light-show-item-label {
-  max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.light-show-item-when { font-variant-numeric: tabular-nums; color: var(--text-muted); }
-.light-show-sep { opacity: 0.6; }
-/* The 10s lead-in fill (his edited decision — the Light Show slot gets a
- * longer fill window than the global timeline's own 3s next-event box). */
-.light-show-item-near { position: relative; }
-.light-show-item-near .light-show-item-when {
-  color: var(--accent2);
-  font-weight: 700;
-  background: rgba(232, 121, 249, 0.14);
-  border-radius: 4px;
-  padding: 0 4px;
-}
+/* The OLD inline "◈ Show: …" line is retired — the bar's own bordered
+ * slot (`.light-show-slot`, in the one-bar block above) replaced it in
+ * the 2026-10-14 design-fidelity pass (audit B7). Only the 10s lead-in
+ * fill's reasoning survives, and it lives with that block too. */
 @media (max-width: 720px) {
   .light-show-layout { grid-template-columns: minmax(0, 1fr); }
   .light-show-page { padding: 8px 12px; }
@@ -2104,30 +2463,50 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
    (components/ModeChip.tsx). A short tap opens /house; holding ~1s toggles
    the cutover switch (HouseSettings.enabled) — his ask 2026-10-06. The
    ring is the same visible-progress shape as .release-hold-ring. */
-.mode-chip { display: inline-flex; gap: 4px; align-items: center; font-size: 0.85em; position: relative; }
+.mode-chip { display: inline-flex; align-items: center; position: relative; }
 /* ICON ONLY (UI declutter plan §13 Q6, decided: icon only — the mode name
  * and source live in the tooltip/aria-label, same house glyph whichever
- * mode drives, coloured/badged by state). 34x30 to match the other
- * grouped buttons' own 30px height (`.top-bar-group-btn`). */
+ * mode drives, coloured/badged by state), drawn at the mockup's own
+ * `.sp .ib` size: 36 wide, 34 tall, in a 48px bar (audit B1 — the live
+ * build was 34x30 plus a separate ⓘ circle beside it, 56px in all).
+ *
+ * THE STATE COLOURS ARE UNCHANGED, deliberately: whether this button
+ * should use the mockup's purple-lit/grey-off or the live green-on/
+ * purple-music/amber-idle mapping is a design-choice question with the
+ * Admiral (Q3, held on task ui-fidelity-fix). They are isolated to the
+ * four rules below so the answer is a small change. */
 .mode-chip a {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 34px; height: 30px; border-radius: var(--radius);
-  border: 1px solid var(--border); text-decoration: none;
+  width: 36px; height: 34px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface); text-decoration: none;
 }
 .mode-chip-on a { color: var(--ok); border-color: var(--ok); }
 .mode-chip-music a { color: var(--accent2); border-color: var(--accent2); }
 .mode-chip-idle a { color: var(--warning); border-color: var(--warning); }
-.mode-chip-off a { color: var(--text-muted); }
+.mode-chip-off a { color: var(--text-muted); opacity: 0.7; }
 /* `touch-action: none`, same reasoning as .release-hold-btn above (found
  * 2026-10-09): `manipulation` let the browser cancel the hold on ordinary
  * finger drift via a native `pointercancel`. */
 .mode-chip-link { position: relative; touch-action: none; -webkit-touch-callout: none;
   -webkit-user-select: none; user-select: none; }
-.mode-chip-hold-ring { position: absolute; top: 50%; left: 2px; transform: translateY(-50%);
-  pointer-events: none; color: currentColor; opacity: 0.85; }
-.mode-chip-hold-hint { position: absolute; top: calc(100% + 4px); left: 0; white-space: nowrap;
-  font-size: 11px; font-weight: 600; color: var(--text-muted); background: var(--surface);
-  border: 1px solid var(--border); border-radius: var(--radius); padding: 2px 7px; z-index: 5; }
+/* The ♪ badge the mockup draws on the corner while MUSIC has the room. */
+.mode-chip-music-badge {
+  position: absolute; right: -4px; bottom: -4px;
+  width: 15px; height: 15px; border-radius: 50%;
+  background: var(--surface2); border: 1.5px solid var(--accent);
+  color: var(--accent2);
+  display: flex; align-items: center; justify-content: center;
+}
+/* THE HOLD RING SITS OUTSIDE THE BUTTON (`inset: -4px`) so holding moves
+ * nothing — audit B1; it used to be a 16px circle drawn inside, beside
+ * the glyph. The "Keep holding…" text hint that used to pop under the bar
+ * is gone with it (the mockup has none); the same words are announced to
+ * a screen reader instead (`.sr-only` in ModeChip.tsx). */
+.mode-chip-hold-ring {
+  position: absolute; inset: -4px;
+  width: auto; height: auto;
+  pointer-events: none; color: currentColor; opacity: 0.9; overflow: visible;
+}
 .house-page { display: flex; flex-direction: column; gap: 12px; padding: 12px 16px; }
 .house-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .house-head h2 { margin: 0; }
@@ -2520,120 +2899,427 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .show-playlist-step-flags { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
 .show-playlist-song-search input[type='search'] { width: 100%; min-height: 40px; }
 
-/* ── song-layout-plan: the global song timeline (SongStrip.tsx) ───────── */
+/* ── song-layout-plan: the global song timeline (SongStrip.tsx) ─────────
+ * Every measurement below is the approved mockup's own `.sp .tl` block
+ * (data/ui-layout-plan/explainer-final.html; design-fidelity pass,
+ * 2026-10-14, audit T2-T6): a 53px row holding a 39px track, a 220px song
+ * block with an animated equaliser, a 96px next-event box with a BOLD
+ * MAGENTA countdown, and a bold/muted progress pair in tabular digits. */
 .song-strip {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr) 96px 100px;
   align-items: center;
   gap: 14px;
-  height: 39px;
+  height: 53px;
   padding: 0 16px;
   background: linear-gradient(180deg, var(--surface), var(--bg));
   border-bottom: 1px solid var(--border);
   position: relative;
   z-index: 4;
 }
-.song-strip-song { display: flex; flex-direction: column; min-width: 0; justify-content: center; line-height: 1.15; }
-.song-strip-title-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.song-strip-song-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.song-strip-song-artist { font-size: 0.8em; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.song-strip-song-tip { min-width: 0; }
+/* THE SONG BLOCK TAPS THROUGH TO HOME (audit T2) and carries the
+ * mockup's own three-bar equaliser instead of an ⓘ circle. */
+.song-strip-song {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  width: 100%;
+  color: var(--text);
+}
+.song-strip-song:hover { text-decoration: none; }
+.song-strip-eq { width: 16px; height: 14px; display: flex; gap: 2px; align-items: flex-end; flex: none; }
+.song-strip-eq i {
+  display: block; width: 4px; border-radius: 1px;
+  background: var(--accent);
+  animation: song-strip-eq 0.9s ease-in-out infinite alternate;
+}
+.song-strip-eq i:nth-child(2) { animation-delay: -0.3s; }
+.song-strip-eq i:nth-child(3) { animation-delay: -0.6s; }
+/* Nothing playing: the bars stand still at a low, muted height rather
+ * than dancing to a song that is not there. */
+.song-strip-eq-still i { animation: none; height: 4px; background: var(--text-muted); }
+@keyframes song-strip-eq { from { height: 3px; } to { height: 14px; } }
+.song-strip-song-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+.song-strip-song-title {
+  font-size: 13px; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.song-strip-song-artist {
+  font-size: 11.5px; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .song-strip-track { position: relative; min-width: 0; }
-.song-strip-svg { width: 100%; height: 100%; display: block; }
-.song-strip-playhead { stroke: #fff; stroke-width: 2; filter: drop-shadow(0 0 3px rgba(255,255,255,0.6)); }
+.song-strip-svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.song-strip-playhead { stroke: #fff; stroke-width: 2; filter: drop-shadow(0 0 3px rgba(255,255,255,0.75)); }
+.song-strip-drop-num { font-size: 9px; font-weight: 800; font-family: inherit; }
+/* A passed marker fades; the one that just fired flashes once — approved
+ * idea 3, and audit T6 (only the BOX used to flash). */
+.song-strip-mk-past { opacity: 0.28 !important; transition: opacity 0.3s; }
+.song-strip-mk-flash { animation: song-strip-mk-flash 0.6s ease-out; }
+@keyframes song-strip-mk-flash {
+  0% { filter: drop-shadow(0 0 7px #fff) brightness(2.2); }
+  100% { filter: none; }
+}
+/* The "it is next" ring, pulsing out from whatever fires next. */
+.song-strip-ring {
+  animation: song-strip-ring 1.3s ease-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+@keyframes song-strip-ring {
+  0% { opacity: 0.95; transform: scale(0.7); }
+  100% { opacity: 0; transform: scale(1.5); }
+}
+/* THE NEXT-EVENT BOX (audit T4): the mockup's full 39px height, a BOLD
+ * 17px/750 count with its unit as a small muted `<small>`, a type-
+ * coloured icon, and — inside the last 3s — a MAGENTA (accent2) border
+ * and glow with a fill sweeping left→right. The live build had the right
+ * 96px shape but a 15px regular-weight count, a muted grey icon, and a
+ * purple border, which read as a plain chip. */
 .song-strip-next {
   position: relative;
-  height: 28px;
+  overflow: hidden;
+  height: 39px;
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 22px minmax(0, 1fr);
   gap: 8px;
   align-items: center;
   padding: 0 10px;
-  border-radius: 8px;
+  border-radius: 9px;
   border: 1px solid var(--border);
   background: var(--surface2);
-  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  min-width: 0;
 }
-.song-strip-next-fill { position: absolute; inset: 0; background: var(--accent, #7c5cff); opacity: 0.22; transform-origin: left; transform: scaleX(0); }
-.song-strip-next-icon { position: relative; color: var(--text-muted); }
-.song-strip-next-count { position: relative; }
-.song-strip-next-soon { border-color: var(--accent, #7c5cff); box-shadow: 0 0 6px rgba(124, 92, 255, 0.5); }
-.song-strip-next-soon .song-strip-next-icon,
+.song-strip-next > * { position: relative; }
+.song-strip-next-fill {
+  position: absolute; inset: 0;
+  background: #3a2858;
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+  pointer-events: none;
+}
+.song-strip-next-icon { width: 22px; height: 22px; }
+.song-strip-next-count {
+  display: block;
+  width: 4.4ch;
+  text-align: right;
+  font-size: 17px;
+  font-weight: 750;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  color: var(--text);
+}
+.song-strip-next-count small {
+  font-size: 11px; font-weight: 600; color: var(--text-muted); margin-left: 1px;
+}
+.song-strip-next-soon {
+  border-color: var(--accent2);
+  box-shadow: 0 0 0 1px var(--accent2), 0 0 16px rgba(232, 121, 249, 0.35);
+}
 .song-strip-next-soon .song-strip-next-count { color: #fff; }
-.song-strip-next-flash { animation: song-strip-flash 0.6s ease-out; }
-@keyframes song-strip-flash { 0% { box-shadow: 0 0 0 2px var(--accent, #7c5cff); } 100% { box-shadow: none; } }
-.song-strip-time { font-size: 0.85em; color: var(--text-muted); text-align: right; white-space: nowrap; }
+.song-strip-next-flash { animation: song-strip-flash 0.45s ease-out; }
+@keyframes song-strip-flash {
+  0% { box-shadow: 0 0 0 2px #fff, 0 0 26px rgba(255, 255, 255, 0.7); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+/* Bold current time, muted total (audit T5). */
+.song-strip-time {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: right;
+  white-space: nowrap;
+}
+.song-strip-time b { color: var(--text); font-weight: 650; }
 
 @media (prefers-reduced-motion: reduce) {
-  .song-strip-next-flash { animation: none; }
+  .song-strip-next-flash, .song-strip-mk-flash { animation: none; }
+  .song-strip-ring, .song-strip-eq i { animation: none; }
 }
 
 @media (max-width: 1180px) {
   .song-strip { grid-template-columns: 176px minmax(0, 1fr) 96px 88px; gap: 12px; }
 }
 @media (max-width: 900px) {
-  .song-strip { grid-template-columns: 128px minmax(0, 1fr) 96px 72px; }
+  .song-strip { grid-template-columns: 128px minmax(0, 1fr) 92px 72px; gap: 10px; padding: 0 10px; }
   .song-strip-song-artist { display: none; }
+  .song-strip-time { font-size: 11.5px; }
 }
 @media (max-width: 520px) {
   .song-strip {
-    grid-template-columns: minmax(0, 1fr) 96px;
+    grid-template-columns: minmax(0, 1fr) 86px;
     grid-template-rows: auto auto;
     height: auto;
-    padding: 6px 12px;
-    gap: 4px 12px;
+    padding: 6px 10px;
+    gap: 5px 8px;
   }
-  .song-strip-song { grid-row: 1; }
-  .song-strip-time { grid-row: 1; }
-  .song-strip-track { grid-row: 2; grid-column: 1; height: 20px; }
-  .song-strip-next { grid-row: 2; grid-column: 2; }
+  .song-strip-song-tip { grid-row: 1; grid-column: 1; }
+  .song-strip-time { grid-row: 1; grid-column: 2; }
+  .song-strip-track { grid-row: 2; grid-column: 1; }
+  .song-strip-next { grid-row: 2; grid-column: 2; grid-template-columns: 16px minmax(0, 1fr); padding: 0 6px; gap: 5px; }
+  .song-strip-next-count { font-size: 14px; }
 }
 
-/* ── song-layout-plan: Home page (/) ──────────────────────────────────── */
+/* ── song-layout-plan: Home page (/) ────────────────────────────────────
+ * Every measurement is the approved mockup's own `homePage()` block
+ * (design-fidelity pass, 2026-10-14; audit H2-H7). */
 .home-page { display: flex; flex-direction: column; gap: 16px; }
 .home-timeline { display: flex; flex-direction: column; gap: 8px; }
-.home-timeline-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.home-timeline-eq { color: var(--accent, #7c5cff); }
-.home-timeline-song { display: flex; flex-direction: column; min-width: 0; margin-right: auto; }
-.home-timeline-toggles { display: flex; gap: 6px; }
-.home-timeline-follow, .home-timeline-fullsong {
-  width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--border);
-  background: var(--surface2); color: var(--text-muted); cursor: pointer;
+/* Title and artist INLINE with the equaliser, tools pushed right. */
+.home-timeline-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.home-timeline-eq i { background: var(--accent); }
+.home-timeline-title { font-size: 15px; white-space: nowrap; }
+.home-timeline-artist { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
+.home-timeline-tools { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+.home-timeline-vsep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; flex: none; }
+/* The mockup's own `.tgl`: a 30x28 square, purple-tinted when on. The
+ * three view buttons (undo/redo/Follow/Full song) share it so the row
+ * reads as one set of controls. */
+.home-timeline-tool {
+  width: 30px; height: 28px; flex: none;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text-muted);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
 }
-.home-timeline-follow.on { color: #fff; background: var(--accent, #7c5cff); border-color: var(--accent, #7c5cff); }
-.home-timeline-strip { position: relative; height: 39px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; touch-action: none; }
+.home-timeline-tool:disabled { opacity: 0.45; cursor: default; }
+.home-timeline-tool-on { background: rgba(168, 85, 247, 0.22); border-color: var(--accent); color: var(--text); }
+.home-timeline-tool-wide { width: auto; gap: 5px; padding: 0 8px; font-size: 11.5px; font-weight: 600; text-decoration: none; }
+.home-timeline-tool-wide:hover { text-decoration: none; }
+.home-timeline-clock { font-size: 13px; color: var(--text-muted); margin-left: 6px; }
+.home-timeline-strip { position: relative; height: 39px; touch-action: none; }
+.home-timeline-strip .song-strip-svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+/* The window overlay's own BRIGHT EDGE HANDLES (audit H3 — it was a flat
+ * grey block). */
 .home-timeline-window {
-  position: absolute; top: 0; bottom: 0; background: rgba(255,255,255,0.1);
-  border: 1px solid rgba(255,255,255,0.3); cursor: grab; z-index: 2;
+  position: absolute; top: 0; bottom: 0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  border-radius: 5px;
+  cursor: grab; z-index: 2;
 }
-.home-timeline-window-edge { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
-.home-timeline-window-edge.left { left: -4px; }
-.home-timeline-window-edge.right { right: -4px; }
-.home-timeline-next { font-size: 0.85em; color: var(--text-muted); }
-.home-timeline-shape { position: relative; height: 160px; min-height: 100px; resize: vertical; overflow: hidden; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
-.home-timeline-shape-canvas { width: 100%; height: 100%; display: block; }
-.home-timeline-shape-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 4px rgba(255,255,255,0.7); }
+.home-timeline-window-edge {
+  position: absolute; top: 9px;
+  width: 5px; height: 21px;
+  border-radius: 2px;
+  background: var(--text);
+  cursor: ew-resize;
+}
+.home-timeline-window-edge.left { left: -2.5px; }
+.home-timeline-window-edge.right { right: -2.5px; }
+/* THE SHAPE IS THE TIMELINE PAGE'S OWN CANVAS (audit H5) — it sizes
+ * itself (TimelineCanvas is DPR-aware and rAF-driven), so this box only
+ * frames it. */
+.home-timeline-shape {
+  position: relative;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.home-timeline-shape canvas { display: block; width: 100%; }
+/* ONE THIN ROW under the shape (audit H5 — the live build had none). */
+.home-timeline-controls {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; flex-wrap: wrap; margin-top: 2px;
+}
+.home-timeline-controls-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
-.home-quick-runs { display: grid; grid-template-columns: repeat(2, minmax(0, 560px)); gap: 16px; }
+/* ── the quick-run cards ──────────────────────────────────────────────── */
+.home-quick-runs { display: grid; grid-template-columns: repeat(2, minmax(0, 560px)); gap: 16px; justify-content: start; }
 @media (max-width: 700px) { .home-quick-runs { grid-template-columns: minmax(0, 1fr); } }
-.home-quick-card { display: flex; flex-direction: column; gap: 8px; }
-.home-quick-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.home-quick-run-btn {
-  width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-  border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); cursor: pointer; text-align: left;
+.home-quick-card { display: flex; flex-direction: column; gap: 6px; }
+/* Small-caps card title with its own glyph (the mockup's `.ptitle`). */
+.home-quick-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-muted);
 }
-.home-quick-run-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.home-quick-run-sub { margin-left: auto; font-size: 0.85em; white-space: nowrap; }
-.home-quick-action-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 6px; background: var(--surface2); border: 1px solid var(--border); }
-.home-quick-action-icons { display: flex; gap: 6px; align-items: center; margin-left: auto; }
-.home-quick-icon-btn { width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; color: var(--text-muted); }
-.home-quick-icon-btn.armed { color: #fff; background: var(--accent, #7c5cff); border-color: var(--accent, #7c5cff); }
-.home-quick-armed-tag { display: flex; align-items: center; gap: 8px; font-size: 0.85em; color: var(--text-muted); }
-.home-quick-toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); color: #fff; padding: 6px 14px; border-radius: 6px; z-index: 50; }
+.home-quick-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+/* A SEQUENCE ROW: name over "last ran … · N items", with a big purple ▶
+ * circle on the right (audit H6). */
+.home-quick-seq-row {
+  width: 100%;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center; gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  cursor: pointer; text-align: left;
+}
+.home-quick-seq-text { min-width: 0; display: block; }
+.home-quick-seq-text b {
+  display: block; font-size: 14px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.home-quick-seq-text span { font-size: 12px; }
+.home-quick-play {
+  width: 34px; height: 34px; flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #14061f;
+  display: flex; align-items: center; justify-content: center;
+}
+.home-quick-play svg { fill: currentColor; }
+.home-quick-running { margin-top: 4px; font-size: 12px; color: var(--text-muted); }
+.home-quick-running b { color: var(--text); }
+.home-quick-seqdots { display: flex; gap: 4px; margin-top: 6px; }
+.home-quick-seqdots i { flex: 1; height: 5px; border-radius: 3px; background: var(--surface2); }
+.home-quick-seqdots i.done { background: rgba(168, 85, 247, 0.55); }
+.home-quick-seqdots i.now { background: var(--accent2); }
+/* AN ACTION SET IS ONE LINE (audit H7/K3): the name, then four icon
+ * buttons at the right end — the live build stacked them into a second
+ * row (`flex-direction: column`), making every row 2x taller, so only
+ * one set fitted the kiosk's first screen. */
+.home-quick-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(4, 34px);
+  gap: 6px;
+  align-items: center;
+  padding: 5px 6px 5px 10px;
+  border-radius: var(--radius);
+  background: var(--surface2);
+}
+.home-quick-action-name {
+  font-size: 13px; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.home-quick-icon-btn {
+  width: 34px; height: 32px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.home-quick-icon-fire { border-color: var(--warning); color: var(--warning); }
+.home-quick-icon-btn.armed { background: rgba(168, 85, 247, 0.25); border-color: var(--accent); color: #fff; }
+.home-quick-icon-btn:disabled { opacity: 0.5; cursor: default; }
+/* An armed tag wraps onto its own line under the row it belongs to,
+ * without changing the row's own four-column shape. */
+.home-quick-armed-tag {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11.5px; color: var(--text-muted);
+}
+.home-quick-armed-tag button {
+  font-size: 11px; padding: 1px 7px; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer;
+}
+.home-quick-toast {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.85); color: #fff;
+  padding: 6px 14px; border-radius: 6px; z-index: 50;
+}
 
 @media (min-width: 1200px) {
   .home-page { max-width: none; }
   .home-timeline { max-width: none; }
 }
+
+/* ── Settings page (settings/*.tsx) — the approved mockup's own shape
+ * (design-fidelity pass, 2026-10-14; audit S1/S3): a page title, then
+ * cards whose rows are a `170px label | control | 60px value` grid with
+ * the label carrying its own glyph and NO visible help circle. */
+.settings-page-title {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 22px; font-weight: 700;
+  margin: 2px 0 12px;
+}
+.settings-row {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr) 60px;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(55, 37, 82, 0.6);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.settings-room-card .settings-row:last-child { border-bottom: 0; }
+.settings-row-top { align-items: start; }
+.settings-row-label { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.settings-row-value { text-align: right; color: var(--text); }
+.settings-row-number { width: 72px; font-variant-numeric: tabular-nums; }
+.settings-row input[type='range'] { width: 100%; min-width: 0; }
+@media (max-width: 720px) {
+  .settings-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .settings-row-value { text-align: left; }
+}
+/* "Scenes & drops" keeps every row it holds today — WHICH rows belong
+ * here is a design-choice question with the Admiral (Q4: the three
+ * compact rows the mockup drew, or every setting the Scenes popover used
+ * to hold; held on task ui-fidelity-fix, kept as live today). What this
+ * does fix is the DRAWING: the mockup's own `170px label | control |
+ * unit` grid with bounded 90-110px inputs, instead of a number field
+ * stretched across the whole card. Isolated to this one block so the
+ * answer to Q4 stays a small change. */
+.settings-drops-card .top-bar-group-field {
+  display: grid;
+  grid-template-columns: minmax(0, 230px) minmax(0, 1fr) 72px;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(55, 37, 82, 0.6);
+  flex-wrap: nowrap;
+}
+.settings-drops-card .top-bar-group-field:last-child { border-bottom: 0; }
+.settings-drops-card .top-bar-group-field > label,
+.settings-drops-card .top-bar-group-field > .info-tip { min-width: 0; }
+.settings-drops-card .top-bar-group-field label { min-width: 0; }
+.settings-drops-card .top-bar-group-field input[type="number"],
+.settings-drops-card .top-bar-group-field input[type="text"] {
+  flex: none;
+  width: 110px;
+  justify-self: start;
+  font-variant-numeric: tabular-nums;
+}
+.settings-drops-card .settings-field-unit { font-size: 11px; color: var(--text-muted); }
+@media (max-width: 720px) {
+  .settings-drops-card .top-bar-group-field { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
+
+/* The drift gradient's own compact row: a select plus ＋ New, with the
+ * full editor appearing below only while a draft is open. */
+.drift-gradient-compact { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.drift-gradient-compact-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.drift-gradient-select {
+  flex: 1; min-width: 0;
+  height: 32px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+  padding: 0 8px; font-size: 13px;
+}
+.drift-gradient-new {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  height: 28px; padding: 0 8px; border-radius: 7px;
+  border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+  font-size: 11.5px; font-weight: 600; cursor: pointer;
+}
+.drift-gradient-editor { border-top: 1px solid var(--border); padding-top: 8px; max-width: 320px; }
+/* Preview favourites as inline chips, each saving itself. */
+.favourite-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.favourite-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface2);
+  font-size: 12px; color: var(--text); cursor: pointer;
+}
+.favourite-chip-dot { width: 10px; height: 10px; border-radius: 3px; background: var(--text-muted); }
+.favourite-chip-on { border-color: var(--accent); background: rgba(168, 85, 247, 0.2); }
+.favourite-chip-on .favourite-chip-dot { background: var(--accent2); }
+.favourite-chip-reset { color: var(--text-muted); }
 
 /* ── song-layout-plan: kiosk view (/?kiosk=1) ─────────────────────────── */
 .kiosk-page {
@@ -2641,18 +3327,22 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   --kiosk-usable-height: 424px;
   --kiosk-touch-target: 44px;
   width: 100%;
-  min-height: var(--kiosk-usable-height);
+  /* A COLUMN, so `main` takes exactly what the bar leaves — whatever the
+   * bar's own height turns out to be. It used to subtract a hardcoded
+   * number of pixels for the bar (`max-height: calc(... - 90px)`), which
+   * drifted the moment the bar's own height changed: measured 93px after
+   * the design-fidelity pass gave every control the mockup's 34px, so
+   * the page scrolled 3px vertically on a screen that has none to give.
+   * There is no constant left to drift. */
+  height: var(--kiosk-usable-height);
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   font-size: 15px;
 }
-/* The one bar's own budget — its own deliberate-TWO-ROW height (measured
- * ~85px here: two ~30px occupant rows plus the bar's own padding/gap/
- * border — the touch-target rule below is scoped to `main` precisely so
- * it never floors the bar's own occupants taller than that) plus a
- * couple px of rounding slop; was a bare "90" guessed against the OLD
- * two-STRIP (not two-row) layout's own, different, height. */
-.kiosk-main { padding: 8px 10px; overflow: auto; max-height: calc(var(--kiosk-usable-height) - 90px); }
-.kiosk-page .home-quick-runs { grid-template-columns: minmax(0, 1fr); }
+.kiosk-page .one-bar { flex: none; }
+.kiosk-main { flex: 1; min-height: 0; overflow: auto; padding: 8px 10px; }
+.kiosk-page .home-quick-runs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 /* Scoped to `main` — never the bar. The bar's own buttons already carry
  * a fixed, measured size (`.top-bar-group-btn`'s own "fixed, uniform,
  * measured — not eyeballed" 30px height; `.scenes-group-btn`'s own

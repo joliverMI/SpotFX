@@ -16,6 +16,8 @@ import { getShowClockMs } from '../lib/showClock';
 import { useFollowWindow } from './hooks/useFollowWindow';
 import TimelineCanvas from './canvas/TimelineCanvas';
 import { BUILDER_LAYERS } from './canvas/layers';
+import IconToggle from '../components/IconToggle';
+import { AnalysedGlyph, DropSeqGlyph, LightShowGlyph } from '../home/markerGlyphs';
 import { BEAT_STRIP_H, snapRailHFor, stripCountFor, type IntensityBgMode, type LayerDataBag, type ViewState } from './canvas/frame';
 import { DEFAULT_BEAT_MS, PHASE_COLOR, buildDisplay, zoomWindow, type Handle } from './dropSequences';
 import DropSequenceStrip from './components/DropSequenceStrip';
@@ -494,30 +496,32 @@ export default function BuilderPage() {
             )}
             <OffsetBadge meta={meta ?? null} uri={uri} />
             <HelpLink topic="builder-misc" title="Other timeline controls" />
-            <button
-              style={{ fontSize: 12 }}
-              className={`chip filter ${showAnalysedEvents ? 'active' : ''}`}
+            {/* THE SHARED ICON TOGGLE (idea 6, audit L1) — these three
+              * text chips were the one surface the icon toggle never
+              * reached (Test Bed and Home both got it). Each draws the
+              * marker shape it switches, the same glyphs Home's own
+              * toggles use (home/markerGlyphs.tsx). */}
+            <IconToggle
+              glyph={AnalysedGlyph}
+              on={showAnalysedEvents}
+              onChange={() => setShowAnalysedEvents((v) => !v)}
               title="Show/hide SPECTRA's planned scene changes and analysed flares for this song, on the graph and on the trigger strip"
-              onClick={() => setShowAnalysedEvents((v) => !v)}
-            >
-              Analysed events
-            </button>
-            <button
-              style={{ fontSize: 12 }}
-              className={`chip filter ${showDropSeqs ? 'active' : ''}`}
+              ariaLabel="Analysed events"
+            />
+            <IconToggle
+              glyph={DropSeqGlyph}
+              on={showDropSeqs}
+              onChange={() => setShowDropSeqs((v) => !v)}
               title="Show/hide the drop sequences (charge → lull → drop) and the snap rails under them"
-              onClick={() => setShowDropSeqs((v) => !v)}
-            >
-              Drop sequences
-            </button>
-            <button
-              style={{ fontSize: 12 }}
-              className={`chip filter ${showLightShow ? 'active' : ''}`}
+              ariaLabel="Drop sequences"
+            />
+            <IconToggle
+              glyph={LightShowGlyph}
+              on={showLightShow}
+              onChange={() => setShowLightShow((v) => !v)}
               title="Show/hide the Light Show's High/Low Trigger positions — solid when an action set is armed on it, muted when nothing is"
-              onClick={() => setShowLightShow((v) => !v)}
-            >
-              Light Show
-            </button>
+              ariaLabel="Light Show"
+            />
             <button
               style={{ fontSize: 12 }}
               className={shiftOpen || triggerPreviewOffsetMs !== 0 ? 'primary' : ''}

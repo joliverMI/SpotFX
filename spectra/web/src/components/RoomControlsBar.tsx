@@ -50,6 +50,7 @@ import PowerButton from './PowerButton';
 import ReleaseButton from './ReleaseButton';
 import RecentChoiceButtons from './RecentChoiceButtons';
 import TopBarGroupButton from './TopBarGroupButton';
+import { colourSwatchBackground, displayModeDiscClass } from './barSlots';
 import HelpLink from '../help/HelpLink';
 import { useDebouncedApply } from '../lib/useDebouncedApply';
 import { useRecentChoices } from '../lib/useRecentChoices';
@@ -278,6 +279,9 @@ export default function RoomControlsBar() {
   const activeSceneName = engineStatus?.conductor.active_scene?.name ?? null;
   const activeColorSetId = engineStatus?.conductor.journey.active_set_id ?? null;
   const activeColorSetName = activeColorSetId ? colorSetNameById.get(activeColorSetId) ?? null : null;
+  const activeColorSetCard = activeColorSetId
+    ? (colorCards ?? []).find((c) => c.id === activeColorSetId) ?? null
+    : null;
   const sceneChangeModeLabel = SCENE_CHANGE_MODES.find((m) => m.value === local.scene_change_mode)?.label
     ?? local.scene_change_mode;
 
@@ -294,20 +298,16 @@ export default function RoomControlsBar() {
 
   const modeMeta = DISPLAY_MODES.find((m) => m.value === local.display_mode) ?? DISPLAY_MODES[0];
   // No text on this button (his ask, 2026-08-17: "I don't need the mode to
-  // say dark or light I just want the color to make that clear") — fill
-  // colour IS the mode: white=Light, black=Dark, grey=Hybrid, his exact
-  // mapping, not adjusted for taste. A fixed accent border on every state
-  // (not part of the mapping) keeps the button legible as a button against
-  // the bar's own dark-purple background even when the fill is black.
-  // #6b6b74 (not a lighter/neutral-er grey) is deliberate: measured against
-  // white and black it lands at 5.3:1 / 4.0:1 contrast respectively — a
-  // paler grey reads too close to the white state at a glance.
-  const modeFill = local.display_mode === 'light'
-    ? '#ffffff'
-    : local.display_mode === 'dark'
-      ? '#000000'
-      : '#6b6b74';
-  const modeStyle: React.CSSProperties = { background: modeFill, borderColor: 'var(--accent)' };
+  // say dark or light I just want the color to make that clear") — and
+  // since the design-fidelity pass (2026-10-14) the mode is carried by a
+  // 16px DISC inside a 36px square, not by filling the whole button:
+  // half-filled = Hybrid, black = Dark, white = Light, which is the
+  // approved mockup's own `.sp .dm .disc` drawing. The empty black
+  // rectangle this replaces is the exact control the artifact's own slot
+  // table lists under "Was" (audit B2). The button keeps its 2px accent
+  // border on every state (the mockup's own `.dm`), so it reads as a
+  // button against this bar whichever way the disc is filled.
+  const modeDiscClass = displayModeDiscClass(local.display_mode);
   const modeUnconfirmed = darkLightResult
     && ['default', 'dark', 'light'].includes(darkLightResult.status)
     && (darkLightResult.unconfirmed?.length ?? 0) > 0;
@@ -348,7 +348,6 @@ export default function RoomControlsBar() {
           ? `Mode: ${modeMeta.label} — not applied while a house mode is driving. Tap to cycle, hold to open the colour/brightness options`
           : `Mode: ${modeMeta.label} — tap to cycle, hold to open the colour/brightness options`}
         ariaLabel={`Display mode: ${modeMeta.label}${houseOverrideNote ? ', not applied while a house mode is driving' : ''}. Tap to cycle, hold to open options.`}
-        style={modeStyle}
         holdToExpand
         onShortPress={cycleMode}
         panelTitle={<>Mode <HelpLink topic="dark-light-mode" /></>}
@@ -445,6 +444,7 @@ export default function RoomControlsBar() {
           </>
         )}
       >
+        <span className={modeDiscClass} aria-hidden />
         {modeUnconfirmed && <span className="top-bar-group-btn-dot top-bar-group-btn-dot-red" title="unconfirmed" />}
         {!modeUnconfirmed && houseOverrideNote && (
           <span className="top-bar-group-btn-dot top-bar-group-btn-dot-gray"
@@ -452,8 +452,11 @@ export default function RoomControlsBar() {
         )}
       </TopBarGroupButton>
 
+      <span className="one-bar-sep one-bar-sep-before-names" aria-hidden />
+
       <TopBarGroupButton
-        className={`ambient-group-btn${!local.ambient_enabled && !ambientInFlight ? ' ambient-group-btn-off' : ''}`}
+        className={`ambient-group-btn${!local.ambient_enabled && !ambientInFlight ? ' ambient-group-btn-off' : ''}${
+          ambientInFlight ? ' ambient-group-btn-turning' : ''}`}
         title={AMBIENT_PHASE_TITLE[ambientPhase]}
         ariaLabel={`Hue Hold: ${AMBIENT_PHASE_LABEL[ambientPhase] ?? ambientPhase}. `
           + 'Tap to toggle, hold for options.'}
@@ -574,14 +577,24 @@ export default function RoomControlsBar() {
           </>
         )}
       >
-        💡
-        {AMBIENT_PHASE_LABEL[ambientPhase] && (
-          <span className="top-bar-group-btn-label ambient-group-btn-phase">
-            {AMBIENT_PHASE_LABEL[ambientPhase]}
-          </span>
-        )}
+        {/* A DRAWN BULB, not the 💡 colour emoji this replaces (audit B3):
+          * the emoji is font-dependent — the exact class of defect
+          * iconRegistry.ts's own docstring exists to end — and the
+          * approved mockup draws an outline bulb in a 36px square, dim
+          * when off, which `bulb` has been in the registry all along. */}
+        <Icon name="bulb" size={18} />
+        {/* A SLOW PULSE WHILE TURNING, not the words — the mockup's own
+          * rule for this slot, and the only one a 36px square can carry.
+          * His ask that the button "say which way it is going" (the
+          * transition takes 15-22s on his real room) is kept, just not on
+          * the face: it is in this button's own title/aria-label, in the
+          * panel's copy of the toggle, and on the live status badge
+          * below. A text label here would also make the one control in
+          * the bar whose width changes with state (audit N2). */}
         {ambientDotClass && <span className={`top-bar-group-btn-dot ${ambientDotClass}`} title={ambientLive?.mode} />}
       </TopBarGroupButton>
+
+      <span className="one-bar-sep one-bar-sep-before-energy" aria-hidden />
 
       <TopBarGroupButton
         className={`scenes-group-btn${local.force_scene_enabled ? ' scenes-group-btn-forced' : ''}`}
@@ -673,10 +686,17 @@ export default function RoomControlsBar() {
           </>
         )}
       >
-        <span className="top-bar-group-btn-label">Scenes</span>
-        {activeSceneName && (
-          <span className="top-bar-group-btn-value" title={activeSceneName}>{activeSceneName}</span>
-        )}
+        {/* THE MOCKUP'S OWN NAME SLOT (`.sp .nb`, audit B4): a small
+          * uppercase label above a left-aligned bold name, with the
+          * scene's own type glyph beside it — not centred 12px text under
+          * a plural "SCENES". Singular "Scene", as drawn. */}
+        <Icon name="scene" size={18} className="bar-slot-icon" />
+        <span className="bar-slot-text">
+          <span className="bar-slot-label">Scene</span>
+          <span className="bar-slot-name" title={activeSceneName ?? undefined}>
+            {activeSceneName ?? '—'}
+          </span>
+        </span>
         {local.force_scene_enabled && (
           <span className="top-bar-group-btn-lock" title="Force Scene is on">
             <Icon name="lock" size={10} />
@@ -768,16 +788,29 @@ export default function RoomControlsBar() {
           </>
         )}
       >
-        <span className="top-bar-group-btn-label">Colour</span>
-        {activeColorSetName && (
-          <span className="top-bar-group-btn-value" title={activeColorSetName}>{activeColorSetName}</span>
-        )}
+        {/* The swatch is the one cue that tells Colour from Scenes at a
+          * glance (audit B4) — and it is the SET'S OWN colours, read off
+          * the card the journey actually committed to, never a fixed
+          * ramp (barSlots.ts::colourSwatchBackground). */}
+        <span
+          className="bar-slot-swatch"
+          style={{ background: colourSwatchBackground(activeColorSetCard) }}
+          aria-hidden
+        />
+        <span className="bar-slot-text">
+          <span className="bar-slot-label">Colour</span>
+          <span className="bar-slot-name" title={activeColorSetName ?? undefined}>
+            {activeColorSetName ?? '—'}
+          </span>
+        </span>
         {local.force_color_enabled && (
           <span className="top-bar-group-btn-lock" title="Force Colour is on">
             <Icon name="lock" size={10} />
           </span>
         )}
       </TopBarGroupButton>
+
+      <span className="one-bar-sep one-bar-sep-before-show" aria-hidden />
 
       {/* Brightness, the drift gradient, and the preview Favourites picker
         * all moved to Settings → "Room" (UI declutter plan §3/§9,

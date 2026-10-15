@@ -190,15 +190,12 @@ export default function ScenesPage() {
   const sceneList = (
     <>
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        Scenes
         <InfoTip
           topic="scenes-page"
-          text="Scene list on the left, the tabbed editor on the right. Drafts live locally until Save."
-        />
-        <InfoTip
-          topic="power-button"
-          text="The power button: lit green when on, dim when off. One tap flips it — on a list row, it saves itself immediately."
-        />
+          text="Scene list on the left, the tabbed editor on the right. Drafts live locally until Save. The power button on each row is lit green when on, dim when off — one tap flips it and saves itself immediately (help topic: power-button)."
+        >
+          <span>Scenes</span>
+        </InfoTip>
         <button className="primary" style={{ marginLeft: 'auto', fontSize: 11, padding: '3px 10px' }}
           onClick={() => { create(); setPickerOpen(false); }}>
           + Scene

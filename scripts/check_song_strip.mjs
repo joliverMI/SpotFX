@@ -20,19 +20,14 @@
  *           window-mapped x, and skips anything the mapping puts off the
  *           visible canvas — proven against a recording fake ctx, no real
  *           <canvas>.
- *   SIX   — the stretched-icon fix (the Admiral's report, 2026-10-14):
- *           every marker's rendered on-screen size, recomputed through
- *           the SAME `axisScale`/`compensate` formulas SongStrip.tsx
- *           and HomeTimeline.tsx actually call, stays EQUAL to its
- *           intended design pixel size at every one of his named widths
- *           (390/1024/1180/1440/800) — never varying with the SVG's own
- *           rendered width the way it did before the fix. Circles
- *           (flares) and squares (scenes) land at ratio 1; the drop-
- *           sequence bars land at their own intended non-square ratio
- *           (10:6 / 4:6 — a deliberately oblong pill, per AGENTS.md's
- *           "squares vs circles vs bars vs pills" shape-redundancy rule,
- *           never meant to be round) rather than a blanket "~1" that
- *           would be the WRONG assertion for that one marker kind.
+ *
+ * The original stretched-icon fix (the Admiral's report, 2026-10-14) was a
+ * per-axis `axisScale`/`compensate` compensation over a stretched
+ * `viewBox="0 0 100 39"`; the TRACK'S OWN DRAWING rewrite superseded it
+ * with a 1:1 viewBox (`trackPainter.paintTrack`, songStrip.ts's own
+ * `trackX` docstring), which removes the stretch at its source rather
+ * than compensating for it — `axisScale`/`compensate` are gone, and so is
+ * the section here that drove them.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -57,13 +52,21 @@ execFileSync('npx', ['esbuild', TS, '--bundle', '--format=esm', '--platform=node
 });
 const mod = await import(js);
 const { fmtCountdown, fmtMMSS, eventLabel, pickNext, markerSizePx, markerOpacity,
-       xFraction, FINAL_STRETCH_MS, NEXT_EVENT_BOX_WIDTH, drawShapeMarkers, KIND_COLOR,
-       axisScale, compensate } = mod;
+       xFraction, FINAL_STRETCH_MS, NEXT_EVENT_BOX_WIDTH, drawShapeMarkers, KIND_COLOR } = mod;
 
-console.log('ONE — countdown formatting');
+// THE BOUNDARY IS 99.95s, THE APPROVED MOCKUP'S OWN (`cd()`), not 60s —
+// changed in the 2026-10-14 design-fidelity pass. It is what makes
+// "99.9s" the widest string the next-event box can hold, which is what
+// its own fixed `4.4ch` count field is sized for; the first build
+// switched to m:ss at 60s AND kept a tenth after it ("1:04.2"), which is
+// both wider than the field and a digit that changes ten times a second
+// for minutes on end.
+console.log('ONE — countdown formatting (the mockup\'s own cd() rule)');
 {
   ok(fmtCountdown(12400) === '12.4s', `12400ms -> "12.4s" (got ${fmtCountdown(12400)})`);
-  ok(fmtCountdown(64200) === '1:04.2', `64200ms -> "1:04.2" (got ${fmtCountdown(64200)})`);
+  ok(fmtCountdown(64200) === '64.2s', `64200ms -> "64.2s" (got ${fmtCountdown(64200)})`);
+  ok(fmtCountdown(99900) === '99.9s', `99900ms -> "99.9s" — the widest the box holds (got ${fmtCountdown(99900)})`);
+  ok(fmtCountdown(128000) === '2:08', `128000ms -> "2:08", no tenth (got ${fmtCountdown(128000)})`);
   ok(fmtCountdown(-500) === '0.0s', 'never negative');
   ok(fmtMMSS(189258) === '3:09', `189258ms duration -> "3:09" (got ${fmtMMSS(189258)})`);
 }
@@ -175,101 +178,6 @@ console.log('FIVE — drawShapeMarkers: same shape/colour per kind, windowed, of
     drawShapeMarkers(ctx, [scene], xAt, 1000);
     ok(ctx.calls.at(-1)[0] === 'globalAlpha' && ctx.calls.at(-1)[1] === 1,
       'globalAlpha is reset to 1 as the very last call');
-  }
-}
-
-console.log('SIX — stretched-icon fix: rendered size is container-independent, ratio correct');
-{
-  // Mirrors exactly what SongStrip.tsx/HomeTimeline.tsx do: a `width`/`rx`/
-  // `height`/`ry`/`stroke-width` set as a bare viewBox-unit NUMBER renders,
-  // once the viewBox is stretched to the SVG's own rendered box, as
-  // `(units / 100) * renderedWidthPx` (X) or `(units / 39) * renderedHeightPx`
-  // (Y) on-screen pixels — the same percent-of-dimension resolution the
-  // `%`-string positions already get, just computed by hand here since a
-  // bare-number SVG length has no such shorthand.
-  const renderedPxFromUnitsX = (units, renderedWidthPx) => (units / 100) * renderedWidthPx;
-  const renderedPxFromUnitsY = (units, renderedHeightPx) => (units / 39) * renderedHeightPx;
-  const KIOSK_WIDTH = 800;
-  const WIDTHS = [390, 1024, 1180, 1440, KIOSK_WIDTH];
-  // The real, measured rendered height (37px for a 39px CSS box — a
-  // border-box border eating 2px, confirmed live) is why Y is measured
-  // too, never assumed exactly 1:1 the way an earlier draft of this fix
-  // did — included alongside the "ideal" 39 to prove the fix holds
-  // under EITHER.
-  const HEIGHTS = [39, 37];
-
-  for (const renderedWidthPx of WIDTHS) {
-    for (const renderedHeightPx of HEIGHTS) {
-      const xScale = axisScale(renderedWidthPx, 100);
-      const yScale = axisScale(renderedHeightPx, 39);
-      const at = `${renderedWidthPx}x${renderedHeightPx}px`;
-
-      // Scene (a square): width/height both intended at r*2 — the pre-fix
-      // bug set width to a bare r*2 units, which rendered at r*2% of
-      // renderedWidthPx (growing with the container) instead of staying
-      // r*2 PIXELS; this is the fix's own round-trip, through the exact
-      // compensate() the component calls, on BOTH axes.
-      const r = markerSizePx('scene', 1, 3);
-      const sceneWidthPx = renderedPxFromUnitsX(compensate(r * 2, xScale), renderedWidthPx);
-      const sceneHeightPx = renderedPxFromUnitsY(compensate(r * 2, yScale), renderedHeightPx);
-      ok(Math.abs(sceneWidthPx - r * 2) < 0.01 && Math.abs(sceneHeightPx - r * 2) < 0.01,
-        `scene marker at ${at}: rendered size stays ${r * 2}x${r * 2}px `
-        + `(got ${sceneWidthPx.toFixed(3)}x${sceneHeightPx.toFixed(3)}), not drifting `
-        + `with the container`);
-      ok(Math.abs(sceneWidthPx / sceneHeightPx - 1) < 0.01,
-        `scene marker at ${at}: width/height ratio ~1 (a square), `
-        + `got ${(sceneWidthPx / sceneHeightPx).toFixed(3)}`);
-
-      // Flare (a circle, drawn as an ellipse once compensated): rx/ry both
-      // intended at the same radius.
-      const fr = markerSizePx('flare', 1, 3);
-      const flareRxPx = renderedPxFromUnitsX(compensate(fr, xScale), renderedWidthPx);
-      const flareRyPx = renderedPxFromUnitsY(compensate(fr, yScale), renderedHeightPx);
-      ok(Math.abs(flareRxPx - fr) < 0.01 && Math.abs(flareRyPx - fr) < 0.01,
-        `flare marker at ${at}: rendered rx/ry both stay ${fr}px `
-        + `(got ${flareRxPx.toFixed(3)}/${flareRyPx.toFixed(3)})`);
-      ok(Math.abs(flareRxPx / flareRyPx - 1) < 0.01,
-        `flare marker at ${at}: rx/ry ratio ~1 (round, not an ellipse), `
-        + `got ${(flareRxPx / flareRyPx).toFixed(3)}`);
-
-      // Charge/lull bar (a deliberately oblong pill, 10x6 — NOT meant to
-      // be square): the fix must land it at its OWN intended ratio, not 1.
-      const barWidthPx = renderedPxFromUnitsX(compensate(10, xScale), renderedWidthPx);
-      const barHeightPx = renderedPxFromUnitsY(compensate(6, yScale), renderedHeightPx);
-      ok(Math.abs(barWidthPx - 10) < 0.01 && Math.abs(barHeightPx - 6) < 0.01,
-        `charge/lull bar at ${at}: rendered size stays 10x6px `
-        + `(got ${barWidthPx.toFixed(3)}x${barHeightPx.toFixed(3)})`);
-      ok(Math.abs(barWidthPx / barHeightPx - 10 / 6) < 0.01,
-        `charge/lull bar at ${at}: width/height ratio stays its own `
-        + `10:6 design, not 1 (got ${(barWidthPx / barHeightPx).toFixed(3)})`);
-
-      // Drop bar: 4x6.
-      const dropWidthPx = renderedPxFromUnitsX(compensate(4, xScale), renderedWidthPx);
-      ok(Math.abs(dropWidthPx - 4) < 0.01,
-        `drop bar at ${at}: rendered width stays 4px (got ${dropWidthPx.toFixed(3)})`);
-
-      // High/low flag: a vertical line, stroke-width intended at 2px
-      // regardless of container width.
-      const strokeWidthPx = renderedPxFromUnitsX(compensate(2, xScale), renderedWidthPx);
-      ok(Math.abs(strokeWidthPx - 2) < 0.01,
-        `high/low flag at ${at}: rendered stroke-width stays 2px `
-        + `(got ${strokeWidthPx.toFixed(3)})`);
-    }
-  }
-
-  // The bug itself, reproduced: WITHOUT compensation (the pre-fix code),
-  // the same scene square's rendered width/height ratio is NOT 1 and
-  // grows with renderedWidthPx — the red control this fix is proven
-  // against.
-  {
-    const r = markerSizePx('scene', 1, 3);
-    const ratioAt1024 = renderedPxFromUnitsX(r * 2, 1024) / (r * 2);
-    const ratioAt390 = renderedPxFromUnitsX(r * 2, 390) / (r * 2);
-    ok(ratioAt1024 > 1.5 && ratioAt1024 !== ratioAt390,
-      `red control: the PRE-FIX formula stretches a square well past ratio 1 and `
-      + `varies with width (1024px ratio=${ratioAt1024.toFixed(2)}, `
-      + `390px ratio=${ratioAt390.toFixed(2)}) — proving this check would have `
-      + `caught the real defect`);
   }
 }
 

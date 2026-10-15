@@ -1,139 +1,145 @@
 /** THE GLOBAL SONG TIMELINE (song-layout-plan, data/ui-layout-plan/
- * report.md §4): a 39 px, READ-ONLY strip between the menu and the top
- * bar, on every page except Home (its own editable copy) and the
+ * report.md §4): a 39 px track in a 53 px row between the menu and the
+ * top bar, on every page except Home (its own editable copy) and the
  * Timeline page (its own full toolset) — §13 decision 5.
  *
+ * IT NEVER UNMOUNTS (design-fidelity pass, 2026-10-14 — audit T1/P2/N2,
+ * the single biggest reason the live app did not look like the approved
+ * artifact). `if (!track) return null;` removed the whole row whenever
+ * nothing was playing, which is the state he reviewed the deploy in: the
+ * artifact's signature element was off screen most of the day, and its
+ * appearance was itself a 39 px layout jump on every page (plan §5's own
+ * "nothing jumps" rule). The row is now always present; with no song it
+ * draws the empty panel, "Nothing playing", and the mockup's own "—" in
+ * the next-event box (its `f-nxstates` frame's right-most state).
+ *
+ * THE TRACK IS DRAWN AS THE MOCKUP DRAWS IT (audit T3): an inset rounded
+ * panel, a faint energy terrain of the song's own section energies
+ * (approved idea 4 — real librosa data, see songStrip.ts::terrainPath),
+ * the played portion tinted purple, drop sequences as a gold charge bar →
+ * a sky lull bar → a pink numbered drop pill, High/Low flags with
+ * triangular heads from the top edge, rank-sized scene/flare markers, a
+ * pulsing ring on whatever fires next, and a triangle-headed playhead.
+ *
  * Markers are static SVG, rebuilt only when the song or its plan changes
- * (react-query already invalidates on its own cadence); the playhead and
- * the next-event countdown move in ONE rAF loop that writes attributes/
- * textContent directly — never a React render per frame (report §4.2).
- * Both read the ONE show clock (lib/showClock.ts) — the exact moment the
- * trigger poll fires against, not raw Spotify progress. */
+ * (react-query already invalidates on its own cadence); the playhead, the
+ * played tint, the ring, the next-event countdown and the one-shot fire
+ * flash move in ONE rAF loop that writes attributes/textContent directly
+ * — never a React render per frame (report §4.2). Both read the ONE show
+ * clock (lib/showClock.ts) — the exact moment the trigger poll fires
+ * against, not raw Spotify progress. */
 import { useEffect, useRef } from 'react';
-import { ICONS } from './iconRegistry';
+import { Link } from 'react-router-dom';
 import {
-  axisScale, compensate, eventLabel, FINAL_STRETCH_MS, fmtCountdown, fmtMMSS, KIND_COLOR,
-  KIND_ICON, markerOpacity, markerSizePx, NEXT_EVENT_BOX_WIDTH, pickNext, xFraction,
+  countdownParts, eventLabel, FINAL_STRETCH_MS, fmtMMSS, kindGlyphSvg, MARKER_CY,
+  NEXT_EVENT_BOX_WIDTH, PLAYED_TINT, pickNext, ringCy, TRACK_HEIGHT, trackX,
 } from './songStrip';
+import { paintTrack, type MarkNode } from './trackPainter';
 import { useEngineStatus, useUpcoming } from '../queries';
+import { useLibrosa } from '../timeline/queries';
 import { getPositionMs, getShowClockMs } from '../lib/showClock';
 import InfoTip from './InfoTip';
-
-const TRACK_H = 39;
 
 export default function SongStrip() {
   const { data: status } = useEngineStatus();
   const track = status?.bridge.track ?? null;
   const uri = track?.uri ?? null;
   const { data: upcoming } = useUpcoming(uri);
+  // The terrain's own source: librosa's per-section energy (approved idea
+  // 4). Shares react-query's cache with the Timeline/debug pages, so a
+  // song already looked at costs nothing here; `retry: false` means a song
+  // with no analysis simply draws no terrain.
+  const { data: librosa } = useLibrosa(uri);
   const events = upcoming?.events ?? [];
   const durationMs = track?.duration_ms ?? 0;
+  const sections = librosa?.sections ?? null;
 
-  const markersGroupRef = useRef<SVGGElement>(null);
-  const playheadRef = useRef<SVGLineElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const bodyGroupRef = useRef<SVGGElement>(null);
+  const playedRef = useRef<SVGRectElement>(null);
+  const ringGroupRef = useRef<SVGGElement>(null);
+  const ringRef = useRef<SVGCircleElement>(null);
+  const playheadRef = useRef<SVGGElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
-  const nextIconPathRef = useRef<SVGPathElement>(null);
+  const nextIconRef = useRef<SVGSVGElement>(null);
   const nextFillRef = useRef<HTMLDivElement>(null);
   const nextCountRef = useRef<HTMLSpanElement>(null);
+  const nextUnitRef = useRef<HTMLElement>(null);
   const nextBoxRef = useRef<HTMLDivElement>(null);
   const flashedKeyRef = useRef<string | null>(null);
   const lastNextKindRef = useRef<string | null>(null);
+  /** Every marker node by its own ms, so the rAF loop can fade a passed
+   * marker (`.song-strip-mk-past`) and flash the one that just fired
+   * (audit T6: the mockup flashes the MARKER, not only the box). */
+  const markNodesRef = useRef<MarkNode[]>([]);
 
-  // Re-render SVG markers when the inputs that decide WHAT is drawn
-  // change (song, its plan) — the per-frame loop below only ever moves
-  // the playhead / next-event text, never touches these nodes. ALSO
-  // rebuilt on resize (a ResizeObserver, not a dep) — the viewBox's own
-  // axis stretch (see `axisScale`'s own docstring) depends on the SVG's
-  // rendered width/height, which change independently of the song/plan.
+  // Rebuild the drawn body when WHAT is drawn changes (song, plan,
+  // sections) — the per-frame loop below only ever moves the playhead /
+  // played tint / ring / next-event text. ALSO rebuilt on resize (a
+  // ResizeObserver, not a dep): paintTrack rewrites the SVG's viewBox to
+  // match its own rendered width/height (songStrip.ts's `trackX`
+  // docstring), which changes independently of the song.
   useEffect(() => {
-    const svg = markersGroupRef.current?.closest('svg');
-    const group = markersGroupRef.current;
+    const svg = svgRef.current;
+    const group = bodyGroupRef.current;
     if (!svg || !group) return undefined;
+
     const build = () => {
-      while (group.lastChild) group.removeChild(group.lastChild);
-      const rect0 = svg.getBoundingClientRect();
-      const xScale = axisScale(rect0.width, 100);
-      const yScale = axisScale(rect0.height, TRACK_H);
-      const ns = 'http://www.w3.org/2000/svg';
-      for (const e of events) {
-        if (durationMs <= 0) continue;
-        const frac = xFraction(e.ms, durationMs);
-        const color = KIND_COLOR[e.kind];
-        if (e.kind === 'scene') {
-          const r = markerSizePx('scene', e.rank, e.rank_of);
-          const widthUnits = compensate(r * 2, xScale);
-          const rect = document.createElementNS(ns, 'rect');
-          rect.setAttribute('x', `${frac * 100 - widthUnits / 2}%`);
-          rect.setAttribute('y', '15');
-          rect.setAttribute('width', `${widthUnits}`);
-          rect.setAttribute('height', `${compensate(r * 2, yScale)}`);
-          rect.setAttribute('fill', color);
-          rect.setAttribute('opacity', String(markerOpacity(e.rank, e.rank_of)));
-          group.appendChild(rect);
-        } else if (e.kind === 'flare') {
-          const r = markerSizePx('flare', e.rank, e.rank_of);
-          const ell = document.createElementNS(ns, 'ellipse');
-          ell.setAttribute('cx', `${frac * 100}%`);
-          ell.setAttribute('cy', '19');
-          ell.setAttribute('rx', `${compensate(r, xScale)}`);
-          ell.setAttribute('ry', `${compensate(r, yScale)}`);
-          ell.setAttribute('fill', color);
-          ell.setAttribute('opacity', String(markerOpacity(e.rank, e.rank_of)));
-          group.appendChild(ell);
-        } else if (e.kind === 'charge' || e.kind === 'lull' || e.kind === 'drop') {
-          const bar = document.createElementNS(ns, 'rect');
-          bar.setAttribute('x', `${frac * 100}%`);
-          bar.setAttribute('y', '29');
-          bar.setAttribute('width', `${compensate(e.kind === 'drop' ? 4 : 10, xScale)}`);
-          bar.setAttribute('height', `${compensate(6, yScale)}`);
-          bar.setAttribute('rx', `${compensate(2, xScale)}`);
-          bar.setAttribute('ry', `${compensate(2, yScale)}`);
-          bar.setAttribute('fill', color);
-          group.appendChild(bar);
-        } else if (e.kind === 'high' || e.kind === 'low') {
-          const flag = document.createElementNS(ns, 'line');
-          flag.setAttribute('x1', `${frac * 100}%`);
-          flag.setAttribute('x2', `${frac * 100}%`);
-          flag.setAttribute('y1', '0');
-          flag.setAttribute('y2', '8');
-          flag.setAttribute('stroke', color);
-          flag.setAttribute('stroke-width', `${compensate(2, xScale)}`);
-          group.appendChild(flag);
-        }
-      }
+      markNodesRef.current = paintTrack(svg, group, { events, durationMs, sections });
     };
+
     build();
     const observer = new ResizeObserver(build);
     observer.observe(svg);
     return () => observer.disconnect();
-  }, [events, durationMs]);
+  }, [events, durationMs, sections]);
 
-  // THE ONE rAF LOOP — playhead, next-event countdown/fill, the one-shot
-  // "it just fired" flash. No React state anywhere in here.
+  // THE ONE rAF LOOP — played tint, playhead, the "next" ring, the
+  // countdown/fill, passed-marker fade, and the one-shot fire flashes.
+  // No React state anywhere in here.
   useEffect(() => {
     let raf = 0;
     const tick = () => {
       const now = getShowClockMs();
       const pos = getPositionMs();
-      if (playheadRef.current && now != null && durationMs > 0) {
-        playheadRef.current.setAttribute('x1', `${xFraction(now, durationMs) * 100}%`);
-        playheadRef.current.setAttribute('x2', `${xFraction(now, durationMs) * 100}%`);
+      const svgRect = svgRef.current?.getBoundingClientRect();
+      const svgW = svgRect?.width ?? 0;
+      const atX = (ms: number) => trackX(ms, durationMs, svgW);
+
+      if (now != null && durationMs > 0 && svgW > 0) {
+        const px = atX(now);
+        playheadRef.current?.setAttribute('transform', `translate(${px.toFixed(2)},0)`);
+        playheadRef.current?.setAttribute('opacity', '1');
+        playedRef.current?.setAttribute('width', String(Math.max(0, px - 1).toFixed(2)));
+      } else {
+        playheadRef.current?.setAttribute('opacity', '0');
+        playedRef.current?.setAttribute('width', '0');
       }
+
       if (timeRef.current) {
-        timeRef.current.textContent = pos != null && durationMs > 0
-          ? `${fmtMMSS(pos)} / ${fmtMMSS(durationMs)}` : '—:— / —:—';
+        timeRef.current.textContent = pos != null && durationMs > 0 ? fmtMMSS(pos) : '—:—';
       }
+
       const next = now != null ? pickNext(events, now) : null;
       if (next) {
         const remaining = next.ms - (now as number);
         const key = `${next.ms}:${next.kind}`;
-        if (nextIconPathRef.current && lastNextKindRef.current !== next.kind) {
-          lastNextKindRef.current = next.kind;
-          nextIconPathRef.current.setAttribute('d', ICONS[KIND_ICON[next.kind]]);
-          nextIconPathRef.current.setAttribute('stroke', KIND_COLOR[next.kind]);
+        const glyphKey = `${next.kind}:${next.num ?? ''}`;
+        if (nextIconRef.current && lastNextKindRef.current !== glyphKey) {
+          lastNextKindRef.current = glyphKey;
+          nextIconRef.current.innerHTML = kindGlyphSvg(next.kind, next.num);
         }
-        if (nextCountRef.current) nextCountRef.current.textContent = fmtCountdown(remaining);
+        const parts = countdownParts(remaining);
+        if (nextCountRef.current) nextCountRef.current.textContent = parts.value;
+        if (nextUnitRef.current) nextUnitRef.current.textContent = parts.unit ?? '';
         if (nextBoxRef.current) nextBoxRef.current.title = eventLabel(next);
+        if (ringGroupRef.current && ringRef.current && durationMs > 0 && svgW > 0) {
+          const h = svgRect?.height ?? TRACK_HEIGHT;
+          ringGroupRef.current.setAttribute('opacity', '1');
+          ringRef.current.setAttribute('cx', atX(next.ms).toFixed(2));
+          ringRef.current.setAttribute('cy', String(ringCy(next.kind) * (h / TRACK_HEIGHT)));
+        }
         const soon = remaining <= FINAL_STRETCH_MS;
         if (nextFillRef.current) {
           nextFillRef.current.style.transform =
@@ -144,11 +150,32 @@ export default function SongStrip() {
           flashedKeyRef.current = key;
           nextBoxRef.current?.classList.add('song-strip-next-flash');
           setTimeout(() => nextBoxRef.current?.classList.remove('song-strip-next-flash'), 600);
+          // THE MARKER FLASHES TOO (audit T6 / approved idea 3) — the
+          // live strip only ever flashed the box.
+          for (const m of markNodesRef.current) {
+            if (Math.abs(m.ms - next.ms) > 1) continue;
+            m.node.classList.remove('song-strip-mk-flash');
+            void (m.node as unknown as { getBoundingClientRect: () => DOMRect }).getBoundingClientRect();
+            m.node.classList.add('song-strip-mk-flash');
+            const node = m.node;
+            setTimeout(() => node.classList.remove('song-strip-mk-flash'), 600);
+          }
         }
       } else {
         if (nextCountRef.current) nextCountRef.current.textContent = '—';
-        if (nextBoxRef.current) { nextBoxRef.current.title = 'Nothing left this song'; }
+        if (nextUnitRef.current) nextUnitRef.current.textContent = '';
+        if (nextIconRef.current) { nextIconRef.current.innerHTML = ''; lastNextKindRef.current = null; }
+        if (nextBoxRef.current) nextBoxRef.current.title = durationMs > 0 ? 'Nothing left this song' : 'Nothing playing';
         if (nextFillRef.current) nextFillRef.current.style.transform = 'scaleX(0)';
+        nextBoxRef.current?.classList.remove('song-strip-next-soon');
+        ringGroupRef.current?.setAttribute('opacity', '0');
+      }
+
+      // Passed markers fade (the mockup's own `.mk.past`).
+      if (now != null) {
+        for (const m of markNodesRef.current) {
+          m.node.classList.toggle('song-strip-mk-past', m.ms < now - 50);
+        }
       }
       raf = requestAnimationFrame(tick);
     };
@@ -157,36 +184,74 @@ export default function SongStrip() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events, durationMs]);
 
-  if (!track) return null;
+  const playing = Boolean(track?.is_playing);
+  const title = track?.title ?? null;
+  // UP NEXT ON HOVER (approved idea 7) — already on the wire
+  // (bridge.status()'s own `next_track`, Show Playlists' read half), so
+  // this is a pure read: no new endpoint, no poll of its own.
+  const upNext = status?.bridge.next_track?.title || null;
 
   return (
-    <div className="song-strip" role="img" aria-label={`${track.title ?? 'Unknown song'} — ${track.artist ?? ''}`}>
-      <div className="song-strip-song" title={track.title ?? ''}>
-        <div className="song-strip-title-row">
-          <span className="song-strip-song-title">{track.title || 'No song'}</span>
-          <InfoTip
-            topic="song-timeline"
-            text="The whole song with the same markers Home shows, and the next thing that will actually fire — its type and a countdown."
-          />
-        </div>
-        <span className="song-strip-song-artist">{track.artist || ''}</span>
-      </div>
-      <div className="song-strip-track" style={{ height: TRACK_H }}>
-        <svg className="song-strip-svg" preserveAspectRatio="none" viewBox="0 0 100 39">
-          <g ref={markersGroupRef} />
-          <line ref={playheadRef} x1="0" x2="0" y1="0" y2="39" className="song-strip-playhead" />
+    <div className="song-strip">
+      {/* THE SONG BLOCK TAPS THROUGH TO HOME (audit T2) with an animated
+        * three-bar equaliser while a song plays, title above artist, and
+        * no circle of its own — the description lives on hover. */}
+      <InfoTip
+        className="song-strip-song-tip"
+        topic="song-timeline"
+        text={`The whole song with the same markers Home shows, and the next thing that will actually fire — its type and a countdown. Tap to open Home.${
+          upNext ? ` Up next: ${upNext}.` : ''}`}
+      >
+        <Link to="/" className="song-strip-song" aria-label={title ? `${title} — tap to open Home` : 'Nothing playing — tap to open Home'}>
+          <span className={`song-strip-eq${playing ? '' : ' song-strip-eq-still'}`} aria-hidden>
+            <i /><i /><i />
+          </span>
+          <span className="song-strip-song-text">
+            <span className="song-strip-song-title">{title || 'Nothing playing'}</span>
+            <span className="song-strip-song-artist">{track?.artist || ''}</span>
+          </span>
+        </Link>
+      </InfoTip>
+
+      <div ref={trackRef} className="song-strip-track" style={{ height: TRACK_HEIGHT }}>
+        {/* The viewBox is REWRITTEN to the measured pixel size on every
+          * build (and on resize) — see songStrip.ts's `trackX` docstring.
+          * `preserveAspectRatio="none"` is kept so a sub-pixel rounding
+          * difference between the attribute and the box never letterboxes
+          * the panel. */}
+        <svg ref={svgRef} className="song-strip-svg" preserveAspectRatio="none"
+            viewBox={`0 0 100 ${TRACK_HEIGHT}`} role="img"
+            aria-label={title ? `${title}: whole song with planned events` : 'No song'}>
+          <g ref={bodyGroupRef} />
+          <rect ref={playedRef} className="song-strip-played" x="0" y="1" width="0"
+              height={TRACK_HEIGHT - 2} fill={PLAYED_TINT} />
+          <g ref={ringGroupRef} opacity="0">
+            <circle ref={ringRef} className="song-strip-ring" cx="0" cy={MARKER_CY} r="9"
+                fill="none" stroke="var(--accent2)" strokeWidth="1.6" />
+          </g>
+          <g ref={playheadRef} opacity="0">
+            <line x1="0" x2="0" y1="0" y2={TRACK_HEIGHT} className="song-strip-playhead" />
+            <path d="M-4 0 L4 0 L0 5Z" fill="#fff" />
+          </g>
         </svg>
       </div>
+
       <div ref={nextBoxRef} className="song-strip-next" style={{ width: NEXT_EVENT_BOX_WIDTH }}>
         <div ref={nextFillRef} className="song-strip-next-fill" />
-        <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor"
-            strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
-            className="song-strip-next-icon" aria-hidden="true">
-          <path ref={nextIconPathRef} d="" />
-        </svg>
-        <span ref={nextCountRef} className="song-strip-next-count tabular-nums">—</span>
+        {/* The TYPE GLYPH IS THE MARKER SHAPE, filled and kind-coloured
+          * (songStrip.ts::kindGlyphSvg) — swapped with one innerHTML write
+          * from the rAF loop, never a React render. */}
+        <svg ref={nextIconRef} viewBox="0 0 16 16" width={18} height={18}
+            className="song-strip-next-icon" aria-hidden="true" />
+        <span className="song-strip-next-count tabular-nums">
+          <span ref={nextCountRef}>—</span>
+          <small ref={nextUnitRef} />
+        </span>
       </div>
-      <span ref={timeRef} className="song-strip-time tabular-nums">—:— / —:—</span>
+
+      <span className="song-strip-time tabular-nums">
+        <b ref={timeRef}>—:—</b> / {durationMs > 0 ? fmtMMSS(durationMs) : '—:—'}
+      </span>
     </div>
   );
 }

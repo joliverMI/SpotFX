@@ -106,7 +106,8 @@ export default function NavMenu({
               onClick={onClose}
               onKeyDown={(e) => onItemKeyDown(e, i)}
             >
-              {it.label}
+              <Icon name={it.icon} size={16} />
+              <span>{it.label}</span>
             </Link>
           ))}
         </div>

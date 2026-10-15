@@ -27,6 +27,7 @@ import {
   useTranscribeSettingsAudio, useUndoLastSetting,
 } from '../queries';
 import type { SettingsChatMessage, SettingValue } from '../types';
+import Icon from '../components/Icon';
 import RoomCard from './RoomCard';
 import ScenesDropsCard from './ScenesDropsCard';
 
@@ -175,6 +176,21 @@ export default function SettingsConsolePage() {
 
   return (
     <div className="settings-console">
+      {/* THE PAGE HAS A TITLE and the cards run in the approved mockup's
+        * own order — Room, Scenes & drops, then Sonic at the BOTTOM
+        * (design-fidelity pass, 2026-10-14 — audit S1: the live page had
+        * no title and put the Sonic console first, so the two direct
+        * cards the plan put on this page were below the fold). */}
+      <div className="settings-page-title"><Icon name="settings" size={20} /> Settings</div>
+
+      {/* Two direct-control cards (UI declutter plan §3/§9, decided yes) —
+        * a stated exception to "talk to Sonic, no forms": these are
+        * controls that already lived in the top bar as direct UI, just
+        * relocated here, never a new kind of control invented for this
+        * page. */}
+      <RoomCard />
+      <ScenesDropsCard />
+
       <div className="card settings-console-chat">
         <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           Sonic — settings console <HelpLink topic="settings-console" />
@@ -219,14 +235,6 @@ export default function SettingsConsolePage() {
           </button>
         </div>
       </div>
-
-      {/* Two direct-control cards (UI declutter plan §3/§9, decided yes) —
-        * a stated exception to "talk to Sonic, no forms" above: these are
-        * controls that already lived in the top bar as direct UI, just
-        * relocated here, never a new kind of control invented for this
-        * page. */}
-      <RoomCard />
-      <ScenesDropsCard />
 
       <div className="card">
         <div className="card-title">

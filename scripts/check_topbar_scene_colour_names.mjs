@@ -221,11 +221,18 @@ const engineStatusWith = ({ activeScene, activeSetId }) => ({
 });
 
 // Extract the HTML slice for the button whose label text is `label`
-// (e.g. "Scenes", "Colour") — from its own `.top-bar-group-btn-label`
-// span up to the button's own closing tag, so an assertion about the
-// Scenes button can never accidentally match the Colour button's markup
-// (both share the className `scenes-group-btn`, distinguished only by
-// their own content/label).
+// (e.g. "Scene", "Colour") — from its own `.bar-slot-label` span up to
+// the button's own closing tag, so an assertion about the Scenes button
+// can never accidentally match the Colour button's markup (both share
+// the className `scenes-group-btn`, distinguished only by their own
+// content/label).
+//
+// The 2026-10-14 design-fidelity pass renamed the label span
+// (`.top-bar-group-btn-label` -> `.bar-slot-label`), the value span
+// (`.top-bar-group-btn-value` -> `.bar-slot-name`) and the Scenes slot's
+// own word ("SCENES" -> the mockup's singular "Scene") — audit B4. The
+// PROPERTY under test is unchanged: each face shows the thing that is
+// actually playing, with a padlock only while forced.
 function sliceButton(html, label) {
   const marker = `>${label}</span>`;
   const i = html.indexOf(marker);
@@ -237,8 +244,8 @@ function sliceButton(html, label) {
 
 const hasLock = (slice) => slice.includes('top-bar-group-btn-lock') && slice.includes('<svg');
 const hasValueText = (slice, text) =>
-  new RegExp(`class="top-bar-group-btn-value"[^>]*>${text}<`).test(slice);
-const hasValueSpanAtAll = (slice) => slice.includes('top-bar-group-btn-value');
+  new RegExp(`class="bar-slot-name"[^>]*>${text}<`).test(slice);
+const hasValueSpanAtAll = (slice) => slice.includes('bar-slot-name');
 const hasOldPurpleDot = (slice) => slice.includes('top-bar-group-btn-dot-purple');
 
 console.log('§1 an active scene + a drifting colour set, neither forced');
@@ -249,7 +256,7 @@ console.log('§1 an active scene + a drifting colour set, neither forced');
     colorCards: [COLOR_SET],
     engineStatus: engineStatusWith({ activeScene: true, activeSetId: COLOR_SET.id }),
   });
-  const scenesSlice = sliceButton(html, 'Scenes');
+  const scenesSlice = sliceButton(html, 'Scene');
   const colourSlice = sliceButton(html, 'Colour');
   ok(hasValueText(scenesSlice, 'Black Hole V2'),
     'Scenes button shows the active scene\'s NAME, not the scene-change-mode label');
@@ -271,7 +278,7 @@ console.log('§2 Force Scene on');
     colorCards: [COLOR_SET],
     engineStatus: engineStatusWith({ activeScene: true, activeSetId: COLOR_SET.id }),
   });
-  const scenesSlice = sliceButton(html, 'Scenes');
+  const scenesSlice = sliceButton(html, 'Scene');
   ok(hasValueText(scenesSlice, 'Black Hole V2'), 'Scenes button still shows the scene name while forced');
   ok(hasLock(scenesSlice), 'Scenes button shows the lock icon when Force Scene is on');
   ok(!hasOldPurpleDot(scenesSlice), 'the old purple dot is gone even while forced (replaced by the lock)');
@@ -291,7 +298,15 @@ console.log('§3 Force Colour on');
   ok(!hasOldPurpleDot(colourSlice), 'the old purple dot is gone even while forced (replaced by the lock)');
 }
 
-console.log('§4 nothing active — "nothing otherwise"');
+// THE SLOT IS ALWAYS DRAWN (changed 2026-10-14, design-fidelity pass).
+// It used to omit the name span entirely when nothing was active, which
+// is itself a layout-jump source — the slot's own content appearing and
+// disappearing — and the opposite of what the approved mockup draws: a
+// fixed name slot whose name reads "—" when there is nothing to name
+// (the same empty-state rule that keeps the song strip and the Light
+// Show slot on screen, audit N2). The padlock is still the thing that
+// appears "only while forced, and nothing otherwise".
+console.log('§4 nothing active — the slot stays, its name reads "—", and no padlock');
 {
   const html = renderBar({
     room: { ...BASE_ROOM },
@@ -299,11 +314,13 @@ console.log('§4 nothing active — "nothing otherwise"');
     colorCards: [COLOR_SET],
     engineStatus: engineStatusWith({ activeScene: false, activeSetId: null }),
   });
-  const scenesSlice = sliceButton(html, 'Scenes');
+  const scenesSlice = sliceButton(html, 'Scene');
   const colourSlice = sliceButton(html, 'Colour');
-  ok(!hasValueSpanAtAll(scenesSlice), 'Scenes button renders no value span when no scene is active');
+  ok(hasValueSpanAtAll(scenesSlice) && hasValueText(scenesSlice, '—'),
+    'Scenes button keeps its fixed name slot and shows "—" when no scene is active');
   ok(!hasLock(scenesSlice), 'Scenes button shows no lock icon when unforced and nothing is active');
-  ok(!hasValueSpanAtAll(colourSlice), 'Colour button renders no value span when no colour set is active');
+  ok(hasValueSpanAtAll(colourSlice) && hasValueText(colourSlice, '—'),
+    'Colour button keeps its fixed name slot and shows "—" when no colour set is active');
   ok(!hasLock(colourSlice), 'Colour button shows no lock icon when unforced and nothing is active');
 }
 

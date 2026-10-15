@@ -48,13 +48,12 @@ export default function EngineStatusStrip() {
       gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 14,
       flexWrap: 'wrap', padding: '8px 12px', fontSize: 12,
     }}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
-        Engine
-        <InfoTip
-          topic="engine"
-          text="A drift conductor (one leg every ~20s) plus a response engine, running the scene's declared life — journey, legs, holds, and the last surge."
-        />
-      </span>
+      <InfoTip
+        topic="engine"
+        text="A drift conductor (one leg every ~20s) plus a response engine, running the scene's declared life — journey, legs, holds, and the last surge."
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>Engine</span>
+      </InfoTip>
       {st.dark && (
         <span className="badge badge-purple"
           title="The evolution engine computes and records every leg and surge, but no write reaches the lights — live execution arrives with the S3 handover (owner's call)">
@@ -130,31 +129,33 @@ export default function EngineStatusStrip() {
       )}
 
       {surge && (
-        <span style={{ color: 'var(--text-muted)' }}
-          title="Most recent response event and what it did">
-          last surge: {surge.class} @ {surge.intensity.toFixed(2)} → {surge.result}
-          <InfoTip
-            topic="engine-surges"
-            text="A response's attached kinds fire at their scales, in a fixed order: dice re-rolls, param moves, gain envelopes, then the colour jump."
-          />
-        </span>
+        <InfoTip
+          topic="engine-surges"
+          text="A response's attached kinds fire at their scales, in a fixed order: dice re-rolls, param moves, gain envelopes, then the colour jump."
+        >
+          <span style={{ color: 'var(--text-muted)' }}
+            title="Most recent response event and what it did">
+            last surge: {surge.class} @ {surge.intensity.toFixed(2)} → {surge.result}
+          </span>
+        </InfoTip>
       )}
 
-      <span style={{ marginLeft: 'auto',
-                     color: st.bridge.connected ? 'var(--text-muted)' : 'var(--warning)' }}
-        title={st.bridge.connected
-          ? `Read-only spot-effects feed live (${st.bridge.ws_url}) — track state, trigger fires with intensity, deferral flags`
-          : 'The read-only spot-effects feed is down — no moments, no surges; intensity holds at the 0.5 neutral (stated degradation)'}>
-        bridge {st.bridge.connected ? '● live' : '○ down'}
-        {st.bridge.connected && st.bridge.intensity != null
-          && ` · i=${st.bridge.intensity.toFixed(2)}`}
-        {st.bridge.connected && st.bridge.last_event?.class
-          && ` · ${st.bridge.last_event.class}`}
-        <InfoTip
-          topic="engine-bridge"
-          text="A one-directional, read-only feed from spot-effects. If it's down, nothing breaks — intensity just holds at 0.5 neutral."
-        />
-      </span>
+      <InfoTip
+        className="engine-status-bridge"
+        topic="engine-bridge"
+        text="A one-directional, read-only feed from spot-effects. If it's down, nothing breaks — intensity just holds at 0.5 neutral."
+      >
+        <span style={{ color: st.bridge.connected ? 'var(--text-muted)' : 'var(--warning)' }}
+          title={st.bridge.connected
+            ? `Read-only spot-effects feed live (${st.bridge.ws_url}) — track state, trigger fires with intensity, deferral flags`
+            : 'The read-only spot-effects feed is down — no moments, no surges; intensity holds at the 0.5 neutral (stated degradation)'}>
+          bridge {st.bridge.connected ? '● live' : '○ down'}
+          {st.bridge.connected && st.bridge.intensity != null
+            && ` · i=${st.bridge.intensity.toFixed(2)}`}
+          {st.bridge.connected && st.bridge.last_event?.class
+            && ` · ${st.bridge.last_event.class}`}
+        </span>
+      </InfoTip>
     </div>
   );
 }

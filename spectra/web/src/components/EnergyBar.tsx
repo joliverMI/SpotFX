@@ -1,18 +1,25 @@
 /** Energy + Mark, grouped — UI declutter plan §13 Q12 (decided yes): below
  * desktop width, "Mark" folds into the Energy control so the Scenes/Colour
- * name slots get back the pixels Mark used to cost on its own. Both
- * controls are untouched (LiveEnergyReadout.tsx / IntensityMarkControl.tsx
- * keep their own state/hooks) — this is a layout wrapper only, with the
- * actual fold done in CSS (`.energy-mark-group` narrows the Mark half at
- * <=1180px — his two named tablet widths, 1024 and 1180). */
+ * name slots get back the pixels Mark used to cost on its own.
+ *
+ * THE FOLD IS NOW REAL (design-fidelity pass, 2026-10-14): the mockup
+ * HIDES the Mark box at <=1180px (`@container sp (max-width: 1180px)
+ * { .mark { display: none } }`) and the Energy slot is what opens Mark
+ * there. The first build implemented it as "hide the word Mark" only,
+ * which left Mark's value and its ⓘ circle dangling after the meter as a
+ * loose "ⓘ —" (audit B6). This component owns the one open/closed state
+ * so either control can open the one panel; the two children keep their
+ * own data hooks, unchanged. */
+import { useState } from 'react';
 import IntensityMarkControl from './IntensityMarkControl';
 import LiveEnergyReadout from './LiveEnergyReadout';
 
 export default function EnergyBar() {
+  const [markOpen, setMarkOpen] = useState(false);
   return (
     <div className="energy-mark-group">
-      <LiveEnergyReadout />
-      <IntensityMarkControl />
+      <LiveEnergyReadout onOpenMark={() => setMarkOpen((o) => !o)} />
+      <IntensityMarkControl open={markOpen} onOpenChange={setMarkOpen} />
     </div>
   );
 }

@@ -9,16 +9,29 @@
 import Icon, { type IconName } from './Icon';
 
 export default function IconToggle({
-  on, onChange, icon, title, ariaLabel, size = 30,
+  on, onChange, icon, glyph, label, title, ariaLabel, size = 30, disabled = false,
 }: {
   on: boolean;
   onChange: (on: boolean) => void;
-  icon: IconName;
+  /** A registry icon. Omit it when passing `glyph` or `label` instead. */
+  icon?: IconName;
+  /** A bespoke glyph, for a toggle whose meaning IS a drawn marker shape
+   * rather than a stroke icon: Home's own three filter toggles draw the
+   * actual scene square / charge-lull-drop pills / High-Low flags they
+   * switch (design-fidelity pass, 2026-10-14 — audit H2, where the
+   * registry's generic stroke icons rendered as ~6px squiggles inside
+   * their 24-unit box and read as nothing at all). */
+  glyph?: React.ReactNode;
+  /** A short text label, for the mockup's own wide `.tgl.wide` variant
+   * (Home's T / B / M / H band toggles, "Marks", "sections", "beats"). */
+  label?: string;
   title: string;
   /** Falls back to `title` when the icon alone wouldn't announce enough. */
   ariaLabel?: string;
   size?: number;
+  disabled?: boolean;
 }) {
+  const wide = label != null;
   return (
     <button
       type="button"
@@ -26,11 +39,13 @@ export default function IconToggle({
       aria-checked={on}
       aria-label={ariaLabel ?? title}
       title={title}
-      className={`icon-toggle${on ? ' icon-toggle-on' : ''}`}
-      style={{ width: size, height: size }}
+      disabled={disabled}
+      className={`icon-toggle${on ? ' icon-toggle-on' : ''}${wide ? ' icon-toggle-wide' : ''}`}
+      style={wide ? { height: size } : { width: size, height: size }}
       onClick={() => onChange(!on)}
     >
-      <Icon name={icon} size={Math.round(size * 0.55)} />
+      {glyph ?? (icon ? <Icon name={icon} size={Math.round(size * 0.55)} /> : null)}
+      {label}
     </button>
   );
 }

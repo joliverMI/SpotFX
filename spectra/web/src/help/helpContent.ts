@@ -69,7 +69,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Navigating SPECTRA — the grouped menu and Home',
     keywords: 'menu navigation nav bar groups dropdown artifacts engine home landing page declutter',
     intro:
-      'The 2026-10-14 layout declutter: 17 flat links became four groups — Home · Artifacts ▾ · Engine ▾ · Settings — and a one-page-per-"?" convention replaces the many small circled "?" icons that used to sit next to individual controls.',
+      'The 2026-10-14 layout declutter: 17 flat links became four groups — Home · Artifacts ▾ · Engine ▾ · Settings — and ONE "?" at the right of the menu row (it opens this help at the page you are on) replaces the many small circled "?" icons that used to sit beside individual controls. Nothing else in the chrome draws a help circle at all: hover a control with a mouse, or long-press it on a touch screen, and it explains itself in place, with a link into the full topic.',
     entries: [
       {
         id: 'nav-menu',
@@ -78,15 +78,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Home · Artifacts ▾ (Scenes, Colours, Devices, Rooms, Room FX, Light Show) · Engine ▾ (Debug, Status, Timing, Review, Feedback, AV Sync, House, Test Bed, Timeline) · Settings.',
           'Tap a group to open its dropdown; tap an item to go there (closes the menu); tap outside, tap the group again, or press Escape to close. With a mouse, pointing at the other group while one is open switches straight to it. Keyboard: ↑/↓ moves between items, Enter/Space opens a group or follows an item, Escape returns focus to the group button.',
-          'The group containing the page you\'re on is highlighted; inside an open dropdown, the current page has its own accent bar. Feedback lives under Engine, next to Review (it reads feedback sessions).',
-        ],
-      },
-      {
-        id: 'home-page',
-        title: 'Home — the landing page',
-        keywords: 'home landing page timeline quick sequences quick actions audio shape stub',
-        body: [
-          'Home ("/") is the landing page now, in place of Scenes. The full page — an editable song timeline, a draggable window into the tuned audio shape, and side-by-side Quick sequences / Quick actions cards — is a separate, in-progress build; until it lands this page is a short placeholder with links to Scenes and Light Show.',
+          'Every dropdown item carries its own icon. The group containing the page you\'re on is highlighted with an accent underline; inside an open dropdown, the current page\'s row is filled and carries an accent bar down its left edge. Feedback lives under Engine, next to Review (it reads feedback sessions).',
         ],
       },
     ],
@@ -837,14 +829,17 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Home',
     keywords: 'landing home timeline window follow quick sequences actions song strip',
     intro:
-      'The landing page ("/"). An editable copy of the song timeline: the whole song with the playhead, scene changes (cyan squares), flares (lime circles), drop sequences (gold charge, sky-blue lull, magenta drop), and High/Low Trigger flags — only the moments that will actually fire, never a guess at what might. Three icon toggles show/hide analysed events, drop sequences and the Light Show flags. Drag the window\'s body to pan, an edge to zoom; ⌖ snaps back to following the playhead, ↔ shows the whole song. Below it, the audio shape shares the SAME playhead. Quick sequences and Quick actions below that run his recent sequences and sets with one tap, without opening the Light Show page.',
+      'The landing page ("/"). An editable copy of the song timeline: the whole song with the playhead, scene changes (cyan squares), flares (lime circles), drop sequences (gold charge, sky-blue lull, magenta drop), and High/Low Trigger flags — only the moments that will actually fire, never a guess at what might. Three icon toggles (each drawing the markers it switches) show/hide analysed events, drop sequences and the Light Show flags; undo/redo step back and forward through the view changes you have made. Drag the window\'s body to pan, an edge to zoom; ◎ snaps back to following the playhead, ↔ shows the whole song. Below it, the Timeline page\'s own tuned audio shape — the same renderer, with its filled bands, time axis and beat lanes — shares the SAME playhead, with one thin row of controls under it for which bands and lanes draw. Quick sequences and Quick actions below that run his recent sequences and sets with one tap, without opening the Light Show page.',
     entries: [
       {
         id: 'song-timeline',
         title: 'The song timeline (every other page)',
         keywords: 'global strip next event countdown playhead one clock',
         body: [
-          'A thin, read-only strip between the menu and the top bar on every page except Home and the Timeline page (which carry their own editable copy): song and artist at the left, the whole song with the same markers Home shows, and on the right the next thing that will fire — its type and a countdown to a tenth of a second. Inside the last three seconds the box glows and fills as the moment approaches.',
+          'A thin, read-only strip between the menu and the top bar on every page except Home and the Timeline page (which carry their own editable copy): song and artist at the left, the whole song with the same markers Home shows, and on the right the next thing that will fire — its type and a countdown to a tenth of a second. Inside the last three seconds the box glows magenta and fills as the moment approaches, and the marker on the track flashes once as it fires.',
+          'IT IS ALWAYS THERE. With nothing playing it still draws its track and reads "Nothing playing", and when a song has nothing left to fire the next box reads "—". It never appears and disappears with playback, which would move every page\'s content by the height of the strip.',
+          'The track itself is an inset panel: a faint terrain of the song\'s own section energies behind the markers, the played part tinted purple, a gold CHARGE bar running into a sky-blue LULL bar and a numbered pink DROP pill along the bottom, and the Light Show\'s High/Low Triggers as flags from the top edge. A pulsing ring marks whatever fires next; markers that have passed fade.',
+          'Hover (or long-press) the song at the left for what is UP NEXT after this track; tapping it opens Home.',
           'Every playhead in the app — this strip, Home\'s own copy, and (where it reuses the same clock) the Timeline page\'s strips — reads the ONE SHOW CLOCK: the exact moment the trigger engine fires against, not raw Spotify playback position. Before this, different pages could each read a different "now" for the same song.',
         ],
       },
@@ -1187,7 +1182,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Next to ⚡ Energy on the top-bar strip. Every song has an intensity SCALING FACTOR — a multiplier on the live energy number above, based on its genre and how bass-forward it measures against the analysed library. 100% means no adjustment; a hyped-up genre like EDM lands well above 100%, a mellow one well below.',
           'Automatic scaling always tops out at a 75% delivered intensity, on ANY song, however hyped its genre — a deliberate gate, not a bug: the room only reaches full-scale hype effects on a track you\'ve personally marked as one, never automatically.',
-          'Tap "Mark" to set this song\'s factor by hand (0–200%) — the one way past that 75% ceiling. Editing gives you a real slider you can drag AND a number field next to it for the exact value — drag to get close, then type the precise percent (this factor drives how loud the room gets, so exact matters). A marked song keeps its number every time it plays again, not just this once. "Edit" changes it, "Clear" removes the mark and returns the song to automatic scaling.',
+          'Tap the MARK box to set this song\'s factor by hand (0–200%) — the one way past that 75% ceiling. It opens a small panel with a real slider you can drag AND a number field next to it for the exact value — drag to get close, then type the precise percent (this factor drives how loud the room gets, so exact matters). A marked song keeps its number every time it plays again, not just this once. "Clear", in that same panel, removes the mark and returns the song to automatic scaling.',
+          'The box itself is one fixed size whatever it says, so nothing in the bar moves when the number changes. Below desktop width it folds away and the ⚡ Energy control beside it opens the same panel instead.',
         ],
       },
       {
@@ -3072,7 +3068,8 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'The Show line in the top bar',
         keywords: 'top bar strip show holding levels running',
         body: [
-          'While the Light Show is holding anything — a fixture, a level, a changed setting, a running set or room effect, or a set armed and waiting — a "◈ Show: …" line appears in the top bar on every page. Tap it to open the Light Show. It disappears when the show holds nothing.',
+          'A slot in the top bar on every page: a sparkle (carrying a small badge counting everything the show is holding — a fixture, a level, a changed setting, a running set or room effect), then what is armed NOW with its own trigger icon and countdown, then "›" and what is next.',
+          'IT IS ALWAYS THERE. With nothing armed it reads "Nothing armed · tap to run an action" rather than disappearing, so the bar keeps its shape whether the show is busy or idle. Tapping it opens the Light Show\'s run page (the Sequence run view while a sequence is running).',
         ],
       },
     ],

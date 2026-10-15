@@ -26,13 +26,12 @@ export default function SequencerStatusStrip({ scenes }: { scenes: SceneV2[] }) 
       gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 14,
       flexWrap: 'wrap', padding: '8px 12px', fontSize: 12,
     }}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
-        Sequencer
-        <InfoTip
-          topic="tab-sequencing"
-          text="The scene's likelihood curve and minimum dwell, engine state, deferrals, and the room's current colour state."
-        />
-      </span>
+      <InfoTip
+        topic="tab-sequencing"
+        text="The scene's likelihood curve and minimum dwell, engine state, deferrals, and the room's current colour state."
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>Sequencer</span>
+      </InfoTip>
 
       {!st.enabled ? (
         <span style={{ color: 'var(--text-muted)' }}>

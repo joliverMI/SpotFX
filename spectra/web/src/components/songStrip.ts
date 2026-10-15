@@ -10,8 +10,8 @@
  * will never play is the same lie as a held room reading like a broken
  * one). */
 import { rankOpacity, rankTier, SCENE_TAB_HALF_WIDTH, FLARE_DOT_RADIUS } from '../debug/plannedEvents';
+import type { LibrosaSection } from '../timeline/types';
 import { PHASE_COLOR } from '../timeline/dropSequences';
-import type { IconName } from './iconRegistry';
 
 export type UpcomingKind =
   | 'scene' | 'flare' | 'colour' | 'charge' | 'lull' | 'drop' | 'high' | 'low';
@@ -46,14 +46,17 @@ export function fmtMMSS(ms: number): string {
   return `${m}:${String(s % 60).padStart(2, '0')}`;
 }
 
-/** Countdown to a tenth of a second — "12.4s" under a minute, "1:04.2"
- * over it (report §4's own examples). Never negative. */
+/** Countdown to a tenth of a second — "12.4s" and "99.9s", then plain
+ * "1:40" above that. THE MOCKUP'S OWN `cd()` RULE, boundary included
+ * (design-fidelity pass, 2026-10-14): tenths right up to 99.95s and none
+ * after, which is what makes "99.9s" the widest string the box can ever
+ * hold and therefore what its own fixed `4.4ch` count field is sized for.
+ * The first build switched to m:ss at 60s and kept a tenth after it
+ * ("1:04.2"), which is both wider than the field and a digit that
+ * changes ten times a second for minutes on end. Never negative. */
 export function fmtCountdown(ms: number): string {
-  const t = Math.max(0, ms) / 1000;
-  if (t < 60) return `${t.toFixed(1)}s`;
-  const m = Math.floor(t / 60);
-  const rest = t - m * 60;
-  return `${m}:${rest.toFixed(1).padStart(4, '0')}`;
+  const { value, unit } = countdownParts(ms);
+  return unit ? `${value}${unit}` : value;
 }
 
 const KIND_LABEL: Record<UpcomingKind, string> = {
@@ -74,11 +77,6 @@ export function eventLabel(e: Pick<UpcomingEvent, 'kind' | 'rank' | 'rank_of' | 
   return base;
 }
 
-export const KIND_ICON: Record<UpcomingKind, IconName> = {
-  scene: 'scene', flare: 'bolt', colour: 'bulb',
-  charge: 'pulse', lull: 'pulse', drop: 'pulse',
-  high: 'arrowUp', low: 'arrowDown',
-};
 
 export const KIND_COLOR: Record<UpcomingKind, string> = {
   scene: '#22d3ee', flare: '#a3e635', colour: '#c084fc',
@@ -191,36 +189,182 @@ export function drawShapeMarkers(
   ctx.globalAlpha = 1;
 }
 
-/** STRETCHED ICONS (the Admiral's report, 2026-10-14) — the strip's own
- * markers are drawn in an SVG whose `viewBox="0 0 100 39"` is stretched
- * to the rendered box with `preserveAspectRatio="none"`, so the X and Y
- * axes scale by DIFFERENT factors: X stretches by `renderedWidthPx / 100`
- * — anywhere from a few px/unit on a phone to well over ten on a wide
- * desktop bar — while Y is INTENDED to be 1:1 (the viewBox height, 39, is
- * set equal to the track's own fixed CSS height, `TRACK_H`) but measured
- * live at a few percent off that (37px rendered for a 39px box, some
- * layout rounding/box-model detail upstream of this module) — so BOTH
- * axes are measured and compensated, never one assumed exactly 1:1. A
- * marker whose width/height (or radius, or stroke-width) is given as the
- * SAME raw viewBox number in both directions — which every marker kind
- * here is — therefore renders many times wider than it is tall: a
- * "circle" is an ellipse, a "square" scene marker is a slab, a flag's
- * stroke is a wide bar. Positions (`cx`/`x` as a `%` string) are
- * untouched by this: SVG resolves a `%` length against the rendered
- * viewport directly, bypassing the viewBox transform entirely, which is
- * why only SIZES need fixing.
+/* ═══════════════════════════════════════════════════════════════════════
+ * THE TRACK'S OWN DRAWING (design-fidelity pass, 2026-10-14)
  *
- * The fix is `compensate`: divide a desired ON-SCREEN pixel size by the
- * actual stretch factor for its axis to get the viewBox-unit value that
- * renders at that many pixels — apply it to every size on BOTH axes (a
- * circle/ellipse's `rx`/`ry`, a rect's `width`/`height`, a rounded rect's
- * own `rx`/`ry`, a vertical line's `stroke-width`). `axisScale` is 1 (a
- * no-op) for a rendered size of 0 (not yet laid out) rather than dividing
- * by zero. */
-export function axisScale(renderedPx: number, viewBoxUnits: number): number {
-  return renderedPx > 0 && viewBoxUnits > 0 ? renderedPx / viewBoxUnits : 1;
+ * The approved mockup draws the 39px track as an INSET ROUNDED PANEL with
+ * four layers under its markers — audit T3, where the live strip was "a
+ * bare SVG on the gradient row". Every geometry constant below is the
+ * mockup's own (`buildTrack` in data/ui-layout-plan/explainer-final.html);
+ * re-lift from there rather than redrawing by eye. All of it is pure so
+ * `scripts/check_ui_fidelity.py` can assert the shapes with no browser.
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+/** The track's own fixed height, in CSS px and in viewBox units — the
+ * two are kept equal on purpose, since the viewBox is 1:1 with the
+ * rendered pixels (see `trackX`'s docstring). */
+export const TRACK_HEIGHT = 39;
+/** The mockup's own horizontal inset, so a marker at 0:00 or at the end
+ * is not half-clipped by the panel's own rounded corner. */
+export const TRACK_PAD = 8;
+/** Marker row centre; the drop band's own top; the terrain's own ceiling. */
+export const MARKER_CY = 17;
+export const DROP_BAND_Y = 29;
+export const TERRAIN_HEIGHT = 14;
+
+/** The inset panel itself (`.sp` surface2 on border, radius 6). */
+export const TRACK_FILL = 'var(--surface2)';
+export const TRACK_STROKE = 'var(--border)';
+/** The played portion's purple wash, and the terrain's fainter one — both
+ * the mockup's own literal rgba values (its own `--accent` at 17% / 10%). */
+export const PLAYED_TINT = 'rgba(168,85,247,0.17)';
+export const TERRAIN_FILL = 'rgba(168,85,247,0.10)';
+
+/** THE TRACK'S VIEWBOX IS 1:1 WITH ITS RENDERED PIXELS, which is what the
+ * approved mockup does (`buildTrack` measures `el.clientWidth` and emits
+ * `viewBox="0 0 w 39"`), and what every helper below assumes: an x is a
+ * pixel, a y is a pixel, a circle is a circle. The strip's FIRST build
+ * instead pinned `viewBox="0 0 100 39"` with `preserveAspectRatio="none"`
+ * and positioned markers with `%` strings, which stretched every SIZE by
+ * the x/y ratio — his own "the little icons on the top timeline are
+ * stretched really wide" report, patched then by dividing each size by a
+ * measured per-axis scale. A 1:1 viewBox removes the stretch at its
+ * source, and it is also the only way to draw the
+ * mockup's own mixed geometry (a pill offset half its own width from a
+ * timestamp, a triangular flag head) at all — an SVG geometry attribute
+ * takes no `calc()`.
+ *
+ * `x` for a timestamp, in those pixels, inside the panel's own padding so
+ * a marker at 0:00 or at the song's end is not half-clipped by the
+ * rounded corner. */
+export function trackX(ms: number, durationMs: number, widthPx: number): number {
+  const f = xFraction(ms, durationMs);
+  return TRACK_PAD + f * Math.max(0, widthPx - 2 * TRACK_PAD);
 }
 
-export function compensate(desiredPx: number, scale: number): number {
-  return scale > 0 ? desiredPx / scale : desiredPx;
+/** THE ENERGY TERRAIN (approved idea 4) — a faint step profile of the
+ * song's own section energies behind the markers, so the shape of the
+ * song is legible at a glance even with nothing playing yet. Real
+ * measured data: librosa's own per-section `energy_rms`
+ * (`useLibrosa(uri)`, already cached app-wide by the Timeline/debug
+ * pages), never a synthesised curve and never re-derived from a marker's
+ * RANK — rank orders a boundary's energy CHANGE, which is a different
+ * quantity (see spectra/services/midsong_generator.py's own planner).
+ *
+ * Returns an SVG path `d` in the track's own pixel space, or null when
+ * the song has no section analysis — in which case the strip draws no
+ * terrain rather than inventing one. */
+export function terrainPath(
+  sections: LibrosaSection[] | null | undefined,
+  durationMs: number,
+  widthPx: number,
+  heightPx: number = TRACK_HEIGHT,
+): string | null {
+  if (!sections || sections.length === 0 || durationMs <= 0 || widthPx <= 0) return null;
+  const k = heightPx / TRACK_HEIGHT;
+  const x = (ms: number) => trackX(ms, durationMs, widthPx).toFixed(2);
+  const floorY = ((TRACK_HEIGHT - 1) * k).toFixed(2);
+  const yFor = (energy: number) => {
+    const level = Math.max(0.15, Math.min(1, energy));
+    return (((TRACK_HEIGHT - 2) - level * TERRAIN_HEIGHT) * k).toFixed(2);
+  };
+  let d = `M${x(0)} ${floorY}`;
+  for (const sec of sections) {
+    const y = yFor(sec.energy_rms);
+    d += ` L${x(sec.start_ms)} ${y} L${x(Math.min(sec.end_ms, durationMs))} ${y}`;
+  }
+  d += ` L${x(durationMs)} ${floorY}Z`;
+  return d;
+}
+
+/** One drop sequence as the mockup draws it: a gold CHARGE bar running to
+ * the lull, a sky LULL bar running to the drop, and a pink numbered DROP
+ * pill on the mark (audit T3 — the live strip drew each member as a tiny
+ * separate dot with no badge). Grouped by the sequence's own `num`, which
+ * is what `/api/upcoming` already carries per member; a member with no
+ * `num` (older data) is its own band so it is never silently dropped. */
+export interface DropBand {
+  key: string;
+  num: number | null;
+  chargeMs: number | null;
+  lullMs: number | null;
+  dropMs: number | null;
+}
+
+export function dropBands(events: UpcomingEvent[]): DropBand[] {
+  const byNum = new Map<string, DropBand>();
+  for (const e of events) {
+    if (e.kind !== 'charge' && e.kind !== 'lull' && e.kind !== 'drop') continue;
+    const key = e.num != null ? `n${e.num}` : `${e.kind}@${e.ms}`;
+    let band = byNum.get(key);
+    if (!band) {
+      band = { key, num: e.num ?? null, chargeMs: null, lullMs: null, dropMs: null };
+      byNum.set(key, band);
+    }
+    if (e.kind === 'charge') band.chargeMs = e.ms;
+    else if (e.kind === 'lull') band.lullMs = e.ms;
+    else band.dropMs = e.ms;
+  }
+  return [...byNum.values()].sort((a, b) => (
+    (a.chargeMs ?? a.lullMs ?? a.dropMs ?? 0) - (b.chargeMs ?? b.lullMs ?? b.dropMs ?? 0)
+  ));
+}
+
+/** Where the "it is next" ring sits vertically for each event kind — the
+ * mockup's own three rows: flags at the top edge, scenes/flares on the
+ * marker row, drop members in the bottom band. */
+export function ringCy(kind: UpcomingKind): number {
+  if (kind === 'high' || kind === 'low') return 5;
+  if (kind === 'charge' || kind === 'lull' || kind === 'drop') return 32;
+  return MARKER_CY;
+}
+
+/** The countdown split into its number and its unit, so the unit can be
+ * drawn as the mockup's own smaller, muted `<small>` rather than being
+ * part of the bold figure (audit T4). See `fmtCountdown` for the
+ * boundary rule. */
+export function countdownParts(ms: number): { value: string; unit: string | null } {
+  const t = Math.max(0, ms) / 1000;
+  if (t < 99.95) return { value: t.toFixed(1), unit: 's' };
+  const m = Math.floor(t / 60);
+  const sec = Math.floor(t - m * 60);
+  return { value: `${m}:${String(sec).padStart(2, '0')}`, unit: null };
+}
+
+/** THE NEXT-EVENT BOX'S OWN TYPE GLYPH IS THE MARKER SHAPE, FILLED —
+ * the mockup's own `kindIcon()` (design-fidelity pass, 2026-10-14): a
+ * cyan square for a scene, a lime circle for a flare, a gold wedge for a
+ * charge, two sky bars for a lull, a pink pill carrying the drop's own
+ * NUMBER, a white up-triangle for High and an indigo down-triangle for
+ * Low. The first build drew a muted stroke icon from the shared registry
+ * instead, which reads as a generic chip rather than "the thing on the
+ * track that is about to fire" (audit T4).
+ *
+ * Returns SVG markup for a `viewBox="0 0 16 16"` element, so the caller's
+ * rAF loop can swap it with one `innerHTML` write and no React render. */
+export function kindGlyphSvg(kind: UpcomingKind, num?: number | null): string {
+  const c = KIND_COLOR[kind];
+  switch (kind) {
+    case 'scene':
+      return `<rect x="2" y="2" width="12" height="12" rx="2.5" fill="${c}"/>`;
+    case 'flare':
+      return `<circle cx="8" cy="8" r="5.5" fill="${c}"/>`;
+    case 'charge':
+      return `<path d="M2 13L14 3V13Z" fill="${c}"/>`;
+    case 'lull':
+      return `<rect x="3" y="3" width="3.4" height="10" rx="1" fill="${c}"/>`
+        + `<rect x="9.6" y="3" width="3.4" height="10" rx="1" fill="${c}"/>`;
+    case 'drop':
+      return `<rect x="3" y="1.5" width="10" height="13" rx="5" fill="${c}"/>`
+        + (num != null
+          ? `<text x="8" y="11.2" font-size="8.5" font-weight="800" text-anchor="middle"`
+            + ` fill="#14061f" font-family="inherit">${num}</text>`
+          : '');
+    case 'high':
+      return `<path d="M8 2L14 12H2Z" fill="${c}"/>`;
+    case 'low':
+      return `<path d="M8 14L2 4H14Z" fill="${c}"/>`;
+    default:
+      return '';
+  }
 }

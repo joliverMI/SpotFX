@@ -1244,6 +1244,10 @@ export interface EngineStatus {
        * interpolates between this poll's reads and the 1 Hz WS push. */
       show_clock_ms: number | null;
     } | null;
+    /** "Up next" — already on bridge.status()'s own payload (Show
+     * Playlists' read half), surfaced by the song timeline's own hover
+     * description (approved idea 7). */
+    next_track: { uri: string | null; title: string } | null;
     deferral: string | null;
     intensity: number | null;
     genre_bucket: string | null;

@@ -13,6 +13,11 @@ import type { IconName } from '../components/iconRegistry';
 export interface NavItem {
   to: string;
   label: string;
+  /** The item's own 16px stroke glyph — the approved mockup draws one per
+   * dropdown row (design-fidelity pass, 2026-10-14; without them the
+   * dropdown reads as a plain text list). Names come from the mockup's own
+   * icon table, lifted into components/iconRegistry.ts. */
+  icon: IconName;
   /** True when `pathname` is "on" this item — matches the existing
    * per-link `cls()` rules in the old NavBar (e.g. '/' and '/scenes' both
    * highlight Scenes). */
@@ -39,12 +44,12 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Artifacts',
     icon: 'cube',
     items: [
-      { to: '/scenes', label: 'Scenes', match: (p) => p.startsWith('/scenes') },
-      { to: '/colorsets', label: 'Colours', match: prefix('/colorsets') },
-      { to: '/devices', label: 'Devices', match: exact('/devices') },
-      { to: '/rooms', label: 'Rooms', match: exact('/rooms') },
-      { to: '/room-effects', label: 'Room FX', match: exact('/room-effects') },
-      { to: '/show', label: 'Light Show', match: exact('/show') },
+      { to: '/scenes', label: 'Scenes', match: (p) => p.startsWith('/scenes'), icon: 'scene' },
+      { to: '/colorsets', label: 'Colours', match: prefix('/colorsets'), icon: 'palette' },
+      { to: '/devices', label: 'Devices', match: exact('/devices'), icon: 'devices' },
+      { to: '/rooms', label: 'Rooms', match: exact('/rooms'), icon: 'rooms' },
+      { to: '/room-effects', label: 'Room FX', match: exact('/room-effects'), icon: 'roomfx' },
+      { to: '/show', label: 'Light Show', match: exact('/show'), icon: 'spark' },
     ],
   },
   {
@@ -52,15 +57,15 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Engine',
     icon: 'gauge',
     items: [
-      { to: '/debug', label: 'Debug', match: exact('/debug') },
-      { to: '/status', label: 'Status', match: exact('/status') },
-      { to: '/timing', label: 'Timing', match: exact('/timing') },
-      { to: '/review', label: 'Review', match: exact('/review') },
-      { to: '/feedback', label: 'Feedback', match: exact('/feedback') },
-      { to: '/avsync', label: 'AV Sync', match: exact('/avsync') },
-      { to: '/house', label: 'House', match: exact('/house') },
-      { to: '/testbed', label: 'Test Bed', match: exact('/testbed') },
-      { to: '/timeline', label: 'Timeline', match: exact('/timeline') },
+      { to: '/debug', label: 'Debug', match: exact('/debug'), icon: 'bug' },
+      { to: '/status', label: 'Status', match: exact('/status'), icon: 'pulse' },
+      { to: '/timing', label: 'Timing', match: exact('/timing'), icon: 'clock' },
+      { to: '/review', label: 'Review', match: exact('/review'), icon: 'review' },
+      { to: '/feedback', label: 'Feedback', match: exact('/feedback'), icon: 'chat' },
+      { to: '/avsync', label: 'AV Sync', match: exact('/avsync'), icon: 'sync' },
+      { to: '/house', label: 'House', match: exact('/house'), icon: 'home' },
+      { to: '/testbed', label: 'Test Bed', match: exact('/testbed'), icon: 'flask' },
+      { to: '/timeline', label: 'Timeline', match: exact('/timeline'), icon: 'timeline' },
     ],
   },
   { id: 'settings', label: 'Settings', icon: 'settings', to: '/settings' },

@@ -49,10 +49,16 @@ import {
 } from './modeChipHold';
 import { useToast } from './Toast';
 
-const RING_SIZE = 16;
-const STROKE = 2;
-const RADIUS = (RING_SIZE - STROKE) / 2;
-const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+/** THE HOLD RING SITS OUTSIDE THE BUTTON (design-fidelity pass,
+ * 2026-10-14 — the approved mockup's own `.sp .house .holdring`, `inset:
+ * -4px`): "so holding moves nothing" (audit B1). It used to be a 16px
+ * circle drawn INSIDE the 34px chip, next to the icon, which both shrank
+ * the glyph's room and read as a second control. It is now a rounded-rect
+ * stroke tracing the button's own 36px outline, 4px outside it, with
+ * `pathLength=100` so one `stroke-dashoffset` number IS the percentage —
+ * the mockup's own trick, and simpler than a circumference calculation. */
+const RING_INSET = 4;
+const RING_BOX = 36 + RING_INSET * 2;
 const HOLD_MS = 1000;
 
 export default function ModeChip() {
@@ -74,8 +80,14 @@ export default function ModeChip() {
 
   const { progress, pressing, justReleasedEarly, bind } = useHoldToConfirm(HOLD_MS, doToggle);
 
+  const musicHasTheRoom = tone === 'music';
+
   return (
-    <span className={`mode-chip mode-chip-${tone}`}>
+    <InfoTip
+      className={`mode-chip mode-chip-${tone}`}
+      topic="house-chip"
+      text="Lit while a house mode drives the room, with a ♪ badge while music has it, dim when house lighting is off. Tap to open House; hold ~1s to turn house lighting on/off."
+    >
       <Link
         to="/house"
         className="mode-chip-link"
@@ -103,38 +115,35 @@ export default function ModeChip() {
           firedRef.current = false;
         }}
       >
+        <Icon name="home" size={18} />
+        {/* The ♪ BADGE the mockup draws on the corner while music has the
+          * room (audit B1) — drawn, never the Unicode character. */}
+        {musicHasTheRoom && (
+          <span className="mode-chip-music-badge" aria-hidden>
+            <Icon name="note" size={9} />
+          </span>
+        )}
         {pressing && (
           <svg
             className="mode-chip-hold-ring"
-            width={RING_SIZE}
-            height={RING_SIZE}
-            viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`}
+            viewBox={`0 0 ${RING_BOX} ${RING_BOX}`}
             aria-hidden="true"
           >
-            <circle
-              cx={RING_SIZE / 2}
-              cy={RING_SIZE / 2}
-              r={RADIUS}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={STROKE}
-              strokeDasharray={CIRCUMFERENCE}
-              strokeDashoffset={CIRCUMFERENCE * (1 - progress)}
-              transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`}
+            <rect
+              x={1.5} y={1.5} width={RING_BOX - 3} height={RING_BOX - 3} rx={11}
+              fill="none" stroke="currentColor" strokeWidth={3}
+              pathLength={100} strokeDasharray={100}
+              strokeDashoffset={100 - progress * 100}
             />
           </svg>
         )}
-        <Icon name="home" size={16} />
       </Link>
-      <InfoTip
-        topic="house-chip"
-        text="Green while the house mode is on the room, purple while music has it, amber when paused or not applied. Tap to open House; hold ~1s to turn house lighting on/off."
-      />
-      {(pressing || justReleasedEarly) && (
-        <span className="mode-chip-hold-hint" role="status">
-          {pressing ? 'Keep holding…' : 'Hold to turn house lighting on/off'}
-        </span>
-      )}
-    </span>
+      {/* `justReleasedEarly` is still read so a short tap's own feedback
+        * stays in the accessible name rather than popping a text hint
+        * under the bar (the mockup has no such hint — audit B1). */}
+      <span className="sr-only" role="status">
+        {pressing ? 'Keep holding to switch house lighting' : justReleasedEarly ? 'Hold to turn house lighting on/off' : ''}
+      </span>
+    </InfoTip>
   );
 }

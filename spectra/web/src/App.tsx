@@ -1,10 +1,7 @@
 import { useEffect } from 'react';
 import { Route, Routes, useLocation } from 'react-router-dom';
-import NavBar from './nav/NavBar';
-import RoomControlsBar from './components/RoomControlsBar';
 import RoomOwnershipBar from './components/RoomOwnershipBar';
 import TestingBar from './components/TestingBar';
-import TopBarStrip from './components/TopBarStrip';
 import { ToastProvider } from './components/Toast';
 import ColorSetsPage from './colorsets/ColorSetsPage';
 import DevicesPage from './devices/DevicesPage';
@@ -25,7 +22,7 @@ import RoomEffectsPage from './roomeffects/RoomEffectsPage';
 import DebugPage from './debug/DebugPage';
 import LightShowPage from './lightshow/LightShowPage';
 import HousePage from './house/HousePage';
-import SongStrip from './components/SongStrip';
+import AppChrome, { showsSongStrip } from './components/AppChrome';
 import KioskPage from './kiosk/KioskPage';
 import { isKioskRequested } from './kiosk/kioskConfig';
 import { useShowClockSeed } from './queries';
@@ -91,8 +88,9 @@ export default function App() {
   }
   // THE GLOBAL SONG TIMELINE (song-layout-plan §4) sits on every page
   // except Home and Timeline, which carry their own editable copy (§13
-  // decision 5) — and not on the Live pop-out, handled above.
-  const hideSongStrip = pathname === '/' || pathname === '/timeline';
+  // decision 5) — and not on the Live pop-out, handled above. The rule
+  // itself lives in AppChrome.tsx so the harness that renders this same
+  // chrome uses it too, rather than its own idea of where the strip goes.
   return (
     <ToastProvider>
       {/* FIRST, above NavBar — this must genuinely be the top bar on every
@@ -100,19 +98,11 @@ export default function App() {
         * confirmed "not testing", so it costs no vertical space in normal
         * use; see TestingBar.tsx for why "unknown" still shows. */}
       <TestingBar />
-      <NavBar />
-      {/* ONE BAR (UI declutter plan §3): RoomControlsBar and TopBarStrip
-        * each still own their own state/logic, but `display: contents` on
-        * both of their root divs (tokens.css) lets their children act as
-        * direct flex items of `.one-bar` — one visual row, explicit
-        * `order` per occupant (tokens.css) rather than a DOM rewrite of
-        * either component. */}
-      <div className="one-bar">
-        <RoomControlsBar />
-        <TopBarStrip />
-      </div>
+      {/* MENU, TIMELINE, BAR — the approved mockups' own order, and the
+        * ONE composition the design-fidelity gate renders too (see
+        * components/AppChrome.tsx on why it is shared, not duplicated). */}
+      <AppChrome showSongStrip={showsSongStrip(pathname)} />
       <RoomOwnershipBar />
-      {!hideSongStrip && <SongStrip />}
       <main className={pathname === '/' ? 'home-route' : undefined}>
         <Routes>
           <Route path="/" element={<HomePage />} />

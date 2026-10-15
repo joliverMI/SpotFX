@@ -99,7 +99,10 @@ const tmp = mkdtempSync(join(tmpdir(), 'home-light-show-'));
 const songStripFix = {
   name: 'songstrip-case-fix',
   setup(b) {
-    b.onResolve({ filter: /components\/songStrip$/ }, () => (
+    // `./songStrip` as well as `../components/songStrip` — since the
+    // 2026-10-14 design-fidelity pass `components/trackPainter.ts`
+    // imports it as a SIBLING, which hits the same resolver quirk.
+    b.onResolve({ filter: /(^|\/)songStrip$/ }, () => (
       { path: join(webDir, 'src/components/songStrip.ts') }
     ));
   },
@@ -200,13 +203,21 @@ dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
   return { left: 0, top: 0, right: 1000, bottom: 160, width: 1000, height: 160, x: 0, y: 0, toJSON() {} };
 };
 
+// `canvasCalls` records every draw op AND every strokeStyle/fillStyle the
+// canvas's own 2D context is handed — the seam that lets the behavioural
+// check below (THREE) see what the shape canvas actually drew, rather
+// than reading HomeTimeline.tsx's source text for the ternary that feeds
+// it.
+const canvasCalls = [];
 const fakeCtxProto = {
-  get fillStyle() { return this._f; }, set fillStyle(v) { this._f = v; },
-  get strokeStyle() { return this._s; }, set strokeStyle(v) { this._s = v; },
-  set globalAlpha(v) {}, set lineWidth(v) {}, setTransform() {}, clearRect() {},
+  get fillStyle() { return this._f; },
+  set fillStyle(v) { this._f = v; canvasCalls.push(['fillStyle', v]); },
+  get strokeStyle() { return this._s; },
+  set strokeStyle(v) { this._s = v; canvasCalls.push(['strokeStyle', v]); },
+  set globalAlpha(v) {}, set lineWidth(v) {}, setTransform() {}, clearRect() {}, setLineDash() {},
+  save() {}, restore() {},
   beginPath() {}, closePath() {}, fillRect() {}, arc() {}, fill() {}, moveTo() {}, lineTo() {}, stroke() {},
 };
-const canvasCalls = [];
 const recordingCtx = Object.create(fakeCtxProto);
 for (const m of ['fillRect', 'arc', 'fill', 'moveTo', 'lineTo', 'stroke', 'beginPath']) {
   recordingCtx[m] = (...a) => canvasCalls.push([m, ...a]);
@@ -227,11 +238,40 @@ const SHAPE_META = {
   timestamp_offset_ms: 0, perception_trim_ms: 0, offset_verification: 'auto_verified',
 };
 const SHAPE_DATA = { timestamps_ms: [], rms_total: [], rms_low: [], rms_mid: [], rms_high: [], avg_rms_1s: null };
+// A real "high" cue and no "low" one, served the shape `/analysed-plan`'s
+// own `show_cues` field carries (spectra/services/show_cues.py via
+// lightshow/types.ts' SongCues) — this is what lets `lightShowCueMarkers`
+// actually produce a marker for THREE below to observe, rather than the
+// empty list it would silently fall back to with nothing mocked here.
+const SHOW_CUES = {
+  uri: 'spotify:track:perf', reason: null, duration_ms: 200000,
+  high: {
+    level: 'high', timestamp_ms: 15000, source: 'auto', shift: null,
+    auto_ms: 15000, auto_shift: null, drop_mark_ms: null, alternates: [],
+    runner_up_close: false, moved_ms: null,
+  },
+  low: null,
+};
+const ANALYSED_PLAN = {
+  uri: 'spotify:track:perf', applies: false, reason: null, effective_mode: 'full',
+  has_authored: false, scene_source: null, scene_changes: [], flares: [],
+  show_clock_shift_ms: 0, show_cues: SHOW_CUES,
+};
+const ARMS_STATUS = {
+  armed: [], history: [],
+  song: {
+    uri: null, position_ms: null, cues: null,
+    expected_scene_change_s: null, expected_scene_change_is_floor: false,
+  },
+  last_crossed: {}, refusal: null,
+};
 const fakeFetch = async (url) => {
   const u = String(url);
   const json = (body) => new NodeResponse(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
   if (u.includes('/audio-shape/meta')) return json(SHAPE_META);
   if (u.includes('/audio-shape/data')) return json(SHAPE_DATA);
+  if (u.includes('/analysed-plan')) return json(ANALYSED_PLAN);
+  if (u.includes('/light-show/arms')) return json(ARMS_STATUS);
   throw new Error(`unexpected fetch ${u}`);
 };
 globalThis.fetch = fakeFetch;
@@ -283,6 +323,18 @@ export async function click(el) {
 const entryFile = join(tmp, 'entry.mjs');
 writeFileSync(entryFile, entrySrc);
 const outFile = join(tmp, 'out.cjs');
+// jsdom ships no ResizeObserver; the shared track painter observes its
+// own SVG with one (see check_home_timeline_responsiveness.mjs's own
+// note on this stub).
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    constructor(cb) { this.cb = cb; }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 const build = await esbuild.build({
   entryPoints: [entryFile], bundle: true, format: 'cjs', platform: 'node', jsx: 'automatic',
   outfile: outFile, nodePaths: [join(webDir, 'node_modules')], logLevel: 'silent',
@@ -295,35 +347,66 @@ await flush();
 tickRaf(2);
 
 const strip = () => container.querySelector('.song-strip-svg g');
-const lightShowToggle = () => [...container.querySelectorAll('.home-timeline-toggles button')]
-  .find((b) => b.getAttribute('title') === 'Light Show');
+// The toggles moved into `.home-timeline-tools` and their titles grew in
+// the 2026-10-14 design-fidelity pass (audit H2) — matched by a prefix so
+// a later wording tweak does not silently stop finding the control.
+const lightShowToggle = () => [...container.querySelectorAll('.home-timeline-tools button')]
+  .find((b) => (b.getAttribute('title') ?? '').startsWith('Light Show'));
 
-const svgKinds = () => [...strip().children].map((el) => (
-  el.tagName === 'rect' && el.getAttribute('y') === '15' ? 'scene'
-    : el.tagName === 'circle' ? 'flare'
-    : el.tagName === 'rect' ? 'drop-like'
-    : el.tagName === 'line' ? 'flag' : '?'
-));
+// Classified by the marker's own FILL — the one thing that identifies a
+// kind regardless of which shape the shared painter draws it as (a flag is
+// a stem `line` PLUS a triangular `path`; a drop is a pill `rect`; the
+// panel and the terrain are a `rect`/`path` too).
+const KIND_BY_FILL = {
+  '#22d3ee': 'scene', '#a3e635': 'flare',
+  '#fbbf24': 'charge', '#38bdf8': 'lull', '#ec4899': 'drop',
+  '#f5f5f4': 'flag-high', '#818cf8': 'flag-low',
+};
+const svgKinds = () => [...strip().children].flatMap((el) => {
+  const fill = el.getAttribute('fill');
+  const stroke = el.getAttribute('stroke');
+  const k = KIND_BY_FILL[fill] ?? KIND_BY_FILL[stroke];
+  return k ? [k] : [];
+});
+const flags = (kinds) => kinds.filter((k) => k.startsWith('flag-')).length;
+
+// THE SHAPE CANVAS's own Light Show flags come from the SHARED
+// `lightShowMarkers` canvas layer (Home mounts the Timeline page's own
+// TimelineCanvas + BUILDER_LAYERS since the 2026-10-14 design-fidelity
+// pass — audit H5), fed by HomeTimeline.tsx's own `filters.lightShow ?
+// lightShowCueMarkers(...) : []`. Proven BEHAVIOURALLY below, through
+// `canvasCalls` (the recording 2D context the canvas mount already
+// uses): the real "high" cue mocked above (served from `/analysed-plan`'s
+// `show_cues`, the Light Show's actual store) draws the layer's own
+// stroke colour while the toggle is ON, and it is gone once the SAME
+// click that clears the strip's flags (below) is fired — the property
+// the deleted source-grep stood in for, observed rather than read off
+// the ternary's own spelling.
+const HIGH_STROKE = '#f5f5f4'; // lightShowMarkers.ts's own LIGHT_SHOW_COLOR.high
+const canvasDrewHighFlag = () => canvasCalls.some((c) =>
+  (c[0] === 'strokeStyle' || c[0] === 'fillStyle') && c[1] === HIGH_STROKE);
 
 const before = svgKinds();
-ok(before.filter((k) => k === 'flag').length === 2, `both high/low flags are drawn on the strip before toggling (${before})`);
+ok(flags(before) === 4,
+  `both high/low flags are drawn on the strip before toggling — a stem and a head each (${before})`);
 ok(lightShowToggle()?.getAttribute('aria-checked') === 'true', 'the "Light Show" toggle starts ON');
+ok(canvasDrewHighFlag(),
+  'the shape canvas ALSO drew the "high" cue — the real list handed to the shared canvas '
+  + 'layer, not just the strip — while "Light Show" is ON');
 
+canvasCalls.length = 0;
 await click(lightShowToggle());
 tickRaf(2);
 await flush();
 
 const after = svgKinds();
-ok(after.filter((k) => k === 'flag').length === 0, `toggling "Light Show" off removes both flags from the strip (${after})`);
+ok(flags(after) === 0, `toggling "Light Show" off removes both flags from the strip (${after})`);
 ok(after.filter((k) => k === 'scene').length === 1 && after.filter((k) => k === 'flare').length === 1
-   && after.filter((k) => k === 'drop-like').length === 1,
+   && after.filter((k) => k === 'drop').length === 1,
   'scene/flare/drop markers are untouched by the Light Show toggle');
-
-canvasCalls.length = 0;
-tickRaf(1);
-const flagOnCanvas = canvasCalls.some((c, i) => c[0] === 'moveTo' && c[2] === 0
-  && canvasCalls[i + 1] && canvasCalls[i + 1][0] === 'lineTo' && canvasCalls[i + 1][1] === c[1] && canvasCalls[i + 1][2] === 8);
-ok(!flagOnCanvas, 'with "Light Show" toggled off, the shape canvas\'s own overlay draws no flag either');
+ok(!canvasDrewHighFlag(),
+  'the shape canvas draws NOTHING for the cue once "Light Show" is toggled off — the list the '
+  + 'canvas layer was handed is genuinely empty, not merely the SVG strip\'s own overlay');
 
 console.log(failures ? `\n${failures} FAILED` : '\nall passed — high/low ARE the Light Show\'s own High/Low Trigger cues, drawn consistently everywhere, and "colour" is never mistaken for one');
 process.exit(failures ? 1 : 0);
