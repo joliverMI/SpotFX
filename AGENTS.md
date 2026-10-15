@@ -12022,37 +12022,17 @@ the row COUNT per width, not just a height ceiling — a stray third row
 or a silent collapse back to one are both regressions this now catches
 that a pure height check cannot.
 
-## SONG TIMELINE MARKERS — the `preserveAspectRatio="none"` SVG stretch, and why BOTH axes need compensating
+## SONG TIMELINE MARKERS — superseded, see "THE DESIGN-FIDELITY GATE" below
 
-`SongStrip.tsx`/`HomeTimeline.tsx` draw their markers (scene squares,
-flare circles, charge/lull/drop bars, High/Low flags) into an SVG whose
-`viewBox="0 0 100 39"` is force-stretched to the rendered box
-(`preserveAspectRatio="none"`) so a scene/colour name of any length still
-positions correctly via `%`-string `x`/`cx` (SVG resolves a `%` length
-against the rendered viewport directly, bypassing the viewBox transform).
-**Every SIZE attribute — `width`/`height`, `r`, a rounded rect's `rx`, a
-line's `stroke-width` — was a bare, unscaled viewBox number, which gets
-stretched by whatever the viewBox-to-viewport ratio happens to be: X
-stretches by `renderedWidthPx/100` (a few px/unit on a phone, well over
-ten on a wide desktop bar) and Y — found live, NOT exactly 1:1 the way a
-first draft of this fix assumed, because a border-box border eats a
-couple of the container's nominal 39px — stretches by its own, separate
-`renderedHeightPx/39`.** A "circle" with the same raw number for both
-axes therefore rendered as a wide ellipse, a "square" as a slab — the
-Admiral's own report, "the little icons on the top timeline are stretched
-really wide." Fix: `songStrip.ts`'s `axisScale(renderedPx, viewBoxUnits)`
-+ `compensate(desiredPx, scale)`, measured fresh off the SVG's own
-`getBoundingClientRect()` on EVERY marker rebuild (a `ResizeObserver` on
-SongStrip's own rebuild-on-data-change effect; HomeTimeline already
-redraws on a 500ms interval, so no observer needed there) and applied to
-every size on BOTH axes — never assume either axis is 1:1, measure both.
-The charge/lull/drop bars are a deliberately OBLONG pill (10:6 or 4:6),
-not meant to land at ratio 1 — the fix preserves THEIR intended ratio,
-not a blanket "make everything round." Spec:
-`scripts/check_song_strip.mjs` §FIVE (pure math, including a red control
-against the pre-fix formula) — the real on-screen pixel sizes were
-independently confirmed in a live headless-Chromium render before
-trusting the math alone.
+The original fix for the stretched-icon report (a `viewBox="0 0 100 39"`
+force-stretched to the rendered box, so a marker's raw size scaled by a
+different factor per axis) was a per-axis `axisScale`/`compensate`
+compensation in `songStrip.ts`. The design-fidelity pass's
+`trackPainter.paintTrack` replaced the stretched viewBox with a 1:1-pixel
+one at its source instead (an x is a pixel, a circle is a circle) —
+`axisScale`/`compensate` are REMOVED, not merely superseded, and nothing
+in this codebase calls them any more. See `songStrip.ts`'s own `trackX`
+docstring and "THE DESIGN-FIDELITY GATE" below for the current mechanism.
 
 ## THE DESIGN-FIDELITY GATE — compare the page to the mockup, or it drifts (2026-10-14)
 
@@ -12146,10 +12126,10 @@ global strip and Home's editable copy, which had drifted into two
 implementations. It rewrites the SVG's `viewBox` to the measured pixel
 box every build, so an x is a pixel and a circle is a circle; the
 stretched `0 0 100 39` viewBox that forced `axisScale`/`compensate` (see
-the section above, still used by Home's own markers) is gone from these
-two. An SVG geometry attribute takes no `calc()`, which is the other
-reason: the mockup's pill-offset-by-half-its-width and triangular flag
-heads cannot be expressed in percent at all.
+the section above — both functions are now dead and removed) is gone
+from these two. An SVG geometry attribute takes no `calc()`, which is
+the other reason: the mockup's pill-offset-by-half-its-width and
+triangular flag heads cannot be expressed in percent at all.
 
 ## Maintaining this file
 
