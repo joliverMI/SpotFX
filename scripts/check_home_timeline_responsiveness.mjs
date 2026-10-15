@@ -44,7 +44,7 @@
 //
 // Run: node scripts/check_home_timeline_responsiveness.mjs
 //   (needs the dev-only jsdom: cd spectra/web && npm install --no-save jsdom)
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -235,11 +235,29 @@ const outFile = join(tmpDir, 'out.cjs');
 const songStripFix = {
   name: 'songstrip-case-fix',
   setup(b) {
-    b.onResolve({ filter: /components\/songStrip$/ }, () => (
+    // `./songStrip` as well as `../components/songStrip` — since the
+    // 2026-10-14 design-fidelity pass `components/trackPainter.ts`
+    // imports it as a SIBLING, which hits the same resolver quirk.
+    b.onResolve({ filter: /(^|\/)songStrip$/ }, () => (
       { path: join(webDir, 'src/components/songStrip.ts') }
     ));
   },
 };
+// jsdom ships no ResizeObserver, and the shared track painter
+// (spectra/web/src/components/trackPainter.ts, adopted by Home in the
+// 2026-10-14 design-fidelity pass so Home and the global strip draw ONE
+// picture) observes its own SVG with one. A minimal stub: record the
+// observed node so the test can trigger a rebuild deliberately, never on
+// a layout jsdom does not have.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    constructor(cb) { this.cb = cb; }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 const build = await esbuild.build({
   entryPoints: [entryFile], bundle: true, format: 'cjs', platform: 'node', jsx: 'automatic',
   outfile: outFile, nodePaths: [join(webDir, 'node_modules')], logLevel: 'silent',
@@ -283,52 +301,63 @@ console.log('ONE — a window drag never rebuilds the strip\'s marker SVG nodes'
     `the overlay's drawn position moved (was ${JSON.stringify(before)}, now ${JSON.stringify(overlay.style.left)})`);
 }
 
-console.log('THREE — the shape canvas is redrawn from the rAF loop, not a React effect');
+console.log('THREE — the shape IS the Timeline page\'s own renderer, not a second one');
 {
-  const before = clearRectCalls;
-  tickRaf(3); // no prop/state change at all — only animation frames
-  ok(clearRectCalls === before + 3, `three manual frame ticks drew exactly three times (clearRect calls: ${clearRectCalls - before})`);
+  // THE H5 FIX (2026-10-14 design-fidelity pass): Home used to draw its
+  // own 160px three-thin-lines canvas; the approved mockup copies the
+  // Timeline page's tuned canvas, so this card now mounts the REAL
+  // `TimelineCanvas` with `BUILDER_LAYERS`. That is a STRUCTURAL
+  // property of the source — asserted here rather than by re-measuring
+  // the canvas, because the canvas and its rAF loop now belong to
+  // TimelineCanvas.tsx, which carries its own DPR/resize guard and its
+  // own proofs (scripts/check_timeline_*.mjs, check_song_strip_fps.py).
+  const src = readFileSync(join(webDir, 'src/home/HomeTimeline.tsx'), 'utf8');
+  ok(/<TimelineCanvas/.test(src) && /layers=\{BUILDER_LAYERS\}/.test(src),
+    'HomeTimeline mounts TimelineCanvas with BUILDER_LAYERS (the Timeline page\'s own layers)');
+  ok(!/home-timeline-shape-canvas/.test(src),
+    'the bespoke 160px shape canvas is gone — no second renderer left behind');
+  ok(/getNowMs=\{getShowClockMs\}/.test(src),
+    'the canvas reads the ONE show clock, the same clock the strip\'s playhead reads');
+  const canvas = container.querySelector('.home-timeline-shape canvas');
+  ok(!!canvas, 'a canvas is actually mounted inside the shape box');
 }
 
-console.log('FOUR — the canvas backing buffer resizes only when the measured size actually changes');
+console.log('FOUR — the strip\'s own per-frame work still touches no React state');
 {
-  const canvas = container.querySelector('.home-timeline-shape-canvas');
-  const w0 = canvas.width, h0 = canvas.height;
-  ok(w0 === 800 && h0 === 160, `the canvas sized itself to the measured 800x160 (got ${w0}x${h0})`);
-  tickRaf(5); // same measured size every tick
-  ok(canvas.width === w0 && canvas.height === h0,
-    'five more frames at an unchanged measured size never touch canvas.width/height again');
+  // The strip keeps its own rAF loop (playhead, window overlay, time
+  // readout, passed-marker fade). Its marker nodes must not be rebuilt
+  // by plain frames either — ONE proved that across a drag, this proves
+  // it across frames with nothing changing at all.
+  const markersGroup = container.querySelector('.song-strip-svg g');
+  const firstMarker = markersGroup.children[0];
+  const n = markersGroup.children.length;
+  tickRaf(5);
+  await flush();
+  ok(container.querySelector('.song-strip-svg g') === markersGroup
+    && markersGroup.children[0] === firstMarker && markersGroup.children.length === n,
+    'five frames with nothing changed leave every marker node identical');
 }
 
-console.log('FIVE — the shape canvas carries marker overlays for every upcoming-event kind');
+console.log('FIVE — the strip draws the shared painter\'s own full picture');
 {
-  // Test ONE's drag left the window scrolled to wherever the drag ended
-  // (TWO proved exactly that) — reset to the full song via the same
-  // "Full song" button a real user would press, so every one of the
-  // fixture's events (spread across the whole duration) is back in view.
-  await fire(container.querySelector('.home-timeline-fullsong'), 'click', {});
-  tickRaf(1);
-
-  // Swap in a ctx that records calls for exactly one tick, so we can see
-  // what the SAME frame that draws the trace also draws for markers.
-  const canvas = container.querySelector('.home-timeline-shape-canvas');
-  const calls = [];
-  const recordingCtx = Object.create(fakeCtxProto);
-  for (const m of ['fillRect', 'arc', 'fill', 'moveTo', 'lineTo', 'stroke', 'beginPath']) {
-    recordingCtx[m] = (...a) => calls.push([m, ...a]);
-  }
-  canvas.__ctx = recordingCtx;
-  tickRaf(1);
-
-  ok(calls.some((c) => c[0] === 'fillRect'), 'at least one square/bar marker (scene, charge, drop, …) was drawn');
-  ok(calls.some((c) => c[0] === 'arc'), 'a flare circle marker was drawn');
-  // The flag marker is a 2-point VERTICAL line (moveTo(x,0) -> lineTo(x,8))
-  // — distinct from the trace's own horizontal, many-point lines, which
-  // also call moveTo/lineTo/stroke, so a loose "some moveTo and some
-  // stroke" check would pass even with no flag drawn at all.
-  const flagDrawn = calls.some((c, i) => c[0] === 'moveTo' && c[2] === 0
-    && calls[i + 1] && calls[i + 1][0] === 'lineTo' && calls[i + 1][1] === c[1] && calls[i + 1][2] === 8);
-  ok(flagDrawn, 'a Light Show flag-line marker (a vertical moveTo(x,0)→lineTo(x,8)) was drawn');
+  // The painter's inset panel + terrain + markers (audit T3/H3) — the
+  // same function the global read-only strip calls, so the two can never
+  // disagree again. Its own geometry is asserted in check_song_strip.mjs.
+  const svg = container.querySelector('.song-strip-svg');
+  const group = svg.querySelector('g');
+  const kinds = [...group.children].map((n) => n.tagName.toLowerCase());
+  ok(kinds[0] === 'rect', 'the first node is the inset panel rect');
+  ok(kinds.includes('circle') || kinds.includes('ellipse'), 'a flare marker is drawn');
+  ok(kinds.filter((k) => k === 'rect').length > 1, 'scene/drop rect markers are drawn on top of the panel');
+  // jsdom has no layout, so the measured box is 0 and the painter floors
+  // it at 1x1 — what this asserts is that the viewBox was REWRITTEN from
+  // the markup's own `0 0 100 39` to the measured pixel box at all (the
+  // 1:1 rule, songStrip.ts's `trackX` docstring). The real geometry is
+  // measured in check_song_strip.mjs and in the rendered-pixel pass of
+  // scripts/check_ui_fidelity.py.
+  const vb = svg.getAttribute('viewBox') ?? '';
+  ok(/^0 0 \d+ \d+$/.test(vb) && vb !== '0 0 100 39',
+    `the viewBox was rewritten from the markup default to the measured pixel box (got ${JSON.stringify(vb)})`);
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');

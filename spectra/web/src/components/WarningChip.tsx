@@ -10,6 +10,7 @@
  * The released-room banner (RoomOwnershipBar's own `released` branch) is
  * untouched — his own "its behaviour after release is unchanged" ruling. */
 import { useEffect, useRef, useState } from 'react';
+import Icon from './Icon';
 import { ActivationStrip, DarkFixtureStrip, HueScopeStrip } from './RoomOwnershipBar';
 import { useOwnership } from '../queries';
 
@@ -47,7 +48,7 @@ export default function WarningChip() {
         aria-expanded={open}
         title={`${total} warning${total === 1 ? '' : 's'} — tap for details`}
       >
-        ⚠ {total}
+        <Icon name="warn" size={14} /> {total}
       </button>
       {open && (
         <div className="warning-chip-panel">

@@ -31,7 +31,7 @@
 //   (needs the dev-only jsdom: cd spectra/web && npm install --no-save jsdom)
 //   (ONE needs a Python interpreter with spectra's own deps installed:
 //   .venv/bin/python, else $PYTHON, else python3)
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -99,7 +99,10 @@ const tmp = mkdtempSync(join(tmpdir(), 'home-light-show-'));
 const songStripFix = {
   name: 'songstrip-case-fix',
   setup(b) {
-    b.onResolve({ filter: /components\/songStrip$/ }, () => (
+    // `./songStrip` as well as `../components/songStrip` — since the
+    // 2026-10-14 design-fidelity pass `components/trackPainter.ts`
+    // imports it as a SIBLING, which hits the same resolver quirk.
+    b.onResolve({ filter: /(^|\/)songStrip$/ }, () => (
       { path: join(webDir, 'src/components/songStrip.ts') }
     ));
   },
@@ -283,6 +286,18 @@ export async function click(el) {
 const entryFile = join(tmp, 'entry.mjs');
 writeFileSync(entryFile, entrySrc);
 const outFile = join(tmp, 'out.cjs');
+// jsdom ships no ResizeObserver; the shared track painter observes its
+// own SVG with one (see check_home_timeline_responsiveness.mjs's own
+// note on this stub).
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    constructor(cb) { this.cb = cb; }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 const build = await esbuild.build({
   entryPoints: [entryFile], bundle: true, format: 'cjs', platform: 'node', jsx: 'automatic',
   outfile: outFile, nodePaths: [join(webDir, 'node_modules')], logLevel: 'silent',
@@ -295,18 +310,32 @@ await flush();
 tickRaf(2);
 
 const strip = () => container.querySelector('.song-strip-svg g');
-const lightShowToggle = () => [...container.querySelectorAll('.home-timeline-toggles button')]
-  .find((b) => b.getAttribute('title') === 'Light Show');
+// The toggles moved into `.home-timeline-tools` and their titles grew in
+// the 2026-10-14 design-fidelity pass (audit H2) — matched by a prefix so
+// a later wording tweak does not silently stop finding the control.
+const lightShowToggle = () => [...container.querySelectorAll('.home-timeline-tools button')]
+  .find((b) => (b.getAttribute('title') ?? '').startsWith('Light Show'));
 
-const svgKinds = () => [...strip().children].map((el) => (
-  el.tagName === 'rect' && el.getAttribute('y') === '15' ? 'scene'
-    : el.tagName === 'circle' ? 'flare'
-    : el.tagName === 'rect' ? 'drop-like'
-    : el.tagName === 'line' ? 'flag' : '?'
-));
+// Classified by the marker's own FILL — the one thing that identifies a
+// kind regardless of which shape the shared painter draws it as (a flag is
+// a stem `line` PLUS a triangular `path`; a drop is a pill `rect`; the
+// panel and the terrain are a `rect`/`path` too).
+const KIND_BY_FILL = {
+  '#22d3ee': 'scene', '#a3e635': 'flare',
+  '#fbbf24': 'charge', '#38bdf8': 'lull', '#ec4899': 'drop',
+  '#f5f5f4': 'flag-high', '#818cf8': 'flag-low',
+};
+const svgKinds = () => [...strip().children].flatMap((el) => {
+  const fill = el.getAttribute('fill');
+  const stroke = el.getAttribute('stroke');
+  const k = KIND_BY_FILL[fill] ?? KIND_BY_FILL[stroke];
+  return k ? [k] : [];
+});
+const flags = (kinds) => kinds.filter((k) => k.startsWith('flag-')).length;
 
 const before = svgKinds();
-ok(before.filter((k) => k === 'flag').length === 2, `both high/low flags are drawn on the strip before toggling (${before})`);
+ok(flags(before) === 4,
+  `both high/low flags are drawn on the strip before toggling — a stem and a head each (${before})`);
 ok(lightShowToggle()?.getAttribute('aria-checked') === 'true', 'the "Light Show" toggle starts ON');
 
 await click(lightShowToggle());
@@ -314,16 +343,23 @@ tickRaf(2);
 await flush();
 
 const after = svgKinds();
-ok(after.filter((k) => k === 'flag').length === 0, `toggling "Light Show" off removes both flags from the strip (${after})`);
+ok(flags(after) === 0, `toggling "Light Show" off removes both flags from the strip (${after})`);
 ok(after.filter((k) => k === 'scene').length === 1 && after.filter((k) => k === 'flare').length === 1
-   && after.filter((k) => k === 'drop-like').length === 1,
+   && after.filter((k) => k === 'drop').length === 1,
   'scene/flare/drop markers are untouched by the Light Show toggle');
 
-canvasCalls.length = 0;
-tickRaf(1);
-const flagOnCanvas = canvasCalls.some((c, i) => c[0] === 'moveTo' && c[2] === 0
-  && canvasCalls[i + 1] && canvasCalls[i + 1][0] === 'lineTo' && canvasCalls[i + 1][1] === c[1] && canvasCalls[i + 1][2] === 8);
-ok(!flagOnCanvas, 'with "Light Show" toggled off, the shape canvas\'s own overlay draws no flag either');
+// THE SHAPE CANVAS's own Light Show flags now come from the SHARED
+// `lightShowMarkers` canvas layer (Home mounts the Timeline page's own
+// TimelineCanvas + BUILDER_LAYERS since the 2026-10-14 design-fidelity
+// pass — audit H5), not from this component's own overlay draw. That
+// layer has its own proof, scripts/check_timeline_light_show_markers.mjs,
+// so re-asserting it here would be a weaker duplicate. What IS asserted
+// here instead: the toggle gates what this card HANDS that layer.
+const homeSrc = readFileSync(join(webDir, 'src/home/HomeTimeline.tsx'), 'utf8');
+const flagOnCanvas = !/filters\.lightShow \? lightShowCueMarkers\(/.test(homeSrc);
+ok(!flagOnCanvas,
+  'with "Light Show" off, the card hands the canvas an EMPTY cue list '
+  + '(`filters.lightShow ? lightShowCueMarkers(...) : []`), so the shared layer draws no flag either');
 
 console.log(failures ? `\n${failures} FAILED` : '\nall passed — high/low ARE the Light Show\'s own High/Low Trigger cues, drawn consistently everywhere, and "colour" is never mistaken for one');
 process.exit(failures ? 1 : 0);

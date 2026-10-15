@@ -60,10 +60,19 @@ const { fmtCountdown, fmtMMSS, eventLabel, pickNext, markerSizePx, markerOpacity
        xFraction, FINAL_STRETCH_MS, NEXT_EVENT_BOX_WIDTH, drawShapeMarkers, KIND_COLOR,
        axisScale, compensate } = mod;
 
-console.log('ONE — countdown formatting');
+// THE BOUNDARY IS 99.95s, THE APPROVED MOCKUP'S OWN (`cd()`), not 60s —
+// changed in the 2026-10-14 design-fidelity pass. It is what makes
+// "99.9s" the widest string the next-event box can hold, which is what
+// its own fixed `4.4ch` count field is sized for; the first build
+// switched to m:ss at 60s AND kept a tenth after it ("1:04.2"), which is
+// both wider than the field and a digit that changes ten times a second
+// for minutes on end.
+console.log('ONE — countdown formatting (the mockup\'s own cd() rule)');
 {
   ok(fmtCountdown(12400) === '12.4s', `12400ms -> "12.4s" (got ${fmtCountdown(12400)})`);
-  ok(fmtCountdown(64200) === '1:04.2', `64200ms -> "1:04.2" (got ${fmtCountdown(64200)})`);
+  ok(fmtCountdown(64200) === '64.2s', `64200ms -> "64.2s" (got ${fmtCountdown(64200)})`);
+  ok(fmtCountdown(99900) === '99.9s', `99900ms -> "99.9s" — the widest the box holds (got ${fmtCountdown(99900)})`);
+  ok(fmtCountdown(128000) === '2:08', `128000ms -> "2:08", no tenth (got ${fmtCountdown(128000)})`);
   ok(fmtCountdown(-500) === '0.0s', 'never negative');
   ok(fmtMMSS(189258) === '3:09', `189258ms duration -> "3:09" (got ${fmtMMSS(189258)})`);
 }

@@ -13,7 +13,7 @@
  * RoomControlsBar's local closure, and doesn't need to: every field here
  * already commits on blur/change exactly as it did in the popover. */
 import { useEffect, useState } from 'react';
-import HelpLink from '../help/HelpLink';
+import InfoTip from '../components/InfoTip';
 import PowerButton from '../components/PowerButton';
 import { useRoomControls, useSaveRoomControls } from '../queries';
 import type { RoomControlState } from '../types';
@@ -43,7 +43,7 @@ export default function ScenesDropsCard() {
   });
 
   return (
-    <div className="card">
+    <div className="card settings-drops-card">
       <div className="card-title">Scenes &amp; drops</div>
       <div className="settings-field-grid">
         <div className="top-bar-group-field">
@@ -52,10 +52,9 @@ export default function ScenesDropsCard() {
           <span className="settings-field-unit">ms (0 = use the two below)</span>
         </div>
         <div className="top-bar-group-field">
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-            Transition @ low intensity
-            <HelpLink topic="intensity-scaled-transitions" />
-          </label>
+          <InfoTip topic="intensity-scaled-transitions" text="How long a scene crossfade takes at the quietest moments; the high-intensity value below is the other end, and the room interpolates between them.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>Transition @ low intensity</label>
+          </InfoTip>
           <input type="number" min={0} max={20000} step={50} {...field('scene_transition_ms_gentle')} />
           <span className="settings-field-unit">ms</span>
         </div>
@@ -65,52 +64,48 @@ export default function ScenesDropsCard() {
           <span className="settings-field-unit">ms</span>
         </div>
         <div className="top-bar-group-field">
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-            title="The longest a lull stays fully dark on Black Hole, Squiggles, Pulse and Star. A lull is dark for half its length, never longer than this.">
-            Lull darkness (max)
-            <HelpLink topic="lull-dark-cap" />
-          </label>
+          <InfoTip topic="lull-dark-cap" text="The longest a lull stays fully dark on Black Hole, Squiggles, Pulse and Star. A lull is dark for half its length, never longer than this.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+            title="The longest a lull stays fully dark on Black Hole, Squiggles, Pulse and Star. A lull is dark for half its length, never longer than this.">Lull darkness (max)</label>
+          </InfoTip>
           <input type="number" min={0} max={30} step={0.5} {...field('lull_dark_max_s')} />
           <span className="settings-field-unit">s</span>
         </div>
         <div className="top-bar-group-field">
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-            title="How strongly the strip effects answer a charge, lull and drop. Never adds white. 0 = off.">
-            Strip phase strength
-            <HelpLink topic="strip-phases" />
-          </label>
+          <InfoTip topic="strip-phases" text="How strongly the strip effects answer a charge, lull and drop. Never adds white. 0 = off.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+            title="How strongly the strip effects answer a charge, lull and drop. Never adds white. 0 = off.">Strip phase strength</label>
+          </InfoTip>
           <input type="number" min={0} max={1.5} step={0.05} {...field('strip_phase_strength')} />
           <span className="settings-field-unit">×</span>
         </div>
         <div className="top-bar-group-field">
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-            title="How long the lights go to true black right before a drop lands.">
-            Breath-hold before drop
-            <HelpLink topic="drop-breath-hold" />
-          </label>
+          <InfoTip topic="drop-breath-hold" text="How long the lights go to true black right before a drop lands.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+            title="How long the lights go to true black right before a drop lands.">Breath-hold before drop</label>
+          </InfoTip>
           <input type="number" min={0} max={3} step={0.1} {...field('lull_breath_hold_s')} />
           <span className="settings-field-unit">s</span>
         </div>
         <div className="top-bar-group-field">
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-            title="How far off its mark every drop fires, in ms: negative = earlier, 0 = on the mark.">
-            Drop timing
-            <HelpLink topic="drop-timing-offset" />
-          </label>
+          <InfoTip topic="drop-timing-offset" text="How far off its mark every drop fires, in ms: negative = earlier, 0 = on the mark.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+            title="How far off its mark every drop fires, in ms: negative = earlier, 0 = on the mark.">Drop timing</label>
+          </InfoTip>
           <input type="number" min={-2000} max={2000} step={50} {...field('drop_timing_offset_ms')} />
           <span className="settings-field-unit">ms</span>
         </div>
         <div className="top-bar-group-field">
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <InfoTip topic="drop-shockwave-switches" text="A pink wave and a colour flood on the drop, composed from the set's own colours — never white.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <PowerButton
               on={local.drop_shock_enabled}
               onChange={(on) => commit({ ...local, drop_shock_enabled: on })}
               size={22}
               ariaLabel="Drop Shockwave"
             />
-            Drop Shockwave
-            <HelpLink topic="drop-shockwave-switches" />
-          </label>
+            Drop Shockwave</label>
+          </InfoTip>
         </div>
         {local.drop_shock_enabled && (
           <div className="top-bar-group-field">
@@ -121,24 +116,23 @@ export default function ScenesDropsCard() {
           </div>
         )}
         <div className="top-bar-group-field">
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-            title="The Pulse singles' flash flare only fires when the top bar's ⚡ Energy reading is at least this much. 0 = every flash.">
-            Pulse flash minimum energy (top-bar Energy)
-            <HelpLink topic="pulse-flash-energy" />
-          </label>
+          <InfoTip topic="pulse-flash-energy" text="The Pulse singles' flash flare only fires when the top bar's ⚡ Energy reading is at least this much. 0 = every flash.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+            title="The Pulse singles' flash flare only fires when the top bar's ⚡ Energy reading is at least this much. 0 = every flash.">Pulse flash minimum energy (top-bar Energy)</label>
+          </InfoTip>
           <input type="number" min={0} max={1} step={0.05} {...field('pulse_flash_min_energy')} />
         </div>
         <div className="top-bar-group-field">
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <InfoTip topic="drop-led-switch" text="A drop can BE the scene change: the cut lands on the drop (or early in the charge if it does not fit at the drop).">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <PowerButton
               on={local.drop_switch_enabled}
               onChange={(on) => commit({ ...local, drop_switch_enabled: on })}
               size={22}
               ariaLabel="Drop-led scene switch"
             />
-            Drops change stale scenes
-            <HelpLink topic="drop-led-switch" />
-          </label>
+            Drops change stale scenes</label>
+          </InfoTip>
         </div>
         {local.drop_switch_enabled && (
           <>
@@ -171,8 +165,10 @@ export default function ScenesDropsCard() {
                 Fireworks → Black Hole after
               </label>
               <input type="number" min={0} max={10} step={0.1} {...field('drop_switch_swallow_delay_s')} />
-              <span className="settings-field-unit">s</span>
-              <HelpLink topic="fireworks-melds" />
+              <InfoTip topic="fireworks-melds"
+                text="Leaving Fireworks for the Black Hole: the Black Hole cuts in this many seconds after the drop, and the drop's own debris is swallowed.">
+                <span className="settings-field-unit">s</span>
+              </InfoTip>
             </div>
             <div className="top-bar-group-field">
               <label title="Leaving Fireworks for Fish, Orbits, Squiggles or STAR: the next scene cuts in on the next analysed flare at least this strong.">
@@ -183,16 +179,16 @@ export default function ScenesDropsCard() {
           </>
         )}
         <div className="top-bar-group-field">
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <InfoTip topic="transition-programs" text="A registered Matrix effect switch runs its own program — an implosion, an eruption, a shoal break — instead of the plain crossfade.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <PowerButton
               on={local.transition_programs_enabled}
               onChange={(on) => commit({ ...local, transition_programs_enabled: on })}
               size={22}
               ariaLabel="Thematic transitions"
             />
-            Thematic transitions
-            <HelpLink topic="transition-programs" />
-          </label>
+            Thematic transitions</label>
+          </InfoTip>
         </div>
         {local.transition_programs_enabled && (
           <>
@@ -265,10 +261,9 @@ export default function ScenesDropsCard() {
           </>
         )}
         <div className="top-bar-group-field" style={{ alignItems: 'flex-start' }}>
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-            Music devices
-            <HelpLink topic="music-device-gate" />
-          </label>
+          <InfoTip topic="music-device-gate" text="The Spotify Connect devices whose playback may drive the lights. Music on anything else leaves the house lighting alone — no show frames, scene changes, flares or Light Show cues.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>Music devices</label>
+          </InfoTip>
           <input
             type="text"
             style={{ minWidth: 160 }}
@@ -285,22 +280,21 @@ export default function ScenesDropsCard() {
           />
         </div>
         <div className="top-bar-group-field">
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <InfoTip topic="transition-placement-rule" text="Where a generated cue actually lands: the nearest rhythmic edge within the window, then the nearest downbeat.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <PowerButton
               on={local.midsong_snap_to_beat}
               onChange={(on) => commit({ ...local, midsong_snap_to_beat: on })}
               size={22}
               ariaLabel="Snap generated cues to beat"
             />
-            Snap generated cues to beat
-          </label>
-          <HelpLink topic="transition-placement-rule" />
+            Snap generated cues to beat</label>
+          </InfoTip>
         </div>
         <div className="top-bar-group-field">
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-            Transition edge window
-            <HelpLink topic="transition-placement-rule" />
-          </label>
+          <InfoTip topic="transition-placement-rule" text="How far either side of an analysed boundary the placement rule looks for a bass edge to land the cue on, in beats.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>Transition edge window</label>
+          </InfoTip>
           <input type="number" min={1} max={16} step={1} {...field('transition_window_beats')} />
           <span className="settings-field-unit">beats</span>
         </div>
@@ -309,25 +303,25 @@ export default function ScenesDropsCard() {
           <input type="number" min={0.2} max={1.5} step={0.05} {...field('transition_edge_sensitivity')} />
         </div>
         <div className="top-bar-group-field">
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-            Total actions per minute
-            <HelpLink topic="transition-placement-rule" />
-            <HelpLink topic="analysed-flares" />
-          </label>
+          <InfoTip topic="analysed-flares"
+            text="How many analysed actions a minute the planner places on a song: the strongest become real scene changes, the rest fire as analysed flares.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>Total actions per minute</label>
+          </InfoTip>
           <input type="number" min={1} max={30} step={0.5} {...field('transitions_per_minute')} />
         </div>
         <div className="top-bar-group-field">
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
-            title="An optional ceiling on how many analysed actions become real scene changes. 0 = off.">
-            Scene changes per minute
-            <HelpLink topic="scene-change-planner" />
-          </label>
+          <InfoTip topic="scene-change-planner" text="An optional ceiling on how many analysed actions become real scene changes. 0 = off.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+            title="An optional ceiling on how many analysed actions become real scene changes. 0 = off.">Scene changes per minute</label>
+          </InfoTip>
           <input type="number" min={0} max={30} step={0.5} {...field('scene_changes_per_minute')} />
           <span className="settings-field-unit">{local.scene_changes_per_minute > 0 ? 'ceiling' : 'off'}</span>
         </div>
         <div className="top-bar-group-field" style={{ fontSize: '0.85em', opacity: 0.75 }}>
-          <span>Changes here re-plan each song's analysed cues the next time it plays — or ask Sonic to refresh them all.</span>
-          <HelpLink topic="analysed-refresh" title="Re-analysing songs after a settings change" />
+          <InfoTip topic="analysed-refresh"
+            text="Changes here re-plan each song's analysed cues the next time it plays — or ask Sonic to refresh them all.">
+            <span>Changes here re-plan each song's analysed cues the next time it plays — or ask Sonic to refresh them all.</span>
+          </InfoTip>
         </div>
       </div>
     </div>

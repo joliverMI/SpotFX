@@ -154,7 +154,7 @@ import {
   pauseDevicePreview, resumeDevicePreview, useDevicePreviewFavorites, useDevicePreviewLayout,
 } from '../queries';
 import type { DevicePreviewStatus } from '../types';
-import Icon from './Icon';
+import Icon, { type IconName } from './Icon';
 import { useToast } from './Toast';
 
 const EXPANDED_KEY = 'spectra-device-preview-expanded';
@@ -327,7 +327,7 @@ export default function DevicePreviewStrip() {
 
   const state: 'paused' | 'idle' | 'live' | 'reconnecting' = paused
     ? 'paused' : tabHiddenPause ? 'idle' : connected ? 'live' : 'reconnecting';
-  const stateIcon = { paused: '▶', idle: '⏾', live: '⏸', reconnecting: '↻' }[state];
+  const stateIcon: IconName = ({ paused: 'play', idle: 'wait', live: 'pause', reconnecting: 'sync' } as const)[state];
   const stateClass = {
     paused: 'device-preview-status-gray',
     idle: 'device-preview-status-blue',
@@ -368,7 +368,11 @@ export default function DevicePreviewStrip() {
   // other top-bar item.
   return (
     <>
-      <div className="device-preview-strip">
+      <InfoTip
+        className="device-preview-strip"
+        topic="device-preview"
+        text="Live colour per favourite device, read straight off whichever world is actually driving your lights. Tap the swatches to expand to the real fixture layout; the glyph on the right pauses it."
+      >
         {favoriteIds.length === 0 ? (
           <span className="device-preview-empty">no favourite devices</span>
         ) : (
@@ -412,14 +416,9 @@ export default function DevicePreviewStrip() {
         <button type="button" className={`device-preview-status-btn ${stateClass}`}
           disabled={pausePending || favoriteIds.length === 0}
           onClick={togglePause} aria-label={stateLabel} title={stateTitle}>
-          {stateIcon}
+          <Icon name={stateIcon} size={12} />
         </button>
-
-        <InfoTip
-          topic="device-preview"
-          text="Live colour per favourite device, read straight off whichever world is actually driving your lights. Click the swatches to expand to the real fixture layout."
-        />
-      </div>
+      </InfoTip>
 
       {expanded && favoriteIds.length > 0 && (
         <div className="device-preview-expanded-row">

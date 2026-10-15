@@ -121,6 +121,67 @@ export const ICONS = {
   /** Hourglass — the Light Show bar slot's "Wait" item kind (a sequence
    * step waiting on a duration/song count, not a trigger). */
   wait: 'M6 2H18 M6 22H18 M6 2C6 8 10 10 12 12C14 14 18 16 18 22 M18 2C18 8 14 10 12 12C10 14 6 16 6 22',
+
+  /* ── THE APPROVED MOCKUP'S OWN ICON SET (2026-10-14 design-fidelity
+   * pass) — every path below is lifted VERBATIM from the approved
+   * artifact's own `P` table (data/ui-layout-plan/explainer-final.html,
+   * "ICONS (Spectra's registry paths + proposed new ones)"), so the live
+   * chrome draws the same glyph the mockup drew rather than a lookalike.
+   * Do not redraw one by eye; re-lift it from that table. ── */
+
+  /** Four-pointed sparkle — the Light Show, everywhere (the bar slot's
+   * own icon with its holds badge, Home's "Quick sequences" card title,
+   * the menu's Light Show item, Settings' Preview-favourites row). */
+  spark: 'M12 2l2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5Z',
+  /** Beamed quaver — the house button's small corner badge while MUSIC
+   * has the room (the mockup's own ♪ badge, drawn not typed). */
+  note: 'M9 18V5l11-2v13 M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z M20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
+  /** Two pause bars — the device-preview group's own pause glyph. */
+  pause: 'M8 5v14 M16 5v14',
+  /** Solid triangle — "run this sequence" (Home's big purple ▶ circle).
+   * Filled by its own call site (`fill="currentColor"`), unlike every
+   * other stroke-only icon here. */
+  play: 'M7 4l13 8-13 8Z',
+  /** Arrow curving back — Home's timeline-card Undo. */
+  undo: 'M9 14L4 9l5-5 M4 9h11a5 5 0 0 1 0 10h-3',
+  /** Arrow curving forward — Home's timeline-card Redo. */
+  redo: 'M15 14l5-5-5-5 M20 9H9a5 5 0 0 0 0 10h3',
+  /** Crosshair — "follow the playhead" (Home's timeline card). */
+  follow: 'M12 2v4 M12 18v4 M2 12h4 M18 12h4 M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z',
+  /** Line with arrows at both ends — "whole song" (Home's timeline card). */
+  full: 'M3 12h18 M7 8l-4 4 4 4 M17 8l4 4-4 4',
+  /** Plus — "New" (Settings' drift gradient) / "Add a trigger here". */
+  plus: 'M12 5v14M5 12h14',
+  /** Three dots — "more lanes" / "nothing after" (a muted placeholder). */
+  more: 'M5 12h.01 M12 12h.01 M19 12h.01',
+  /** Clock face — the Engine menu's Timing item. */
+  clock: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z M12 6v6l4 2',
+  /** Painter's palette — the Artifacts menu's Colours item. */
+  palette: 'M12 3a9 9 0 1 0 0 18c1 0 1.6-.8 1.6-1.6 0-.9-.7-1.3-.7-2.1 0-.9.8-1.5 1.7-1.5H17a4 4 0 0 0 4-4c0-4.8-4-8.8-9-8.8Z M7.5 11h.01 M10 7.5h.01 M14.5 7.5h.01',
+  /** Stacked planes — Settings' drift-gradient row. */
+  layers: 'M12 2l10 5-10 5L2 7Z M2 12l10 5 10-5 M2 17l10 5 10-5',
+  /** Monitor + tower — the Artifacts menu's Devices item. */
+  devices: 'M3 5h12v9H3Z M7 18h4 M9 14v4 M18 8h3v11h-3Z',
+  /** House with a doorway — the Artifacts menu's Rooms item (NOT the
+   * house-lighting glyph, which is `home`). */
+  rooms: 'M3 21V8l9-5 9 5v13 M9 21v-7h6v7',
+  /** Sun with rays — the Artifacts menu's Room FX item. */
+  roomfx: 'M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M5.6 18.4l2.1-2.1 M16.3 7.7l2.1-2.1 M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
+  /** Beetle — the Engine menu's Debug item. */
+  bug: 'M8 9a4 4 0 0 1 8 0v5a4 4 0 0 1-8 0Z M4 13h4 M16 13h4 M5 7l3 2 M19 7l-3 2 M5 19l3-2 M19 19l-3-2',
+  /** Two arrows round a circle — the Engine menu's AV Sync item. */
+  sync: 'M4 10a8 8 0 0 1 14-4 M20 4v4h-4 M20 14a8 8 0 0 1-14 4 M4 20v-4h4',
+  /** Conical flask — the Engine menu's Test Bed item. */
+  flask: 'M9 3h6 M10 3v6L5 19a1.5 1.5 0 0 0 1.3 2h11.4A1.5 1.5 0 0 0 19 19l-5-10V3',
+  /** Ticked axis — the Engine menu's Timeline item. */
+  timeline: 'M3 12h18 M7 8v8 M12 6v12 M17 9v6',
+  /** Speech bubble — the Engine menu's Feedback item, and Settings' Sonic
+   * card. */
+  chat: 'M4 5h16v11H9l-5 4Z',
+  /** Speech bubble with a tail — the Engine menu's Review item. */
+  review: 'M4 4h16v12H8l-4 4Z',
+  /** Warning triangle — the ⚠ chip at the right end of the bar. */
+  warn: 'M12 3l10 18H2Z M12 10v5 M12 18h.01',
 } satisfies Record<string, string>;
 
 export type IconName = keyof typeof ICONS;

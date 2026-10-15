@@ -36,7 +36,12 @@ export default function TopBarStrip() {
       <ModeChip />
       <EnergyBar />
       <LightShowStrip />
+      {/* The mockup's fourth thin divider (`.sp .sepv`) — see tokens.css's
+        * own `.one-bar-sep-*` block for why each one is named for the
+        * `order` it is given rather than its DOM neighbour. */}
+      <span className="one-bar-sep one-bar-sep-before-preview" aria-hidden />
       <DevicePreviewStrip />
+      <span className="one-bar-spacer" aria-hidden />
       <WarningChip />
     </div>
   );

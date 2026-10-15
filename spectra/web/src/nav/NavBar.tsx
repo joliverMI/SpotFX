@@ -33,11 +33,20 @@ export default function NavBar() {
         }
       }}
     >
-      <span className="logo">◆ SPECTRA</span>
+      {/* THE LOGO IS A DRAWN GEM, not a font glyph (design-fidelity pass,
+        * 2026-10-14 — the approved mockup's own `.logo .gem`: a 14px
+        * accent square rotated 45°, with "SPECTRA" letter-spaced beside
+        * it). `◆` was a Unicode character and therefore font-dependent,
+        * the class of defect iconRegistry.ts's own docstring exists to
+        * end. It also carries the menu's one hover description — no
+        * visible circle anywhere in this row but the page "?" at the far
+        * right (idea 5, "one help '?' per page"). */}
       <InfoTip
         topic="nav-menu"
         text="Home · Artifacts ▾ (Scenes, Colours, Devices, Rooms, Room FX, Light Show) · Engine ▾ (Debug, Status, Timing, Review, Feedback, AV Sync, House, Test Bed, Timeline) · Settings."
-      />
+      >
+        <span className="logo"><span className="logo-gem" aria-hidden /><span className="logo-text">SPECTRA</span></span>
+      </InfoTip>
       {NAV_GROUPS.map((g) => {
         if (!g.items) {
           // Home / Settings — a plain link, no dropdown.

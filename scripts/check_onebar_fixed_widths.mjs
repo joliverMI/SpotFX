@@ -18,12 +18,18 @@
 // Three rules, each a plain regex read of the real stylesheet:
 //   1. `.scenes-group-btn` (the class BOTH Scenes and Colour share) has an
 //      explicit `width:` declaration, not just `min-width`.
-//   2. `.scenes-group-btn .top-bar-group-btn-value` sets `max-width: 100%`
+//   2. `.scenes-group-btn .bar-slot-name` sets `max-width: 100%`
 //      (never a fixed px value that could itself race the button's own
 //      width at a different breakpoint).
-//   3. Energy/Mark/countdown-bearing values carry `font-variant-numeric:
-//      tabular-nums` (so a digit changing width, e.g. "0.9" -> "0.97",
-//      "9:59" -> "10:00", never reflows the row either).
+//   3. Every numeric readout in the bar/strip gets tabular digits (so a
+//      digit changing width, e.g. "0.9" -> "0.97", "9:59" -> "10:00",
+//      never reflows the row either) — EITHER by its own
+//      `font-variant-numeric` declaration or through the shared
+//      `.tabular-nums` utility class its element carries. The 2026-10-14
+//      design-fidelity pass added that utility, which until then was
+//      applied as a className in SongStrip.tsx/HomeTimeline.tsx and
+//      DEFINED NOWHERE (audit T5/N3), so this section now asserts the
+//      utility exists as well as the per-selector declarations.
 //
 // Run: node scripts/check_onebar_fixed_widths.mjs
 import { readFileSync } from 'node:fs';
@@ -54,25 +60,44 @@ console.log('§1 Scenes/Colour (.scenes-group-btn) has a FIXED width, no min/max
 {
   const body = soleClassRule(css, '.scenes-group-btn');
   ok(body !== null, '.scenes-group-btn has its own (non-compound) rule block');
-  ok(!!body && /width:\s*132px/.test(body), 'declares an explicit `width: 132px` (not only min-width)');
+  // 156px since the design-fidelity pass (the approved mockup's own
+  // `.sp .nb` flex-basis); the PROPERTY under test is "an explicit width,
+  // not a min/max race", never the particular number.
+  ok(!!body && /(?:^|[^-])width:\s*156px/.test(body), 'declares an explicit `width: 156px` (not only min-width)');
   ok(!!body && !/max-width/.test(body), 'the button rule itself carries no competing max-width');
 }
 
 console.log('§2 the value span fills the fixed button, truncating instead of widening it');
 {
-  const re = /(?:^|\n)\.scenes-group-btn \.top-bar-group-btn-value\s*\{([^}]*)\}/m;
-  const m = css.match(re);
-  ok(!!m, '.scenes-group-btn .top-bar-group-btn-value has its own rule');
-  const body = m ? m[1] : '';
-  ok(/max-width:\s*100%/.test(body), 'sets max-width: 100% (fills the fixed parent, never forces it wider)');
+  // `.bar-slot-name` since the design-fidelity pass — the name slot's own
+  // left-aligned bold name replaced the centred `.top-bar-group-btn-value`
+  // (audit B4). Its `max-width: 100%` + ellipsis is the same property.
+  const body = soleClassRule(css, '.bar-slot-name');
+  ok(body !== null, '.bar-slot-name has its own rule');
+  ok(!!body && /max-width:\s*100%/.test(body), 'sets max-width: 100% (fills the fixed parent, never forces it wider)');
+  ok(!!body && /text-overflow:\s*ellipsis/.test(body), 'truncates with an ellipsis rather than widening');
 }
 
 console.log('§3 numeric readouts use tabular digits so a value changing width never reflows');
 {
-  for (const sel of ['.energy-readout-value', '.intensity-mark-value', '.light-show-item-when']) {
+  const util = soleClassRule(css, '.tabular-nums');
+  ok(!!util && /font-variant-numeric:\s*tabular-nums/.test(util),
+    '.tabular-nums IS defined (it was used as a className and defined nowhere — audit T5/N3)');
+  for (const sel of ['.energy-readout-value', '.intensity-mark-value']) {
     const body = soleClassRule(css, sel);
     ok(!!body && /font-variant-numeric:\s*tabular-nums/.test(body),
       `${sel} carries font-variant-numeric: tabular-nums`);
+  }
+  // The Light Show slot's countdown and the strip's own count/progress
+  // carry the shared utility on the ELEMENT instead (they are rewritten
+  // every frame by a rAF loop, so the class travels with the markup).
+  for (const [file, what] of [
+    ['spectra/web/src/components/LightShowStrip.tsx', "the Light Show slot's countdown"],
+    ['spectra/web/src/components/SongStrip.tsx', "the strip's countdown and progress"],
+    ['spectra/web/src/home/HomeTimeline.tsx', "Home's own progress readout"],
+  ]) {
+    const src = readFileSync(path.join(REPO, file), 'utf8');
+    ok(/tabular-nums/.test(src), `${what} carries the tabular-nums class`);
   }
 }
 
@@ -82,7 +107,15 @@ console.log('§4 the one-bar never wraps on tablet/desktop (only the bar\'s own 
   ok(!!body && /flex-wrap:\s*nowrap/.test(body), '.one-bar is flex-wrap: nowrap by default');
   const phoneBlock = css.match(/@media \(max-width: 520px\)\s*\{\s*\.one-bar\s*\{([^}]*)\}/);
   ok(!!phoneBlock && /flex-wrap:\s*wrap/.test(phoneBlock[1]),
-    'only the phone (<=520px) media query re-enables wrapping — a deliberate second row, not a side effect');
+    'the phone (<=520px) media query re-enables wrapping — a deliberate second row, not a side effect');
+  // The Admiral's own "do C" band (521-1100px) wraps too, deliberately —
+  // see tokens.css's own `.one-bar::before` rule. Asserted here so a
+  // future edit cannot remove it silently.
+  const tabletBlock = css.match(/@media \(min-width: 521px\) and \(max-width: 1100px\)\s*\{\s*\.one-bar\s*\{([^}]*)\}/);
+  ok(!!tabletBlock && /flex-wrap:\s*wrap/.test(tabletBlock[1]),
+    'the 521-1100px band wraps too (his own deliberate two rows), and nothing between 1101-1180 does');
+  ok(!/@media \(min-width: 1181px\)[^}]*flex-wrap:\s*wrap/.test(css),
+    'nothing above 1180px re-enables wrapping');
 }
 
 console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);
