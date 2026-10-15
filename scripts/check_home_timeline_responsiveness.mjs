@@ -306,14 +306,23 @@ console.log('THREE — the shape IS the Timeline page\'s own renderer, not a sec
   // THE H5 FIX (2026-10-14 design-fidelity pass): Home used to draw its
   // own 160px three-thin-lines canvas; the approved mockup copies the
   // Timeline page's tuned canvas, so this card now mounts the REAL
-  // `TimelineCanvas` with `BUILDER_LAYERS`. The canvas and its rAF loop
-  // now belong to TimelineCanvas.tsx, which carries its own DPR/resize
-  // guard and its own proofs (scripts/check_timeline_*.mjs,
-  // check_song_strip_fps.py) — the wiring itself is proven BEHAVIOURALLY
-  // below (a real canvas is actually mounted) and by
-  // scripts/check_ui_fidelity.py's FOUR-C Home assertions (the canvas'
-  // measured height matches the approved mockup's own), not by reading
-  // source text for a prop name.
+  // `TimelineCanvas` with `BUILDER_LAYERS`. WHAT THIS FILE GENUINELY
+  // PROVES about that mount: the bespoke canvas is gone and a real
+  // `<canvas>` is mounted in its place (below); its rAF-driven,
+  // resize-only-on-change behaviour is TimelineCanvas.tsx's OWN property,
+  // proven once by its own suite (scripts/check_timeline_*.mjs,
+  // check_song_strip_fps.py) and inherited here by construction, not
+  // re-verified in this file. THE GAP, named rather than quietly implied
+  // away: nothing here checks WHICH `layers` array or WHICH clock
+  // function actually reached the mount — swapping `layers={BUILDER_LAYERS}`
+  // for an empty/wrong array, or `getNowMs={getShowClockMs}` for a
+  // different clock, would pass every check in this file and in
+  // check_ui_fidelity.py's FOUR-C (its own canvas-height measurement
+  // doesn't depend on either prop) while Home silently stopped drawing
+  // its scene/flare/drop/Light-Show markers or drifted off the one show
+  // clock. (scripts/check_home_timeline_light_show_markers.mjs closes the
+  // `layers`/cue-list half of that gap behaviourally, for the Light Show
+  // layer specifically — see its own THREE section.)
   const src = readFileSync(join(webDir, 'src/home/HomeTimeline.tsx'), 'utf8');
   ok(!/home-timeline-shape-canvas/.test(src),
     'the bespoke 160px shape canvas is gone — no second renderer left behind');

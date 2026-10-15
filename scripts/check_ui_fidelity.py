@@ -539,6 +539,7 @@ async def run(app_url: str, artifact_url: str) -> int:
                 nextCount: box('.song-strip-next-count'),
                 nextSoonBorder: soonColor,
                 time: box('.song-strip-time'),
+                showWhen: box('.light-show-act-cur .light-show-act-when'),
                 // Scoped to the STRIP's own equaliser — Home's card head
                 // reuses the same class, so an unscoped count is doubled.
                 eqBars: document.querySelectorAll('.song-strip .song-strip-eq i').length,
@@ -639,6 +640,11 @@ async def run(app_url: str, artifact_url: str) -> int:
                f"the countdown uses TABULAR digits (audit T5/N3 — got {m['nextCount']['fvn']!r})")
             ok("tabular-nums" in (m["time"]["fvn"] or ""),
                f"so does the progress readout (got {m['time']['fvn']!r})")
+            if m["showWhen"] is None:
+                notes.append("Light Show slot's countdown: not armed in this harness run, nothing to measure")
+            else:
+                ok("tabular-nums" in (m["showWhen"]["fvn"] or ""),
+                   f"so does the Light Show slot's own countdown (got {m['showWhen']['fvn']!r})")
             ok(m["eqBars"] == 3, f"the song block draws the mockup's 3-bar equaliser (got {m['eqBars']})")
             ok(m["songIsLink"], "and taps through to Home (audit T2)")
             ok(m["gem"] is not None and m["gem"]["w"] == 14 and m["gem"]["h"] == 14
@@ -739,6 +745,8 @@ async def run(app_url: str, artifact_url: str) -> int:
                     actionRowH: row ? Math.round(row.getBoundingClientRect().height) : null,
                     actionRowOneLine: tops.length > 0
                       && Math.max(...tops) - Math.min(...tops) <= 12,
+                    clockFvn: (() => { const el = document.querySelector('.home-timeline-clock');
+                      return el ? getComputedStyle(el).fontVariantNumeric : null; })(),
                   });
                 })()'''))
                 ok(not h["globalStrip"] and h["ownCard"],
@@ -756,6 +764,11 @@ async def run(app_url: str, artifact_url: str) -> int:
                 ok(h["tools"] >= 4,
                    f"Home's head carries undo/redo beside Follow/Full song (audit H2 — {h['tools']})")
                 ok(h["controlsRow"], "Home has the mockup's one thin control row under the shape (audit H5)")
+                if h["clockFvn"] is None:
+                    notes.append("Home's clock readout: not rendered in this harness run, nothing to measure")
+                else:
+                    ok("tabular-nums" in h["clockFvn"],
+                       f"Home's own clock readout uses tabular digits too (got {h['clockFvn']!r})")
                 ok(not h["nextLine"], "the muted 'Next: …' sentence is gone (audit H4)")
                 ok(h["playW"] == 34, "a sequence row carries the mockup's big ▶ circle (audit H6)")
                 ok(h["actionRowOneLine"] and (h["actionRowH"] or 99) <= 48,
