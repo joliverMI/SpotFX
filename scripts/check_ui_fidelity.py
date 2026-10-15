@@ -99,6 +99,12 @@ PAIRS = [
 # song) — it is captured and asserted on its own, because it is the state
 # the Admiral reviewed the deploy in and the one the live app used to
 # render as menu + bar and nothing else.
+# "within a few px of the mockup" (firstmate's words): the live canvas
+# is laid out by flexbox inside a bordered box, so a px of rounding either
+# way is fine — a stack of empty beat-strip lanes under the waveform is
+# tens of px, which is what this catches.
+SHAPE_H_TOLERANCE_PX = 4
+
 EMPTY_VIEWS = [
     ("empty-1440", "view=bar&nothing=1", 1440, 420),
     ("empty-home-1440", "view=home&nothing=1", 1440, 900),
@@ -375,6 +381,17 @@ async def run(app_url: str, artifact_url: str) -> int:
                 await shoot(ws, nid, path, rect)
                 mock_shots[name] = path
 
+            # Home's audio shape, MEASURED off the mockup rather than
+            # hardcoded here, so the live one below is held to the
+            # artifact's own number (its `.canvasbox canvas` is 230px) and
+            # a future mockup edit moves the bar with it.
+            mock_shape_h = await evaluate(ws, nid, """(() => {
+              const c = document.querySelector('#f-home .sp .canvasbox canvas');
+              return c ? Math.round(c.getBoundingClientRect().height) : null;
+            })()""")
+            ok(isinstance(mock_shape_h, int) and mock_shape_h > 0,
+               f"read the mockup's own audio-shape height ({mock_shape_h}px)")
+
             # ── 2. the live chrome at the same sizes ───────────────────
             print("\nTWO — the live chrome at the same widths")
             live_shots: dict[str, Path] = {}
@@ -416,6 +433,18 @@ async def run(app_url: str, artifact_url: str) -> int:
                     return 0
                 await asyncio.sleep(0.8)
                 await shoot(ws, nid, OUT_DIR / f"live-{name}.png")
+            # Measured on an ORDINARY route, not whichever view the loop
+            # above happened to leave on screen: Home draws no global
+            # strip at all by design (§13 decision 5, asserted in FOUR-C),
+            # so measuring "is the strip still there" on Home would read
+            # that deliberate absence as the very regression this catches.
+            await cdp(ws, nid, "Emulation.setDeviceMetricsOverride", {
+                "width": 1440, "height": 420, "deviceScaleFactor": 1, "mobile": False})
+            if not await goto(ws, nid, f"{app_url}?view=bar&nothing=1",
+                              "!!document.querySelector('.one-bar')"):
+                print("  the live chrome never appeared — skipping")
+                return 0
+            await asyncio.sleep(0.8)
             state = await evaluate(ws, nid, """(() => {
               const strip = document.querySelector('.song-strip');
               const slot = document.querySelector('.light-show-slot');
@@ -442,9 +471,12 @@ async def run(app_url: str, artifact_url: str) -> int:
 
             # ── 4. the measurable drawing ──────────────────────────────
             print("\nFOUR — the measurable parts of the drawing, with a song")
+            # On an ORDINARY page's route — Home and the Timeline page
+            # carry their own editable copy of the timeline and draw no
+            # global strip at all (§13 decision 5; asserted in FOUR-C).
             await cdp(ws, nid, "Emulation.setDeviceMetricsOverride", {
                 "width": 1440, "height": 1000, "deviceScaleFactor": 1, "mobile": False})
-            if not await goto(ws, nid, f"{app_url}?view=home", "!!document.querySelector('.song-strip-next')"):
+            if not await goto(ws, nid, f"{app_url}?view=bar", "!!document.querySelector('.song-strip-next')"):
                 print("  the live chrome never appeared — skipping")
                 return 0
             await asyncio.sleep(1.2)
@@ -476,10 +508,6 @@ async def run(app_url: str, artifact_url: str) -> int:
               }
               const rows = (sel) => [...document.querySelectorAll(sel)]
                 .map((e) => Math.round(e.getBoundingClientRect().top));
-              const actionRow = document.querySelector('.home-quick-action-row');
-              const actionTops = actionRow
-                ? [...actionRow.children].map((c) => Math.round(c.getBoundingClientRect().top))
-                : [];
               return JSON.stringify({
                 bar: box('.one-bar'),
                 barRows: [...new Set(rows('.one-bar .mode-chip, .one-bar .scenes-group-btn, '
@@ -529,8 +557,6 @@ async def run(app_url: str, artifact_url: str) -> int:
                   + '.home-timeline-head .help-link').length,
                 helpInNav: document.querySelectorAll('nav .help-link').length,
                 helpInSettingsRows: document.querySelectorAll('.settings-row .help-link').length,
-                homeCanvas: !!document.querySelector('.home-timeline-shape canvas'),
-                homeToolsGlyphs: document.querySelectorAll('.home-timeline-tools .icon-toggle svg').length,
                 // THE RENDERED size of every small icon button's glyph —
                 // the thing the "icons render tiny" regression actually
                 // broke (the global `button { padding: 6px 12px }`
@@ -542,13 +568,6 @@ async def run(app_url: str, artifact_url: str) -> int:
                   .map((g) => { const r = g.getBoundingClientRect();
                     return { w: Math.round(r.width), h: Math.round(r.height) }; })
                   .filter((d) => d.w < d.h - 1 || d.w < 10),
-                homeUndo: document.querySelectorAll('.home-timeline-tool').length,
-                homeControlsRow: !!document.querySelector('.home-timeline-controls'),
-                homeNextLine: !!document.querySelector('.home-timeline-next'),
-                quickPlay: box('.home-quick-play'),
-                actionRowH: actionRow ? Math.round(actionRow.getBoundingClientRect().height) : null,
-                actionRowOneLine: actionTops.length > 0
-                  && Math.max(...actionTops) - Math.min(...actionTops) <= 12,
                 // IDEA 7's own hover target, for the REAL mouse move
                 // below — a synthetic `mouseenter` does not reach React,
                 // which implements onMouseEnter through mouseover/mouseout
@@ -665,21 +684,9 @@ async def run(app_url: str, artifact_url: str) -> int:
                f"(found {m['helpInChrome']})")
             ok(m["helpInNav"] == 1,
                f"exactly ONE '?' in the chrome, the menu's own page help (idea 5 — found {m['helpInNav']})")
-            ok(m["homeCanvas"], "Home's audio shape is a real canvas (audit H5)")
-            ok(m["homeToolsGlyphs"] >= 3,
-               f"Home's marker toggles draw real marker glyphs (audit H2 — {m['homeToolsGlyphs']})")
             ok(not m["tinyGlyphs"],
                "every small icon button's glyph renders at its real size — none squeezed "
                f"narrow by the global button padding (audit H2; offenders: {m['tinyGlyphs']})")
-            ok(m["homeUndo"] >= 4,
-               f"Home's head carries undo/redo beside Follow/Full song (audit H2 — {m['homeUndo']})")
-            ok(m["homeControlsRow"], "Home has the mockup's one thin control row under the shape (audit H5)")
-            ok(not m["homeNextLine"], "the muted 'Next: …' sentence is gone (audit H4)")
-            ok(m["quickPlay"] is not None and m["quickPlay"]["w"] == 34,
-               "a sequence row carries the mockup's big ▶ circle (audit H6)")
-            ok(m["actionRowOneLine"] and (m["actionRowH"] or 99) <= 48,
-               f"an action set is ONE line (audit H7/K3 — height {m['actionRowH']}, "
-               f"one line: {m['actionRowOneLine']})")
             # A REAL mouse move over the song block — see `songTip`.
             if m["songTip"]:
                 await cdp(ws, nid, "Input.dispatchMouseEvent", {
@@ -704,6 +711,68 @@ async def run(app_url: str, artifact_url: str) -> int:
                f"and the progress reads 'now / total' (got {m['timeText']!r})")
             ok(m["scrollW"] <= m["clientW"],
                f"no horizontal page scroll at 1440 ({m['scrollW']} <= {m['clientW']})")
+
+            # ── 4c. Home's own page ────────────────────────────────────
+            print("\nFOUR-C — Home: its own timeline card, and no global strip")
+            await cdp(ws, nid, "Emulation.setDeviceMetricsOverride", {
+                "width": 1440, "height": 1100, "deviceScaleFactor": 1, "mobile": False})
+            if not await goto(ws, nid, f"{app_url}?view=home",
+                              "!!document.querySelector('.home-timeline')"):
+                print("  Home never rendered — skipping its assertions")
+            else:
+                await asyncio.sleep(1.2)
+                h = json.loads(await evaluate(ws, nid, '''(() => {
+                  const canvas = document.querySelector('.home-timeline-shape canvas');
+                  const row = document.querySelector('.home-quick-action-row');
+                  const tops = row ? [...row.children]
+                    .map((c) => Math.round(c.getBoundingClientRect().top)) : [];
+                  const play = document.querySelector('.home-quick-play');
+                  return JSON.stringify({
+                    globalStrip: !!document.querySelector('.song-strip'),
+                    ownCard: !!document.querySelector('.home-timeline'),
+                    canvasH: canvas ? Math.round(canvas.getBoundingClientRect().height) : null,
+                    toolGlyphs: document.querySelectorAll('.home-timeline-tools .icon-toggle svg').length,
+                    tools: document.querySelectorAll('.home-timeline-tool').length,
+                    controlsRow: !!document.querySelector('.home-timeline-controls'),
+                    nextLine: !!document.querySelector('.home-timeline-next'),
+                    playW: play ? Math.round(play.getBoundingClientRect().width) : null,
+                    actionRowH: row ? Math.round(row.getBoundingClientRect().height) : null,
+                    actionRowOneLine: tops.length > 0
+                      && Math.max(...tops) - Math.min(...tops) <= 12,
+                  });
+                })()'''))
+                ok(not h["globalStrip"] and h["ownCard"],
+                   "Home draws its OWN timeline card and NO global strip (§13 decision 5 — "
+                   f"global strip present: {h['globalStrip']})")
+                if not isinstance(mock_shape_h, int) or mock_shape_h <= 0:
+                    notes.append("Home's shape height: no mockup height to compare against")
+                else:
+                    ok(h["canvasH"] is not None
+                       and abs(h["canvasH"] - mock_shape_h) <= SHAPE_H_TOLERANCE_PX,
+                       f"Home's audio shape is the mockup's own {mock_shape_h}px, not a stack "
+                       f"of empty lanes under the waveform (measured {h['canvasH']}px)")
+                ok(h["toolGlyphs"] >= 3,
+                   f"Home's marker toggles draw real marker glyphs (audit H2 — {h['toolGlyphs']})")
+                ok(h["tools"] >= 4,
+                   f"Home's head carries undo/redo beside Follow/Full song (audit H2 — {h['tools']})")
+                ok(h["controlsRow"], "Home has the mockup's one thin control row under the shape (audit H5)")
+                ok(not h["nextLine"], "the muted 'Next: …' sentence is gone (audit H4)")
+                ok(h["playW"] == 34, "a sequence row carries the mockup's big ▶ circle (audit H6)")
+                ok(h["actionRowOneLine"] and (h["actionRowH"] or 99) <= 48,
+                   f"an action set is ONE line (audit H7/K3 — height {h['actionRowH']}, "
+                   f"one line: {h['actionRowOneLine']})")
+
+            print("\nFOUR-D — and no global strip on the Timeline page either")
+            if not await goto(ws, nid, f"{app_url}?view=timeline", "!!document.querySelector('.one-bar')"):
+                print("  the Timeline route never rendered — skipping")
+            else:
+                await asyncio.sleep(0.5)
+                t = json.loads(await evaluate(ws, nid,
+                    '''JSON.stringify({ strip: !!document.querySelector('.song-strip'),
+                                        bar: !!document.querySelector('.one-bar') })'''))
+                ok(t["bar"] and not t["strip"],
+                   "the Timeline route draws the bar and NO global strip "
+                   f"(it has its own full toolset — measured {t})")
 
             # ── 4b. the Settings page's own shape ──────────────────────
             print("\nFOUR-B — the Settings page (audit S1/S3)")

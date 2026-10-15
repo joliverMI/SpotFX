@@ -12078,7 +12078,7 @@ them PASSED on the build he called much worse. Four things now hold:
   test_ui_fidelity.py` runs it, so it fires on a full test run): it
   renders every mockup frame at its native width and the live chrome at
   the same size, writes the stacked pairs to `docs/evidence/ui-fidelity/`
-  for a person to EYE, and asserts ~86 measurable things (sizes, weights,
+  for a person to EYE, and asserts ~90 measurable things (sizes, weights,
   colours, dividers, rows per width, tabular digits, no help circles,
   the empty states). It runs against the repo's own mocked harness page
   (`spectra/web/harness/fidelity.tsx` — the REAL NavBar/SongStrip/one-bar/
@@ -12113,6 +12113,19 @@ third while the harness drew the mockup's order, so the pair images
 looked right because the HARNESS was right. A harness that models the
 app rather than rendering it proves nothing about the app — the gate now
 asserts nav < strip < bar from the measured tops.
+
+**AND THE STRIP IS NOT ON EVERY PAGE — `showsSongStrip(pathname)`, in
+that same module, is the one rule**: Home and `/timeline` draw their OWN
+editable timeline card (§13 decision 5), so the GLOBAL strip is theirs
+to omit, not to stack a second copy under. Home's own card holds the
+mockup's flat 230px audio shape with NO beat-strip lanes under it
+(`HomeTimeline.tsx` passes `beatStrips: false`, which `canvas/frame.ts`'s
+`stripCountFor` answers with zero before it looks at anything else, and
+`rails: null`); growing the canvas per lane is the Timeline page's own
+behaviour and belongs there. The gate asserts both — no `.song-strip` on
+either route, and Home's canvas within a few px of the height MEASURED
+off the mockup — because both read as ordinary-looking pages until a
+pair image is put beside the artifact.
 
 **ONE HELP "?" PER PAGE IS STRUCTURAL NOW** (idea 5): `InfoTip.tsx`
 renders NO trigger of its own — callers WRAP their control in it, and

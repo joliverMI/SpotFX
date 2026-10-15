@@ -49,15 +49,12 @@ import { paintTrack, type MarkNode } from '../components/trackPainter';
 import TimelineCanvas from '../timeline/canvas/TimelineCanvas';
 import { BUILDER_LAYERS } from '../timeline/canvas/layers';
 import { computeAverages, computeMfccDistances } from '../timeline/canvas/data';
-import {
-  BEAT_STRIP_H, snapRailHFor, stripCountFor,
-  type LayerDataBag, type ViewState,
-} from '../timeline/canvas/frame';
+import type { LayerDataBag, ViewState } from '../timeline/canvas/frame';
 import { buildDisplay } from '../timeline/dropSequences';
 import { lightShowCueMarkers } from '../timeline/lightShowMarkers';
 import { songPositionMarkers } from '../debug/plannedEvents';
 import {
-  useAnalysedPlan, useAudioShapeData, useAudioShapeMeta, useDropRails, useDropSequences,
+  useAnalysedPlan, useAudioShapeData, useAudioShapeMeta, useDropSequences,
   useLibrosa, useShowArms,
 } from '../timeline/queries';
 import { useFollowWindow } from '../timeline/hooks/useFollowWindow';
@@ -69,9 +66,14 @@ const isAnalysed = (k: UpcomingEvent['kind']) => k === 'scene' || k === 'flare' 
 const isDrop = (k: UpcomingEvent['kind']) => k === 'charge' || k === 'lull' || k === 'drop';
 const isLightShow = (k: UpcomingEvent['kind']) => k === 'high' || k === 'low';
 
-/** The mockup's own canvas height (`.sp .canvasbox canvas { height: 230px }`),
- * replacing the 160px box — the Timeline page's own renderer needs real
- * room for its bands, axis and beat strips. */
+/** THE MOCKUP'S OWN CANVAS HEIGHT, flat (`.sp .canvasbox canvas {
+ * height: 230px }`) — the whole canvas, not a waveform area the lanes
+ * then grow past. Home draws no per-beat score strips and no drop-
+ * sequence snap rails (see `beatStrips: false` and the `rails: null`
+ * below), so nothing is reserved under the waveform and this IS the
+ * rendered height. The first build passed 230 as the waveform area on
+ * top of five empty 21px lanes and a 36px rail band, which made Home's
+ * shape ~370px — half as tall again as the drawing. */
 const CANVAS_H = 230;
 
 export default function HomeTimeline({
@@ -92,7 +94,6 @@ export default function HomeTimeline({
   const { data: analysedPlan } = useAnalysedPlan(uri);
   const { data: showArms } = useShowArms(!!uri);
   const { data: dropResp } = useDropSequences(uri);
-  const { data: dropRails } = useDropRails(uri, true);
   const offsetMs = Number(meta?.timestamp_offset_ms ?? 0);
   const sections = librosa?.sections ?? null;
 
@@ -272,21 +273,26 @@ export default function HomeTimeline({
     selectedIds: [],
     hoverTriggerId: null,
     plannedEvents: analysedMarkers,
-    dropSeq: dropSeqs.length || dropRails?.status === 'ok'
+    // No per-beat score strips (empty lanes here — see CANVAS_H) and no
+    // `rails`: the snap rails are a drop-EDITING affordance, and Home is
+    // a read-only glance view. Both would otherwise reserve height the
+    // mockup's own canvas does not have.
+    beatStrips: false,
+    dropSeq: dropSeqs.length
       ? {
-        seqs: dropSeqs, rails: dropRails?.status === 'ok' ? dropRails : null,
+        seqs: dropSeqs, rails: null,
         selectedKey: null, hover: null, selectedHandle: null, adding: false, live: null,
         capturedFromMs: dropResp?.song?.captured_from_ms ?? null,
-        beatMs: dropResp?.song?.beat_ms ?? dropRails?.beat_ms ?? 500,
+        beatMs: dropResp?.song?.beat_ms ?? 500,
       }
       : null,
     lightShow: lightShowCues,
-  }), [shape, averages, meta, librosa, mfccDistances, analysedMarkers, dropSeqs, dropRails,
+  }), [shape, averages, meta, librosa, mfccDistances, analysedMarkers, dropSeqs,
        dropResp, lightShowCues]);
 
-  const canvasHeight = CANVAS_H
-    + snapRailHFor(data)
-    + stripCountFor(data, view.librosaFilters) * BEAT_STRIP_H;
+  // Flat: nothing is reserved under the waveform (see the data bag above),
+  // so this is the canvas's whole rendered height.
+  const canvasHeight = CANVAS_H;
 
   // Window drag — TimelineBar's own dragEdge shape (BuilderPage.tsx's
   // onAdjustFollow convention): in follow mode, an edge drag resizes the

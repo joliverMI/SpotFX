@@ -18,12 +18,19 @@
  *                KioskPage.
  *   ?view=home     the Home page under the chrome (the default).
  *   ?view=settings the Settings page under the chrome.
- *   ?view=bar      chrome only, no page body. */
+ *   ?view=bar      chrome only, no page body (an ordinary page's route).
+ *   ?view=timeline the Timeline page's own route, chrome only.
+ *
+ * Each view declares the ROUTE it stands for and asks the app's own
+ * `showsSongStrip(pathname)` whether the global timeline is drawn there
+ * — never its own idea of it. That is the bug this flag exists to make
+ * impossible: the harness used to render the strip on every view, so the
+ * Home pair image showed a row the real app has never drawn there. */
 import '../src/styles/tokens.css';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import AppChrome from '../src/components/AppChrome';
+import AppChrome, { showsSongStrip } from '../src/components/AppChrome';
 import HomePage from '../src/home/HomePage';
 import SettingsConsolePage from '../src/settings/SettingsConsolePage';
 import KioskPage from '../src/kiosk/KioskPage';
@@ -327,9 +334,16 @@ class FakeSocket {
  * app rendered the bar BEFORE the strip while this harness drew the
  * mockup's own menu/timeline/bar order, and the pair images looked fine
  * because the harness was right and the app was not). */
+/** The route each view stands for — what the real app's own rule is
+ * asked about below. */
+const PATHNAME = VIEW === 'home' ? '/'
+  : VIEW === 'settings' ? '/settings'
+  : VIEW === 'timeline' ? '/timeline'
+  : '/scenes';
+
 const Chrome = () => (
   <>
-    <AppChrome />
+    <AppChrome showSongStrip={showsSongStrip(PATHNAME)} />
     {VIEW === 'home' && (
       <main className="home-route"><HomePage /></main>
     )}
@@ -342,7 +356,7 @@ const Chrome = () => (
 createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <ToastProvider>
-      <MemoryRouter initialEntries={[KIOSK ? '/?kiosk=1' : '/']}>
+      <MemoryRouter initialEntries={[KIOSK ? '/?kiosk=1' : PATHNAME]}>
         {KIOSK ? <KioskPage /> : <Chrome />}
       </MemoryRouter>
     </ToastProvider>

@@ -22,7 +22,7 @@ import RoomEffectsPage from './roomeffects/RoomEffectsPage';
 import DebugPage from './debug/DebugPage';
 import LightShowPage from './lightshow/LightShowPage';
 import HousePage from './house/HousePage';
-import AppChrome from './components/AppChrome';
+import AppChrome, { showsSongStrip } from './components/AppChrome';
 import KioskPage from './kiosk/KioskPage';
 import { isKioskRequested } from './kiosk/kioskConfig';
 import { useShowClockSeed } from './queries';
@@ -88,8 +88,9 @@ export default function App() {
   }
   // THE GLOBAL SONG TIMELINE (song-layout-plan §4) sits on every page
   // except Home and Timeline, which carry their own editable copy (§13
-  // decision 5) — and not on the Live pop-out, handled above.
-  const hideSongStrip = pathname === '/' || pathname === '/timeline';
+  // decision 5) — and not on the Live pop-out, handled above. The rule
+  // itself lives in AppChrome.tsx so the harness that renders this same
+  // chrome uses it too, rather than its own idea of where the strip goes.
   return (
     <ToastProvider>
       {/* FIRST, above NavBar — this must genuinely be the top bar on every
@@ -100,7 +101,7 @@ export default function App() {
       {/* MENU, TIMELINE, BAR — the approved mockups' own order, and the
         * ONE composition the design-fidelity gate renders too (see
         * components/AppChrome.tsx on why it is shared, not duplicated). */}
-      <AppChrome showSongStrip={!hideSongStrip} />
+      <AppChrome showSongStrip={showsSongStrip(pathname)} />
       <RoomOwnershipBar />
       <main className={pathname === '/' ? 'home-route' : undefined}>
         <Routes>

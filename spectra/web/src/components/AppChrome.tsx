@@ -21,6 +21,18 @@ import RoomControlsBar from './RoomControlsBar';
 import SongStrip from './SongStrip';
 import TopBarStrip from './TopBarStrip';
 
+/** WHERE THE GLOBAL TIMELINE IS DRAWN — the one definition, so App.tsx
+ * and the design-fidelity harness can never disagree about it (they did:
+ * the harness rendered it on Home, where the approved decision §13.5 and
+ * every Home mockup hide it, and the pair image showed a row the real app
+ * never draws there). Home and the Timeline page carry their own editable
+ * copy; the Live pop-out has no chrome at all and is handled before this.
+ *
+ * Pure and exported so a check can drive the table with no DOM. */
+export function showsSongStrip(pathname: string): boolean {
+  return pathname !== '/' && pathname !== '/timeline';
+}
+
 export default function AppChrome({ showSongStrip = true, showNav = true }: {
   /** Home and the Timeline page carry their own editable copy of the
    * timeline (plan §13 decision 5), so the global one is hidden there. */
