@@ -249,9 +249,9 @@ direction." He was right, and the cause is the lattice, not the release.
 - **`_head_motion(c)`** is the fix: the walk direction averaged over
   `_walk_span()` = one whole SEGMENT PAIR (`2 x step_size` lattice moves) at
   the chain's walking speed, plus the turn rate from how that heading changed
-  over the span before it — published as the snapshot's `vx`/`vy`/`om`.
-  published as the snapshot's `walk_vx`/`walk_vy`/`walk_om` — **BESIDE the
-  unchanged `vx`/`vy`, not instead of them**. `_head_velocity` is still the
+  over the span before it — published as the snapshot's
+  `walk_vx`/`walk_vy`/`walk_om`, **BESIDE the unchanged `vx`/`vy`, not
+  instead of them**. `_head_velocity` is still the
   single lattice move, because that pair is a contract four transition
   programs release from and three effects (blackhole, fireworks, fish) adopt
   on an ordinary crossfade, and none of them was in the shoal-burst plan's

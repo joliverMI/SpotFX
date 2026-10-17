@@ -183,7 +183,9 @@ THE ANCHORS (transition_program.anchor_frac, what the trigger clock leads
 by): Lensing's is its ignition (like Infall's); the Fountain sprays at
 FOUNTAIN_ANCHOR; the Flame Lick explodes, the Shoal Break shatters and a
 chain unspools ON the mark (0); the Ignition's rim catches at
-IGNITION_ANCHOR; the Shoaling's fish are formed at SHOALING_ANCHOR; the
+IGNITION_ANCHOR; the Shoaling's fish are formed ON the mark (0) whenever
+`transition_burst_px>0` — the shoal-burst plan's own rule, the burst IS the
+payoff — and only at SHOALING_ANCHOR when that setting is 0; the
 threads complete at THREAD_ANCHOR.
 """
 
