@@ -99,6 +99,9 @@ console.log('§5 the Home Assistant card says what the seam is doing, and only t
     media: { source: 'roku', state: 'playing', since_ms: 1, active: true, mode: null, words: ['TV (roku)', 'TV'] } });
   ok(media[0].includes('no mode answers to "TV (roku)" or "TV"') && media[0].includes('Evening stays'),
     `media with no TV mode names it: ${media[0]}`);
+  const idle = hs.seamLines({ ...base, clock_mode: { id: 'c', name: 'Evening' },
+    media: { source: 'roku', state: 'idle', since_ms: 1, active: false, mode: null, words: [] } });
+  ok(idle[0] === 'Media: roku idle (no TV mode).', `idle is reported but never overlays a mode: ${idle[0]}`);
   const fx = (o) => ({ device: 'crystal', name: 'Crystal', target: null, why: null, in_flight: false,
     override: null, applied: null, ...o });
   ok(hs.fixtureLine(fx({ target: 'on', applied: { target: 'on', outcome: 'landed', detail: '', at_ms: 1 } })) === null,

@@ -735,6 +735,52 @@ def test_a_playing_source_selects_the_tv_mode_and_stopping_returns(world):
     assert world.house.current_mode().id == std.id
 
 
+def test_an_idle_source_never_selects_tv_paused_and_a_picked_mode_sticks(world):
+    """2026-10-17 (data/media-pause-diag/report.md): HA reports a Roku at
+    its home screen as `idle`, not `paused` — idle must never overlay "TV
+    paused" (nothing was paused), and picking a mode while the Roku reads
+    idle must stick rather than being overridden by the stale media
+    report."""
+    from spectra.services import house_store
+    std = _mode(world, "Standard")
+    eve = _mode(world, "Evening", ha_aliases=["Evening"])
+    _mode(world, "TV paused", ha_aliases=["TV paused"])
+    _run(world.house.set_mode(ha_mode="Daytime", source="ha"))
+    res = _run(world.house.set_media(source="roku", state="idle"))
+    assert res["status"] == "recorded"
+    assert world.house.current_mode().id == std.id, "idle never overlays TV paused"
+    lighting = world.house.status_dict()
+    assert lighting["media"]["active"] is False
+    assert lighting["media"]["state"] == "idle"
+    assert lighting["mode"]["name"] == "Standard"
+    # Picking a different mode while still idle sticks — it is not re-armed
+    # the way a genuinely active media overlay would re-assert itself.
+    res = _run(world.house.set_mode(mode="Evening", source="spectra"))
+    assert res["status"] == "applied"
+    assert world.house.current_mode().id == eve.id
+    st = house_store.state()
+    assert st.media_source == "roku" and st.media_state == "idle", \
+        "the idle report is still recorded, just inert"
+
+
+def test_a_playing_source_still_selects_tv_and_paused_still_selects_tv_paused(world):
+    """Pinning that dropping idle from MEDIA_ACTIVE_STATES left playing and
+    paused byte-identical."""
+    std = _mode(world, "Standard")
+    tv = _mode(world, "TV", ha_aliases=["TV"])
+    paused = _mode(world, "TV paused", ha_aliases=["TV paused"])
+    _run(world.house.set_mode(ha_mode="Daytime", source="ha"))
+    res = _run(world.house.set_media(source="roku", state="playing"))
+    assert res["status"] == "applied"
+    assert world.house.current_mode().id == tv.id
+    res = _run(world.house.set_media(source="roku", state="paused"))
+    assert res["status"] == "applied"
+    assert world.house.current_mode().id == paused.id
+    res = _run(world.house.set_media(source="roku", state="stopped"))
+    assert res["status"] == "applied"
+    assert world.house.current_mode().id == std.id
+
+
 def test_a_clock_change_during_a_film_shows_after_it(world):
     from spectra.services import house_store
     _mode(world, "Standard")
