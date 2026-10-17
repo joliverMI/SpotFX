@@ -232,3 +232,50 @@ implode onto Squiggles' own chain heads via the same `_formation_points()`/
 `_adopt_handoff` seeding; it shares the FORM step with Unravel but not the
 release.
 `fx/effects/transition_cloud.py`'s docstring is the binding statement for phase 4's programs; `tests/test_transition_programs_phase4.py` measures them on the real pipeline.
+
+## A CHAIN PUBLISHES THE WAY IT IS ACTUALLY GOING (2026-10-17)
+
+The Admiral, on the shoal-burst plan: "The bursts don't seem to carry the
+directional velocity of the squiggles. Some look like they go the opposite
+direction." He was right, and the cause is the lattice, not the release.
+
+- The six ring directions sit at -135/-90/-45/45/90/135 degrees — **there is
+  no horizontal move** — so consecutive gaps are 45/45/90, and every move
+  INSIDE one segment is the same slot. So the LAST lattice move points up to
+  45 degrees off the way the chain is going, and the first move of a fresh
+  segment (`_walk_one` turns one slot at a segment boundary, and a +-1 turn
+  across one of the two 90-degree gaps really is 90 degrees) can be 90 out.
+  `_head_velocity` published exactly that one move.
+- **`_head_motion(c)`** is the fix: the walk direction averaged over
+  `_walk_span()` = one whole SEGMENT PAIR (`2 x step_size` lattice moves) at
+  the chain's walking speed, plus the turn rate from how that heading changed
+  over the span before it — published as the snapshot's
+  `walk_vx`/`walk_vy`/`walk_om`, **BESIDE the unchanged `vx`/`vy`, not
+  instead of them**. `_head_velocity` is still the
+  single lattice move, because that pair is a contract four transition
+  programs release from and three effects (blackhole, fireworks, fish) adopt
+  on an ordinary crossfade, and none of them was in the shoal-burst plan's
+  scope (the Admiral: "for scope, dont do B"). Only
+  `transition_program._program_objects` — the host frame's own object set —
+  reads the walk keys, which is what keeps every tier-B pair out of
+  Squiggles byte-identical.
+- **`_step_smooth_head` / `_smooth_head`** — a second, SMOOTH head for
+  anything that RIDES a chain rather than draws it (the host frame). The real
+  head stands still for two or three frames and then jumps a whole cell:
+  invisible when drawn as a path, judder in a direction the parent never went
+  when a cloud rides it. The smooth point dead-reckons along `theta` at the
+  walking speed (right from the first frame, before the head has moved at
+  all) and is pulled onto the real head over `HEAD_CORRECT_S`, snapping past
+  `HEAD_SNAP_PX` (a turn-around reverses the path). `_head_pos` is unchanged
+  and is still what `_formation_points` and the collision checks use.
+- **`_program_birth` / `_program_hosts`** — a program birth starts one chain
+  per released object with its head AT that object and walking the way it was
+  GOING. `_adopt_handoff` is UNTOUCHED and still aims an adopted chain at the
+  centre of the panel +-30 degrees, which is itself "the opposite direction"
+  for anything heading outward — that is the crossfade path, deliberately
+  byte-identical. A chain head walks at a fixed speed, so there is no turn
+  rate to inherit and no count to restore (`max_chains` is a density cap).
+
+Proofs: `tests/test_shoal_burst.py` (the published heading against the
+chain's own travel, with the single-move formula as the control),
+`tests/shoal_burst_harness.py`.

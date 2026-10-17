@@ -1089,6 +1089,11 @@ _SOA_NAMES = (
     "p_trail_x", "p_trail_y", "p_trail_acc",
     "p_wsg", "p_wurg", "p_wcmd", "p_wauth", "p_sb", "p_sb_t", "p_wr",
     "p_wph", "p_peel",
+    # the host frame (fx/effects/transition_program.py, the shoal-burst
+    # plan): the rate its heading is turning (published on the hand-off so
+    # a successor continues the turn), and which released object a fish
+    # born by a matched birth came from
+    "p_om", "p_pid",
 )
 
 
@@ -1894,6 +1899,18 @@ class Fish2d(Twod, GradientEffect):
         # THE PEEL: the inherited heading rate, rad/s (NaN = none)
         self.p_peel = np.full(CAP, np.nan, dtype=np.float32)
         self._peel_age = None
+        # the rate each fish's heading is turning, rad/s — computed every
+        # frame and, since the shoal-burst plan, PUBLISHED on the hand-off
+        # so a successor (and a program's cloud) continues the turn
+        self.p_om = np.zeros(CAP, dtype=np.float32)
+        # THE HOST FRAME (the shoal-burst plan §5.2): the id a program's
+        # cloud follows a fish born by a matched birth by
+        self.p_pid = np.full(CAP, -1, dtype=np.int64)
+        self._prog_birth_snap = None
+        self._prog_birth_pids = None
+        self._prog_birth_token = None
+        self._next_pid = 0
+        self._count_hold = None
         self._soa = tuple(getattr(self, name) for name in _SOA_NAMES)
         self.n = 0
 
@@ -2228,6 +2245,8 @@ class Fish2d(Twod, GradientEffect):
         self.p_wr[s] = 0.0
         self.p_wph[s] = np.nan
         self.p_peel[s] = np.nan
+        self.p_om[s] = 0.0
+        self.p_pid[s] = -1
         self.p_wurg[s] = 0.0
         self.p_wcmd[s] = 0.0
         self.p_wauth[s] = 0.0
@@ -2387,6 +2406,11 @@ class Fish2d(Twod, GradientEffect):
             # these (particle_handoff)
             "vx": (np.cos(hd) * spd).astype(np.float32),
             "vy": (np.sin(hd) * spd).astype(np.float32),
+            # ... and the rate it was turning at (the shoal-burst plan
+            # §5.1) — a cloud with no host continues on this, and a born
+            # fish/blob keeps turning at it
+            "om": np.where(np.isfinite(self.p_om[:n]),
+                           self.p_om[:n], 0.0).astype(np.float32),
             "gesture": "swim",
             "grad": self.p_grad[:n].copy(),
             "bright": self.p_bright[:n].copy(),
@@ -2430,6 +2454,124 @@ class Fish2d(Twod, GradientEffect):
         y = self.cy + self.p_y[idx] * self.sy - self.cam_py
         ok = np.isfinite(x) & np.isfinite(y)
         return (x[ok], y[ok])
+
+    # ── THE HOST FRAME (the shoal-burst plan §5.2, fx/effects/
+    # transition_program.py's own docstring is the binding statement) ─────
+
+    def _program_birth(self, snap):
+        """BORN MATCHED: one fish per released object, AT its position, on
+        its heading and speed, turning at its inherited rate (the PEEL),
+        which is what lets a transition program's cloud ride it instead of
+        flying to a stranger.
+
+        Fish needs nothing new to be born this way — heading and speed ARE
+        its state and `PEEL_S` already eases an inherited turn rate into
+        its own steering; this is `_adopt_handoff`'s own cross-type block
+        plus the count rule and a pid. Deliberately NOT part of that method
+        (the crossfade adoption path stays byte-identical).
+
+        Returns one pid per released object (-1 where the count clamped and
+        it got none)."""
+        px = np.asarray(snap["px"], dtype=np.float32)
+        n_obj = int(px.size)
+        pids = np.full(n_obj, -1, dtype=np.int64)
+        if n_obj == 0 or getattr(self, "r_width", None) is None:
+            return pids
+        py = np.asarray(snap["py"], dtype=np.float32)
+        vx = np.asarray(snap.get("vx", np.zeros(n_obj)), dtype=np.float32)
+        vy = np.asarray(snap.get("vy", np.zeros(n_obj)), dtype=np.float32)
+        om = np.asarray(snap.get("om", np.zeros(n_obj)), dtype=np.float32)
+        grad = np.asarray(snap.get("grad", np.zeros(n_obj)), dtype=np.float32)
+        bright = np.asarray(snap.get("bright", np.ones(n_obj)), dtype=np.float32)
+        authored = int(self._config["particle_count"])
+        match = bool(snap.get("match_count", True))
+        # the count the SCENE will run at: the released count when the match
+        # is on, the authored one when it is off (the plan's §5.4 rule)
+        count = int(min(max(n_obj if match else authored, 1), MAX_PARTICLE_COUNT))
+        # ... and how many are born ON a released object: never more than
+        # there are objects to be born on. With the match off the rest fly
+        # in from off-panel the ordinary way, as any live count change does.
+        want = int(min(count, n_obj))
+        # a DEFERRED birth (the eruption's, at its bloom) replaces whatever
+        # is on the panel: every ordinary fish disperses out of it
+        if self.n:
+            live = np.flatnonzero(
+                (self.p_mode[: self.n] < 2) & (self.p_nocap[: self.n] == 0))
+            if live.size:
+                self._depart(live, within=HANDOFF_ENTER_S)
+                self.p_pid[live] = -1
+        base = self.n
+        sl = self._spawn(want, mode=1)
+        got = self.n - base
+        if got <= 0:
+            return pids
+        ex = (px[:got] - self.cx + self.cam_px) / max(self.sx, 1e-6)
+        ey = (py[:got] - self.cy + self.cam_py) / max(self.sy, 1e-6)
+        self.p_x[sl] = ex
+        self.p_y[sl] = ey
+        self.p_x0[sl] = ex
+        self.p_y0[sl] = ey
+        spd = np.hypot(vx[:got], vy[:got])
+        moving = np.isfinite(spd) & (spd > 1e-3)
+        self.p_hd[sl] = np.where(
+            moving, np.arctan2(vy[:got], vx[:got]),
+            np.arctan2(ey * self.sy, ex * self.sx) + np.pi / 2.0)
+        self.p_spd[sl] = np.where(
+            moving,
+            np.clip(spd, 0.2 * self.cruise_px, 4.0 * self.cruise_px),
+            self.cruise_px)
+        # THE PEEL (PEEL_S): the inherited turning rate, easing into its
+        # own steering — so the host's first stretch IS the parent's
+        # continuation and the cloud riding it continues that motion
+        ok = moving & np.isfinite(om[:got])
+        self.p_peel[sl] = np.where(ok, om[:got], np.nan)
+        if ok.any():
+            self._peel_age = 0.0
+        self.p_erate[sl] = max(1.0, self.enter_time / HANDOFF_ENTER_S)
+        self.p_grad[sl] = grad[:got]
+        self.p_grad_from[sl] = grad[:got]
+        self.p_bright[sl] = np.clip(bright[:got], 0.3, 1.0)
+        ids = self._next_pid + np.arange(got, dtype=np.int64)
+        self._next_pid += got
+        self.p_pid[sl] = ids
+        pids[:got] = ids
+        self.particle_count = count
+        self._count_hold = (
+            self.t + max(float(snap.get("count_hold_s", 0.0) or 0.0), 0.0),
+            authored,
+        )
+        self._booted = True
+        return pids
+
+    def _program_hosts(self, pids):
+        """Where each pid's fish is NOW, on screen (pixels) — NaN for a pid
+        that has since retired (a fish disperses), whose pieces fall back to
+        the constant-turn continuation and fade."""
+        pids = np.asarray(pids, dtype=np.int64)
+        qx = np.full(pids.size, np.nan, dtype=np.float32)
+        qy = np.full(pids.size, np.nan, dtype=np.float32)
+        n = self.n
+        if n == 0 or pids.size == 0:
+            return qx, qy
+        live = np.flatnonzero((self.p_mode[:n] < 2) & (self.p_pid[:n] >= 0))
+        if live.size == 0:
+            return qx, qy
+        have = self.p_pid[live]
+        srt = np.argsort(have)
+        have, live = have[srt], live[srt]
+        at = np.searchsorted(have, pids)
+        at_c = np.clip(at, 0, max(have.size - 1, 0))
+        ok = (at < have.size) & (pids >= 0) & (have[at_c] == pids)
+        if not ok.any():
+            return qx, qy
+        idx = live[at_c[ok]]
+        x = self.cx + self.p_x[idx] * self.sx - self.cam_px
+        y = self.cy + self.p_y[idx] * self.sy - self.cam_py
+        good = np.isfinite(x) & np.isfinite(y)
+        sel = np.flatnonzero(ok)[good]
+        qx[sel] = x[good]
+        qy[sel] = y[good]
+        return qx, qy
 
     def deactivate(self):
         virtual = self._virtual
@@ -4685,6 +4827,13 @@ class Fish2d(Twod, GradientEffect):
             self.draw_test(self.m_draw)
             return
 
+        # A MATCHED BIRTH REPLACES THE ADOPT (the shoal-burst plan §5.2)
+        pend = self._prog_birth_snap
+        if pend is not None:
+            self._prog_birth_snap = None
+            self._handoff_pending = False
+            self._prog_birth_token = pend.get("token")
+            self._prog_birth_pids = self._program_birth(pend)
         if self._handoff_pending:
             self._handoff_pending = False
             self._adopt_handoff()
@@ -4834,6 +4983,13 @@ class Fish2d(Twod, GradientEffect):
 
         if self._scatter is None:
             self._phase_step(dt)
+            # THE COUNT RULE (the shoal-burst plan §5.4): a matched birth's
+            # count holds until `transition_count_hold_ms` after the program
+            # ends, then the authored count wins and _manage_population
+            # flies the difference in or out as it does for a live change.
+            if self._count_hold is not None and self.t >= self._count_hold[0]:
+                self.particle_count = int(self._count_hold[1])
+                self._count_hold = None
             self._manage_population()
         else:
             # an outgoing instance receives no more choreography and spawns
@@ -5458,6 +5614,10 @@ class Fish2d(Twod, GradientEffect):
                 omega = np.where(
                     pe, (1.0 - w) * np.nan_to_num(self.p_peel[:n]) + w * omega,
                     omega)
+        # the rate actually applied — published on the hand-off (the
+        # shoal-burst plan §5.1: Fish computed this every frame and threw
+        # it away, so a cloud leaving a turning fish flew dead straight)
+        self.p_om[:n] = omega.astype(np.float32)
         self.p_hd[:n] = _wrap_pi(hd + omega * dt)
         hd = self.p_hd[:n]
 

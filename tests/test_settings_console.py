@@ -102,6 +102,11 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         "drop_shock_enabled", "drop_shock_min_energy",
         # 2026-10-12, the Pulse flash flare's energy floor:
         "pulse_flash_min_energy",
+        # 2026-10-17, THE HOST FRAME — the shoaling family's six
+        # (the shoal-burst plan, fx/VENDOR.md #82):
+        "transition_burst_px", "transition_burst_ms", "transition_land_at",
+        "transition_graft_ms", "transition_count_hold_ms",
+        "transition_match_count",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring
     assert "force_scene_enabled" not in sc.SETTINGS_REGISTRY

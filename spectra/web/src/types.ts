@@ -571,6 +571,17 @@ export interface RoomControlState {
   transition_bands_pieces: number;
   transition_bands_hold_ms: number;
   transition_unwind: number;
+  /** THE HOST FRAME (the shoal-burst plan, 2026-10-17): the shoaling
+   * family's pieces are offsets from the new object they are riding, so
+   * they burst and rejoin without ever leaving it
+   * (fx/effects/transition_cloud.py's HostFormer). 0 px of burst turns it
+   * off — and for orbits into fish brings back today's plain Shoaling. */
+  transition_burst_px: number;
+  transition_burst_ms: number;
+  transition_land_at: number;
+  transition_graft_ms: number;
+  transition_count_hold_ms: number;
+  transition_match_count: boolean;
   /** Legacy Now Playing "Force Scene" control, ported verbatim: while
    * enabled, every scene the system would otherwise pick automatically
    * (sequencer roll, trigger fire, or the automatic transition fire) fires

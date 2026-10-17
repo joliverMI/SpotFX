@@ -1066,6 +1066,80 @@ crossfade. Eight things:
   same frame's raw picture — Melt breathes. Proof: `tests/
   test_star_into_programs.py`.
 
+### THE SHOALING FAMILY RIDES A HOST — a piece is an offset, not a particle (2026-10-17)
+
+The shoal-burst plan (`/home/javi/fleet-spotfx/data/shoal-burst-plan/
+report.md`; the Admiral: "The burst particles continue generally moving as
+if the original object were still moving, like nothing happened, except it
+burst into particles ... Then, the new effect object matches initial
+conditions, and starts doing it's own motion, so it smoothly flows, and the
+particles recombine into the new object ... 3 fish turn into 3 orbits").
+**`fx/effects/transition_cloud.py`'s `HostFormer` docstring is the binding
+statement**; `fx/VENDOR.md` #82 lists every hook. Six things:
+
+- **THE ONE IDEA.** `piece_i(t) = host_j(i)(t) + (shape_i + u_i·R·E_burst(t))
+  · E_land(t)`. The host is the incoming object this piece's own parent
+  BECAME, read live every frame; `shape_i` is where the piece sat inside its
+  parent; the burst opens from rest and the gather closes it. A piece's
+  motion RELATIVE to what it is joining is the derivative of that bracket —
+  bounded by `transition_burst_px` and the envelopes, with **no term that
+  grows with distance**, which is exactly what a Hermite to a stranger has.
+  MEASURED before/after on the real pipeline, this branch against its own
+  merge-base: the new objects are born 13.0/19.2/13.3 px from the released
+  ones → 0.47/0.58/0.65 px (fish→orbits, squiggles→orbits, squiggles→fish;
+  two unrelated point sets on this panel sit ~11.4 px apart), and into
+  Squiggles there was nothing to be born on AT ALL on the program's first
+  frame → 0.40-0.56 px. orbits → fish was already 0.77 px and is unchanged
+  by it — the Fish's own adopt always did this; what that pair gains is the
+  burst it never had (his D1). A piece's speed against the object it joins
+  is 0.5-1.5 px/s (the plan measured 39.3 before, 1.36x the parent's own
+  speed), and the cloud turns 104-178° where it used to turn exactly 0.
+- **ASSIGNMENT IS INHERITED, NEVER SEARCHED** (`object_of` → pid), which is
+  also what stops two pieces of one fish being sent to opposite sides of the
+  panel. A piece whose host retired continues on the constant-turn model its
+  parent published (`transition_program.turn_integrate`) and fades — never a
+  flight to a stranger.
+- **THE BIRTH IS AN OPT-IN CAPABILITY AND IS NOT `_adopt_handoff`.** An
+  incoming form joins by answering `_program_birth(snap)` (born matched,
+  returns one pid per released object) and `_program_hosts(pids)` (where they
+  are now, NaN for a retired one); without both, the pair keeps today's
+  former exactly. The crossfade adoption path is byte-identical, deliberately.
+  The snapshot is handed over in `begin()` and consumed on the incoming
+  effect's FIRST DRAW, where its geometry is known — except the eruption's,
+  which is deferred to its own bloom (`_birth_now`).
+- **ORBITS GETS THE VELOCITY GRAFT, FISH NEEDS NOTHING, SQUIGGLES GETS A
+  SMOOTH HEAD.** Orbits is position-driven, so
+  `drawn(t) = model(t) + v_res·t·e^(−t/τ)` leaves it on the velocity it
+  inherited and erases itself (nothing solved backwards). Fish's heading and
+  speed ARE its state and `PEEL_S` already eases an inherited turn rate —
+  what it was missing is that it computed `omega` every frame and threw it
+  away; it is published now. A squiggle's head walks a lattice whose six
+  directions sit 45/45/90 apart, so its published heading is averaged over a
+  whole segment pair (the Admiral's own correction: "the bursts ... look like
+  they go the opposite direction") and anything that RIDES a chain reads
+  `_smooth_head`, not the jumping lattice head.
+- **THE COUNT RULE (his D3)**: matched on the way in, the scene's own
+  authored count a moment (`transition_count_hold_ms`) after the program ENDS
+  — never during it; each effect's own population manager flies the
+  difference in or out as it does for any live change. The eruption is the
+  stated not-applicable case (its ring collapses to a point). A clamp bite
+  merges the surplus objects' pieces into the nearest born host.
+- **SCOPE IS TIER A, and tier B is held byte-identical.** The 8 shoaling
+  pairs plus orbits → fish (his D1, which had no burst at all). His ruling
+  was "for scope, dont do B", so the 39 tier-B pairs are proven unchanged
+  against a `git archive` of the branch's merge-base — EVERY one of them,
+  the four out of Squiggles included: the walk direction he asked to
+  correct rides its own `walk_vx`/`walk_vy`/`walk_om` snapshot keys, which
+  ONLY `_program_objects` (the host frame's object set) reads, so `vx`/`vy`
+  still carry the last lattice move for the four programs that release from
+  them and the three effects that adopt them on an ordinary crossfade.
+  `transition_burst_px = 0` reproduces today's orbits → fish AND today's
+  eruption frame for frame. Specs: `tests/test_shoal_burst.py`,
+  `tests/shoal_burst_harness.py` (the rig — read its two determinism traps
+  before writing another), `tests/shoal_tier_b_driver.py`; the six room
+  settings are Sonic-editable and sit on Settings → "Scenes & drops"; help
+  topic `shoaling-burst`. **Unverified against his live room.**
+
 ## THE KNOWN AUDIO BUFFER — SPECTRA MIRRORS River's number, never shortens it
 
 **`spectra/services/known_buffer.py`'s module docstring is the binding

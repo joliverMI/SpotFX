@@ -1708,6 +1708,26 @@ export const HELP_SECTIONS: HelpSection[] = [
             kbd: false,
           },
           {
+            id: 'shoaling-burst',
+            title: 'The shoaling burst: the particles keep the old motion, and the new object is born on them',
+            keywords: 'shoaling burst host frame particles cloud recombine rejoin zoom velocity continue count match 3 fish 3 orbits fish orbits squiggles black hole eruption shoal break unravel graft peel gather land burst size',
+            body: [
+              'When one shoaling effect becomes another — Fish, Orbits and Squiggles in any direction, and the Black Hole erupting into any of them — the old object bursts into particles that carry on as if nothing had happened: still swimming like a fish, still turning like an orbit. The new object is born on them, with the same position, speed and turn rate, and starts doing its own motion; the particles ride it and gather back into it. There is no moment where a cloud zooms across the panel to wherever the new effect happened to put itself.',
+              'The count is matched on the way in, where it means something: 3 fish become 3 orbits. A moment later (the matched-count hold) the scene\'s own authored count wins again and the effect flies the difference in or out exactly as it does for any other change. The Black Hole\'s eruption is the one case with no sensible one-to-one — its ring collapses to a point — so the incoming effect keeps its own count there and the spray is divided among its objects.',
+              'Each transition keeps its own character: a fish still shatters into its body dots, a chain still unspools from its tail one dot at a time, the eruption still contracts, blooms and sprays. What changed is that a piece is now an offset from the object it is going to join, rather than a free particle that has to be driven there.',
+              'Shoaling burst 0 turns the puff off: every pair still rides its new object, with no spread. For Orbits into Fish it brings back the older transition entirely, where the fish simply appear on the blobs with no burst at all.',
+            ],
+            table: [
+              ['Shoaling burst', '7 px (0-20) — how far the cloud puffs out from the object it is riding.'],
+              ['Shoaling burst opens over', '300 ms (80-700) — the only moment a piece moves quickly against that object.'],
+              ['Shoaling gather begins at', '0.45 of the transition (0.1-0.9).'],
+              ['Shoaling inherited speed', '250 ms (60-800) — how long a newly born object keeps the velocity it inherited.'],
+              ['Shoaling matched count holds', '400 ms (0-3000) after the transition ends.'],
+              ['Match the count', 'On. Off: the new effect comes in with its own authored count straight away.'],
+            ],
+            kbd: false,
+          },
+          {
             id: 'drop-sequence-keys',
             title: 'Drop-sequence keyboard',
             keywords: 'keyboard keys shortcuts c l d select handle arrow step nudge shift enter confirm delete dismiss n p next previous escape ctrl z undo y redo focus',

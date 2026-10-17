@@ -208,3 +208,40 @@ motion) and the drop-timing-reference withdrawal note
   Hermite FORM as the Eruption; Orbits -> Squiggles is UNRAVEL (the blobs
   thread onto the chain heads).
 `fx/effects/transition_cloud.py`'s docstring is the binding statement for phase 4's programs; `tests/test_transition_programs_phase4.py` measures them on the real pipeline.
+
+## THE HOST FRAME: born matched, with a velocity graft (2026-10-17)
+
+The shoal-burst plan (`/home/javi/fleet-spotfx/data/shoal-burst-plan/
+report.md`; `fx/effects/transition_cloud.py`'s `HostFormer` is the binding
+statement) made Orbits a form a transition program can be BORN INTO, so the
+cloud leaving the old effect rides the new blobs instead of flying to them.
+Three things on this effect:
+
+- **`_program_birth(snap)` / `_program_hosts(pids)`** — one blob per
+  released object, AT its position, carrying the id the program's cloud
+  follows it by (`p_pid`). It is NOT part of `_adopt_handoff`, deliberately:
+  the crossfade adoption path is byte-identical and the birth is an opt-in
+  capability. `_program_hosts` answers NaN for a retired pid, and those
+  pieces fall back to a constant-turn continuation.
+- **THE VELOCITY GRAFT** (`p_resx`/`p_resy`/`p_resage`, applied in `draw()`
+  after the entering/leaving blend has settled `x, y`). Orbits is
+  POSITION-driven — a tether on a spinning ring, a blob orbiting the tether
+  — so there is no velocity state to set. Instead
+  `drawn(t) = model(t) + v_res . t . e^(-t/tau)` with
+  `v_res = v_inherited - v_model(0)`: the graft's own velocity at birth is
+  exactly `v_res`, so the blob leaves on the velocity it inherited; the
+  displacement peaks at `v_res.tau/e` and returns to zero, so the model is
+  never permanently displaced and NOTHING IS SOLVED BACKWARDS (no inverse
+  kinematics for slot/phase/radius). `v_model(0)` is MEASURED on the first
+  frame after birth, never guessed. `tau` is `transition_graft_ms`.
+- **RING ORDER IS CHOSEN, not left to chance**: `_manage_population` hands
+  slots out in array order, so the birth orders the born blobs by their own
+  angle and rotates that to the ring, which is what keeps each glide into
+  orbit short instead of sending a blob across the panel for a slot it never
+  had to have. `_count_hold` holds the matched count (3 fish -> 3 orbits)
+  until `transition_count_hold_ms` after the program ends, then the
+  authored `particle_count` wins and `_manage_population` flies the
+  difference in or out exactly as it does for any live change.
+
+Proofs: `tests/test_shoal_burst.py` (every number, with a `git archive` of
+the merge-base as the before), `tests/shoal_burst_harness.py` (the rig).

@@ -183,7 +183,9 @@ THE ANCHORS (transition_program.anchor_frac, what the trigger clock leads
 by): Lensing's is its ignition (like Infall's); the Fountain sprays at
 FOUNTAIN_ANCHOR; the Flame Lick explodes, the Shoal Break shatters and a
 chain unspools ON the mark (0); the Ignition's rim catches at
-IGNITION_ANCHOR; the Shoaling's fish are formed at SHOALING_ANCHOR; the
+IGNITION_ANCHOR; the Shoaling's fish are formed ON the mark (0) whenever
+`transition_burst_px>0` — the shoal-burst plan's own rule, the burst IS the
+payoff — and only at SHOALING_ANCHOR when that setting is 0; the
 threads complete at THREAD_ANCHOR.
 """
 
@@ -564,6 +566,132 @@ class TargetFormer(_Former):
         return s * s
 
 
+# ── THE HOST FRAME: the shoaling family's FORM ─────────────────────────────
+
+ORPHAN_FADE_S = 0.45       # a piece whose host retired fades over this
+HOST_PIECE_FADE = 0.35     # ... and it starts from this much of its brightness
+
+
+class HostFormer(_Former):
+    """THE HOST FRAME (the shoal-burst plan, /home/javi/fleet-spotfx/data/
+    shoal-burst-plan/report.md §5; the Admiral: "The burst particles
+    continue generally moving as if the original object were still moving,
+    like nothing happened, except it burst into particles ... Then, the new
+    effect object matches initial conditions, and starts doing it's own
+    motion, so it smoothly flows, and the particles recombine into the new
+    object").
+
+    A piece is not a free particle that has to be DRIVEN to a destination
+    (the TargetFormer's Hermite to a stranger, whose peak speed scales with
+    however far apart the two forms happened to be — the "zoom"). It is an
+    OFFSET FROM A HOST, and the host does the travelling::
+
+        piece_i(t) = host_j(i)(t) + ( shape_i + u_i.R.E_burst(t) ) . E_land(t)
+
+    `host_j(t)` is the incoming object this piece's own parent BECAME, read
+    live off the incoming effect every frame (`_program_hosts`), born on the
+    parent's position, velocity and turn rate — so for its first stretch the
+    host's trajectory IS the parent's continuation (the velocity graft on
+    Orbits, the peel on Fish) and the cloud riding it continues the parent's
+    motion BY CONSTRUCTION; then the same cloud is carried by the new
+    object's own motion, with no second mechanism and no moment where the
+    two disagree. `shape_i` is where the piece sat inside its parent,
+    measured against WHERE ITS HOST ACTUALLY IS rather than where the parent
+    was (`CloudProgram._host_frame`), so `host(0) + shape` is exactly the
+    piece's own position on the first frame for every incoming form — each
+    program keeps its own release shape, so each transition keeps its
+    character. `u_i.R` is the burst, opening from rest over
+    `transition_burst_ms` and gathered back to nothing from
+    `transition_land_at`.
+
+    A piece's motion RELATIVE to the thing it is joining is the derivative
+    of that bracket — bounded by R and the envelopes, independent of how far
+    apart anything is. There is no term that grows with distance, which is
+    the whole fix.
+
+    ASSIGNMENT IS INHERITED, NEVER SEARCHED (`object_of` -> pid), which is
+    also what stops two pieces of one fish being sent to opposite sides of
+    the panel. A piece whose host has since retired (a fish disperses, a
+    blob is shed) continues on the constant-turn model its parent published
+    (transition_program.turn_integrate) and fades — never a flight to a
+    stranger."""
+
+    def __init__(self, prog, inc, t_land):
+        super().__init__(prog, inc, t_land)
+        n = prog.n
+        self.t_land = float(t_land)
+        self.R = float(prog.settings.burst_px)
+        self.burst_s = max(float(prog.settings.burst_open_s()), 1e-3)
+        self.lost = np.full(n, np.nan, np.float32)
+        self.hosts_seen = False
+
+    def _hosts(self, inc):
+        p = self.p
+        try:
+            qx, qy = inc._program_hosts(p.host_pids)
+        except Exception:
+            return None
+        qx = np.asarray(qx, dtype=np.float32)
+        qy = np.asarray(qy, dtype=np.float32)
+        if qx.size != p.host_pids.size:
+            return None
+        return qx[p.obj_of], qy[p.obj_of]
+
+    def advance(self, inc, t, dt):
+        p = self.p
+        hosts = self._hosts(inc)
+        if hosts is None:
+            p._fly(inc, t, dt)
+            return
+        hx, hy = hosts
+        have = np.isfinite(hx) & np.isfinite(hy)
+        if have.any():
+            self.hosts_seen = True
+        eb = _smoothstep((t - p.t_burst0) / self.burst_s).astype(np.float32)
+        span = max(p.duration - self.t_land, 1e-3)
+        el = np.float32(1.0 - float(_smoothstep((t - self.t_land) / span)))
+        ox = (p.shape_ox + p.burst_ux * self.R * eb) * el
+        oy = (p.shape_oy + p.burst_uy * self.R * eb) * el
+        nx = hx + ox
+        ny = hy + oy
+        # ORPHANS: the continuation the release itself published — constant
+        # speed on a constant turn rate — then a fade. Never a flight to a
+        # stranger, and never a dead-straight drift out of a turn.
+        gone = ~have
+        if gone.any():
+            fresh = gone & ~np.isfinite(self.lost)
+            if fresh.any():
+                self.lost = np.where(fresh, np.float32(t), self.lost)
+            ovx, ovy = tp.turn_integrate(p.vx, p.vy, p.piece_om, dt)
+            nx = np.where(gone, p.x + ovx * dt, nx)
+            ny = np.where(gone, p.y + ovy * dt, ny)
+            p.vx = np.where(gone, ovx, p.vx).astype(np.float32)
+            p.vy = np.where(gone, ovy, p.vy).astype(np.float32)
+        if dt > 0:
+            vx = (nx - p.x) / dt
+            vy = (ny - p.y) / dt
+            p.vx = np.where(have, vx, p.vx).astype(np.float32)
+            p.vy = np.where(have, vy, p.vy).astype(np.float32)
+        p.x = nx.astype(np.float32)
+        p.y = ny.astype(np.float32)
+        # a hosted piece dissolves into its host as the gather closes; an
+        # orphan fades on its own clock from where it was dropped
+        fade = np.where(have, HOST_PIECE_FADE + (1.0 - HOST_PIECE_FADE) * el,
+                        np.clip(1.0 - (t - np.nan_to_num(self.lost, nan=t))
+                                / ORPHAN_FADE_S, 0.0, 1.0))
+        p.form_fade = np.clip(fade, 0.0, 1.0).astype(np.float32)
+
+    def gain(self, t) -> float:
+        """The new object IS the continuation, so it comes up as the burst
+        opens and is fully there when the gather begins."""
+        return float(_smoothstep(t / max(self.t_land, 1e-3)))
+
+    def hand_off(self, inc):
+        # Nothing to adopt: every piece has arrived ON its host and faded
+        # into it, and the host is the real effect's own object.
+        return None
+
+
 # ── the cloud program ──────────────────────────────────────────────────────
 
 class CloudProgram(TransitionProgram):
@@ -599,6 +727,88 @@ class CloudProgram(TransitionProgram):
             return 1.0 - settings.infall_form_s() / settings.duration_s
         return cls.FORM_AT
 
+    # ── the host frame (HostFormer's docstring is the binding statement)
+    # A release that sets these up gets the HostFormer; one that does not
+    # keeps today's former exactly.
+    obj_of = None          # piece -> released-object index
+    shape_ox = None        # where the piece sat inside its parent (px)
+    shape_oy = None
+    burst_ux = None        # its own unit burst direction
+    burst_uy = None
+    t_burst0 = None        # when its puff starts (the unspool staggers it)
+    piece_om = None        # its parent's turn rate (orphan continuation)
+    host_pids = None       # object -> the pid its host was born with
+
+    def _host_frame(self, objs, obj_of, inc=None, *, extra=None,
+                    t_burst0=None, om=None) -> bool:
+        """Hand the cloud to the HostFormer: `obj_of` names each piece's own
+        parent, and the SHAPE — where that piece sat inside it — is measured
+        against WHERE ITS HOST ACTUALLY IS, read once here, not against the
+        released object's own position. The two differ whenever the incoming
+        form places its new object on a grid of its own (a chain head snaps
+        to the device lattice), and measuring against the host is what makes
+        `host(0) + shape` exactly the piece's own position on frame one for
+        every form, rather than up to a pixel off for some. `extra` is a
+        release's own spread, added on top as a distance.
+
+        The pids come from the matched birth the incoming effect has already
+        consumed on its first draw; an object the count clamped out (-1) has
+        its pieces MERGED INTO THE NEAREST BORN HOST — two fish visibly
+        becoming one orbit — rather than a count nobody asked for."""
+        pids = self._birth_pids(self.incoming)
+        if pids is None or objs is None or pids.size != objs["px"].size:
+            return False
+        born = np.flatnonzero(pids >= 0)
+        if born.size == 0:
+            return False
+        orphan = np.flatnonzero(pids < 0)
+        if orphan.size:
+            d = ((objs["px"][orphan][:, None] - objs["px"][born][None, :]) ** 2
+                 + (objs["py"][orphan][:, None] - objs["py"][born][None, :]) ** 2)
+            pids = pids.copy()
+            pids[orphan] = pids[born][np.argmin(d, axis=1)]
+        obj_of = np.asarray(obj_of, dtype=np.int64)
+        n = int(self.x.size)
+        # a mapping that does not line up is a BUG, not something to clamp
+        # into silence: fall back to today's former rather than send a piece
+        # to a host its parent never became
+        if obj_of.size != n or n == 0:
+            return False
+        if obj_of.min() < 0 or obj_of.max() >= pids.size:
+            return False
+        self.host_pids = pids
+        self.obj_of = obj_of
+        rx = np.asarray(objs["px"], np.float32).copy()
+        ry = np.asarray(objs["py"], np.float32).copy()
+        inc = inc if inc is not None else self.incoming
+        try:
+            qx, qy = inc._program_hosts(pids)
+            qx = np.asarray(qx, np.float32)
+            qy = np.asarray(qy, np.float32)
+            if qx.size == rx.size:
+                ok = np.isfinite(qx) & np.isfinite(qy)
+                rx = np.where(ok, qx, rx)
+                ry = np.where(ok, qy, ry)
+        except Exception:
+            pass
+        ox = self.x - rx[obj_of]
+        oy = self.y - ry[obj_of]
+        if extra is not None:
+            ox = ox + np.asarray(extra[0], np.float32)
+            oy = oy + np.asarray(extra[1], np.float32)
+        self.shape_ox = np.asarray(ox, np.float32).copy()
+        self.shape_oy = np.asarray(oy, np.float32).copy()
+        ang = self.rng.uniform(0.0, 2.0 * np.pi, n).astype(np.float32)
+        rad = np.sqrt(self.rng.uniform(0.0, 1.0, n)).astype(np.float32)
+        self.burst_ux = (np.cos(ang) * rad).astype(np.float32)
+        self.burst_uy = (np.sin(ang) * rad).astype(np.float32)
+        self.t_burst0 = (np.zeros(n, np.float32) if t_burst0 is None
+                         else np.asarray(t_burst0, np.float32).copy())
+        self.piece_om = (objs["om"][self.obj_of].astype(np.float32)
+                         if om is None else
+                         np.asarray(om, np.float32).copy())
+        return True
+
     # ── setup ─────────────────────────────────────────────────────────
     def _setup(self, inc) -> None:
         self.c_from_t = 0.0
@@ -624,14 +834,16 @@ class CloudProgram(TransitionProgram):
     def _release_snapshot(self, cap=PIECE_CAP, min_bright=0.35):
         """The outgoing snapshot's pieces as they are: positions,
         velocities, colours — capped to the brightest, a small cloud split
-        (SPLIT_MIN)."""
+        (SPLIT_MIN). `_rel_obj` records which released OBJECT each piece
+        came from (the host frame's `object_of`)."""
         px, py, vx, vy, grad, bright, rgb = self._snap_arrays()
         keep = _cap_by_brightness(bright, cap)
         a = {"x": px[keep], "y": py[keep], "vx": vx[keep], "vy": vy[keep],
              "grad": grad[keep], "bright": np.clip(bright[keep], min_bright, 1.0),
-             "rgb": rgb[keep]}
+             "rgb": rgb[keep], "obj": keep.astype(np.int64)}
         if self.SPLIT_MIN:
             a = _split(self.rng, a, self.SPLIT_MIN)
+        self._rel_obj = np.asarray(a["obj"], dtype=np.int64)
         self._set_pieces(a["x"], a["y"], a["vx"], a["vy"], a["grad"],
                          a["bright"], a["rgb"])
 
@@ -643,6 +855,10 @@ class CloudProgram(TransitionProgram):
             return FieldFormer(self, inc)
         if self.in_type == "fireworks":
             return SparkFormer(self, inc, self.FORM_AT * d)
+        # THE HOST FRAME: only when this release built one AND the incoming
+        # form was born matched — every other pair keeps today's former.
+        if self.obj_of is not None and hasattr(inc, "_program_hosts"):
+            return HostFormer(self, inc, self.settings.land_s())
         if hasattr(inc, "_formation_points"):
             return TargetFormer(self, inc, self.FORM_AT * d, self.STAGGER)
         return FadeFormer(self, inc, self.FORM_AT * d)
@@ -1077,6 +1293,11 @@ class IgnitionProgram(CloudProgram):
 # ── SHOAL BREAK: Fish -> Orbits / Squiggles ────────────────────────────────
 
 DOTS_PER_FISH = 6
+# In the host frame a release's sideways spread is a DISTANCE, not a
+# velocity: the same `transition_scatter` number read as px/s then times
+# this many seconds of it, so the shape a fish shatters into is the one it
+# always had without a term that keeps pushing the dot away from its host.
+HOST_LAT_S = 0.12
 
 
 class ShoalBreakProgram(CloudProgram):
@@ -1084,6 +1305,7 @@ class ShoalBreakProgram(CloudProgram):
     FORM_AT = 0.45
     STAGGER = 0.3
     DRAG = 1.0
+    HOST_FRAME = True
 
     @classmethod
     def stage_fracs(cls, settings, out_type=None, in_type=None):
@@ -1121,6 +1343,16 @@ class ShoalBreakProgram(CloudProgram):
         self._set_pieces(x, y, dvx, dvy, np.repeat(grad, DOTS_PER_FISH),
                          np.repeat(np.clip(bright, 0.35, 1.0), DOTS_PER_FISH),
                          np.repeat(rgb, DOTS_PER_FISH, axis=0))
+        # THE HOST FRAME: the shape IS the body — each dot's own place in
+        # the fish it came from, laid back along its heading, with the
+        # lateral spread a STATIC offset rather than a sideways velocity (a
+        # scatter in the velocity is what sent a dot off at up to 80 degrees
+        # to the fish it came out of). Every dot of one fish rides the one
+        # object that fish became.
+        obj = np.repeat(keep, DOTS_PER_FISH)
+        lat_x = (-uy[:, None] * lat * HOST_LAT_S).ravel().astype(np.float32)
+        lat_y = (ux[:, None] * lat * HOST_LAT_S).ravel().astype(np.float32)
+        self._host_frame(self.objs, obj, inc, extra=(lat_x, lat_y))
 
 
 # ── SHOALING: Orbits -> Fish ───────────────────────────────────────────────
@@ -1182,6 +1414,56 @@ class ShoalingProgram(TransitionProgram):
         return None
 
 
+DOTS_PER_BLOB = 6          # pieces an orbit blob comes apart into
+BLOB_DOT_R = 1.6           # ... spread this far round it before the burst
+
+
+class ShoalBurstProgram(CloudProgram):
+    """SHOALING WITH A BURST (the Admiral's D1 on the shoal-burst plan: it
+    is the pair he named, and today it has no burst at all — the fish simply
+    appear on the blobs). Each orbit blob comes apart into its own pixels,
+    the Fish is BORN MATCHED on the blobs (one fish per blob, on its
+    velocity and turning rate), and every piece rides the fish its own blob
+    became — so the cloud bursts and rejoins without ever leaving it.
+
+    `transition_burst_px = 0` selects the plain `ShoalingProgram` instead
+    (transition_program.program_class), which is today's pair frame for
+    frame."""
+
+    name = tp.SHOALING
+    HOST_FRAME = True
+    DRAG = 1.0
+    RELEASE_HALF_LIFE_S = 0.2
+    STAGE_WORDS = ("burst", "burst", "gather")
+
+    @classmethod
+    def stage_fracs(cls, settings, out_type=None, in_type=None):
+        return [{"label": "burst", "from": 0.0,
+                 "to": settings.land_at, "anchor": True},
+                {"label": "gather", "from": settings.land_at, "to": 1.0}]
+
+    def _release(self, inc):
+        px, py, vx, vy, grad, bright, rgb = self._snap_arrays()
+        keep = _cap_by_brightness(bright, PIECE_CAP // DOTS_PER_BLOB)
+        px, py, vx, vy = px[keep], py[keep], vx[keep], vy[keep]
+        grad, bright, rgb = grad[keep], bright[keep], rgb[keep]
+        n = px.size
+        k = (np.arange(DOTS_PER_BLOB, dtype=np.float32) / DOTS_PER_BLOB
+             * 2.0 * np.pi)
+        jit = self.rng.uniform(0.0, 2.0 * np.pi, n).astype(np.float32)
+        ox = (np.cos(k[None, :] + jit[:, None]) * BLOB_DOT_R).ravel()
+        oy = (np.sin(k[None, :] + jit[:, None]) * BLOB_DOT_R).ravel()
+        x = (np.repeat(px, DOTS_PER_BLOB) + ox).astype(np.float32)
+        y = (np.repeat(py, DOTS_PER_BLOB) + oy).astype(np.float32)
+        self._set_pieces(x, y,
+                         np.repeat(vx, DOTS_PER_BLOB),
+                         np.repeat(vy, DOTS_PER_BLOB),
+                         np.repeat(grad, DOTS_PER_BLOB),
+                         np.repeat(np.clip(bright, 0.35, 1.0), DOTS_PER_BLOB),
+                         np.repeat(rgb, DOTS_PER_BLOB, axis=0))
+        self._host_frame(self.objs, np.repeat(keep, DOTS_PER_BLOB), inc)
+
+
 # ── UNRAVEL: Squiggles <-> Orbits / Fish ──────────────────────────────────
 
 class UnravelProgram(CloudProgram):
@@ -1193,6 +1475,7 @@ class UnravelProgram(CloudProgram):
 
     name = tp.UNRAVEL
     DRAG = 1.0
+    HOST_FRAME = True
 
     @classmethod
     def stage_fracs(cls, settings, out_type=None, in_type=None):
@@ -1234,12 +1517,21 @@ class UnravelProgram(CloudProgram):
             self._release_snapshot()
             self.t_rel = np.zeros(self.x.size, np.float32)
             self.v_go = None
+            # THE HOST FRAME: each split copy rides the object it came from
+            # (its jitter is the shape), threading onto the chain head /
+            # blob that object became instead of flying to the nearest one
+            obj = getattr(self, "_rel_obj", None)
+            o = self.objs
+            if (obj is not None and o is not None and obj.size == self.x.size
+                    and obj.size and 0 <= obj.min() and obj.max() < o["px"].size):
+                self._host_frame(o, obj, inc)
             return
         self.FORM_AT = 0.5
         self.STAGGER = 0.35
         rng = self.rng
         xs, ys, tx, ty, gr, br, rel = [], [], [], [], [], [], []
-        for pts, grad, bright in self.paths:
+        ch = []
+        for ci, (pts, grad, bright) in enumerate(self.paths):
             m = pts.shape[0]
             nxt = np.vstack([pts[1:], pts[-1:]])
             prv = np.vstack([pts[:1], pts[:-1]])
@@ -1253,6 +1545,7 @@ class UnravelProgram(CloudProgram):
             br.append(np.clip(bright * (0.4 + 0.6 * np.arange(m) / max(m - 1, 1)),
                               0.0, 1.0))
             rel.append(UNSPOOL_S * np.arange(m, dtype=np.float32) / max(m - 1, 1))
+            ch.append(np.full(m, ci, dtype=np.int64))
         x = np.concatenate(xs) + 0.5
         y = np.concatenate(ys) + 0.5
         keep = np.arange(x.size)
@@ -1284,6 +1577,20 @@ class UnravelProgram(CloudProgram):
         self.v_go = ((ux * spd - uy * lat).astype(np.float32),
                      (uy * spd + ux * lat).astype(np.float32))
         self.t_rel = np.concatenate(rel)[keep].astype(np.float32)
+        # THE HOST FRAME: a chain IS the object, so every dot of its body
+        # rides the chain head / blob / fish that chain became, holding its
+        # own place back along the body (`self.paths` is in raw chain order,
+        # which `raw_to_object` maps onto the released objects). The
+        # tail-first UNSPOOL survives as each dot's own burst start, so the
+        # chain still comes apart from its tail rather than all at once.
+        o = self.objs
+        if o is not None and o["px"].size:
+            raw = self.raw_to_object(o, max(len(self.paths), 1))
+            ci_ = np.concatenate(ch)[keep]
+            obj = raw[ci_] if (ci_.size and ci_.min() >= 0
+                               and ci_.max() < raw.size) else np.full(1, -1)
+            if obj.size == x[keep].size and (obj >= 0).all():
+                self._host_frame(o, obj, inc, t_burst0=self.t_rel)
 
     def _piece_gain(self):
         # out of Squiggles the dots ease in over the chain picture they are
@@ -1850,6 +2157,9 @@ PROGRAM_CLASSES = {
     tp.IGNITION: IgnitionProgram,
     tp.SHOAL_BREAK: ShoalBreakProgram,
     tp.SHOALING: ShoalingProgram,
+    # the host-frame variant of the SAME name, chosen by
+    # transition_program.program_class when transition_burst_px > 0
+    "shoaling_burst": ShoalBurstProgram,
     tp.UNRAVEL: UnravelProgram,
     tp.UNWIND: UnwindProgram,
     tp.CLUSTER: ClusterProgram,

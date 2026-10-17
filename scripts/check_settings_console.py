@@ -162,12 +162,18 @@ check(set(sc.SETTINGS_REGISTRY) == {
     "pulse_flash_min_energy",
     # 2026-10-12, the room's drop timing offset (PR #414):
     "drop_timing_offset_ms",
+    # 2026-10-17, THE HOST FRAME (the shoal-burst plan, fx/VENDOR.md #82) —
+    # the shoaling family's six:
+    "transition_burst_px", "transition_burst_ms", "transition_land_at",
+    "transition_graft_ms", "transition_count_hold_ms",
+    "transition_match_count",
 }, "registry is the deliberate allowlist (eight room keys + the four "
    "analysed-transition knobs + the five 2026-10-06 widening keys + "
    "drop_floor + lull_dark_max_s + lull_breath_hold_s + the four "
    "drop-switch tunables + the two fireworks-meld tunables + "
    "strip_phase_strength + background_fade_s + "
-   "the thirteen transition-program tunables + the drop Shockwave's switch "
+   "the thirteen transition-program tunables + the shoaling family's six + "
+   "the drop Shockwave's switch "
    "and energy floor + the Pulse flash's energy floor)")
 check(sc.SETTINGS_REGISTRY["ambient_enabled"].kind == "bool"
       and sc.SETTINGS_REGISTRY["ambient_on_music_pause"].kind == "bool",

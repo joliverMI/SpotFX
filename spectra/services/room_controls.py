@@ -822,6 +822,27 @@ class RoomControlState(BaseModel):
     #     their rings before they unwind;
     #   - transition_unwind: how hard they unwind outward (px/s^2) on their
     #     way to the Orbits (and, gentler, the Fish).
+    # THE HOST FRAME (the shoal-burst plan, 2026-10-17 — the Admiral: "The
+    # burst particles continue generally moving as if the original object
+    # were still moving, like nothing happened, except it burst into
+    # particles ... Then, the new effect object matches initial conditions,
+    # and starts doing it's own motion, so it smoothly flows, and the
+    # particles recombine into the new object") adds six, for the shoaling
+    # family (fx/effects/transition_cloud.py's HostFormer is the binding
+    # statement). A piece is an OFFSET FROM A HOST, so:
+    #   - transition_burst_px: how far the cloud puffs out from its host.
+    #     0 disables the burst for every pair — and for orbits -> fish it
+    #     selects today's plain Shoaling, frame for frame;
+    #   - transition_burst_ms: how fast that puff opens (the only moment a
+    #     piece moves quickly against its host);
+    #   - transition_land_at: the fraction of the program at which the
+    #     gather back into the new object begins;
+    #   - transition_graft_ms: how long a newly born object keeps the
+    #     velocity it inherited before its own motion takes over;
+    #   - transition_count_hold_ms: how long after the program ends the
+    #     MATCHED count holds (3 fish -> 3 orbits, then the scene's own
+    #     authored count a moment later — his D3);
+    #   - transition_match_count: that count match itself.
     transition_programs_enabled: bool = True
     transition_program_ms: int = Field(default=1400, ge=600, le=2500)
     transition_velocity_blend_ms: int = Field(default=500, ge=100, le=1500)
@@ -835,6 +856,12 @@ class RoomControlState(BaseModel):
     transition_bands_pieces: int = Field(default=180, ge=60, le=220)
     transition_bands_hold_ms: int = Field(default=300, ge=0, le=800)
     transition_unwind: float = Field(default=14.0, ge=0.0, le=40.0)
+    transition_burst_px: float = Field(default=7.0, ge=0.0, le=20.0)
+    transition_burst_ms: int = Field(default=300, ge=80, le=700)
+    transition_land_at: float = Field(default=0.45, ge=0.1, le=0.9)
+    transition_graft_ms: int = Field(default=250, ge=60, le=800)
+    transition_count_hold_ms: int = Field(default=400, ge=0, le=3000)
+    transition_match_count: bool = True
 
     # THE A/V-SYNC LEAD (owner ask 2026-08-28) — LEAD family: positive =
     # fire EARLIER, negative = fire LATER. The value the /avsync
@@ -1069,6 +1096,12 @@ def transition_program_request(room: "RoomControlState", *,
         "bands_pieces": int(room.transition_bands_pieces),
         "bands_hold_ms": int(room.transition_bands_hold_ms),
         "unwind": float(room.transition_unwind),
+        "burst_px": float(room.transition_burst_px),
+        "burst_ms": int(room.transition_burst_ms),
+        "land_at": float(room.transition_land_at),
+        "graft_ms": int(room.transition_graft_ms),
+        "count_hold_ms": int(room.transition_count_hold_ms),
+        "match_count": bool(room.transition_match_count),
         "on_mark": bool(on_mark),
     }
 

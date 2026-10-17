@@ -287,6 +287,60 @@ export default function ScenesDropsCard() {
               <label title="How hard the Star's pieces unwind outward on their way to the Orbits.">Out of Star unwind</label>
               <input type="number" min={0} max={40} step={1} {...field('transition_unwind')} />
             </div>
+            <div className="top-bar-group-field">
+              <InfoTip
+                topic="shoaling-burst"
+                text="Fish, Orbits, Squiggles and the Black Hole's eruption into them: the old object bursts into particles that keep moving as if nothing had happened, and the new one is born on them and gathers them back in. 0 px turns the burst off — and for Orbits into Fish brings back the old transition."
+              >
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  Shoaling burst
+                </label>
+              </InfoTip>
+              <input type="number" min={0} max={20} step={0.5} {...field('transition_burst_px')} />
+              <span className="settings-field-unit">px</span>
+            </div>
+            {local.transition_burst_px > 0 && (
+              <>
+                <div className="top-bar-group-field">
+                  <label title="How fast the burst opens — the only moment a piece moves quickly against the object it is riding.">
+                    Shoaling burst opens over
+                  </label>
+                  <input type="number" min={80} max={700} step={20} {...field('transition_burst_ms')} />
+                  <span className="settings-field-unit">ms</span>
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="How far into the transition the pieces start gathering back into the new object.">
+                    Shoaling gather begins at
+                  </label>
+                  <input type="number" min={0.1} max={0.9} step={0.05} {...field('transition_land_at')} />
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="How long a newly born object keeps the velocity it inherited before its own motion takes over.">
+                    Shoaling inherited speed
+                  </label>
+                  <input type="number" min={60} max={800} step={10} {...field('transition_graft_ms')} />
+                  <span className="settings-field-unit">ms</span>
+                </div>
+                <div className="top-bar-group-field">
+                  <label title="3 fish become 3 orbits on the way in; the scene's own count wins again this long after the transition ends.">
+                    Shoaling matched count holds
+                  </label>
+                  <input type="number" min={0} max={3000} step={50} {...field('transition_count_hold_ms')} />
+                  <span className="settings-field-unit">ms</span>
+                </div>
+                <div className="top-bar-group-field">
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <PowerButton
+                      on={local.transition_match_count}
+                      onChange={(on) => commit({ ...local, transition_match_count: on })}
+                      size={22}
+                      ariaLabel="Match the shoaling count"
+                    />
+                    Match the count
+                  </label>
+                </div>
+              </>
+            )}
           </>
         )}
         <div className="top-bar-group-field" style={{ alignItems: 'flex-start' }}>

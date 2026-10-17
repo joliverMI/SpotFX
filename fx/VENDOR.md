@@ -2431,3 +2431,56 @@ against that commit.
     `tests/test_blackhole_infall_through_transition.py` (a real Orbits→
     Black Hole transition and a steady-state run, both proven RED against
     the pre-fix accounting restored inline as the control).
+82. `effects/transition_program.py` (`ProgramSettings`' six host-frame
+    fields + `land_s`/`burst_open_s`/`graft_tau_s`, `turn_integrate`,
+    `TransitionProgram.HOST_FRAME`/`OBJECT_CAP`/`_program_objects`/
+    `raw_to_object`/`_birth_snapshot`/`_offer_birth`/`_birth_now`/
+    `_birth_pids`, `begin()`'s birth offer, `program_class(settings)`,
+    SHOALING's settings-aware anchor, `EruptionProgram._birth_hosts`/
+    `_host_gather`) + `effects/transition_cloud.py` (`HostFormer`,
+    `CloudProgram._host_frame` and its host-frame state, `_make_former`'s
+    new branch, `_release_snapshot`'s `_rel_obj`, `ShoalBreakProgram`'s and
+    `UnravelProgram`'s host frames, `ShoalBurstProgram`) +
+    `effects/orbits.py` (`p_pid`/`p_resx`/`p_resy`/`p_resage`,
+    `PARTICLE_MAX`, `_program_birth`/`_program_hosts`, the VELOCITY GRAFT
+    in `draw()`, `_count_hold`, the pending-birth consumption) +
+    `effects/fish.py` (`p_om` stored at the heading integration and
+    published as the snapshot's `om`, `p_pid`, `_program_birth`/
+    `_program_hosts`, `_count_hold`, the pending-birth consumption) +
+    `effects/squiggles.py` (`_walk_span`/`_head_motion` and the
+    `walk_vx`/`walk_vy`/`walk_om` snapshot keys BESIDE the unchanged
+    `vx`/`vy`, `_step_smooth_head`/`_smooth_head`, `_program_birth`/
+    `_program_hosts`, the pending-birth consumption): THE HOST FRAME, the
+    shoal-burst plan (`/home/javi/fleet-spotfx/data/shoal-burst-plan/
+    report.md`; the Admiral, 2026-10-17: "The burst particles continue
+    generally moving as if the original object were still moving, like
+    nothing happened, except it burst into particles ... Then, the new
+    effect object matches initial conditions, and starts doing it's own
+    motion, so it smoothly flows, and the particles recombine into the new
+    object ... It should also match the particle count where applicable, so
+    that 3 fish turn into 3 orbits"). In the SHOALING FAMILY a cloud piece
+    is an OFFSET FROM A HOST — the incoming object its own parent became,
+    born on that parent's position, velocity and turn rate — so its motion
+    relative to what it is joining is bounded by the burst and the
+    envelopes and has no term that grows with distance; the "zoom" of a
+    Hermite to a stranger goes by construction. `HostFormer`'s docstring is
+    the binding statement. Scope is the plan's TIER A plus the pair he
+    named (his D1): fish/orbits/squiggles in any direction and the Black
+    Hole's eruption into them; TIER B IS UNTOUCHED by his own ruling ("for
+    scope, dont do B") and proven byte-identical against the branch's
+    merge-base — every pair, the four out of Squiggles included, because
+    the walk direction he asked to correct rides its own `walk_vx`/
+    `walk_vy`/`walk_om` snapshot keys that only the host frame reads.
+    `transition_burst_px = 0` reproduces today's
+    orbits -> fish, and today's eruption, frame for frame. Measured against
+    the merge-base in the same rig: the new objects are born 13.0 / 19.2 /
+    13.3 px from the released ones -> 0.47 / 0.58 / 0.65 (fish -> orbits,
+    squiggles -> orbits, squiggles -> fish), and into Squiggles there was
+    nothing to be born on at all on the first frame -> 0.40-0.56; a piece's
+    speed against the object it joins is 0.5-1.5 px/s, and the cloud turns
+    104-178 degrees where it used to turn exactly 0. Evidence:
+    `tests/test_shoal_burst.py` + `tests/shoal_burst_harness.py` +
+    `tests/shoal_tier_b_driver.py` (real pipeline; a `git archive` of the
+    merge-base as the before, a control run with the switch removed as the
+    ground truth for what the parent was doing). Unverified against his
+    live room.

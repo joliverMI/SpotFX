@@ -103,6 +103,12 @@ DROP_SETTLE_S = 1.0  # post-burst settle before phase auto-reset (measured
 # never reverse.
 from fx.effects.lattice import AVG_MOVE_PX, RING, RING_ANGLES  # noqa: E402
 
+# the SMOOTH head a transition program's cloud rides (`_step_smooth_head`):
+# dead-reckoned along the chain's heading, pulled onto the real lattice head
+# over this long, snapping past this much of a jump
+HEAD_CORRECT_S = 0.18
+HEAD_SNAP_PX = 5.0 * AVG_MOVE_PX
+
 
 def _wrap_pi(a):
     return (a + math.pi) % (2 * math.pi) - math.pi
@@ -266,6 +272,12 @@ class Squiggles2d(Twod, GradientEffect):
         # Chain + spark state lives here (NOT do_once) so it survives config
         # patches — morph ramps re-run do_once constantly.
         self.chains = []
+        # THE HOST FRAME (the shoal-burst plan §5.2): a pending matched
+        # birth, consumed on the first draw where the geometry is known
+        self._prog_birth_snap = None
+        self._prog_birth_pids = None
+        self._prog_birth_token = None
+        self._next_pid = 0
         self.impulse = 0.0
         self._beat_pending = False
         self.spawn_acc = 0.0
@@ -548,9 +560,65 @@ class Squiggles2d(Twod, GradientEffect):
         hx, hy = c["path"][-1]
         return (float(hx), float(hy))
 
+    def _walk_span(self):
+        """How many lattice moves a published heading is averaged over: one
+        whole SEGMENT PAIR. Within a segment every move is the same ring
+        slot, and the six slots sit at +-45/+-90/+-135 degrees with NO
+        horizontal move — so a chain travelling right really does alternate
+        -45 and +45, and ANY single move (or any run inside one segment)
+        points up to 45 degrees off the way the chain is actually going.
+        That is what the Admiral saw: "The bursts don't seem to carry the
+        directional velocity of the squiggles. Some look like they go the
+        opposite direction." (shoal-burst plan, his comment on it.)"""
+        return max(2, 2 * int(getattr(self, "step_size", 1) or 1))
+
+    def _head_motion(self, c):
+        """The head's (vx, vy, om): the WALK DIRECTION averaged over the
+        last `_walk_span` lattice moves at the chain's walking speed, and
+        the turn rate from how that heading changed over the span before
+        it. 0 for a chain that has not moved far enough to say."""
+        path = c["path"]
+        m = len(path)
+        spd = float(getattr(self, "base_speed", 0.0) or 0.0)
+        if m < 2 or spd <= 0.0:
+            return (0.0, 0.0, 0.0)
+        k = min(self._walk_span(), m - 1)
+        pts = list(path)
+
+        def _head(i0, i1):
+            dx = float(pts[i1][0]) - float(pts[i0][0])
+            dy = float(pts[i1][1]) - float(pts[i0][1])
+            d = (dx * dx + dy * dy) ** 0.5
+            if d <= 1e-6:
+                return None
+            return dx / d, dy / d
+
+        now = _head(m - 1 - k, m - 1)
+        if now is None:
+            return (0.0, 0.0, 0.0)
+        vx, vy = now[0] * spd, now[1] * spd
+        om = 0.0
+        if m - 1 - 2 * k >= 0:
+            prev = _head(m - 1 - 2 * k, m - 1 - k)
+            if prev is not None:
+                dth = _wrap_pi(
+                    math.atan2(now[1], now[0]) - math.atan2(prev[1], prev[0]))
+                # the time those k moves took, at the walking speed
+                span_s = k * AVG_MOVE_PX / max(spd, 1e-3)
+                om = float(dth) / max(span_s, 1e-3)
+        return (vx, vy, om)
+
     def _head_velocity(self, c):
         """The head's velocity in px/s: the direction of its last lattice
-        move at the chain's walking speed (0 for a chain not yet moved)."""
+        move at the chain's walking speed (0 for a chain not yet moved).
+
+        THE SNAPSHOT'S `vx`/`vy` ARE STILL THIS, deliberately — several
+        effects adopt a squiggles snapshot on an ordinary crossfade
+        (blackhole, fireworks, fish) and four transition programs release
+        from it, and none of them was in the shoal-burst plan's scope (the
+        Admiral: "for scope, dont do B"). The WALK direction `_head_motion`
+        measures rides its own `walk_vx`/`walk_vy`/`walk_om` keys, which
+        only the host frame reads."""
         path = c["path"]
         if len(path) < 2:
             return (0.0, 0.0)
@@ -593,6 +661,42 @@ class Squiggles2d(Twod, GradientEffect):
         self._trim(c, steps_target)
         c["age"] += dt
         c["cooldown"] = max(0.0, c["cooldown"] - dt)
+        self._step_smooth_head(c, dt, speed_px)
+
+    def _step_smooth_head(self, c, dt, speed_px):
+        """A SMOOTH head, for anything that has to RIDE this chain rather
+        than draw it (the host frame — fx/effects/transition_cloud.py's
+        HostFormer).
+
+        The real head walks a lattice: it stands still for two or three
+        frames and then jumps a whole cell, and the six ring directions sit
+        45/45/90 apart, so ANY single move can be 90 degrees off the way the
+        chain is actually going. Drawn as a path that is invisible; RIDDEN
+        by a cloud it is judder in a direction the parent never went.
+
+        So this point DEAD-RECKONS along the chain's own heading at its
+        walking speed — which is the direction the lattice walk converges on
+        (`_steer`'s error diffusion), and is right from the very first frame,
+        before the head has moved at all — and is pulled toward the real head
+        over HEAD_CORRECT_S so it can never drift away from it. A teleport (a
+        turn-around reverses the path) snaps."""
+        hx, hy = self._head_pos(c)
+        sm = c.get("sm")
+        if sm is None:
+            c["sm"] = (hx, hy)
+            return
+        spd = max(float(speed_px), 0.0)
+        sx = sm[0] + math.cos(c["theta"]) * spd * dt
+        sy = sm[1] + math.sin(c["theta"]) * spd * dt
+        dx, dy = hx - sx, hy - sy
+        if math.hypot(dx, dy) > HEAD_SNAP_PX:
+            c["sm"] = (hx, hy)
+            return
+        k = min(1.0, dt / HEAD_CORRECT_S)
+        c["sm"] = (sx + dx * k, sy + dy * k)
+
+    def _smooth_head(self, c):
+        return c.get("sm") or self._head_pos(c)
 
     def _offscreen(self, c):
         """Gone once every point has left the crystal silhouette — pixels
@@ -774,6 +878,7 @@ class Squiggles2d(Twod, GradientEffect):
         heads = [self._head_pos(c) for c in self.chains]
         n = len(heads)
         vel = [self._head_velocity(c) for c in self.chains]
+        walk = [self._head_motion(c) for c in self.chains]
         return {
             "src": "squiggles",
             "t": particle_handoff.now(),
@@ -785,6 +890,16 @@ class Squiggles2d(Twod, GradientEffect):
             # program's RELEASE reads these (particle_handoff)
             "vx": np.array([v[0] for v in vel], dtype=np.float32),
             "vy": np.array([v[1] for v in vel], dtype=np.float32),
+            # ... and, BESIDE them, the way the chain is actually GOING:
+            # its walk direction over a whole segment pair and the rate
+            # that heading is turning (`_head_motion`). A separate key on
+            # purpose — `vx`/`vy` above are a contract several effects
+            # already adopt and four programs already release from, and the
+            # shoal-burst plan's scope was tier A only, so only the HOST
+            # FRAME reads these (transition_program._program_objects).
+            "walk_vx": np.array([w[0] for w in walk], dtype=np.float32),
+            "walk_vy": np.array([w[1] for w in walk], dtype=np.float32),
+            "walk_om": np.array([w[2] for w in walk], dtype=np.float32),
             "gesture": "spark",
             "grad": np.array(
                 [c["grad"] for c in self.chains], dtype=np.float32
@@ -800,6 +915,84 @@ class Squiggles2d(Twod, GradientEffect):
             "trail": None,
             "n": n,
         }
+
+    # ── THE HOST FRAME (the shoal-burst plan §5.2, fx/effects/
+    # transition_program.py's own docstring is the binding statement) ─────
+
+    def _program_birth(self, snap):
+        """BORN MATCHED: one chain per released object, with its head AT
+        that object's position and walking the way the object was GOING.
+
+        `_adopt_handoff` aims an adopted chain at the CENTRE of the panel
+        (+- 30 degrees) regardless of the velocity the predecessor
+        published — which is exactly a release "going the opposite
+        direction" for every object that was heading outward. That path is
+        deliberately left byte-identical (it is also the no-program
+        crossfade path); a program birth is the one that must continue the
+        motion, so it reads vx/vy and nothing else.
+
+        A chain head walks a lattice at a fixed speed, so there is no turn
+        rate to inherit (`om` = 0 by construction) and no count to restore:
+        `max_chains` is a density cap, not a target. Returns one pid per
+        released object (-1 where the cap clamped and it got none)."""
+        px = np.asarray(snap["px"], dtype=np.float32)
+        n_obj = int(px.size)
+        pids = np.full(n_obj, -1, dtype=np.int64)
+        if n_obj == 0 or getattr(self, "r_width", None) is None:
+            return pids
+        py = np.asarray(snap["py"], dtype=np.float32)
+        vx = np.asarray(snap.get("vx", np.zeros(n_obj)), dtype=np.float32)
+        vy = np.asarray(snap.get("vy", np.zeros(n_obj)), dtype=np.float32)
+        grad = np.asarray(snap.get("grad", np.zeros(n_obj)), dtype=np.float32)
+        bright = np.asarray(snap.get("bright", np.ones(n_obj)), dtype=np.float32)
+        room = max(int(self.max_chains) - len(self.chains), 0)
+        want = int(min(n_obj, room))
+        rng = self._rng
+        for i in range(want):
+            pos = (float(px[i]), float(py[i]))
+            spd = float(math.hypot(vx[i], vy[i]))
+            if spd > 1e-3:
+                theta = math.atan2(float(vy[i]), float(vx[i]))
+            else:
+                theta = math.atan2(self.cy - pos[1], self.cx - pos[0]) \
+                    + math.radians(float(rng.uniform(-30.0, 30.0)))
+            c = self._new_chain(
+                pos, theta,
+                grad=float(grad[i]),
+                bright=float(np.clip(bright[i], 0.4, 1.0)),
+            )
+            # a program owns the picture while it runs, so the chain is
+            # already on the panel: it continues at full strength instead
+            # of fading up under its own cloud (the hard-cut rule)
+            c["age"] = FADE_IN_S
+            c["pid"] = int(self._next_pid)
+            pids[i] = self._next_pid
+            self._next_pid += 1
+            self.chains.append(c)
+        return pids
+
+    def _program_hosts(self, pids):
+        """Where each pid's chain HEAD is now, in pixels — NaN for a pid
+        whose chain has gone (off the silhouette, or exploded in a
+        collision), whose pieces fall back to the constant-turn
+        continuation and fade."""
+        pids = np.asarray(pids, dtype=np.int64)
+        qx = np.full(pids.size, np.nan, dtype=np.float32)
+        qy = np.full(pids.size, np.nan, dtype=np.float32)
+        if pids.size == 0:
+            return qx, qy
+        at = {}
+        for c in self.chains:
+            pid = c.get("pid")
+            if pid is not None:
+                at[int(pid)] = self._smooth_head(c)
+        if not at:
+            return qx, qy
+        for k, pid in enumerate(pids.tolist()):
+            p = at.get(int(pid))
+            if p is not None:
+                qx[k], qy[k] = p[0], p[1]
+        return qx, qy
 
     def deactivate(self):
         virtual = self._virtual
@@ -1316,6 +1509,13 @@ class Squiggles2d(Twod, GradientEffect):
         if self.test:
             self.draw_test(self.m_draw)
             return
+        # A MATCHED BIRTH REPLACES THE ADOPT (the shoal-burst plan §5.2)
+        pend = self._prog_birth_snap
+        if pend is not None:
+            self._prog_birth_snap = None
+            self._handoff_pending = False
+            self._prog_birth_token = pend.get("token")
+            self._prog_birth_pids = self._program_birth(pend)
         if self._handoff_pending:
             self._handoff_pending = False
             self._adopt_handoff()

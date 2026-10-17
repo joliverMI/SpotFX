@@ -14,6 +14,8 @@ from fx.effects.twod import Twod
 _LOGGER = logging.getLogger(__name__)
 
 CAP = 48            # particle buffer cap (count max + departing extras)
+PARTICLE_MAX = 16   # `particle_count` schema max — the matched birth's own
+                    # clamp (the shoal-burst plan's count rule)
 SUBSTEPS = 3        # path sub-samples per frame (gap-free smear)
 DT_MAX = 0.1
 KERNEL_R = 8        # max blob radius the offset table supports
@@ -72,6 +74,10 @@ _SOA_NAMES = (
     "p_nf1", "p_nf2", "p_np1", "p_np2", "p_wf", "p_wp", "p_gf", "p_gp",
     "p_grad", "p_x0", "p_y0", "p_scatter", "p_bright", "p_grad_from",
     "p_erate", "p_lfade", "p_vx", "p_vy", "p_om",
+    # the host frame (fx/effects/transition_program.py, the shoal-burst
+    # plan): which released object this blob was born from, and the
+    # velocity graft it leaves on
+    "p_pid", "p_resx", "p_resy", "p_resage",
 )
 
 
@@ -308,6 +314,25 @@ class Orbits2d(Twod, GradientEffect):
         # (smoothed over OM_TAU_S) — a SHOALING fish peels off its orbit
         # turning at this rate (fx/effects/transition_cloud.py)
         self.p_om = np.zeros(CAP, dtype=np.float32)
+        # THE HOST FRAME (the shoal-burst plan §5.2): a blob born by a
+        # transition program's MATCHED BIRTH carries the id the program's
+        # cloud follows it by, and a VELOCITY GRAFT — the residual velocity
+        # it inherited, which fades out of its own model motion over
+        # `_graft_tau` so it leaves on the velocity it was born with and is
+        # never permanently displaced.
+        self.p_pid = np.full(CAP, -1, dtype=np.int64)
+        self.p_resx = np.zeros(CAP, dtype=np.float32)
+        self.p_resy = np.zeros(CAP, dtype=np.float32)
+        self.p_resage = np.full(CAP, np.nan, dtype=np.float32)
+        self._graft_tau = 0.25
+        # a pending matched birth (set by the program's begin(), consumed on
+        # the first draw, where the geometry is known) and its results
+        self._prog_birth_snap = None
+        self._prog_birth_pids = None
+        self._prog_birth_token = None
+        self._next_pid = 0
+        # the matched count's hold: (deadline on self.t, authored count)
+        self._count_hold = None
         self._soa = tuple(getattr(self, name) for name in _SOA_NAMES)
         self.n = 0
         self._booted = False
@@ -459,6 +484,10 @@ class Orbits2d(Twod, GradientEffect):
         self.p_vx[s] = 0.0
         self.p_vy[s] = 0.0
         self.p_om[s] = 0.0
+        self.p_pid[s] = -1
+        self.p_resx[s] = 0.0
+        self.p_resy[s] = 0.0
+        self.p_resage[s] = np.nan
         self.p_grad_from[s] = np.nan
         self.p_erate[s] = 1.0
         self.p_lfade[s] = LEAVE_FADE_S
@@ -571,6 +600,141 @@ class Orbits2d(Twod, GradientEffect):
         y = self.p_y0[idx]
         ok = np.isfinite(x) & np.isfinite(y)
         return (self.cx + x[ok] * self.sx, self.cy + y[ok] * self.sy)
+
+    # ── THE HOST FRAME (the shoal-burst plan §5.2, fx/effects/
+    # transition_program.py's own docstring is the binding statement) ─────
+
+    def _program_birth(self, snap):
+        """BORN MATCHED: one blob per released object, AT its position, on
+        its velocity, turning at its rate — the continuation of the object
+        the transition program's cloud came from, which is what lets that
+        cloud ride it instead of flying to a stranger.
+
+        Deliberately NOT part of `_adopt_handoff` (the crossfade adoption
+        path stays byte-identical). Orbits is POSITION-driven — a tether on
+        a spinning ring, a blob orbiting the tether — so there is no
+        velocity state to set: it gets the VELOCITY GRAFT instead
+        (`draw`'s own block), whose own velocity at birth is exactly the
+        residual, so the blob leaves on the velocity it inherited and the
+        model is never permanently displaced.
+
+        Returns one pid per released object (-1 where the count clamped and
+        it got none; the program merges those objects' pieces into the
+        nearest born host)."""
+        px = np.asarray(snap["px"], dtype=np.float32)
+        n_obj = int(px.size)
+        pids = np.full(n_obj, -1, dtype=np.int64)
+        if n_obj == 0 or getattr(self, "r_width", None) is None:
+            return pids
+        py = np.asarray(snap["py"], dtype=np.float32)
+        vx = np.asarray(snap.get("vx", np.zeros(n_obj)), dtype=np.float32)
+        vy = np.asarray(snap.get("vy", np.zeros(n_obj)), dtype=np.float32)
+        grad = np.asarray(snap.get("grad", np.zeros(n_obj)), dtype=np.float32)
+        bright = np.asarray(snap.get("bright", np.ones(n_obj)), dtype=np.float32)
+        authored = int(self._config["particle_count"])
+        match = bool(snap.get("match_count", True))
+        # the count the SCENE will run at: the released count when the match
+        # is on, the authored one when it is off (the plan's §5.4 rule)
+        count = int(min(max(n_obj if match else authored, 1), PARTICLE_MAX))
+        # ... and how many are born ON a released object: never more than
+        # there are objects to be born on. With the match off the rest fly
+        # in from off-panel the ordinary way, as any live count change does.
+        want = int(min(count, n_obj))
+        self._graft_tau = max(float(snap.get("graft_s", 0.25) or 0.25), 1e-3)
+        # a DEFERRED birth (the eruption's, at its bloom) replaces whatever
+        # population is on the panel: everything tracked leaves quickly
+        if self.n:
+            live = np.flatnonzero(self.p_mode[: self.n] < 2)
+            if live.size:
+                ang = self._rng.uniform(0.0, 2 * np.pi, live.size)
+                self.p_mode[live] = 2
+                self.p_lvx[live] = LEAVE_SPEED * np.cos(ang)
+                self.p_lvy[live] = LEAVE_SPEED * np.sin(ang)
+                self.p_leave[live] = 0.0
+                self.p_lfade[live] = HANDOFF_LEAVE_S
+                self.p_pid[live] = -1
+        ex = (px[:want] - self.cx) / max(self.sx, 1e-6)
+        ey = (py[:want] - self.cy) / max(self.sy, 1e-6)
+        # RING ORDER: slot i sits at (ring_phase + i/want) of the ring, and
+        # _manage_population hands slots out in array order — so ordering
+        # the born blobs by their own angle, rotated to the ring it lands
+        # on, is what keeps each one's glide into orbit SHORT instead of
+        # sending it across the panel for a slot it never had to have.
+        order = np.argsort(np.arctan2(ey, ex) % (2.0 * np.pi))
+        if want > 1:
+            a = (np.arctan2(ey[order], ex[order]) % (2.0 * np.pi))
+            k = np.arange(want, dtype=np.float32)
+            best, best_r = None, 0
+            for r in range(want):
+                slot = ((self.ring_phase + ((k + r) % want) / want)
+                        * 2.0 * np.pi) % (2.0 * np.pi)
+                d = np.abs(np.angle(np.exp(1j * (a - slot)))).sum()
+                if best is None or d < best:
+                    best, best_r = d, r
+            order = order[np.argsort((np.arange(want) + best_r) % want)]
+        base = self.n
+        self._spawn_entering(want)
+        got = self.n - base
+        if got <= 0:
+            return pids
+        order = order[:got]
+        sl = slice(base, self.n)
+        self.p_ex[sl] = ex[order]
+        self.p_ey[sl] = ey[order]
+        self.p_x0[sl] = ex[order]
+        self.p_y0[sl] = ey[order]
+        self.p_grad[sl] = grad[order]
+        self.p_grad_from[sl] = grad[order]
+        self.p_bright[sl] = np.clip(bright[order], 0.3, 1.0)
+        # the graft, armed: the velocity it inherited, in normalized units/s
+        # (resage 0.0 = armed and not yet measured; the first drawn frame
+        # subtracts the model's OWN velocity, measured rather than guessed)
+        self.p_resx[sl] = vx[order] / max(self.sx, 1e-6)
+        self.p_resy[sl] = vy[order] / max(self.sy, 1e-6)
+        self.p_resage[sl] = 0.0
+        ids = self._next_pid + np.arange(got, dtype=np.int64)
+        self._next_pid += got
+        self.p_pid[sl] = ids
+        pids[order] = ids
+        self.particle_count = count
+        self._count_hold = (
+            self.t + max(float(snap.get("count_hold_s", 0.0) or 0.0), 0.0),
+            authored,
+        )
+        self._booted = True
+        return pids
+
+    def _program_hosts(self, pids):
+        """Where each pid's blob is NOW, in pixels — NaN for a pid that has
+        since retired, whose pieces fall back to the constant-turn
+        continuation and fade (never a flight to a stranger)."""
+        pids = np.asarray(pids, dtype=np.int64)
+        qx = np.full(pids.size, np.nan, dtype=np.float32)
+        qy = np.full(pids.size, np.nan, dtype=np.float32)
+        n = self.n
+        if n == 0 or pids.size == 0:
+            return qx, qy
+        live = np.flatnonzero((self.p_mode[:n] < 2) & (self.p_pid[:n] >= 0))
+        if live.size == 0:
+            return qx, qy
+        have = self.p_pid[live]
+        srt = np.argsort(have)
+        have = have[srt]
+        live = live[srt]
+        at = np.searchsorted(have, pids)
+        ok = (at < have.size)
+        at_c = np.clip(at, 0, max(have.size - 1, 0))
+        ok &= (pids >= 0) & (have[at_c] == pids)
+        if not ok.any():
+            return qx, qy
+        idx = live[at_c[ok]]
+        x = self.cx + self.p_x0[idx] * self.sx
+        y = self.cy + self.p_y0[idx] * self.sy
+        good = np.isfinite(x) & np.isfinite(y)
+        sel = np.flatnonzero(ok)[good]
+        qx[sel] = x[good]
+        qy[sel] = y[good]
+        return qx, qy
 
     def deactivate(self):
         # Leave live state behind for a successor instance (effect switch or
@@ -1058,6 +1222,14 @@ class Orbits2d(Twod, GradientEffect):
             self.draw_test(self.m_draw)
             return
 
+        # A MATCHED BIRTH REPLACES THE ADOPT (the shoal-burst plan §5.2):
+        # consumed here, on the first draw, where the geometry is known.
+        pend = self._prog_birth_snap
+        if pend is not None:
+            self._prog_birth_snap = None
+            self._handoff_pending = False
+            self._prog_birth_token = pend.get("token")
+            self._prog_birth_pids = self._program_birth(pend)
         if self._handoff_pending:
             self._handoff_pending = False
             self._adopt_handoff()
@@ -1182,6 +1354,13 @@ class Orbits2d(Twod, GradientEffect):
             self._beat_pending = False
 
         self._phase_step(dt)
+        # THE COUNT RULE (the shoal-burst plan §5.4): a matched birth's
+        # count holds until `transition_count_hold_ms` after the program
+        # ends, then the authored count wins and _manage_population flies
+        # the difference in or out exactly as it does for any live change.
+        if self._count_hold is not None and self.t >= self._count_hold[0]:
+            self.particle_count = int(self._count_hold[1])
+            self._count_hold = None
         self._manage_population()
         n = self.n
         if n == 0:
@@ -1293,6 +1472,41 @@ class Orbits2d(Twod, GradientEffect):
             self.p_leave[:n][leaving] += dt
             x[leaving] = self.p_x0[:n][leaving] + self.p_lvx[:n][leaving] * dt
             y[leaving] = self.p_y0[:n][leaving] + self.p_lvy[:n][leaving] * dt
+
+        # ── THE VELOCITY GRAFT (the shoal-burst plan §5.2) ──────────────
+        # drawn(t) = model(t) + v_res . t . e^(-t/tau),  v_res = v_inherited
+        # - v_model(0). The graft's own velocity at birth is exactly v_res,
+        # so a blob born by a transition program's MATCHED BIRTH leaves on
+        # the velocity it inherited; the displacement peaks at v_res.tau/e
+        # and returns to zero, so the model is never permanently displaced
+        # and nothing has to be solved backwards (no inverse kinematics for
+        # slot/phase/radius). v_model(0) is MEASURED on the first frame
+        # after birth rather than guessed.
+        # tracked blobs only: a blob that has been told to leave is flying
+        # a straight departure off `p_x0`, which is cumulative — a graft on
+        # top of that would ride along with it instead of erasing itself
+        g = np.isfinite(self.p_resage[:n]) & (mode < 2)
+        if g.any():
+            tau = max(float(self._graft_tau), 1e-3)
+            arm = g & (self.p_resage[:n] <= 0.0)
+            if arm.any():
+                mvx = (x - self.p_x0[:n]) / dt
+                mvy = (y - self.p_y0[:n]) / dt
+                self.p_resx[:n] = np.where(
+                    arm, self.p_resx[:n] - np.nan_to_num(mvx), self.p_resx[:n])
+                self.p_resy[:n] = np.where(
+                    arm, self.p_resy[:n] - np.nan_to_num(mvy), self.p_resy[:n])
+            self.p_resage[:n] = np.where(
+                g, self.p_resage[:n] + dt, self.p_resage[:n])
+            age = np.nan_to_num(self.p_resage[:n])
+            k = age * np.exp(-age / tau)
+            x = np.where(g, x + self.p_resx[:n] * k, x)
+            y = np.where(g, y + self.p_resy[:n] * k, y)
+            spent = g & (age > 6.0 * tau)
+            if spent.any():
+                self.p_resage[:n] = np.where(spent, np.nan, self.p_resage[:n])
+                self.p_resx[:n] = np.where(spent, 0.0, self.p_resx[:n])
+                self.p_resy[:n] = np.where(spent, 0.0, self.p_resy[:n])
 
         # ── color / brightness / size ───────────────────────────────────
         count = max(self.particle_count, 1)

@@ -223,6 +223,17 @@ DEFAULT_SCATTER = 1.0
 DEFAULT_BANDS_PIECES = 180
 DEFAULT_BANDS_HOLD_S = 0.3
 DEFAULT_UNWIND = 14.0
+# THE HOST FRAME (the shoal-burst plan, /home/javi/fleet-spotfx/data/
+# shoal-burst-plan/report.md §6 — the Admiral's D2 "ship 7 px and tune by
+# eye"). A tier-A piece is an OFFSET FROM A HOST, so these six say how far
+# it puffs out, how fast the puff opens, when the gather begins, how long a
+# newly born object keeps the velocity it inherited, and how long the
+# matched count holds after the program ends.
+DEFAULT_BURST_PX = 7.0
+DEFAULT_BURST_S = 0.3
+DEFAULT_LAND_AT = 0.45
+DEFAULT_GRAFT_S = 0.25
+DEFAULT_COUNT_HOLD_S = 0.4
 
 
 def _clamp(v, lo, hi, default):
@@ -249,6 +260,13 @@ class ProgramSettings:
     bands_pieces: int = DEFAULT_BANDS_PIECES
     bands_hold_s: float = DEFAULT_BANDS_HOLD_S
     unwind: float = DEFAULT_UNWIND
+    # the host frame (the shoal-burst plan)
+    burst_px: float = DEFAULT_BURST_PX
+    burst_s: float = DEFAULT_BURST_S
+    land_at: float = DEFAULT_LAND_AT
+    graft_s: float = DEFAULT_GRAFT_S
+    count_hold_s: float = DEFAULT_COUNT_HOLD_S
+    match_count: bool = True
     on_mark: bool = False
     seed: Optional[int] = None
 
@@ -283,6 +301,18 @@ class ProgramSettings:
             bands_hold_s=_clamp(req.get("bands_hold_ms", d.bands_hold_s * 1000.0),
                                 0.0, 800.0, d.bands_hold_s * 1000.0) / 1000.0,
             unwind=_clamp(req.get("unwind", d.unwind), 0.0, 40.0, d.unwind),
+            burst_px=_clamp(req.get("burst_px", d.burst_px),
+                            0.0, 20.0, d.burst_px),
+            burst_s=_clamp(req.get("burst_ms", d.burst_s * 1000.0),
+                           80.0, 700.0, d.burst_s * 1000.0) / 1000.0,
+            land_at=_clamp(req.get("land_at", d.land_at),
+                           0.1, 0.9, d.land_at),
+            graft_s=_clamp(req.get("graft_ms", d.graft_s * 1000.0),
+                           60.0, 800.0, d.graft_s * 1000.0) / 1000.0,
+            count_hold_s=_clamp(req.get("count_hold_ms",
+                                        d.count_hold_s * 1000.0),
+                                0.0, 3000.0, d.count_hold_s * 1000.0) / 1000.0,
+            match_count=bool(req.get("match_count", True)),
             on_mark=bool(req.get("on_mark", False)),
             seed=int(seed) if isinstance(seed, (int, float)) else None,
         )
@@ -291,6 +321,23 @@ class ProgramSettings:
         """The infall's FORM stage: the last velocity_blend_s, never more
         than half the program."""
         return min(self.velocity_blend_s, 0.5 * self.duration_s)
+
+    # ── the host frame's own clock (the shoal-burst plan §5.6) ─────────
+    def land_s(self) -> float:
+        """When the gather begins, in seconds — a FRACTION of the program,
+        so a drop-led 0.6 s cut and a 2.5 s program both work."""
+        return float(np.clip(self.land_at, 0.05, 0.95)) * self.duration_s
+
+    def burst_open_s(self) -> float:
+        """How long the puff takes to open — never more than half the time
+        it has before the gather, so a short program shows a burst rather
+        than a twitch."""
+        return float(min(self.burst_s, 0.5 * self.land_s()))
+
+    def graft_tau_s(self) -> float:
+        """The velocity graft's tau: about the FORM's own motion, so it is
+        absolute, capped at half the program."""
+        return float(min(self.graft_s, 0.5 * self.duration_s))
 
 
 # The eruption's stage boundaries, as fractions of the program.
@@ -337,6 +384,10 @@ def anchor_frac(name: Optional[str], settings: ProgramSettings,
         return 1.0 - settings.infall_form_s() / settings.duration_s
     if name == UNRAVEL:
         return THREAD_ANCHOR if in_type == "squiggles" else 0.0
+    if name == SHOALING and settings.burst_px > 0.0:
+        # with a burst the blobs come apart ON the mark, the Shoal Break's
+        # own rule — the burst IS the payoff (the Admiral's D1)
+        return 0.0
     if name == FOUNTAIN and in_type == STAR:
         # into Star the fountain sprays where FORM begins
         return STAR_FORM_AT
@@ -354,9 +405,15 @@ def lead_ms(name: Optional[str], settings: ProgramSettings,
                      * settings.duration_s * 1000.0))
 
 
-def program_class(name: Optional[str]):
+def program_class(name: Optional[str],
+                  settings: Optional[ProgramSettings] = None):
     """The class that runs a program name (phase 4's live in transition_
-    cloud.py, imported lazily: it builds on this module)."""
+    cloud.py, imported lazily: it builds on this module).
+
+    SHOALING is the one name with two classes: with a burst (the Admiral's
+    D1 on the shoal-burst plan) orbits -> fish comes apart into a host-frame
+    cloud; at `transition_burst_px` 0 it is today's plain pair, frame for
+    frame. A caller with no settings gets the plain one."""
     if name == INFALL:
         return InfallProgram
     if name == ERUPTION:
@@ -364,6 +421,8 @@ def program_class(name: Optional[str]):
     if name is None:
         return None
     from fx.effects import transition_cloud
+    if name == SHOALING and settings is not None and settings.burst_px > 0.0:
+        return transition_cloud.ShoalBurstProgram
     return transition_cloud.PROGRAM_CLASSES.get(name)
 
 
@@ -372,7 +431,7 @@ def stages(out_type: Optional[str], in_type: Optional[str],
     """The program's named stages as fractions of its duration — what the
     previews draw on their rulers ({"label", "from", "to"}, "anchor": True
     on the stage the payoff opens). [] when no program runs."""
-    cls = program_class(program_name(out_type, in_type))
+    cls = program_class(program_name(out_type, in_type), settings)
     if cls is None:
         return []
     fracs = cls.stage_fracs
@@ -391,10 +450,10 @@ def stages(out_type: Optional[str], in_type: Optional[str],
 def build(out_type: Optional[str], in_type: Optional[str],
           request: Optional[dict]) -> Optional["TransitionProgram"]:
     """The facade's one call: a program for this switch, or None."""
-    cls = program_class(program_name(out_type, in_type))
+    settings = ProgramSettings.from_request(request)
+    cls = program_class(program_name(out_type, in_type), settings)
     if cls is None:
         return None
-    settings = ProgramSettings.from_request(request)
     return cls(settings, out_type, in_type)
 
 
@@ -442,6 +501,19 @@ def splat_path(layer, x0, y0, x1, y1, rgb, size: float = 0.9) -> None:
 def _smoothstep(s):
     s = np.clip(s, 0.0, 1.0)
     return s * s * (3.0 - 2.0 * s)
+
+
+def turn_integrate(vx, vy, om, dt):
+    """Constant speed on a constant turn rate (the shoal-burst plan §5.3):
+    v(t+dt) = R(om.dt).v(t). ONE integrator for every parent form — exact
+    for an orbit, first-order for a swimming fish — so a piece with no host
+    continues as if its parent were still moving instead of flying dead
+    straight. Never a per-effect reimplementation of orbit geometry or fish
+    steering, which would drift the moment either is tuned."""
+    c = np.cos(om * dt).astype(np.float32)
+    s_ = np.sin(om * dt).astype(np.float32)
+    return ((vx * c - vy * s_).astype(np.float32),
+            (vx * s_ + vy * c).astype(np.float32))
 
 
 def _sample_rgb(effect: Any, grad: np.ndarray) -> Optional[np.ndarray]:
@@ -495,6 +567,13 @@ class TransitionProgram:
     # nothing of its own — the program owns the pieces. A program whose
     # FORM is the incoming effect's own adoption (SHOALING) leaves it.
     TAKE_REGISTRY = True
+    # THE HOST FRAME (the shoal-burst plan). A program that sets this
+    # offers the incoming effect a MATCHED BIRTH in begin() — one object
+    # per released object, at its position, on its velocity, turning at its
+    # rate — and its pieces then ride those objects (HostFormer,
+    # fx/effects/transition_cloud.py) instead of flying to a stranger.
+    HOST_FRAME = False
+    OBJECT_CAP = 48        # at most this many released objects become hosts
 
     @classmethod
     def stage_fracs(cls, settings: ProgramSettings, out_type=None,
@@ -536,6 +615,11 @@ class TransitionProgram:
         # a record of the last frame's stage + gain, for tests/telemetry
         self.last_gain = 0.0
         self.frames = 0
+        # the host frame: the released OBJECTS, and whether the incoming
+        # effect took the birth we offered it
+        self.objs: Optional[dict] = None
+        self.birth_offered = False
+        self._birth_order: Optional[np.ndarray] = None
 
     # ── the virtual's two calls ──────────────────────────────────────────
     def capture(self, virtual, outgoing) -> bool:
@@ -594,6 +678,9 @@ class TransitionProgram:
         incoming._transition_program = self
         self.t0 = particle_handoff.now()
         self.t_last = 0.0
+        if self.HOST_FRAME and self.snap is not None:
+            self.objs = self._program_objects()
+            self.birth_offered = self._offer_birth(incoming, self.objs)
 
     # ── Twod.render's hook ───────────────────────────────────────────────
     def compose(self, effect) -> None:
@@ -651,6 +738,13 @@ class TransitionProgram:
         self.done = True
         inc = self.incoming
         if inc is not None:
+            # a birth this program offered and the incoming effect never got
+            # to draw must not be consumed by some LATER frame as if it were
+            # still current (an interrupting switch, a program dropped on an
+            # exception) — it is ours, so we take it back
+            pend = getattr(inc, "_prog_birth_snap", None)
+            if isinstance(pend, dict) and pend.get("token") == id(self):
+                inc._prog_birth_snap = None
             if self._ready and not self.handed_off:
                 self.handed_off = True
                 try:
@@ -704,6 +798,143 @@ class TransitionProgram:
         keep = np.isfinite(px) & np.isfinite(py) & (bright > 0.03)
         return (px[keep], py[keep], vx[keep], vy[keep], grad[keep],
                 bright[keep], rgb[keep])
+
+    # ── the host frame (the shoal-burst plan §5.1/§5.2) ──────────────
+    def _program_objects(self) -> dict:
+        """The released OBJECTS this program works in terms of, in EXACTLY
+        the order (and under exactly the filter) `_snap_arrays` keeps them —
+        so an object index IS an index into what the release itself is built
+        from, and nothing has to re-derive the same filter and risk a
+        different answer. Each carries its position, velocity, turn rate
+        (`om`, 0 when the form published none), colour and `src` (its index
+        in the raw outgoing snapshot, which is what a program carrying its
+        own per-object data — the unspool's chain paths — aligns by).
+
+        A form whose ordinary `vx`/`vy` are not the way the OBJECT is going
+        may say so BESIDE them, in `walk_vx`/`walk_vy`/`walk_om`: a
+        squiggle's head walks a lattice whose six directions sit 45/45/90
+        apart, so its last move points up to 45 degrees off its actual
+        travel and the first move of a fresh segment can be 90 out — "The
+        bursts don't seem to carry the directional velocity of the
+        squiggles. Some look like they go the opposite direction" (the
+        Admiral, on the shoal-burst plan). ONLY THE HOST FRAME reads those
+        keys, so every form that ADOPTS a snapshot or releases from the
+        ordinary pair is untouched — which is what keeps this inside the
+        plan's own tier-A scope."""
+        s = self.snap
+        px = np.asarray(s["px"], dtype=np.float32)
+        py = np.asarray(s["py"], dtype=np.float32)
+        n = px.size
+        bright = np.clip(np.asarray(s["bright"], dtype=np.float32)[:n], 0.0, 1.0)
+        keep = np.flatnonzero(np.isfinite(px) & np.isfinite(py) & (bright > 0.03))
+
+        def _f(key, instead=None):
+            a = s.get(key)
+            if a is None or len(a) < n:
+                if instead is None:
+                    return np.zeros(keep.size, dtype=np.float32)
+                return _f(instead)
+            a = np.asarray(a, dtype=np.float32)[:n][keep]
+            return np.where(np.isfinite(a), a, 0.0).astype(np.float32)
+
+        return {
+            "src": keep.astype(np.int64),
+            "px": px[keep], "py": py[keep],
+            "vx": _f("walk_vx", "vx"), "vy": _f("walk_vy", "vy"),
+            "om": _f("walk_om", "om"),
+            "grad": np.asarray(s["grad"], dtype=np.float32)[:n][keep],
+            "bright": np.clip(bright[keep], 0.1, 1.0),
+            "rgb": np.asarray(self.rgb_out, dtype=np.float32)[:n][keep],
+        }
+
+    def raw_to_object(self, objs: dict, n_raw: int) -> np.ndarray:
+        """raw outgoing-snapshot index -> object index, -1 for an object the
+        brightness filter dropped."""
+        m = np.full(int(n_raw), -1, dtype=np.int64)
+        src = np.asarray(objs["src"], dtype=np.int64)
+        ok = (src >= 0) & (src < n_raw)
+        m[src[ok]] = np.flatnonzero(ok)
+        return m
+
+    def _can_be_born(self, incoming) -> bool:
+        return (incoming is not None
+                and hasattr(incoming, "_program_birth")
+                and hasattr(incoming, "_program_hosts"))
+
+    def _birth_snapshot(self, objs: dict, at_t: float, match: bool):
+        """The birth snapshot and the permutation it is built under:
+        BRIGHTEST FIRST, so a count clamp keeps the objects that matter."""
+        o = np.argsort(np.asarray(objs["bright"], dtype=np.float32),
+                       kind="stable")[::-1][:max(int(self.OBJECT_CAP), 1)]
+        hold = max(self.duration - float(at_t), 0.0) \
+            + self.settings.count_hold_s
+        return {
+            "src": self.out_type,
+            "token": id(self),
+            "dims": self.dims,
+            "px": objs["px"][o], "py": objs["py"][o],
+            "vx": objs["vx"][o], "vy": objs["vy"][o], "om": objs["om"][o],
+            "grad": objs["grad"][o], "bright": objs["bright"][o],
+            "gradient": self.snap.get("gradient") if self.snap else None,
+            "spin_sign": self.snap.get("spin_sign") if self.snap else None,
+            "blob_size": self.snap.get("blob_size") if self.snap else None,
+            "graft_s": self.settings.graft_tau_s(),
+            "count_hold_s": hold,
+            "match_count": bool(match and self.settings.match_count),
+        }, o.astype(np.int64)
+
+    def _offer_birth(self, incoming, objs: dict, *, at_t: float = 0.0,
+                     match: bool = True) -> bool:
+        """Hand the incoming effect a matched birth to consume on its first
+        draw (where its geometry is known). Deliberately NOT a change to
+        `_adopt_handoff`: the crossfade adoption path stays byte-identical,
+        and the birth is an opt-in capability — an incoming form without the
+        two hooks simply keeps today's FORM."""
+        if not self._can_be_born(incoming):
+            return False
+        snap, o = self._birth_snapshot(objs, at_t, match)
+        self._birth_order = o
+        incoming._prog_birth_snap = snap
+        return True
+
+    def _birth_now(self, incoming, objs: dict, *, at_t: float = 0.0,
+                   match: bool = True) -> Optional[np.ndarray]:
+        """A DEFERRED birth: the eruption's hosts are born AT ITS BLOOM, on
+        the spray, not at the program's first frame — so the call happens
+        here, inside a step (the geometry is long since known), and the pids
+        come straight back."""
+        if not self._can_be_born(incoming):
+            return None
+        snap, o = self._birth_snapshot(objs, at_t, match)
+        try:
+            pids = np.asarray(incoming._program_birth(snap), dtype=np.int64)
+        except Exception:
+            _LOGGER.exception("transition program: deferred birth failed")
+            return None
+        if pids.size != o.size:
+            return None
+        out = np.full(int(objs["px"].size), -1, dtype=np.int64)
+        out[o] = pids
+        return out
+
+    def _birth_pids(self, incoming) -> Optional[np.ndarray]:
+        """The pids the incoming effect's birth returned (one per released
+        object, -1 where it took none), or None when it has not been born
+        yet — or was born for some OTHER program."""
+        if not self.birth_offered:
+            return None
+        if getattr(incoming, "_prog_birth_token", None) != id(self):
+            return None
+        pids = getattr(incoming, "_prog_birth_pids", None)
+        if pids is None or self.objs is None:
+            return None
+        pids = np.asarray(pids, dtype=np.int64)
+        o = getattr(self, "_birth_order", None)
+        if o is None or pids.size != o.size:
+            return None
+        out = np.full(int(self.objs["px"].size), -1, dtype=np.int64)
+        out[o] = pids
+        return out
 
     # subclass API
     def _setup(self, effect) -> None:  # pragma: no cover - abstract
@@ -885,6 +1116,15 @@ ERUPT_BLOOM_SIGMA = 2.2     # px
 ERUPT_SPEED_PX = 85.0       # ejecta launch speed at eruption_speed 1
 ERUPT_DRAG = 2.0            # 1/s: the ejecta decelerate
 ERUPT_CONTRACT_TURNS = 0.35 # extra spin the contraction adds
+# THE HOST FRAME (the shoal-burst plan §7 phase 3): the eruption's
+# CONTRACTION AND BLOOM ARE UNTOUCHED — only the last stage's homing becomes
+# a host-frame gather, with the hosts born AT THE BLOOM, at the centre, on
+# the spray, so the new blobs are carried outward by their own clouds and
+# the gather closes a small offset instead of a panel-sized one. There is no
+# meaningful 1:1 between the pre-collapse ring and the spray, so the count
+# match is NOT APPLICABLE here (the plan says so): the incoming form keeps
+# its own authored count and the cloud is divided among its objects.
+ERUPT_HOSTS_MAX = 12
 
 
 class EruptionProgram(TransitionProgram):
@@ -914,6 +1154,11 @@ class EruptionProgram(TransitionProgram):
         self.form = None
         self._tq = None       # target positions last frame (velocity estimate)
         self._tu = None
+        # the host frame: the hosts born at the bloom, and which host each
+        # ejecta rides (inherited at the bloom by angle, never searched)
+        self.host_pids = None
+        self.e_obj = None
+        self.gather = None
 
     def _spawn_ejecta(self, inc) -> None:
         n = int(self.settings.eruption_count)
@@ -945,6 +1190,53 @@ class EruptionProgram(TransitionProgram):
         self.ergb = rgb if rgb is not None else np.full((n, 3), 220.0, dtype=np.float32)
         self.e_n = n
         self.ejecta = True
+        self._birth_hosts(inc, ang, spd)
+
+    def _birth_hosts(self, inc, ang, spd) -> None:
+        """The incoming form's objects, BORN AT THE BLOOM: at the centre,
+        each on the spray velocity of its own share of the angles — so each
+        one is carried outward by the cloud that will gather onto it. Every
+        ejecta then rides the host nearest its own launch angle, inherited
+        here and never searched again."""
+        if self.settings.burst_px <= 0.0 or not self._can_be_born(inc):
+            return
+        want = getattr(inc, "particle_count", None)
+        if not want:
+            want = min(int(getattr(inc, "max_chains", 6) or 6), ERUPT_HOSTS_MAX)
+        want = int(min(max(int(want), 1), ERUPT_HOSTS_MAX))
+        mean_spd = float(np.mean(spd)) if spd.size else ERUPT_SPEED_PX
+        # A HOST MUST TRAVEL WITH ITS OWN CLOUD, so it is born not on the
+        # spray's LAUNCH speed but on the spray's AVERAGE speed over the
+        # window before the gather — the ejecta decelerate under ERUPT_DRAG
+        # and a host that did not would simply outrun them (measured: born
+        # on the launch speed, a fish host left its own cloud 2 x further
+        # behind by the gather than this does). Derived, not tuned:
+        # v_avg = v0 . (1 - e^-k.T) / (k.T) for the drag's own k over T.
+        flight = max(self.t_form - self.t_bloom, 1e-3)
+        kT = ERUPT_DRAG * flight
+        mean_spd *= float((1.0 - math.exp(-kT)) / kT)
+        hang = ((np.arange(want, dtype=np.float32) + 0.5) / want
+                * 2.0 * np.pi).astype(np.float32)
+        aspect = inc.r_height / max(inc.r_width, 1)
+        objs = {
+            "src": np.arange(want, dtype=np.int64),
+            "px": np.full(want, self.ccx, np.float32),
+            "py": np.full(want, self.ccy, np.float32),
+            "vx": (np.cos(hang) * mean_spd).astype(np.float32),
+            "vy": (np.sin(hang) * mean_spd * aspect).astype(np.float32),
+            "om": np.zeros(want, np.float32),
+            "grad": ((hang / (2.0 * np.pi)) % 1.0).astype(np.float32),
+            "bright": np.ones(want, np.float32),
+            "rgb": np.full((want, 3), 220.0, np.float32),
+        }
+        pids = self._birth_now(inc, objs, at_t=self.t_bloom, match=False)
+        if pids is None or not (pids >= 0).any():
+            return
+        born = np.flatnonzero(pids >= 0)
+        d = np.abs(np.angle(np.exp(1j * (
+            np.asarray(ang, np.float32)[:, None] - hang[born][None, :]))))
+        self.e_obj = born[np.argmin(d, axis=1)]
+        self.host_pids = pids
 
     def _targets(self, inc, dt):
         fn = getattr(inc, "_formation_points", None)
@@ -1021,6 +1313,8 @@ class EruptionProgram(TransitionProgram):
                 layer *= np.float32(f)
                 return float(_smoothstep((t - self.t_form) / max(self.duration - self.t_form, 1e-3)))
             return 0.0
+        if self.host_pids is not None and self.e_obj is not None:
+            return self._host_gather(inc, t, dt, layer)
         qx, qy, ux, uy = targets
         m = qx.size
         if self.form is None:
@@ -1055,6 +1349,41 @@ class EruptionProgram(TransitionProgram):
         px, py = self.ex, self.ey
         self.ex, self.ey = nx, ny
         splat_path(layer, px, py, nx, ny, self.ergb * fade)
+        return s * s
+
+    def _host_gather(self, inc, t, dt, layer) -> float:
+        """FORM in the HOST FRAME (the shoal-burst plan §5): each ejecta
+        holds its own offset from the host it was assigned at the bloom, and
+        that offset is gathered to nothing over the FORM stage. Its motion
+        relative to the thing it is joining is bounded by that offset, which
+        is SMALL because the host was born on the spray and has been
+        travelling with the cloud ever since — never a Hermite across
+        whatever distance a stranger happened to be at."""
+        try:
+            qx, qy = inc._program_hosts(self.host_pids)
+        except Exception:
+            return 0.0
+        qx = np.asarray(qx, np.float32)[self.e_obj]
+        qy = np.asarray(qy, np.float32)[self.e_obj]
+        have = np.isfinite(qx) & np.isfinite(qy)
+        span = max(self.duration - self.t_form, 1e-3)
+        if self.gather is None:
+            # the offset each piece holds, read at the gather's first frame
+            self.gather = {"ox": np.where(have, self.ex - qx, 0.0),
+                           "oy": np.where(have, self.ey - qy, 0.0)}
+        el = np.float32(1.0 - float(_smoothstep((t - self.t_form) / span)))
+        nx = np.where(have, qx + self.gather["ox"] * el,
+                      self.ex + self.evx * dt)
+        ny = np.where(have, qy + self.gather["oy"] * el,
+                      self.ey + self.evy * dt)
+        if dt > 0:
+            self.evx = np.where(have, (nx - self.ex) / dt, self.evx)
+            self.evy = np.where(have, (ny - self.ey) / dt, self.evy)
+        s = float(np.clip((t - self.t_form) / span, 0.0, 1.0))
+        px, py = self.ex, self.ey
+        self.ex, self.ey = nx.astype(np.float32), ny.astype(np.float32)
+        splat_path(layer, px, py, self.ex, self.ey,
+                   self.ergb * np.float32(1.0 - s ** 3))
         return s * s
 
     def _hand_off(self, inc) -> None:
