@@ -54,7 +54,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -217,7 +216,8 @@ async def _run_transition(tmp_path, sub, *, pre_fix: bool, seconds=6.0):
                 if f is not None:
                     v.flush(f)
 
-            new = host.effects.create(ledfx=host, type="blackhole", config=BH_CFG)
+            new = host.effects.create(
+                ledfx=host, type="blackhole", config=BH_CFG)
             new._rng = np.random.default_rng(2)
             if pre_fix:
                 _install_pre_fix_spawn(new)
