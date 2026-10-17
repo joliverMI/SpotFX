@@ -209,9 +209,14 @@ def test_infall_leaves_on_the_motion_it_had(tmp_path):
 
 @pytest.mark.parametrize("dst", ["orbits", "fish"])
 def test_eruption_implodes_onto_the_moving_incoming_form(tmp_path, dst):
-    r = _run(_program_run(tmp_path, dst, "blackhole", dst))
+    """The HERMITE FORM, which `transition_burst_px = 0` still selects —
+    today's eruption, unchanged (the host-frame gather the default now runs
+    is proven in tests/test_shoal_burst.py)."""
+    r = _run(_program_run(tmp_path, dst, "blackhole", dst,
+                          request={"burst_px": 0.0}))
     prog = r["prog"]
     assert prog.done
+    assert prog.host_pids is None, "burst_px 0 keeps the Hermite FORM"
     assert prog.form is not None, "the FORM stage never engaged"
     # the last cloud state sits ON the incoming effect's formation points,
     # moving with them

@@ -553,3 +553,31 @@ the probe measures the lit-pixel blue against each mode's own curve.
   snapshot, `TAKE_REGISTRY = False`); Squiggles -> Fish is UNRAVEL; Sauron/Eye
   -> Fish is FLAME LICK onto `_formation_points()`.
 `fx/effects/transition_cloud.py`'s docstring is the binding statement for phase 4's programs; `tests/test_transition_programs_phase4.py` measures them on the real pipeline.
+
+## THE HOST FRAME: `om` published, born matched (2026-10-17)
+
+The shoal-burst plan (`/home/javi/fleet-spotfx/data/shoal-burst-plan/
+report.md`; `fx/effects/transition_cloud.py`'s `HostFormer` is the binding
+statement). Fish needed almost nothing new — heading and speed ARE its
+state and `PEEL_S` already eases an inherited turn rate into its own
+steering, which is why the plan calls its `_adopt_handoff` the existence
+proof for the whole design. Three things:
+
+- **`p_om` is no longer thrown away.** Fish computed `omega` every frame and
+  discarded it; it is now stored at the heading integration and PUBLISHED as
+  the hand-off snapshot's `om`. That is what a cloud leaving a TURNING fish
+  continues on (before this it flew dead straight out of a turn — measured
+  0 degrees of cloud turn against 43 degrees of parent turn), and what a
+  born orbit/fish keeps turning at.
+- **`_program_birth(snap)` / `_program_hosts(pids)`** — one fish per
+  released object, at its position, on its heading and speed, peeling at its
+  inherited rate, carrying the id the cloud follows it by (`p_pid`). It is
+  `_adopt_handoff`'s own cross-type block plus the count rule and that id,
+  and deliberately NOT part of that method: the crossfade adoption path
+  stays byte-identical.
+- **`_count_hold`** holds the matched count (3 orbits -> 3 fish) until
+  `transition_count_hold_ms` after the program ends, then the authored
+  `particle_count` wins and `_manage_population` flies the difference in or
+  out as it does for any live change.
+
+Proofs: `tests/test_shoal_burst.py`, `tests/shoal_burst_harness.py`.

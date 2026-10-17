@@ -43,6 +43,10 @@ RUNS = (
     ("shoaling_orbits_to_fish", "orbits", "fish", False),
     ("unravel_squiggles_to_orbits", "squiggles", "orbits", False),
     ("unravel_orbits_to_squiggles", "orbits", "squiggles", False),
+    # the shoal-burst plan's own tier A, completed (fx/VENDOR.md #82)
+    ("shoal_break_fish_to_squiggles", "fish", "squiggles", False),
+    ("unravel_squiggles_to_fish", "squiggles", "fish", False),
+    ("eruption_blackhole_to_squiggles", "blackhole", "squiggles", False),
 )
 # a few effects need a livelier warm-up to have something to hand over
 WARM_CONFIG = {

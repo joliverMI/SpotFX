@@ -321,11 +321,13 @@ def _record_cloud(prog, new, out):
                                 prog.form_fade.copy())
 
 
-@pytest.mark.parametrize("pair,sub", [
-    (("sauron", "orbits"), "flo"), (("fish", "orbits"), "sbo"),
-    (("squiggles", "orbits"), "uno"), (("orbits", "squiggles"), "uns"),
-    (("fish", "squiggles"), "sbs")])
+@pytest.mark.parametrize("pair,sub", [(("sauron", "orbits"), "flo")])
 def test_the_cloud_arrives_on_the_moving_incoming_form(tmp_path, pair, sub):
+    """The TargetFormer's own proof. The four SHOALING-family pairs that
+    used to be parametrised here (fish/squiggles/orbits -> orbits/squiggles)
+    run the HOST FRAME since the shoal-burst plan — a stronger property,
+    proven in tests/test_shoal_burst.py: they do not fly to a target at
+    all, they ride the object their own parent became."""
     r = _run(_program_run(tmp_path, sub, *pair, on_frame=_record_cloud))
     prog = r["prog"]
     assert prog.done and isinstance(prog.former, tc.TargetFormer)

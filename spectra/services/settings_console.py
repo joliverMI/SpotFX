@@ -163,7 +163,12 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "transition_scatter": "multiplier",
             "transition_bands_pieces": "pieces",
             "transition_bands_hold_ms": "ms",
-            "transition_unwind": "px/s^2"}.get(key)
+            "transition_unwind": "px/s^2",
+            "transition_burst_px": "px",
+            "transition_burst_ms": "ms",
+            "transition_land_at": "fraction of the program, 0.1-0.9",
+            "transition_graft_ms": "ms",
+            "transition_count_hold_ms": "ms"}.get(key)
     return SettingSpec(key=key, label=label, kind=kind, description=description,
                        unit=unit, min=ge, max=le, choices=choices)
 
@@ -488,6 +493,37 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "transition_unwind", "Out of Star: unwind",
         "How hard the Star's pieces unwind outward on their way to the "
         "Orbits (the Fish gets a gentler share) — 0-40, default 14."),
+    # THE HOST FRAME (the shoal-burst plan) — the shoaling family: fish,
+    # orbits, squiggles and the Black Hole's eruption into them
+    "transition_burst_px": _spec(
+        "transition_burst_px", "Shoaling: burst size",
+        "How far the cloud puffs out from the new object it is riding when "
+        "one shoaling effect becomes another (0-20 px, default 7). 0 turns "
+        "the burst off everywhere — and for orbits into fish it brings back "
+        "the old transition, where the fish simply appear on the blobs."),
+    "transition_burst_ms": _spec(
+        "transition_burst_ms", "Shoaling: burst opens over",
+        "How fast that puff opens, in ms (80-700, default 300) — the only "
+        "moment a piece moves quickly against the object it is riding."),
+    "transition_land_at": _spec(
+        "transition_land_at", "Shoaling: gather begins at",
+        "How far into the transition the pieces start gathering back into "
+        "the new object, as a fraction of it (0.1-0.9, default 0.45)."),
+    "transition_graft_ms": _spec(
+        "transition_graft_ms", "Shoaling: keep inherited speed",
+        "How long a newly born object keeps the velocity it inherited from "
+        "the one it replaced before its own motion takes over, in ms "
+        "(60-800, default 250)."),
+    "transition_count_hold_ms": _spec(
+        "transition_count_hold_ms", "Shoaling: matched count holds",
+        "How long after a shoaling transition ends the MATCHED count holds "
+        "before the scene's own count wins again, in ms (0-3000, default "
+        "400) — 3 fish become 3 orbits, then the scene's 6 a moment later."),
+    "transition_match_count": _spec(
+        "transition_match_count", "Shoaling: match the count",
+        "Whether a shoaling transition gives the new effect as many objects "
+        "as the old one had (3 fish become 3 orbits). Off: the new effect "
+        "comes in with its own authored count straight away."),
 }
 
 
