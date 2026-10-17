@@ -393,27 +393,98 @@ def test_tier_b_is_byte_for_byte_unchanged(base_tree, pair):
     assert now["former"] == was["former"], pair
 
 
-def test_the_squiggles_fix_is_confined_to_the_keys_only_tier_a_reads():
-    """The two velocity families sit SIDE BY SIDE on the snapshot, and the
-    reason is scope: `vx`/`vy` is a contract four programs release from and
-    three effects adopt on an ordinary crossfade, none of them in tier A. So
-    the ordinary pair still carries the last lattice move, byte for byte,
-    and the way the chain is actually GOING rides `walk_vx`/`walk_vy`/
-    `walk_om`, which only `_program_objects` (the host frame's own object
-    set) reads."""
-    from fx.effects import squiggles as sq
+async def _squiggles_head_readings(tmp_path, *, seed=5):
+    """A real Squiggles effect, warmed up, with each chain's two velocity
+    readings taken both off the live snapshot and straight off the
+    functions that compute them — so a drift between the two can only mean
+    the snapshot stopped calling what it claims to."""
+    host, v = await H._host(tmp_path, f"sq-fn-eq-{seed}")
+    try:
+        with H.pinned_rng(seed), H.headless.fake_clock() as clk:
+            H.headless.attach_effect(host, v, "squiggles", H._out_cfg("squiggles"))
+            H.headless.render_frames(v, H.WARM_FRAMES, clock=clk)
+            effect = v.active_effect
+            snap = effect._handoff_snapshot()
+            rows = []
+            for i, c in enumerate(effect.chains):
+                vx, vy = effect._head_velocity(c)
+                wvx, wvy, wom = effect._head_motion(c)
+                rows.append((
+                    float(snap["vx"][i]), float(snap["vy"][i]),
+                    float(snap["walk_vx"][i]), float(snap["walk_vy"][i]),
+                    float(snap["walk_om"][i]),
+                    vx, vy, wvx, wvy, wom,
+                ))
+            return rows
+    finally:
+        await host.shutdown()
 
-    src = Path(sq.__file__).read_text()
-    # the ordinary pair comes from the single-move formula...
-    assert '"vx": np.array([v[0] for v in vel]' in src
-    assert '"walk_vx": np.array([w[0] for w in walk]' in src
-    # ... and nothing but the host frame's object set reads the walk keys
-    hits = subprocess.run(["git", "grep", "-l", "walk_vx"], cwd=REPO,
-                          capture_output=True, text=True).stdout.split()
-    readers = {h for h in hits if h.endswith(".py")}
-    assert readers <= {"fx/effects/squiggles.py",
-                       "fx/effects/transition_program.py",
-                       "tests/test_shoal_burst.py"}, readers
+
+async def _captured_program_objects(tmp_path, out_type, in_type, *, seed=7):
+    """A real outgoing effect's own handoff snapshot, captured by a real
+    `TransitionProgram` through its ordinary `capture()` entry point, then
+    read back through `_program_objects()` — the host frame's own read."""
+    host, v = await H._host(tmp_path, f"objs-{out_type}-{seed}")
+    try:
+        with H.pinned_rng(seed), H.headless.fake_clock() as clk:
+            H.headless.attach_effect(host, v, out_type, H._out_cfg(out_type))
+            H.headless.render_frames(v, H.WARM_FRAMES, clock=clk)
+            outgoing = v.active_effect
+            prog = tp.TransitionProgram(
+                tp.ProgramSettings(seed=seed), out_type, in_type)
+            assert prog.capture(v, outgoing), (out_type, "capture failed")
+            objs = prog._program_objects()
+            snap = dict(prog.snap)
+            return objs, snap
+    finally:
+        await host.shutdown()
+
+
+def test_squiggles_handoff_velocity_keys_are_exactly_head_velocity_and_head_motion(tmp_path):
+    """His comment's own fix, executed rather than grepped: a squiggles
+    handoff snapshot's `vx`/`vy` is `_head_velocity`'s single-move reading
+    (what every ordinary tier-B pair releases from, untouched) and its
+    `walk_vx`/`walk_vy`/`walk_om` is `_head_motion`'s averaged walk reading
+    — and the two readings genuinely differ for at least one chain, or the
+    separate keys would be pointless."""
+    rows = H.run(_squiggles_head_readings(tmp_path))
+    assert len(rows) >= 3
+    differs = False
+    for (svx, svy, swvx, swvy, swom, vx, vy, wvx, wvy, wom) in rows:
+        assert svx == pytest.approx(vx, abs=1e-5)
+        assert svy == pytest.approx(vy, abs=1e-5)
+        assert swvx == pytest.approx(wvx, abs=1e-5)
+        assert swvy == pytest.approx(wvy, abs=1e-5)
+        assert swom == pytest.approx(wom, abs=1e-5)
+        if math.hypot(vx - wvx, vy - wvy) > 1e-3:
+            differs = True
+    assert differs, "walk and single-move readings never differed on any chain"
+
+
+def test_program_objects_reads_the_walk_pair_for_a_squiggles_snapshot(tmp_path):
+    """The host frame — and only the host frame — reads the walk keys."""
+    objs, snap = H.run(_captured_program_objects(tmp_path, "squiggles", "orbits"))
+    keep = objs["src"]
+    assert keep.size >= 1
+    assert np.allclose(objs["vx"], snap["walk_vx"][keep])
+    assert np.allclose(objs["vy"], snap["walk_vy"][keep])
+    assert np.allclose(objs["om"], snap["walk_om"][keep])
+
+
+@pytest.mark.parametrize("out_type,in_type", (("fish", "orbits"), ("orbits", "fish")))
+def test_program_objects_falls_back_to_the_ordinary_pair_with_no_walk_keys(
+        tmp_path, out_type, in_type):
+    """A snapshot that never published walk keys (every ordinary pair out
+    of fish/orbits) leaves the host frame reading exactly the ordinary
+    `vx`/`vy`/`om` it would read anyway — the confinement itself, proven on
+    the two forms that have none to confine."""
+    objs, snap = H.run(_captured_program_objects(tmp_path, out_type, in_type))
+    assert "walk_vx" not in snap and "walk_vy" not in snap and "walk_om" not in snap
+    keep = objs["src"]
+    assert keep.size >= 1
+    assert np.allclose(objs["vx"], snap["vx"][keep])
+    assert np.allclose(objs["vy"], snap["vy"][keep])
+    assert np.allclose(objs["om"], snap["om"][keep])
 
 
 # ── the Admiral's squiggles comment, measured ─────────────────────────────
