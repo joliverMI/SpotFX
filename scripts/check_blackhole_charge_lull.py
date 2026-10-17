@@ -133,14 +133,27 @@ async def _run(tmp, sub, effect_type="blackhole", config=None,
             _o(count, beat_count, *a, **kw)
             added = effect.n - before
             if added:
-                ambient = int(effect.n - np.count_nonzero(
-                    effect.p_nocap[: effect.n])) if hasattr(
-                        effect, "p_nocap") else effect.n
+                has_nocap = hasattr(effect, "p_nocap")
+                nocap = effect.p_nocap[: effect.n] if has_nocap else None
+                ambient = int(effect.n - np.count_nonzero(nocap)) if (
+                    has_nocap) else effect.n
+                # infalling_before is what the real cap gate counts since
+                # 2026-10-17's option D (bh-infall-plan): a horizon
+                # captive (p_cap >= 0) no longer competes for room, unlike
+                # `ambient` above's own historical "every ambient blob,
+                # captured or not" count.
+                if has_nocap and hasattr(effect, "p_cap"):
+                    infalling = int(np.count_nonzero(
+                        (effect.p_cap[: effect.n] < 0.0) & ~nocap))
+                else:
+                    infalling = ambient
+                forced = bool(kw.get("ignore_cap"))
                 spawns[where["phase"]].append({
                     "p": where["p"], "added": added,
-                    "forced": bool(kw.get("ignore_cap")),
-                    "frame": frame[0], "ambient_before": ambient - (
-                        0 if kw.get("ignore_cap") else added),
+                    "forced": forced,
+                    "frame": frame[0],
+                    "ambient_before": ambient - (0 if forced else added),
+                    "infalling_before": infalling - (0 if forced else added),
                 })
 
         effect._spawn = logged_spawn
@@ -300,10 +313,14 @@ def main() -> int:
           "the forced formation lands even with the ordinary population "
           "already at the cap ('ignore max counts')")
     check(not any(r["forced"] is False and
-                  r["ambient_before"] >= HIS_MATRIX["max_blobs"]
+                  r["infalling_before"] >= HIS_MATRIX["max_blobs"]
                   for r in res["spawns"]["charge"]),
-          "…while ORDINARY spawning is still refused at that same cap — "
-          "the override is scoped to the charge's own blobs")
+          "…while ORDINARY spawning is still refused once INFALLING "
+          "population alone reaches that cap — the override is scoped to "
+          "the charge's own blobs (since 2026-10-17's option D, a horizon "
+          "captive no longer counts against this gate at all, so it is "
+          "`infalling_before`, not the retired total-ambient count, that "
+          "ordinary spawning is checked against)")
     per_frame = {}
     for r in res["spawns"]["charge"]:
         if r["forced"]:

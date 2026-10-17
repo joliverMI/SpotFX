@@ -82,6 +82,19 @@ downstream of that geometry, not independent tuning.
   payoff alone — anchor any target ratio on `p_is_burst`, never on the
   total (`fx/VENDOR.md` #38).
 
+**`max_blobs` gates INFALLING blobs only (`p_cap < 0` and not `p_nocap`),
+not every captive too — fixed 2026-10-17, bh-infall-plan option D.** A
+horizon captive (`p_cap >= 0`) is already where it's going and no longer
+competes for `_spawn`'s room; before this, the captive QUEUE ALONE (spawn
+rate × ~3.6s hold+fade) could fill `max_blobs` under busy music and stall
+fresh infall to zero for seconds — worst right after a scene transition
+INTO Black Hole, which lands the whole outgoing cloud onto the ring as
+captives in one frame. The ring runs denser under busy music as a result
+(accepted trade-off, his own call — no captive budget was built). `CAP`
+(1024) is unchanged as the hard buffer bound. AGENTS.md's Black Hole
+section item 5 is the binding note; spec is
+`tests/test_blackhole_infall_through_transition.py`.
+
 ## The three-anchor rule for THIS effect specifically
 
 A drop/explosion anchors its START to the trigger mark (never its ramp's
