@@ -69,20 +69,41 @@ OLD_PHASE_BURST_N = 24  # the pre-fix constant; blackhole.py's own is now 48
 
 class _OldCapBlackhole2d(Blackhole2d):
     """Reproduces the PRE-FIX ambient-spawn cap: gated on total live
-    population (self.n), burst particles included — the formula no longer
-    exists in blackhole.py, restated here only for this regression
-    comparison. Achieved by zeroing the no-cap tag before delegating to the
-    real (fixed) `_spawn`, so its `ambient_n = self.n -
-    count_nonzero(p_nocap)` collapses to `ambient_n == self.n`, exactly
-    the old `max_blobs - self.n` arithmetic."""
+    population (self.n), burst particles included, horizon captives
+    included too — the formula no longer exists in blackhole.py, restated
+    here only for this regression comparison.
+
+    Zeroing the no-cap tag collapses the historical `ambient_n = self.n -
+    count_nonzero(p_nocap)` to `ambient_n == self.n`, exactly the old
+    `max_blobs - self.n` arithmetic — but since 2026-10-17 (the
+    bh-infall-plan, option D) the REAL `_spawn` no longer computes
+    `ambient_n` at all: its own cap now counts only INFALLING population
+    (`p_cap < 0`), excluding already-captured particles regardless of
+    `p_nocap`. Delegating straight to the real `_spawn` after zeroing
+    `p_nocap` would therefore silently inherit that narrower, post-fix
+    accounting instead of the historical one. Compensate by shrinking
+    `max_blobs` by exactly the captured (non-no-cap) population before
+    delegating — algebraically, `ambient_n == infalling_n +
+    captured_ambient_n`, so `max_blobs_fake = max_blobs -
+    captured_ambient_n` makes the real `_spawn`'s own `max_blobs_fake -
+    infalling_n` land on `max_blobs - ambient_n`, the true old room."""
 
     def _spawn(self, count, beat_count, **kw):
         # p_nocap is the flag the cap arithmetic reads (since 2026-08-24 it
         # is split from p_is_burst, which now means specifically "a
         # drop-payoff particle"); zeroing it collapses `ambient_n` back to
         # `self.n`, which is the old formula.
-        self.p_nocap[: self.n] = False
-        super()._spawn(count, beat_count, **kw)
+        nocap = self.p_nocap[: self.n]
+        ambient_n = self.n - int(np.count_nonzero(nocap))
+        nocap[:] = False
+        real_max_blobs = self.max_blobs
+        if not kw.get("ignore_cap"):
+            infalling_n = int(np.count_nonzero(self.p_cap[: self.n] < 0.0))
+            self.max_blobs = real_max_blobs - (ambient_n - infalling_n)
+        try:
+            super()._spawn(count, beat_count, **kw)
+        finally:
+            self.max_blobs = real_max_blobs
 
 
 def _attach_custom_effect(host, virtual, effect_cls, config):
