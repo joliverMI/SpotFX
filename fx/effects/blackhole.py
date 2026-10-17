@@ -1566,11 +1566,23 @@ class Blackhole2d(Twod, GradientEffect):
 
     def _spawn(self, count, beat_count, *, theta=None, ignore_cap=False):
         """max_blobs is the user-facing density cap; CAP is the hard buffer
-        cap. The cap counts only ambient (non-no-cap) population — a drop's
-        _phase_burst blobs are excluded (see its own docstring) so a large
-        surviving burst can never pause the music-driven ambient/beat
-        spawn this function drives; CAP - self.n still bounds the total
-        buffer regardless of tag.
+        cap. The cap counts only INFALLING ambient population — a blob
+        already captured by the event horizon (p_cap >= 0) is where it is
+        going and no longer competes for room, and a drop's _phase_burst
+        blobs are excluded too (see p_is_burst's own docstring) so a large
+        surviving burst can't starve the music-driven ambient/beat spawn
+        this function drives. Before 2026-10-17 (the bh-infall-plan, option
+        D) a horizon captive DID count, so under busy music the captive
+        queue alone (spawn rate x its ~3.6s hold+fade) filled max_blobs on
+        its own and fresh infall stalled to zero for seconds at a time —
+        worst on a scene transition into Black Hole, which lands a whole
+        incoming cloud onto the ring as captives in one frame. The ring now
+        runs measurably denser under busy music (captives aren't budgeted
+        either — the Admiral's own call, accepted as part of D) but fresh
+        infall never stalls. CAP - self.n still bounds the total buffer
+        regardless of tag — with max_blobs well under CAP (1024), captives
+        plus a full max_blobs of infalling can never approach that hard
+        limit, so no separate captive budget is needed for safety.
 
         `ignore_cap` spawns straight past max_blobs and tags the result
         p_is_burst — the same no-cap treatment, for the blob rush (his
@@ -1582,9 +1594,11 @@ class Blackhole2d(Twod, GradientEffect):
 
         int(): morph smoothing can hand us float counts, which numpy's rng
         size argument rejects."""
-        ambient_n = self.n - int(np.count_nonzero(self.p_nocap[: self.n]))
+        infalling_n = int(np.count_nonzero(
+            (self.p_cap[: self.n] < 0.0) & ~self.p_nocap[: self.n]
+        ))
         room = (CAP - self.n) if ignore_cap else min(
-            self.max_blobs - ambient_n, CAP - self.n)
+            self.max_blobs - infalling_n, CAP - self.n)
         count = int(min(count, room))
         if count <= 0:
             return

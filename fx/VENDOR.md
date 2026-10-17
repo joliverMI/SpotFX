@@ -2415,3 +2415,19 @@ against that commit.
     `tests/test_star_into_programs.py`, `tests/test_star_strip_lull.py`
     (real pipeline, `tests/star_harness.py`). Unverified against his live
     room.
+81. `effects/blackhole.py` (`Blackhole2d._spawn`): bh-infall-plan option D
+    (2026-10-17, the Admiral: "just do option D"). `max_blobs` now gates
+    only INFALLING blobs (`p_cap < 0` and not `p_nocap`) against the
+    density cap — a horizon captive (`p_cap >= 0`) is already where it is
+    going and no longer competes for `_spawn`'s room. Before, the captive
+    queue alone (spawn rate × ~`horizon_hold + HORIZON_FADE_S` ≈ 3.6s
+    hold+fade) could fill `max_blobs` under busy music, stalling fresh
+    infall to zero for seconds — worst right after a scene transition INTO
+    Black Hole, which lands the whole outgoing cloud onto the ring as
+    captives in one frame (the `INFALL`/`ERUPTION` hand-off, deviation
+    #70). `CAP` (1024) is unchanged as the hard buffer bound; the ring
+    runs denser under busy music as a result (accepted trade-off, his own
+    call — no separate captive budget was built). Evidence:
+    `tests/test_blackhole_infall_through_transition.py` (a real Orbits→
+    Black Hole transition and a steady-state run, both proven RED against
+    the pre-fix accounting restored inline as the control).

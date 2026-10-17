@@ -8853,6 +8853,30 @@ with the mechanism detail; this is the short list of traps.
    `p_is_burst`, never on the total, or the target is a divergent fixed
    point. `fx/VENDOR.md` #38 is the binding statement; the instrument is
    `scripts/check_blackhole_charge_target.py`.
+5. **`max_blobs` gates INFALLING blobs only, not every captive too
+   (2026-10-17, bh-infall-plan, option D — the Admiral: "just do option
+   D").** Before this, `_spawn`'s density check counted every ambient
+   (non-no-cap) blob — horizon captives included — against `max_blobs`,
+   so under busy music the captive QUEUE ALONE (spawn rate × its
+   `horizon_hold + HORIZON_FADE_S` ≈ 3.6s hold+fade) filled the cap and
+   fresh infall stalled to ZERO for seconds — worst right after a scene
+   transition INTO Black Hole, which lands the whole outgoing cloud onto
+   the ring as captives in one frame (the transition programs' own
+   `INFALL`/`ERUPTION` hand-off, see "TRANSITION PROGRAMS" above). `_spawn`
+   now counts only `p_cap < 0` (not yet captured) and not `p_nocap` against
+   `max_blobs`; `CAP` (1024) still bounds the hard buffer regardless, and
+   with `max_blobs` well under it a full captive queue plus a full
+   `max_blobs` of infalling can never approach that limit — no separate
+   captive budget was built (his own call, accepted trade-off: a denser
+   ring under busy music — 58 vs 43 measured captives in the plan's own
+   rig — not a busier field). C (muting the Black Hole's own picture
+   under the program) and A (a seeded starting population) were proposed
+   in the same plan and NOT built; B (split the cloud, let some fall
+   instead of all landing on the ring) was measured worse than today and
+   rejected. Spec: `tests/test_blackhole_infall_through_transition.py`
+   (a real Orbits→Black Hole transition and a steady-state run, both
+   proven RED against the pre-fix accounting restored inline as the
+   control).
 
 ## A SATURATING SIGNAL MEETING `>=` MAKES A "never" THRESHOLD FIRE
 
