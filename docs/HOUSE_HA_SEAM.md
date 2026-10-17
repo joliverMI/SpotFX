@@ -41,7 +41,8 @@ Every value `input_select.lighting_mode` can take reaches a mode:
 | `Travel` | Away |
 | `Away` | Away |
 | media `playing` | TV (by name) |
-| media `paused` / `idle` | TV paused (by name) |
+| media `paused` | TV paused (by name) |
+| media `idle` | recorded, but never selects a mode — not "paused" (fixed 2026-10-17) |
 
 `unknown` / `unavailable` (while HA restarts) are deliberately unmapped: an
 unmapped word keeps the current mode, so a restart never flips the house to
@@ -88,7 +89,8 @@ the WLEDs report `live: false`. Re-assert the mode (R1) when it comes back.
 - `tv-music` OFF lends the TV strip (`settings.tv_strips`, default
   `["tv-backlight"]`) to Hyperion: Spectra sends it **nothing** (not even
   black) and posts `{"live": false}` once. The sconces on the same effect keep
-  going. A media source on (`state` playing / paused / idle) lends it too.
+  going. A media source ACTIVE (`state` playing / paused — not `idle`,
+  which is reported but inert) lends it too.
 - **The lend is honoured only while Hyperion is actually streaming to the
   strip, whenever the current mode's own plan also wants that strip
   powered off** (e.g. Away). Spectra re-checks the strip's own `live` flag
@@ -108,8 +110,12 @@ the WLEDs report `live: false`. Re-assert the mode (R1) when it comes back.
 ### Media / TV mode (R7)
 
 - `playing` selects the mode answering to `"TV (<source>)"`, else `"TV"`.
-  `paused` / `idle` select the one answering to `"TV paused (<source>)"`,
-  else `"TV paused"`. `stopped` returns to the clock's mode.
+  `paused` selects the one answering to `"TV paused (<source>)"`, else
+  `"TV paused"`. `idle` is recorded (`media.state`) but is NOT active and
+  never selects a mode — a Roku at its home screen is not "paused" (fixed
+  2026-10-17, previously `idle` wrongly behaved like `paused` and could
+  not be cleared by re-picking a mode, only by HA sending `stopped`).
+  `stopped` returns to the clock's mode.
 - It is an overlay: the clock's word (R1) keeps being recorded underneath, so
   a clock change during a film shows when the film ends.
 - A media word no mode answers to changes nothing about the mode (the strip

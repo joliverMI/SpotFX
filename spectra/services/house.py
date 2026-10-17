@@ -1029,10 +1029,12 @@ async def set_media(*, source: Optional[str], state: str,
         logger.exception("house: fixture kick after media failed")
     await tick()
     out = {"status": status, "lighting": status_dict()}
-    if state != "stopped" and media_mode(st) is None and st.mode_id is not None:
+    if state in MEDIA_ACTIVE_STATES and media_mode(st) is None and st.mode_id is not None:
         out["note"] = (f"no house mode answers to "
                        f"{' or '.join(repr(w) for w in media_words(src, state))} "
                        f"— the clock's mode stays")
+    elif state not in MEDIA_ACTIVE_STATES and state != "stopped" and st.mode_id is not None:
+        out["note"] = f"{src or 'the media centre'} is {state} — not treated as media, no TV mode"
     return out
 
 

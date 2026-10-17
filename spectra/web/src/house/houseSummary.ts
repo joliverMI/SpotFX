@@ -156,6 +156,10 @@ export function seamLines(l: LightingStatus | undefined): string[] {
   if (m?.active) {
     out.push(`Media: ${m.source ?? 'a source'} is ${m.state}`
       + (m.mode ? ` → ${m.mode}.` : ` — no mode answers to ${m.words.map((w) => `"${w}"`).join(' or ')}, so ${l.clock_mode?.name ?? 'the clock\'s mode'} stays.`));
+  } else if (m?.source && m.state) {
+    // Reported but not active (e.g. idle — a home screen, not paused):
+    // never selects a mode, so there is nothing to overlay or clear.
+    out.push(`Media: ${m.source} ${m.state} (no TV mode).`);
   }
   const v = l.voice;
   if (v && v.state !== 'idle') {

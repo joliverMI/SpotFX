@@ -232,8 +232,15 @@ VOICE_IDLE = "idle"
 
 #: A media source Home Assistant reports (the Roku, the Switch, the Blu-ray
 #: player — or any other word it sends; the word is kept as given).
-MEDIA_ACTIVE_STATES = ("playing", "paused", "idle")
-MEDIA_STATES = MEDIA_ACTIVE_STATES + ("stopped",)
+MEDIA_ACTIVE_STATES = ("playing", "paused")
+#: Reported and recorded (a valid MEDIA_STATES value, never refused) but
+#: never ACTIVE — a Roku at its home screen is not "paused" and must not
+#: select the mode answering to "TV paused" (fixed 2026-10-17,
+#: data/media-pause-diag/report.md: an idle Roku overlaid "TV paused" with
+#: `music: ignore` and no mode re-pick could clear it — only `stopped`
+#: could, and HA never sends that for an idle Roku).
+MEDIA_INACTIVE_STATES = ("idle",)
+MEDIA_STATES = MEDIA_ACTIVE_STATES + MEDIA_INACTIVE_STATES + ("stopped",)
 
 
 #: Home Assistant's three Serenity colours, read off his own automations
