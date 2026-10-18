@@ -492,23 +492,38 @@ async def main() -> int:
                     await asyncio.sleep(0.2)
 
             # THE LIGHT SHOW SLOT'S OWN TEXT, AT THE WIDTHS THAT CLIPPED IT
-            # (spotfx-deploy-427): `.light-show-act-name` carried a fixed
-            # `max-width: 72px` for every width <=1180px, and the override
-            # lifting it covered only the 521-1100px two-row band — leaving
-            # it clipped to "Nothing a…" in the two gaps either side:
-            # 1101-1180px (one line) and the phone tier (<=520px, measured
-            # here at 390). This is a GENERIC clip check (scrollWidth <=
-            # clientWidth on both the name and its 'when' line) against
-            # whatever the slot happens to be showing live — idle or an
-            # armed action — because the cap was unconditional on the
-            # element, not on its content; a dedicated idle-state proof
-            # (forcing "Nothing armed" specifically) lives in
-            # check_ui_fidelity.py's own mocked harness, which can set
-            # that state deterministically where this read-only, live-only
-            # script cannot.
-            for width in (1180, 1101, 390):
+            # (spotfx-deploy-427, then spotfx-deploy-428/fm/ls-idle-clip-360):
+            # `.light-show-act-name` carried a fixed `max-width: 72px` for
+            # every width <=1180px, and the override lifting it covered
+            # only the 521-1100px two-row band — leaving it clipped to
+            # "Nothing a…" in the two gaps either side: 1101-1180px (one
+            # line) and the phone tier (<=520px, measured at 390). The
+            # 427 fix removed that cap everywhere; the POST-DEPLOY CHECK
+            # on a REAL 360px phone (spotfx-deploy-428 report §3-4) found
+            # it still clipped there — a real phone's overlay scrollbars
+            # give `.one-bar` a few px more usable width than the desktop
+            # emulation this script used before, which is exactly the few
+            # px of slack that made 390 pass while 360 (and 390's own
+            # ~9px of margin) stayed one accidental name away from
+            # failing. `"mobile": true` on `Emulation.setDeviceMetricsOverride`
+            # is what reproduces that — Chrome switches to overlay
+            # scrollbars (no reserved gutter) under it, same as a real
+            # phone — so the two phone widths (390, 360) emulate as a
+            # phone while the two desktop/tablet widths (1180, 1101) keep
+            # emulating as a desktop, matching how each is actually
+            # reached live. This is still a GENERIC clip check
+            # (scrollWidth <= clientWidth on both the name and its 'when'
+            # line) against whatever the slot happens to be showing live
+            # — idle or an armed action — because the cap was
+            # unconditional on the element, not on its content; a
+            # dedicated idle-state proof (forcing "Nothing armed"
+            # specifically) lives in check_ui_fidelity.py's own mocked
+            # harness, which can set that state deterministically where
+            # this read-only, live-only script cannot.
+            for width, is_mobile in ((1180, False), (1101, False), (390, True), (360, True)):
                 await cdp_call(ws, nid(), "Emulation.setDeviceMetricsOverride", {
-                    "width": width, "height": HEIGHT, "deviceScaleFactor": 1, "mobile": False,
+                    "width": width, "height": HEIGHT, "deviceScaleFactor": is_mobile and 2 or 1,
+                    "mobile": is_mobile,
                 })
                 await asyncio.sleep(0.3)
                 r = await cdp_call(ws, nid(), "Runtime.evaluate", {

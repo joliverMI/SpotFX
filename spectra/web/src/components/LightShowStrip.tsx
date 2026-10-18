@@ -18,19 +18,22 @@
  * (`.sp .show`/`.sp .act`) with the holds count as a badge on the
  * sparkle, not as 0.85em inline text behind a "◈" glyph.
  *
- * THE IDLE "WHEN" LINE HAS A SHORTER PHONE VARIANT, the name does not
- * (spotfx-deploy-427's own live measurement). "Nothing armed" fills the
- * slot's own fixed-width text column fine at every width once
- * `.light-show-act-name`'s one-time fixed cap was removed (tokens.css) —
- * but "tap to run an action" genuinely does not fit the phone tier's own
- * narrower column (measured ~101px available there, ~122px needed), a
- * real width shortage rather than an artificial cap, so it is the ONE
- * piece of idle text this slot shortens rather than lets ellipsise:
- * `.light-show-act-when-full`/`-short` are two sibling spans, toggled by
- * `tokens.css`'s own `max-width: 520px` rule (the slot's existing phone
- * tier) — never a JS width check, so this costs nothing at any other
- * width and both strings always sit in `textContent` for anything that
- * reads the slot's words rather than its pixels.
+ * BOTH IDLE LINES HAVE SHORTER PHONE VARIANTS (fm/ls-idle-clip-360
+ * supersedes the note this replaces, which said only the "when" line
+ * did). spotfx-deploy-427 fixed `.light-show-act-name`'s own fixed cap
+ * (72px, clipping "Nothing armed" to "Nothing a…") everywhere but the
+ * phone tier, on the theory that an uncapped `display: block` text
+ * element fills its fixed-width slot and only ellipsises when genuinely
+ * too wide. True on desktop; FALSE on a real 360px phone, where the
+ * post-deploy check (spotfx-deploy-428) measured the idle name box at
+ * ~71px against "Nothing armed"'s own ~92px at 12px/700 — still "Nothing
+ * a…", with only ~9px of slack left even at 390. So the idle NAME gets
+ * the exact same two-span treatment the "when" line already had:
+ * `.light-show-act-name-full`/`-short` toggle on `tokens.css`'s own
+ * `max-width: 520px` rule, never a second cap and never a JS width
+ * check — costs nothing above that width, and both strings always sit
+ * in `textContent`. An author-chosen action name is untouched and still
+ * just ellipsises; only the idle "Nothing armed" placeholder shortens.
  *
  * Reads three already-existing sources, no new server work: `useEngineStatus`
  * (the `light_show` brief, already on the wire — spectra/services/engine.py's
@@ -127,7 +130,10 @@ export default function LightShowStrip() {
         {idle ? (
           <span className="light-show-act light-show-act-cur light-show-act-wide">
             <span className="light-show-act-text">
-              <span className="light-show-act-name light-show-act-name-idle">Nothing armed</span>
+              <span className="light-show-act-name light-show-act-name-idle">
+                <span className="light-show-act-name-full">Nothing armed</span>
+                <span className="light-show-act-name-short">Not armed</span>
+              </span>
               <span className="light-show-act-when">
                 <span className="light-show-act-when-full">tap to run an action</span>
                 <span className="light-show-act-when-short">tap to run</span>
