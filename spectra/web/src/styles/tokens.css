@@ -1117,6 +1117,16 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
  * where a genuine width shortage (not a removable cap) leaves no room
  * for "tap to run an action". */
 .light-show-act-when-short { display: none; }
+/* The idle NAME's own phone-only short variant (fm/ls-idle-clip-360,
+ * post-#428 deploy check: 360px real phones, with their overlay
+ * scrollbar giving the slot its full width, still measured the idle
+ * name box at ~71px against "Nothing armed"'s own ~92px at 12px/700 —
+ * ~9px of slack remained even at 390. Same two-span pattern as the
+ * "when" line right above, toggled by the SAME `max-width: 520px` rule
+ * below — never a second cap, never a slot-width change. Only the idle
+ * name gets a short variant; an author-chosen action name still
+ * ellipsises as before. */
+.light-show-act-name-short { display: none; }
 @media (max-width: 1180px) { .light-show-strip { flex-basis: 262px; } }
 @media (max-width: 900px) {
   .light-show-strip { flex-basis: 200px; }
@@ -1129,6 +1139,8 @@ button.danger:hover { border-color: var(--danger); color: var(--danger); }
   .light-show-chev, .light-show-act-nxt { display: none; }
   .light-show-act-when-full { display: none; }
   .light-show-act-when-short { display: inline; }
+  .light-show-act-name-full { display: none; }
+  .light-show-act-name-short { display: inline; }
 }
 
 /* THE MOCKUP'S OWN BORDERED SWATCH GROUP (`.sp .pv`, audit B8): one 34px
