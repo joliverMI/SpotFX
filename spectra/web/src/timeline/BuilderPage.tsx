@@ -9,7 +9,7 @@ import { useEvents, useSettings } from '../api/queries';
 import { useBuilderStore } from './store';
 import { useAnalysedPlan, useAudioShapeData, useAudioShapeMeta, useCalibrationStatus, useDropRails, useDropSequences, useLibrosa, useLiveShape, useProfileByUri, useSetlists, useShowArms } from './queries';
 import { FLARE_MARKER_COLOR, SCENE_MARKER_COLOR, songPositionMarkers } from '../debug/plannedEvents';
-import { LIGHT_SHOW_COLOR, lightShowCueMarkers, sceneChangeArms } from './lightShowMarkers';
+import { LIGHT_SHOW_COLOR, lightShowCueMarkers, phaseArms, sceneChangeArms } from './lightShowMarkers';
 import AnalysedEventsStrip from './components/AnalysedEventsStrip';
 import { usePlayhead } from './hooks/usePlayhead';
 import { getShowClockMs } from '../lib/showClock';
@@ -273,6 +273,11 @@ export default function BuilderPage() {
     () => (showLightShow ? lightShowCueMarkers(analysedPlan?.show_cues, showArms, uri) : []),
     [showLightShow, analysedPlan, showArms, uri]);
   const armedSceneChangeSets = useMemo(() => sceneChangeArms(showArms, uri), [showArms, uri]);
+  // Light Show sets armed on a drop / lull / charge (2026-10-19's one
+  // cycle button). Named in the DROP-SEQUENCE legend below, beside the
+  // shapes they are waiting for, rather than drawn as a second marker on
+  // a moment that already has one — see phaseArms' own docstring.
+  const armedPhaseSets = useMemo(() => phaseArms(showArms, uri), [showArms, uri]);
   const lightShowUi = useLightShowDrag({
     uri, durationMs,
     getBeats: () => librosaRef.current?.beats ?? null,
@@ -680,6 +685,12 @@ export default function BuilderPage() {
             <span className="drop-legend-item"><span className="drop-swatch drop" style={{ color: PHASE_COLOR.drop }} />drop</span>
             <span style={{ minWidth: 0 }}>solid = fires · dashed = suggested · dotted = where the analysis had it</span>
             <span style={{ minWidth: 0 }}>rails under the graph: bass spikes (taller = harder) and beats</span>
+            {armedPhaseSets.map((g) => (
+              <span key={g.phase} style={{ minWidth: 0, color: PHASE_COLOR[g.phase] }}
+                title={g.arms.map((a) => a.label || 'an action').join(', ')}>
+                {g.arms.length} armed on the {g.label}
+              </span>
+            ))}
             <HelpLink topic="drop-sequence-layer" title="The drop-sequence layer" />
           </div>
         )}

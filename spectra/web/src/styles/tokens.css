@@ -2395,7 +2395,15 @@ kbd {
 .light-show-run-set-row { background: var(--surface2); border-radius: var(--radius); padding: 10px; }
 .light-show-run-set-main { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .light-show-run-set-name { flex: 1 1 120px; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
-.light-show-run-set-actions { display: flex; gap: 6px; flex-wrap: nowrap; }
+/* WRAPS rather than overflowing. The budget: five 48px buttons plus four
+   6px gaps = 264px since 2026-10-19's phase-cycle button (it was 210px at
+   four), against ~268px of usable width inside the card on a 320px-wide
+   phone — i.e. it still fits, but with nothing to spare, and a sixth
+   button or a wider gutter would not. `nowrap` here would overflow the
+   card horizontally rather than take a second line; `wrap` only ever
+   engages when the row genuinely cannot fit, so the usual one-line look
+   at every width he actually uses is unchanged. */
+.light-show-run-set-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 /* 48px square — a real phone/tablet touch target, never smaller than the
    glyph plus thumb-sized padding. */
 .light-show-run-set-icon-btn {
@@ -2411,6 +2419,20 @@ kbd {
    a refresh or when armed from Sonic/another screen (his ask, 2026-10-08).
    Clearly different from idle: filled accent, not just a border tint. */
 .light-show-run-set-icon-btn.armed { background: var(--accent); color: #fff; border-color: var(--accent); }
+/* THE PHASE CYCLE BUTTON (2026-10-19) wears the TIMELINE's own colour for
+   whichever of drop / lull / charge it is armed on — set inline from
+   timeline/dropSequences' PHASE_COLOR (see lightshow/phaseArmCycle.ts),
+   never a hex here, so the button and the shape it waits for can never
+   drift apart. This rule exists because `.armed`'s own flat accent fill
+   above would otherwise paint over that colour: the glyph and the ring
+   keep the phase's colour (`currentColor`, i.e. the inline one) and the
+   fill is a wash of it rather than the shared purple. Home's own copy of
+   the button has the twin rule beside .home-quick-icon-btn.armed.
+   Unarmed, it is byte-identical to any other idle icon button. */
+.light-show-run-set-icon-btn.phase.armed {
+  background: color-mix(in srgb, currentColor 22%, var(--surface));
+  border-width: 2px;
+}
 .light-show-run-set-armed-tag { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.9em; color: var(--muted); }
 .light-show-run-set-armed-tag button { padding: 4px 10px; }
 button.big { padding: 16px 18px; font-size: 1.05em; min-height: 52px; border-radius: var(--radius); }
@@ -3324,7 +3346,11 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
  * one set fitted the kiosk's first screen. */
 .home-quick-action-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(4, 34px);
+  /* one column per icon button — FIVE since 2026-10-19's phase-cycle
+     button. This count is explicit, so adding a button to
+     HomeQuickRuns.tsx without widening it here drops the new one into an
+     implicit auto column and silently mis-sizes the row. */
+  grid-template-columns: minmax(0, 1fr) repeat(5, 34px);
   gap: 6px;
   align-items: center;
   padding: 5px 6px 5px 10px;
@@ -3347,9 +3373,15 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 }
 .home-quick-icon-fire { border-color: var(--warning); color: var(--warning); }
 .home-quick-icon-btn.armed { background: rgba(168, 85, 247, 0.25); border-color: var(--accent); color: #fff; }
+/* the phase cycle button's own colour, as in the Run view above */
+.home-quick-icon-btn.phase.armed {
+  background: color-mix(in srgb, currentColor 22%, var(--surface));
+  border-width: 2px;
+}
 .home-quick-icon-btn:disabled { opacity: 0.5; cursor: default; }
 /* An armed tag wraps onto its own line under the row it belongs to,
- * without changing the row's own four-column shape. */
+ * without changing the row's own icon-column shape (grid-column: 1 / -1,
+ * so it spans whatever that count currently is). */
 .home-quick-armed-tag {
   grid-column: 1 / -1;
   display: flex; align-items: center; gap: 8px;

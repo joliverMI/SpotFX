@@ -68,6 +68,9 @@ export const TRIGGER_LABEL: Record<ArmTrigger, string> = {
   scene_change: 'next scene change',
   high: 'next High Trigger',
   low: 'next Low Trigger',
+  drop: 'next drop',
+  lull: 'next lull',
+  charge: 'next charge',
 };
 
 export function triggerLabel(on: string): string {
@@ -128,8 +131,13 @@ export function cueLine(c: ShowCue | null, positionMs: number | null | undefined
 
 // ── THE BAR SLOT: current → next (UI declutter plan §3) ───────────────────
 
+/** The three phases all wear the Timeline's own generic drop-sequence
+ * phase glyph (iconRegistry's `pulse`); the colour is what tells them
+ * apart, from the Timeline's own PHASE_COLOR — see ./phaseArmCycle.ts,
+ * which is the one place that pairing is made. */
 const TRIGGER_ICON: Record<ArmTrigger, IconName> = {
   scene_change: 'rabbit', high: 'arrowUp', low: 'arrowDown',
+  drop: 'pulse', lull: 'pulse', charge: 'pulse',
 };
 
 export interface ShowNowNextItem {

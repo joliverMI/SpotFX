@@ -3,7 +3,7 @@
 §5.2 and §6; his spec: "armed to execute on the next scene change ... on the
 next High Trigger, or on the next Low Trigger").
 
-THREE TRIGGERS, an open list:
+SIX TRIGGERS, an open list:
 
   scene_change  the next REAL change to a DIFFERENT scene — any path that
                 really fires one (the sequencer, a trigger, the automatic
@@ -25,6 +25,10 @@ THREE TRIGGERS, an open list:
                 memory, rearmed on a rewind or a song change). Independent
                 of the scene-change tier — a cue exists on every analysed
                 song, his own triggers or not.
+  drop / lull /
+  charge        this song's NEXT drop, lull or charge (PHASE_TRIGGERS, the
+                Admiral 2026-10-19: "add a button for next drop, lull, and
+                charge"). See THE PHASE TRIGGERS below.
 
 FINISH ON THE MARK (an approved add-on). A set armed on High/Low that FADES
 (a Device state fade, a Level fade-in) starts early by its longest fade —
@@ -35,6 +39,40 @@ fades each land on the mark. The WHOLE set moves early (an instant step in
 it lands that much early too) — stated on the arm card, his to switch off
 per arm. Capped at MAX_FINISH_LEAD_MS. Ambient's own ~15-22 s ease is not
 a fade this counts: it is the bulbs' physics, it STARTS on the trigger.
+
+THE PHASE TRIGGERS — "the next drop / lull / charge". Where the High and
+Low come from show_cues.py, these come from the SAME drop-sequence data
+the Timeline draws as gold/sky/magenta shapes: drop_firing.phase_moments
+over drop_sequences.view — every firing sequence's own members plus his
+own authored charge/lull/drop triggers, his winning a collision. Unlike
+High/Low there can be SEVERAL of each in one song (his real EDM songs
+carry a dozen drops), so `cue_plan` returns one entry per moment and an
+ordinary one-shot arm fires on the FIRST one its clock crosses and is
+then done — "the next drop", exactly as named. Everything else is the
+High/Low path unchanged: the same `cue_plan`/`on_cue` pair, the same
+exactly-once-per-crossing memory in trigger_engine._tick_show_cues, the
+same show clock (`av_sync_lead` + `known_buffer` — nothing here touches
+the audio offset), the same finish-on-the-mark lead, the same gate that
+never consumes an arm, and the same house wrong-device gate in
+services/engine._show_cue.
+
+  THE MOMENTS ARE READ, NEVER COMPUTED HERE. `phase_moments` is a seam
+  whose default asks the trigger engine for the list it already memoises
+  per tick (TriggerEngine.phase_cue_moments) — the view costs a full
+  triggers.json parse, and `cue_plan` is asked every tick. `None` from
+  that seam means "not worked out for this song yet", which the armed
+  board reports differently from an empty list ("none on this song").
+
+  THEY ARE MODE-INDEPENDENT and sit on the MARK. A phase cue is a moment
+  in the music, like a High: it is not narrowed by the room's
+  scene-change tier, and it is not relocated by the drop timing offset
+  (drop_timing.py, default -400 ms). drop_firing.phase_moments' own
+  docstring carries the reasoning for both.
+
+  A SONG WITH NO DROP SEQUENCES still takes the arm: it simply never
+  crosses one, so the arm waits exactly as an arm on a High waits on a
+  song with no High — `status()["song"]["phases"]` says so, and nothing
+  about the arm is used up.
 
 QUEUE, NOT REPLACE — EXCEPT THE SAME SET ON THE SAME TRIGGER. Several arms
 wait side by side; arming the set that is already armed on that trigger
@@ -83,7 +121,16 @@ from spectra.services import show_cues, show_output, show_store
 
 logger = logging.getLogger(__name__)
 
-TRIGGERS = ("scene_change", "high", "low")
+PHASE_TRIGGERS = ("drop", "lull", "charge")
+"""The drop-sequence phases, in the order the Run view's one button cycles
+through them (the Admiral's own words: "next drop, lull, and charge")."""
+
+TRIGGERS = ("scene_change", "high", "low") + PHASE_TRIGGERS
+
+MARK_TRIGGERS = ("high", "low") + PHASE_TRIGGERS
+"""The triggers that sit at a KNOWN song-time moment — so a countdown and
+the finish-on-the-mark lead both mean something. "scene_change" is the
+one that does not (it fires on whichever change happens next)."""
 ARM_MAX_AGE_S = 12 * 3600
 ARM_IDLE_EXPIRY_S = 30 * 60
 """An arm expires after this long with no music playing."""
@@ -101,6 +148,9 @@ EXPIRED = "expired"
 #: injectable seams (production reads the bridge; tests replace them)
 current_uri: Callable[[], Optional[str]]
 is_playing: Callable[[], Optional[bool]]
+#: where this song plays a charge/lull/drop — the trigger engine's own
+#: per-tick memo (THE PHASE TRIGGERS above). None = not worked out yet.
+phase_moments: Callable[[Optional[str]], Optional[list]]
 
 
 def _bridge_uri() -> Optional[str]:
@@ -119,8 +169,21 @@ def _bridge_playing() -> Optional[bool]:
         return None
 
 
+def _engine_phase_moments(uri: Optional[str]) -> Optional[list]:
+    """The trigger engine's already-memoised phase moments for `uri`
+    (drop_firing.PhaseMoment). A tuple compare, no I/O; None whenever the
+    engine has not worked this song out yet (and on any failure, which is
+    the same honest "not known" rather than a fabricated empty list)."""
+    try:
+        from spectra.services.trigger_engine import trigger_engine
+        return trigger_engine.phase_cue_moments(uri)
+    except Exception:                                    # noqa: BLE001
+        return None
+
+
 current_uri = _bridge_uri
 is_playing = _bridge_playing
+phase_moments = _engine_phase_moments
 
 _last_music_mono: float = time.monotonic()
 _last_crossed: dict[str, dict] = {}
@@ -174,9 +237,12 @@ def _steps(arm: ShowArm) -> list[ShowAction]:
 
 
 def lead_ms(arm: ShowArm) -> int:
-    """How early this arm must start so its fades COMPLETE on a High/Low
-    mark: the longest fade among its steps before the first pause."""
-    if not arm.finish_on_mark or arm.on not in ("high", "low"):
+    """How early this arm must start so its fades COMPLETE on its mark:
+    the longest fade among its steps before the first pause. Every
+    MARK_TRIGGERS arm (High, Low and the three phases) gets it — a phase
+    sits at a known song-time moment exactly as a High does; only
+    "scene_change", which has no known time, never does."""
+    if not arm.finish_on_mark or arm.on not in MARK_TRIGGERS:
         return 0
     best = 0
     for a in _steps(arm):
@@ -428,27 +494,36 @@ def _tell_sequence(kind: str) -> None:
 
 
 def cue_plan(uri: Optional[str]) -> list[tuple[str, int, int]]:
-    """(level, cue_ms, lead_ms) for this song's High and Low — what the
-    trigger clock watches. The lead is the largest any armed set on that
-    level needs (0 with nothing armed). Never blocks: an uncomputed song
-    returns [] while its cues are derived in a thread."""
+    """(level, cue_ms, lead_ms) for every moment on this song the trigger
+    clock watches: its High and its Low (show_cues.py), and every charge,
+    lull and drop (THE PHASE TRIGGERS — several of each is normal). The
+    lead is the largest any armed set on that level needs (0 with nothing
+    armed). Never blocks: a song whose cues are not derived yet
+    contributes none of them while they are computed in a thread, and a
+    song whose phases the engine has not worked out yet contributes no
+    phase."""
     global _plan_uri
     if uri != _plan_uri:
         # A new play re-derives (a setting or ranking change since the last
         # time this song played must not be served from a stale cache).
         _plan_uri = uri
         show_cues.invalidate(uri)
-    cues = show_cues.cached(uri)
-    if cues is None:
-        return []
     arms = [a for a in active_arms() if _applies_to_song(a, uri)]
-    out = []
-    for level in show_cues.LEVELS:
-        cue = cues.get(level)
-        if cue is None:
-            continue
-        lead = max((lead_ms(a) for a in arms if a.on == level), default=0)
-        out.append((level, int(cue.timestamp_ms), lead))
+
+    def lead_for(level: str) -> int:
+        return max((lead_ms(a) for a in arms if a.on == level), default=0)
+
+    out: list[tuple[str, int, int]] = []
+    cues = show_cues.cached(uri)
+    if cues is not None:
+        for level in show_cues.LEVELS:
+            cue = cues.get(level)
+            if cue is None:
+                continue
+            out.append((level, int(cue.timestamp_ms), lead_for(level)))
+    for m in phase_moments(uri) or []:
+        if m.cls in PHASE_TRIGGERS:
+            out.append((m.cls, int(m.ms), lead_for(m.cls)))
     return out
 
 
@@ -555,10 +630,37 @@ def _source_tag(source: Optional[str]) -> Optional[str]:
     return None
 
 
+def phase_summary(uri: Optional[str], position_ms: Optional[int] = None) -> dict:
+    """This song's charge/lull/drop for the armed board: the NEXT moment of
+    each class ahead of `position_ms` (the first one when the position is
+    unknown), how many the song holds at all, and a `reason` when there is
+    nothing to say yet — the phase half of `song.cues`, read the same way
+    an arm board reads "none on this song" for a missing High.
+
+    `known` tells the two empty cases apart: False while the engine has
+    not worked this song out yet, True when it has and the song genuinely
+    plays no charge, lull or drop."""
+    moments = phase_moments(uri) if uri else None
+    out: dict = {"known": moments is not None, "next": {}, "counts": {},
+                 "reason": None}
+    for cls in PHASE_TRIGGERS:
+        mine = sorted((int(m.ms) for m in (moments or []) if m.cls == cls))
+        out["counts"][cls] = len(mine)
+        ahead = [ms for ms in mine
+                 if position_ms is None or ms > position_ms]
+        out["next"][cls] = ahead[0] if ahead else None
+    if moments is None:
+        out["reason"] = ("this song's drops have not been worked out yet"
+                         if uri else "nothing is playing")
+    elif not any(out["counts"].values()):
+        out["reason"] = "this song has no charge, lull or drop"
+    return out
+
+
 def status() -> dict:
     """The armed board: every waiting arm (with its lead and the next time
     its trigger is due on this song, when known), recent history, and this
-    song's High/Low for the countdowns."""
+    song's High/Low and its charge/lull/drop for the countdowns."""
     uri = current_uri()
     cues = show_cues.cached(uri) if uri else None
     position = None
@@ -568,16 +670,25 @@ def status() -> dict:
             position = trigger_engine._last_position_ms
     except Exception:                                    # noqa: BLE001
         pass
+    phases = phase_summary(uri, position)
     waiting = []
     for a in sorted(active_arms(), key=lambda a: a.created_ms):
         row = a.model_dump()
         row["lead_ms"] = lead_ms(a)
         row["this_song"] = _applies_to_song(a, uri)
         due = None
-        if a.on in ("high", "low") and cues is not None and row["this_song"]:
-            cue = cues.get(a.on)
-            if cue is not None and (position is None or cue.timestamp_ms > position):
-                due = cue.timestamp_ms - row["lead_ms"]
+        if row["this_song"]:
+            mark = None
+            if a.on in ("high", "low") and cues is not None:
+                cue = cues.get(a.on)
+                if cue is not None and (position is None or cue.timestamp_ms > position):
+                    mark = int(cue.timestamp_ms)
+            elif a.on in PHASE_TRIGGERS:
+                # the NEXT one of its class ahead of the playhead — a song
+                # can hold a dozen drops, and a one-shot arm takes the first
+                mark = phases["next"].get(a.on)
+            if mark is not None:
+                due = mark - row["lead_ms"]
         row["due_ms"] = due
         row["tag"] = _source_tag(a.source)
         waiting.append(row)
@@ -595,6 +706,7 @@ def status() -> dict:
     return {"armed": waiting, "history": history,
             "song": {"uri": uri, "position_ms": position,
                      "cues": cues.as_dict() if cues else None,
+                     "phases": phases,
                      "expected_scene_change_s": expected_s,
                      "expected_scene_change_is_floor": True},
             "last_crossed": dict(_last_crossed),
@@ -603,7 +715,7 @@ def status() -> dict:
 
 def reset() -> None:
     """Tests."""
-    global current_uri, is_playing, _plan_uri
+    global current_uri, is_playing, phase_moments, _plan_uri
     _plan_uri = None
     _last_crossed.clear()
     for t in list(_tasks):
@@ -611,4 +723,5 @@ def reset() -> None:
     _tasks.clear()
     current_uri = _bridge_uri
     is_playing = _bridge_playing
+    phase_moments = _engine_phase_moments
     _touch_music()

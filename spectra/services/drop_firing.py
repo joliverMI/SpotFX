@@ -5,7 +5,7 @@ or where an analysed scene change or flare may land around one.
 
 drop_sequences.py says what each sequence IS (detected, suggested,
 confirmed, edited, added, matches yours, dismissed). This module is the
-ONE answer to three questions about the same merged view, all pure (no
+ONE answer to four questions about the same merged view, all pure (no
 I/O, the view is handed in):
 
   WHAT FIRES (`firing_sequences`, gated by `fires_here`)
@@ -88,6 +88,14 @@ I/O, the view is handed in):
     mode, so the planner (midsong_generator) can stamp them into stored
     cues; the trigger clock applies the same windows again at fire time,
     which covers a plan made before an edit or before detection landed.
+
+  WHERE EACH PHASE IS (`phase_moments`)
+    every moment this song plays a charge, a lull or a drop — the firing
+    sequences' own members plus his own authored phase triggers, his
+    winning a collision — read by a Light Show arm waiting for "the next
+    drop / lull / charge" (spectra/services/show_arms.py's PHASE
+    TRIGGERS). Mode-independent, like the High/Low cues it sits beside,
+    and NOT relocated by the drop timing offset: see that function.
 
 Every time is SONG time, the frame his triggers and the view are in.
 """
@@ -423,6 +431,78 @@ def windows_from_view(view: dict) -> list[Window]:
         start = charge if charge is not None else (lull if lull is not None else drop)
         out.append(Window(f"his:{d.get('id')}", "yours", start, lull, drop, drop + tail, beat))
     return sorted(out, key=lambda w: (w.start_ms, w.drop_ms))
+
+
+PHASE_CLASSES = tuple(phase_partner.PHASE_ORDER)
+"""The three phase classes, in the order a sequence runs them — read off
+phase_partner's own ordering rather than re-typed."""
+
+
+@dataclass(frozen=True)
+class PhaseMoment:
+    """One moment this song plays a charge, a lull or a drop — the unit a
+    Light Show arm on "the next drop / lull / charge" waits for
+    (show_arms.PHASE_TRIGGERS).
+
+    `source` is "yours" for one of his own authored phase triggers and
+    "sequence" for a drop-sequence member; `key` is that trigger's id
+    (prefixed "his:") or the sequence's own key, so a caller can say which
+    shape on the Timeline a moment belongs to."""
+    cls: str
+    ms: int
+    source: str
+    key: str
+
+
+def phase_moments(view: dict) -> list[PhaseMoment]:
+    """Every moment this song plays a charge / lull / drop, in time order —
+    the same shapes the Timeline draws as phases, MODE-INDEPENDENTLY.
+
+    THE RULE, and why it is not `fires_here`'s: a Light Show arm on "the
+    next drop" waits for a moment in the MUSIC, the same way an arm on the
+    next High Trigger does (show_cues.py's own "a cue exists on every
+    analysed song, his own triggers or not"). So this reads every sequence
+    `firing_sequences` keeps — which is already the mode-independent
+    candidate set: a confident detection, or one he confirmed, edited or
+    added, a SUGGESTED one excluded because it waits for his confirm and a
+    DISMISSED one because he said no — plus his own authored phase
+    triggers, grouped or lone. A member `stood_down` because one of his
+    own marks sits on it is still a moment (his own mark supplies it), so
+    `members()` is asked WITHOUT a mode: nothing here is narrowed by the
+    room's scene-change tier, and nothing here does I/O.
+
+    HIS OWN MARK WINS A COLLISION. A detection that matches one of his
+    triggers would otherwise yield the same drop twice, a beat apart, so
+    moments of one class within MATCH_BEATS of an already-kept one are
+    dropped — his first (the sort), exactly as `firing_sequences` keeps
+    his sequence over a detection on the same drop.
+
+    NOT RELOCATED BY THE DROP TIMING OFFSET (drop_timing.py, default
+    -400 ms), deliberately: these are the marks the Timeline draws and the
+    drop-sequence data carries, the offset is resolved per fire from the
+    room AND the SHOWING scene (so it is neither constant nor knowable
+    without I/O on the trigger clock's own tick), and an arm landing on
+    the mark rather than 400 ms before the particle burst is the honest
+    reading of "the next drop" — see show_arms.py's own PHASE TRIGGERS
+    section."""
+    reach = MATCH_BEATS * beat_ms_of(view)
+    cands: list[PhaseMoment] = []
+    for cls, ms, tid in _his_phase_marks(view):
+        if cls in PHASE_CLASSES:
+            cands.append(PhaseMoment(cls=cls, ms=int(ms), source="yours",
+                                     key=f"his:{tid}"))
+    for seq in firing_sequences(view):
+        for cls, ms in seq.members():
+            cands.append(PhaseMoment(cls=cls, ms=int(ms), source="sequence",
+                                     key=seq.key))
+    out: list[PhaseMoment] = []
+    # his first within each class, then in time order, so a detection on
+    # one of his own marks yields to it
+    for m in sorted(cands, key=lambda m: (m.cls, m.source != "yours", m.ms)):
+        if any(o.cls == m.cls and abs(o.ms - m.ms) <= reach for o in out):
+            continue
+        out.append(m)
+    return sorted(out, key=lambda m: (m.ms, phase_partner.PHASE_ORDER.get(m.cls, 9)))
 
 
 def holding_window(windows: Iterable[Window], t: int) -> Optional[Window]:

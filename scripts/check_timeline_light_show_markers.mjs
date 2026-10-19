@@ -17,6 +17,11 @@
  *           marker (no fixed song position) but IS picked up by
  *           sceneChangeArms for the legend.
  *   FOUR  — a song with no High/Low (e.g. too short) draws nothing.
+ *   SIX   — a PHASE arm (drop / lull / charge, 2026-10-19's one cycle
+ *           button) likewise produces no Light Show marker — the phases
+ *           already have their own shapes on the Timeline — but IS
+ *           grouped by phaseArms for the drop-sequence legend, honouring
+ *           the same per-song scoping.
  *
  * Run: node scripts/check_timeline_light_show_markers.mjs
  */
@@ -40,7 +45,8 @@ const js = path.join(tmp, 'lightShowMarkers.mjs');
 execFileSync('npx', ['esbuild', path.join(WEB, 'src/timeline/lightShowMarkers.ts'), '--bundle',
   '--format=esm', '--platform=neutral', '--log-level=warning', `--outfile=${js}`],
   { cwd: WEB, stdio: ['ignore', 'ignore', 'inherit'] });
-const { armAppliesToCue, lightShowCueMarkers, sceneChangeArms, LIGHT_SHOW_COLOR } = await import(js);
+const { armAppliesToCue, lightShowCueMarkers, sceneChangeArms, phaseArms,
+        LIGHT_SHOW_COLOR } = await import(js);
 
 const arm = (over) => ({
   id: 'a1', set_id: 's1', action: null, label: 'Reveal Crystal', on: 'high', repeat: false,
@@ -104,6 +110,32 @@ console.log('FIVE — colours stay off the phase colours (gold charge, sky-blue 
   const phaseColours = new Set(['#fbbf24', '#38bdf8', '#ec4899']); // dropSequences.ts PHASE_COLOR
   ok(!phaseColours.has(LIGHT_SHOW_COLOR.high) && !phaseColours.has(LIGHT_SHOW_COLOR.low),
     'High/Low colours are distinct from the drop-sequence phase colours');
+}
+
+console.log('SIX — a drop / lull / charge arm is named in words, never marked');
+{
+  const armed = [arm({ id: 'p1', on: 'drop' }), arm({ id: 'p2', on: 'charge', label: 'Dim Wave' }),
+                 arm({ id: 'p3', on: 'drop', song_uri: 'other' }),
+                 arm({ id: 'p4', on: 'high' })];
+  const status = { armed, history: [], song: {}, last_crossed: {}, refusal: null };
+  const m = lightShowCueMarkers(cues({}), status, 'u');
+  ok(m.every((x) => x.level === 'high' || x.level === 'low'),
+    'the Light Show marker list still only ever holds High/Low');
+  ok(m.find((x) => x.level === 'high').armed === true,
+    'and the High arm beside them still marks the High armed');
+  const groups = phaseArms(status, 'u');
+  ok(groups.map((g) => g.phase).join(',') === 'drop,charge',
+    `grouped in cycle order, only the phases actually armed (${groups.map((g) => g.phase).join(',')})`);
+  ok(groups[0].arms.length === 1 && groups[0].arms[0].id === 'p1',
+    'an arm scoped to a DIFFERENT song is left out, like sceneChangeArms');
+  ok(groups[0].label === 'next drop' && groups[1].label === 'next charge',
+    `each group carries the Light Show's own words (${groups.map((g) => g.label).join(' | ')})`);
+  ok(phaseArms({ armed: [arm({ on: 'high' })], history: [], song: {}, last_crossed: {}, refusal: null }, 'u')
+    .length === 0, 'no phase armed → nothing to name');
+  ok(phaseArms(null, 'u').length === 0 && phaseArms(undefined, null).length === 0,
+    'no arms status at all → nothing to name, never a throw');
+  ok(phaseArms({ armed: [arm({ on: 'drop', song_uri: 'u' })], history: [], song: {}, last_crossed: {}, refusal: null }, 'u')
+    .length === 1, 'an arm scoped to THIS song is named');
 }
 
 rmSync(tmp, { recursive: true, force: true });

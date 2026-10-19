@@ -8,24 +8,31 @@
  *
  * "Sets — tap to run" is ONE TAP, no menu (his ask, 2026-10-08, verbatim:
  * "make each row instead have buttons for each thing with an icon ...
- * i just tap it and it happens"). Each row shows the set's name plus four
- * icon buttons, each already the complete action for one of the four
- * timings the backend has always supported (`ArmTrigger` =
- * 'scene_change' | 'high' | 'low', plus the separate fire-now call) — no
- * new backend semantics were needed, so there is nothing here to flag as
- * a needs-decision. His own glyph choices: ⚡ bolt = fire now, 🐇 bunny =
- * arm on the next scene change, ▲ up arrow = arm on the next High
- * Trigger, ▼ down arrow = arm on the next Low Trigger — drawn as inline
- * SVG via `iconRegistry.ts` (never a raw Unicode glyph; see that file's
- * own "appears as an X" docstring for why). The previous tap-to-open
- * sheet (name button → a second screen of four labeled buttons → Cancel)
- * is gone; a tap now IS the action. */
+ * i just tap it and it happens"). Each row shows the set's name plus five
+ * icon buttons, each already the complete action for one of the timings
+ * the backend supports (`ArmTrigger`, plus the separate fire-now call).
+ * His own glyph choices: ⚡ bolt = fire now, 🐇 bunny = arm on the next
+ * scene change, ▲ up arrow = arm on the next High Trigger, ▼ down arrow =
+ * arm on the next Low Trigger — drawn as inline SVG via
+ * `iconRegistry.ts` (never a raw Unicode glyph; see that file's own
+ * "appears as an X" docstring for why). The previous tap-to-open sheet
+ * (name button → a second screen of four labeled buttons → Cancel) is
+ * gone; a tap now IS the action.
+ *
+ * THE FIFTH BUTTON IS THE PHASE CYCLE (2026-10-19, his ask: "add a button
+ * for next drop, lull, and charge. make it one button that cycles through
+ * those to reduce clutter. use thr icons and colors from the timeline for
+ * those events") — ONE button rather than three, cycling off → drop →
+ * lull → charge → off, wearing the Timeline's own phase glyph and colour.
+ * ./phaseArmCycle.ts is the whole rule (cycle order, what a tap arms and
+ * disarms, the look and the words); this file only renders it. */
 import { apiDel, apiPost } from '../api/client';
 import Icon from '../components/Icon';
 import HelpLink from '../help/HelpLink';
 import { ArmBoard } from './ArmBoard';
 import { ShowNowPanel } from './LightShowPage';
 import PlaylistRunCard from './PlaylistRunCard';
+import { cycleActions, phaseButtonLook } from './phaseArmCycle';
 import { endShowSummary, runSummary, triggerLabel } from './showSummary';
 import type { ArmsStatus, ArmTrigger, EndShowReport, PlaylistStatus, ShowRun, ShowSet, ShowStatus } from './types';
 import { useState } from 'react';
@@ -70,6 +77,33 @@ export default function RunView({ sets, status, arms, onChangeArms, playlistStat
 
   const disarm = async (armId: string) => {
     await apiDel(`/light-show/arms/${armId}`).catch((e) => toast(String(e), 'error'));
+    onChangeArms();
+  };
+
+  /** One tap on the phase button: cancel whatever phase this set is armed
+   * on (show_arms only replaces an arm on the SAME trigger, so cycling
+   * drop→lull must disarm the drop itself), then arm the next phase — or
+   * nothing, when the cycle comes back round to off. */
+  const cyclePhase = async (s: ShowSet, setArms: ArmsStatus['armed']) => {
+    const { disarmIds, arm: next } = cycleActions(setArms);
+    try {
+      // Each disarm is BEST EFFORT: the common failure is a 404 for an
+      // arm that already fired, which has achieved what the cancel
+      // wanted anyway. Nothing is stranded by a real failure either —
+      // `cycleActions` cancels EVERY phase arm on the set, so the next
+      // tap clears whatever this one left behind.
+      for (const id of disarmIds) {
+        await apiDel(`/light-show/arms/${id}`).catch(() => undefined);
+      }
+      if (next) {
+        await apiPost('/light-show/arms', { set_id: s.id, on: next });
+        toast(`Armed for the ${triggerLabel(next)}`, 'success');
+      } else {
+        toast('No longer armed on a drop, lull or charge', 'success');
+      }
+    } catch (e) {
+      toast(String(e), 'error');
+    }
     onChangeArms();
   };
 
@@ -125,7 +159,8 @@ export default function RunView({ sets, status, arms, onChangeArms, playlistStat
       <ShowNowPanel status={status} onRelease={release} onEndLevel={endLevel} onEndHold={endHold} />
 
       <div className="card light-show-run-sets">
-        <strong>Sets — tap to run</strong> <HelpLink topic="show-sets" />
+        <strong>Sets — tap to run</strong> <HelpLink topic="show-sets" />{' '}
+        <HelpLink topic="show-phase-arming" title="Arming on a drop, lull or charge" />
         {sets.length === 0 && <p className="muted">No sets yet — build one on the Build view.</p>}
         <ul className="light-show-run-set-list">
           {sets.map((s) => {
@@ -136,6 +171,7 @@ export default function RunView({ sets, status, arms, onChangeArms, playlistStat
             // 2026-10-08: "highlight" the armed button). Clears itself
             // once `arms` no longer lists it (fired or cancelled).
             const armedOn = new Set(armedForSet.map((a) => a.on));
+            const phase = phaseButtonLook(armedForSet, s.name, arms?.song.phases);
             return (
               <li key={s.id} className="light-show-run-set-row">
                 <div className="light-show-run-set-main">
@@ -168,6 +204,19 @@ export default function RunView({ sets, status, arms, onChangeArms, playlistStat
                       title="Arm: next Low Trigger" aria-label={`Arm ${s.name} for the next Low Trigger`}
                       onClick={() => s.id && void arm(s.id, 'low')}>
                       <Icon name="arrowDown" size={22} />
+                    </button>
+                    {/* ONE button for all three phases (his ask) — the
+                      * Timeline's own glyph, tinted its own PHASE_COLOUR
+                      * while armed. The class/aria state comes from live
+                      * `arms`, like the four above. */}
+                    <button type="button"
+                      className={`light-show-run-set-icon-btn phase${phase.phase ? ' armed' : ''}`}
+                      disabled={busy || !s.id} aria-pressed={phase.phase !== null}
+                      style={phase.color ? { color: phase.color, borderColor: phase.color } : undefined}
+                      data-phase={phase.phase ?? 'off'}
+                      title={phase.title} aria-label={phase.ariaLabel}
+                      onClick={() => s.id && void cyclePhase(s, armedForSet)}>
+                      <Icon name={phase.icon} size={22} />
                     </button>
                   </div>
                 </div>

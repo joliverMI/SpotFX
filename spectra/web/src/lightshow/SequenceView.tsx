@@ -39,8 +39,8 @@ import { cloneFresh, duplicateAt, insertAt, itemSummary, plainItem, writeClip } 
 import useShowClip from './useShowClip';
 import SortableList from './SortableList';
 import type {
-  ArmTrigger, RecentSequenceRun, SequenceItem, SequenceStatus, SequenceWait, ShowSequence, ShowSet,
-  SongRef, WaitKind,
+  RecentSequenceRun, SequenceItem, SequenceStatus, SequenceWait, ShowSequence, ShowSet,
+  SongRef, WaitKind, WaitTrigger,
 } from './types';
 
 type Toast = (msg: string, kind?: 'success' | 'error') => void;
@@ -459,9 +459,16 @@ function WaitEditor({ wait, onChange, toast }: {
   );
 }
 
-function TriggerPicker({ value, onChange }: { value: ArmTrigger; onChange: (t: ArmTrigger) => void }) {
-  const opts: ArmTrigger[] = ['scene_change', 'high', 'low'];
-  const words: Record<ArmTrigger, string> = { scene_change: 'scene changes', high: 'High Triggers', low: 'Low Triggers' };
+/** Which trigger a trigger-count Wait counts. Deliberately `WaitTrigger`,
+ * not `ArmTrigger`: a Wait counts NAMED triggers (one scene change, one
+ * High, one Low), and the three drop-sequence phases a set can be armed
+ * on are not that — a song holds a dozen drops, so "2 drops" would mean
+ * something quite different from "2 High Triggers". The server agrees:
+ * light_show.WAIT_TRIGGERS is its own narrower tuple beside
+ * show_arms.TRIGGERS. */
+function TriggerPicker({ value, onChange }: { value: WaitTrigger; onChange: (t: WaitTrigger) => void }) {
+  const opts: WaitTrigger[] = ['scene_change', 'high', 'low'];
+  const words: Record<WaitTrigger, string> = { scene_change: 'scene changes', high: 'High Triggers', low: 'Low Triggers' };
   return (
     <div className="light-show-run-set-actions show-seq-arm" role="radiogroup" aria-label="Which trigger">
       {opts.map((t) => (

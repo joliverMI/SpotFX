@@ -216,12 +216,22 @@ class LightShowState(BaseModel):
 # only written by an edit; the RUN lives in LightShowState above.
 
 SEQUENCE_ARMS = ("instant", "scene_change", "high", "low")
-"""How a Set item is armed — the same four timings the Run view's one-tap
-buttons offer: bolt (instant), bunny (next scene change), up (next High
-Trigger), down (next Low Trigger)."""
+"""How a Set item is armed — the same four timings as four of the Run
+view's one-tap buttons: bolt (instant), bunny (next scene change), up
+(next High Trigger), down (next Low Trigger).
+
+DELIBERATELY NOT show_arms.TRIGGERS, which since 2026-10-19 also carries
+the three drop-sequence phases (drop / lull / charge). A sequence runs
+strictly in order on NAMED triggers, where "the next drop" is one of a
+dozen in a song — arming a sequence step on one was never asked for, and
+is left out rather than half-built. The Run view's own phase button and
+Sonic's arm_show_set reach every phase; a sequence step does not."""
 
 WAIT_KINDS = ("duration", "trigger_count", "songs", "song_list")
 WAIT_TRIGGERS = ("scene_change", "high", "low")
+"""What a trigger-count Wait counts — the named triggers only, for the
+same reason SEQUENCE_ARMS excludes the phases: "2 drops" would mean
+something quite different from "2 High Triggers" (one per song)."""
 
 
 class SongRef(BaseModel):
@@ -319,7 +329,10 @@ PLAYLIST_STEP_TIMINGS = ("song_start", "scene_change", "high", "low")
 the other three arm it for this song's next scene change / High / Low (the
 Run view's bunny / up / down). "at a time" and "before the end" are phase 2
 (they ride the show-cue tick) and are new values here, not a schema
-change."""
+change. The three drop-sequence phases show_arms.TRIGGERS gained in
+2026-10-19 are deliberately NOT here either — a program step is authored
+per song and was never asked to wait on a drop; adding one is a value
+here plus a picker entry, not a mechanism."""
 
 UNLISTED_SONG = ("default", "nothing")
 

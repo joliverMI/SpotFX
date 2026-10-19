@@ -204,6 +204,35 @@ Proofs: `tests/test_drop_switch.py` (FINA + 100 MILLONES real stores),
 `tests/test_preview_programs_live.py`, `tests/test_fireworks_melds.py`
 (the three melds: decision, effects, FINA trigger clock).
 
+## A LIGHT SHOW SET CAN BE ARMED ON A PHASE (2026-10-19)
+
+The Admiral: "add a button for next drop, lull, and charge. make it one
+button that cycles through those to reduce clutter." `show_arms.TRIGGERS`
+gained `drop`/`lull`/`charge` (`PHASE_TRIGGERS`), and the moments come
+from `drop_firing.phase_moments(view)` — the one pure rule: every firing
+sequence's declared members plus his own authored phase triggers, his
+winning a collision within two beats, SUGGESTED and DISMISSED excluded.
+Three things to know before touching it:
+
+- **It is mode-independent and sits on the MARK.** A phase cue is a
+  moment in the music, like a High Trigger — never narrowed by
+  `scene_change_mode`, and never relocated by `drop_timing`'s offset.
+  Both are argued in that function's own docstring.
+- **The trigger engine publishes it off `_drop_state`'s existing memo**
+  (`TriggerEngine.phase_cue_moments`, read by `show_arms.phase_moments`),
+  so the cue plan costs a tuple compare per tick rather than a
+  `triggers.json` parse. `None` means "not worked out for this song yet",
+  which is a different answer from `[]`.
+- A sequence step and a playlist step deliberately cannot arm on a
+  phase — named, with the reason, on `SEQUENCE_ARMS`/`WAIT_TRIGGERS`/
+  `PLAYLIST_STEP_TIMINGS` in `spectra/models/light_show.py`.
+
+Spec: `tests/test_light_show_arms.py` section 5 (the firing and
+disarming, through the real trigger clock), `scripts/
+check_phase_arm_cycle.mjs` + `scripts/check_light_show_run_icon_buttons.mjs`
+section SIX (the one cycling button), both run by
+`tests/test_phase_arm_cycle.py`. Help topic `show-phase-arming`.
+
 ## Sonic reach
 
 `spectra/services/drop_console.py`, domain `"drops"`. The full edit set
@@ -233,6 +262,11 @@ added) are plain
 `settings_console.SETTINGS_REGISTRY` keys, not drop ops. A sequence
 numbered by Sonic is the SAME numbering the Timeline review list shows
 (song order among non-dismissed sequences) — never a raw store key.
+
+`arm_show_set` (domain `"show"`, `show_console.py`) reaches the three
+phases too since 2026-10-19 — its `on` enum is `show_arms.TRIGGERS`
+itself, read rather than re-typed, so the MCP wrapper's own
+`_ArmTriggerEnum` widened with it and no wrapper edit was needed.
 
 Every new `apply_edit` op name needs either a Sonic operation or a named
 exclusion — `tests/test_drop_console.py::
