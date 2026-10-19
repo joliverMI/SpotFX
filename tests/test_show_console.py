@@ -194,3 +194,57 @@ def test_a_room_effect_set_arms_and_fires_through_the_same_operations(room, monk
     fired = _run(show_console._op_fire_show_set(s.id))
     assert fired["status"] == "applied"
     assert started.get("spec") is not None
+
+
+# ── the three phase triggers (PR 433: "next drop, lull, or charge") ────────
+# show_arms.TRIGGERS grew from three to six the same day as this follow-up;
+# these prove Sonic can read, arm and disarm a set on each of the new ones,
+# not just the pre-existing scene_change/high/low path.
+
+def test_sonic_can_arm_and_read_a_set_on_each_phase_trigger(room):
+    sets = {on: _set(f"Phase set {on}") for on in show_arms.PHASE_TRIGGERS}
+    for on, s in sets.items():
+        result = _run(show_console._op_arm_show_set(s.id, on=on))
+        assert result["status"] == "applied"
+        assert result["arm"]["on"] == on
+        assert on in result["summary"]
+
+    board = show_console._op_show_status()
+    armed_by_set = {row["set_id"]: row["on"] for row in board["arms"]["armed"]}
+    assert len(armed_by_set) == 3
+    for on, s in sets.items():
+        assert armed_by_set[s.id] == on
+    # the per-song phase countdown is part of the same read surface
+    assert set(show_arms.PHASE_TRIGGERS) <= set(board["arms"]["song"]["phases"]["next"])
+
+
+def test_sonic_can_disarm_a_set_armed_on_a_phase_trigger(room):
+    s = _set("Only the drop")
+    armed = _run(show_console._op_arm_show_set(s.id, on="drop"))
+    assert armed["status"] == "applied"
+    disarmed = show_console._op_disarm_show(armed["arm"]["label"])
+    assert disarmed["status"] == "applied"
+    assert show_console._op_show_status()["arms"]["armed"] == []
+
+
+def test_sonic_can_disarm_all_across_phase_and_ordinary_triggers(room):
+    s = _set("Mixed")
+    for on in ("high", "drop", "lull", "charge"):
+        _run(show_console._op_arm_show_set(_set(f"Mixed {on}").id, on=on))
+    cleared = show_console._op_disarm_all_show()
+    assert len(cleared["disarmed"]) == 4
+    assert show_console._op_show_status()["arms"]["armed"] == []
+
+
+def test_mcp_tool_docstrings_name_the_three_phase_triggers():
+    """Regression for the deploy-found gap this task was filed to close:
+    show_console.py's own SonicOperation (arm_show_set/show_status) was
+    updated in PR 433 to describe drop/lull/charge, but the hand-written
+    MCP wrapper docstrings in settings_mcp_server.py -- the description a
+    CLI-backend model actually reads -- still said only "scene change, or
+    this song's High or Low Trigger" post-merge."""
+    from spectra.services import settings_mcp_server as sms
+
+    for trigger in ("drop", "lull", "charge"):
+        assert trigger in sms.arm_show_set.__doc__
+        assert trigger in sms.show_status.__doc__

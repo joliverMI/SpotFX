@@ -546,7 +546,8 @@ async def set_room_effect(effect_id: str, key: _RoomEffectKeyEnum, value: Any) -
 async def show_status() -> dict:
     """What the Light Show is doing right now: held fixtures, levels, a
     running room effect, changed settings, running sets, and the full armed
-    board (with this song's High/Low for a countdown)."""
+    board (with this song's High/Low, and its next drop/lull/charge, for a
+    countdown)."""
     return await _call("show_status")
 
 
@@ -574,8 +575,9 @@ async def fire_show_set(set_name: str) -> dict:
 async def arm_show_set(set_name: str, on: _ArmTriggerEnum = "scene_change",
                        repeat: bool = False, this_song_only: bool = False,
                        finish_on_mark: bool = True) -> dict:
-    """Arm a saved set to fire on the next scene change, or this song's High
-    or Low Trigger."""
+    """Arm a saved set to fire on the next scene change, on this song's
+    High or Low Trigger, or on its next drop, lull or charge. on is
+    'scene_change' | 'high' | 'low' | 'drop' | 'lull' | 'charge'."""
     return await _call("arm_show_set", set_name=set_name, on=on, repeat=repeat,
                        this_song_only=this_song_only, finish_on_mark=finish_on_mark)
 
