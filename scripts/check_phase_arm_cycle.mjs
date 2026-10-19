@@ -15,8 +15,15 @@
  *           next: show_arms only replaces an arm on the SAME trigger, so
  *           without that the set would end up armed on two phases at once.
  *   THREE — the look comes from the TIMELINE: iconRegistry's own generic
- *           phase glyph, and timeline/dropSequences' own PHASE_COLOR —
- *           imported, never a hex literal in this file.
+ *           phase glyph, and timeline/dropSequences' own PHASE_COLOR.
+ *           "Imported, never copied" is proven BEHAVIOURALLY, by bundling
+ *           the module against a STUBBED Timeline whose colours are
+ *           sentinels and watching the button return them — a copied hex
+ *           (even one that happens to match today's value) returns the
+ *           real colour there and fails. That is strictly stronger than
+ *           the source-text grep this section used to carry: it also
+ *           accepts a legitimate re-export through another module, which
+ *           a grep for the import path would have failed.
  *   FOUR  — the words name the phase (never the colour alone), say what
  *           the next tap does, and tell "no drop on this song" from
  *           "not worked out yet" without guessing.
@@ -24,7 +31,8 @@
  * Run: node scripts/check_phase_arm_cycle.mjs
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -81,11 +89,6 @@ ok(JSON.stringify(act.disarmIds) === JSON.stringify(['x1', 'x2']),
 
 console.log('THREE — the glyph and the colours are the Timeline\'s own');
 ok(PHASE_ICON === 'pulse', `the generic drop-sequence phase glyph (${PHASE_ICON})`);
-const srcText = readFileSync(TS, 'utf8');
-ok(!/#[0-9a-fA-F]{3,8}\b/.test(srcText),
-  'no hex colour literal anywhere in the module — PHASE_COLOR is imported');
-ok(/from '\.\.\/timeline\/dropSequences'/.test(srcText),
-  'it imports PHASE_COLOR from the Timeline\'s own one definition');
 const dropJs = path.join(tmp, 'dropSequences.mjs');
 execFileSync('npx', ['esbuild', DROP_TS, '--bundle', '--format=esm', '--log-level=error', `--outfile=${dropJs}`], {
   cwd: path.join(REPO, 'spectra/web'), stdio: ['ignore', 'ignore', 'inherit'],
@@ -102,6 +105,40 @@ ok(off.color === undefined && off.phase === null,
   'off: no colour of its own, so it keeps the shared unarmed look');
 ok(new Set(PHASE_CYCLE.map((p) => PHASE_COLOR[p])).size === 3,
   'the three colours are genuinely different from each other');
+
+// IMPORTED, NOT COPIED — behaviourally. Rebuild the SAME module with the
+// Timeline's own module replaced by a stub whose colours are sentinels:
+// a module that reads the Timeline's definition returns the sentinels, and
+// one carrying its own copy of the hex values returns those instead. This
+// catches a copy that happens to match today's values (which comparing
+// against the real PHASE_COLOR above cannot) and, unlike a grep for the
+// import path, still passes if PHASE_COLOR is legitimately re-exported
+// through another module.
+const SENTINEL = { drop: '#010203', lull: '#040506', charge: '#070809' };
+const stubPath = path.join(tmp, 'stubDropSequences.mjs');
+writeFileSync(stubPath, `export const PHASE_COLOR = ${JSON.stringify(SENTINEL)};\n`);
+const stubbedJs = path.join(tmp, 'phaseArmCycle.stubbed.mjs');
+// esbuild's --alias only rewrites BARE specifiers, so the swap is an
+// onResolve plugin (the JS API) — check_light_show_pickers.mjs's own
+// stub-a-module precedent.
+const esbuild = createRequire(path.join(REPO, 'spectra/web/package.json'))('esbuild');
+const stubBuild = await esbuild.build({
+  entryPoints: [TS], bundle: true, format: 'esm', outfile: stubbedJs,
+  logLevel: 'silent', absWorkingDir: path.join(REPO, 'spectra/web'),
+  plugins: [{
+    name: 'stub-timeline-phase-colour',
+    setup(b) {
+      b.onResolve({ filter: /timeline\/dropSequences$/ }, () => ({ path: stubPath }));
+    },
+  }],
+});
+ok(stubBuild.errors.length === 0, 'the module re-bundles against a stubbed Timeline');
+const stubbed = await import(stubbedJs);
+const viaStub = PHASE_CYCLE.map((p) => stubbed.phaseButtonLook([arm('a', p)], 'X').color);
+ok(JSON.stringify(viaStub) === JSON.stringify(PHASE_CYCLE.map((p) => SENTINEL[p])),
+  `each colour is READ from the Timeline's module, not copied (stubbed: ${viaStub.join(', ')})`);
+ok(!viaStub.some((c) => Object.values(PHASE_COLOR).includes(c)),
+  'and none of the real hex values survives the stub — nothing is hardcoded here');
 
 console.log('FOUR — the words');
 const dropLook = phaseButtonLook([arm('a', 'drop')], 'Quiet Hues');
