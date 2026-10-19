@@ -302,22 +302,25 @@ def test_finish_on_the_mark_lead(room):
 
 # ── 3. THE TRIGGER CLOCK ───────────────────────────────────────────────────
 
-def _engine(stored=()):
+def _engine(stored=(), scene_change_mode="full"):
     fired_scenes: list = []
     cue_calls: list = []
 
     async def fire_scene(*a, **k):
         fired_scenes.append(("scene", time.monotonic()))
 
+    async def fire_response(event_class, *a, **k):
+        fired_scenes.append((f"response:{event_class}", time.monotonic()))
+
     async def noop(*a, **k):
         return None
 
     te = TriggerEngine(
         list_triggers=lambda uri: list(stored),
-        fire_scene=fire_scene, fire_response=noop,
+        fire_scene=fire_scene, fire_response=fire_response,
         fire_scene_update=noop, select_color_set=noop,
         select_scene=lambda i: "s1",
-        scene_change_mode=lambda: "full",
+        scene_change_mode=lambda: scene_change_mode,
         render_intensity=lambda x: x,
         sequencer_enabled=lambda: False,
         lead_ms=lambda t: 0, response_offset_ms=lambda a: 0,
@@ -576,11 +579,80 @@ def test_his_own_phase_triggers_are_moments_and_win_a_collision():
 
 def test_phase_moments_are_not_narrowed_by_the_rooms_mode():
     """Like a High Trigger, a phase cue is a moment in the MUSIC: it exists
-    whatever the scene-change tier is, which is why phase_moments takes no
-    mode at all (drop_firing.phase_moments' own docstring)."""
-    from spectra.services import drop_firing
-    import inspect
-    assert list(inspect.signature(drop_firing.phase_moments).parameters) == ["view"]
+    whatever the scene-change tier is. Drive the real engine's
+    _drop_state -> phase_cue_moments chain under two different
+    scene_change_mode values, fed the SAME drop-sequence view, and assert
+    identical output. "transitions" is the meaningful contrast: under it
+    neither a sequence member nor one of his own authored charge/lull/drop
+    triggers fires at all (drop_firing.fires_here / _trigger_allowed), so a
+    mode leaking into the phase path would visibly shrink or empty the
+    list rather than merely changing something unobserved."""
+    def view(uri, triggers):
+        return _phase_view(sequences=[
+            _seq("s1", 30_000, charge_ms=20_000, lull_ms=28_000)])
+
+    async def moments_under(mode):
+        te, _c, _f, _p = _engine(scene_change_mode=mode)
+        te._drop_view = view
+        te._drop_revision = lambda: ("rev",)
+        te._show_cue_plan = lambda uri: []
+        await te.on_track_state(URI)
+        for p in (0, 1_000, 2_000):
+            await te.tick(p)
+        got = te.phase_cue_moments(URI)
+        assert got is not None
+        return [(m.cls, m.ms) for m in got]
+
+    full = asyncio.run(moments_under("full"))
+    transitions = asyncio.run(moments_under("transitions"))
+    expected = [("charge", 20_000), ("lull", 28_000), ("drop", 30_000)]
+    assert full == expected
+    assert transitions == expected
+
+
+def test_a_phase_arm_fires_even_when_his_own_authored_trigger_would_not(room):
+    """The stronger, end-to-end consequence of mode-independence: a
+    one-shot arm on "drop" still FIRES when the clock crosses a drop
+    moment under scene_change_mode "analysed" — the same mode under which
+    an authored (source="authored") FireResponseAction trigger of his own
+    never reaches the room at all (_trigger_allowed: an authored trigger
+    only fires under "full"/"triggers_only"). The moments come from the
+    REAL _drop_view -> drop_firing.phase_moments chain, not a stubbed
+    list, so the mode genuinely has a path to interfere if it leaked in."""
+    his = {"charge": None, "lull": None,
+           "drop": {"id": "d1", "kind": "drop", "timestamp_ms": 30_000}}
+
+    def view(uri, triggers):
+        return _phase_view(authored=[his])
+
+    stored = [SpectraTrigger(id="d1", timestamp_ms=30_000, source="authored",
+                             action=FireResponseAction(event_class="drop",
+                                                       intensity=0.8))]
+    s = _set()
+    _play_uri(URI)
+    arm = show_arms.arm(set_id=s.id, on="drop")
+    te, _c, fired, _p = _engine(stored, scene_change_mode="analysed")
+    te._drop_view = view
+    te._drop_revision = lambda: ("rev",)
+    te._show_cue_plan = show_arms.cue_plan
+    te._show_cue = show_arms.on_cue
+
+    orig_phase_moments = show_arms.phase_moments
+    show_arms.phase_moments = te.phase_cue_moments
+    try:
+        async def go():
+            await te.on_track_state(URI)
+            for p in (0, 29_900, 30_100):
+                await te.tick(p)
+            await asyncio.sleep(0.05)
+        asyncio.run(go())
+    finally:
+        show_arms.phase_moments = orig_phase_moments
+
+    done = next(a for a in show_store.state().arms if a.id == arm.id)
+    assert done.status == "fired"
+    assert done.last_outcome["trigger"] == "drop"
+    assert fired == [], "his own authored trigger never fires under analysed"
 
 
 def test_the_engine_publishes_its_phase_moments_off_one_memo(room):
