@@ -158,7 +158,20 @@ export interface EndShowReport {
 // ── PHASE 2: arms and the High/Low Triggers (spectra/services/show_arms.py,
 //    show_cues.py) ──────────────────────────────────────────────────────────
 
-export type ArmTrigger = 'scene_change' | 'high' | 'low';
+/** The three drop-sequence phases a set can be armed on (the Admiral,
+ * 2026-10-19: "add a button for next drop, lull, and charge"), in the
+ * order the Run view's one button cycles through them — the same order
+ * and the same words as show_arms.PHASE_TRIGGERS. */
+export type ArmPhase = 'drop' | 'lull' | 'charge';
+
+/** Everything an arm can wait for — show_arms.TRIGGERS. */
+export type ArmTrigger = 'scene_change' | 'high' | 'low' | ArmPhase;
+
+/** What a sequence's trigger-count Wait may count
+ * (spectra/models/light_show.py WAIT_TRIGGERS, its own narrower tuple:
+ * a Wait counts named triggers, which the phases are not — a song can
+ * hold a dozen drops). */
+export type WaitTrigger = 'scene_change' | 'high' | 'low';
 
 export interface ShowArm {
   id: string;
@@ -206,11 +219,24 @@ export interface SongCues {
   low: ShowCue | null;
 }
 
+/** This song's charge/lull/drop for the armed board (show_arms.
+ * phase_summary): the NEXT moment of each class ahead of the playhead,
+ * how many the song holds at all, and `known` telling "not worked out
+ * yet" (false) from "this song genuinely has none" (true). */
+export interface SongPhases {
+  known: boolean;
+  next: Partial<Record<ArmPhase, number | null>>;
+  counts: Partial<Record<ArmPhase, number>>;
+  reason: string | null;
+}
+
 export interface ArmsStatus {
   armed: ShowArm[];
   history: ShowArm[];
   song: {
     uri: string | null; position_ms: number | null; cues: SongCues | null;
+    /** null only from a server older than the phase arms */
+    phases?: SongPhases | null;
     /** The showing scene's own minimum-hold FLOOR (dwell.py) in seconds —
      * null when nothing is tracked. Not a real prediction of when a scene
      * actually changes, only the earliest it could. */
@@ -232,7 +258,7 @@ export interface SongRef { uri: string; title: string; artist: string }
 export interface SequenceWait {
   kind: WaitKind;
   seconds: number;
-  trigger: ArmTrigger;
+  trigger: WaitTrigger;
   count: number;
   songs: SongRef[];
 }

@@ -65,10 +65,24 @@ from spectra.models.light_show import ShowAction
 from spectra.services import show_actions, show_arms, show_cues, show_output, show_store
 from spectra.services.sonic_ops import SonicOperation
 
-TRIGGER_CHOICES = ("scene_change", "high", "low")
+TRIGGER_CHOICES = show_arms.TRIGGERS
+"""Every trigger an arm can wait for — read off show_arms rather than
+re-typed, so the MCP wrapper's own enum (_ArmTriggerEnum, built from this)
+and the API's validation can never disagree about what is legal."""
 TARGET_KIND_CHOICES = ("everything", "category", "fixture")
 STATE_CHOICES = ("show", "steady", "freeze", "dark")
 CUE_LEVEL_CHOICES = ("high", "low")
+
+TRIGGER_WORDS = {"scene_change": "the next scene change",
+                 "high": "this song's High Trigger",
+                 "low": "this song's Low Trigger",
+                 "drop": "this song's next drop",
+                 "lull": "this song's next lull",
+                 "charge": "this song's next charge"}
+"""His words for each trigger, for an operation's own summary. A trigger
+with no entry falls back to "the next <name>" rather than raising — a new
+show_arms.TRIGGERS entry must never crash an arm it is otherwise legal
+for."""
 
 
 def _close(name: str, candidates: list[str]) -> list[str]:
@@ -206,8 +220,7 @@ async def _op_arm_show_set(set_name: str, on: str = "scene_change", repeat: bool
                             finish_on_mark=finish_on_mark, source="sonic")
     except show_arms.ArmError as exc:
         return {"status": "rejected", "reason": str(exc)}
-    trigger_word = {"scene_change": "the next scene change",
-                    "high": "this song's High Trigger", "low": "this song's Low Trigger"}[on]
+    trigger_word = TRIGGER_WORDS.get(on, f"the next {on}")
     return {"status": "applied", "arm": arm.model_dump(),
             "summary": f"armed '{s.name}' for {trigger_word}"
                       + (" (repeating)" if repeat else "")}
@@ -642,13 +655,18 @@ OPERATIONS: dict[str, SonicOperation] = {
         handler=_op_fire_show_set),
     "arm_show_set": SonicOperation(
         name="arm_show_set", domain="show", kind="write",
-        summary="Arm a saved set to fire on the next scene change, or on "
-                "this song's High or Low Trigger.",
-        instructions="on is 'scene_change' | 'high' | 'low'. repeat keeps "
-                    "it armed after firing; this_song_only scopes it to "
-                    "whatever song is playing now; finish_on_mark (default "
-                    "true) starts the set's fades early so they land on "
-                    "the trigger mark.",
+        summary="Arm a saved set to fire on the next scene change, on "
+                "this song's High or Low Trigger, or on its next drop, "
+                "lull or charge.",
+        instructions="on is 'scene_change' | 'high' | 'low' | 'drop' | "
+                    "'lull' | 'charge'. The three phases are this song's "
+                    "own drop sequences (the ones the Timeline draws) and "
+                    "his own charge/lull/drop triggers: a one-shot arm "
+                    "fires on the FIRST one its clock reaches. repeat "
+                    "keeps it armed after firing; this_song_only scopes it "
+                    "to whatever song is playing now; finish_on_mark "
+                    "(default true) starts the set's fades early so they "
+                    "land on the trigger mark.",
         input_schema={
             "type": "object",
             "properties": {

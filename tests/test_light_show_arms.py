@@ -510,3 +510,281 @@ def test_status_carries_the_dwell_floor_as_an_honest_estimate(room):
         assert body["song"]["expected_scene_change_is_floor"] is True
     finally:
         dwell.reset()
+
+
+# ── 5. THE PHASE TRIGGERS — "next drop / lull / charge" ────────────────────
+# His ask, 2026-10-19: "add a button for next drop, lull, and charge".
+# drop_firing.phase_moments is the pure rule (which moments a song has);
+# show_arms carries them on the SAME cue_plan/on_cue path the High and Low
+# already use, so these tests drive the real trigger clock end to end.
+
+def _phase_view(**kw):
+    """A drop-sequence view in the shape drop_sequences.view returns."""
+    view = {"uri": URI, "song": {"beat_ms": 500.0}, "authored": [],
+            "authored_lone": [], "sequences": []}
+    view.update(kw)
+    return view
+
+
+def _seq(key, drop_ms, *, charge_ms=None, lull_ms=None, state="confident",
+         tier="confident"):
+    return {"key": key, "origin": "detected", "state": state, "tier": tier,
+            "charge_ms": charge_ms, "lull_ms": lull_ms, "drop_ms": drop_ms,
+            "step": 0.9, "moved": {}}
+
+
+def _moments(view):
+    from spectra.services import drop_firing
+    return [(m.cls, m.ms, m.source) for m in drop_firing.phase_moments(view)]
+
+
+class _PM:
+    """A drop_firing.PhaseMoment stand-in (only .cls/.ms are read here)."""
+    def __init__(self, cls, ms):
+        self.cls, self.ms = cls, ms
+        self.source, self.key = "sequence", "k"
+
+
+def test_phase_moments_are_every_charge_lull_and_drop_the_timeline_draws():
+    view = _phase_view(sequences=[
+        _seq("s1", 30_000, charge_ms=20_000, lull_ms=28_000),
+        _seq("s2", 60_000, charge_ms=50_000, state="suggested", tier="suggested"),
+        _seq("s3", 90_000, state="added", tier=None),
+    ])
+    assert _moments(view) == [
+        ("charge", 20_000, "sequence"), ("lull", 28_000, "sequence"),
+        ("drop", 30_000, "sequence"), ("drop", 90_000, "sequence")]
+    # a SUGGESTED detection waits for his confirm, so it is not a moment —
+    # and neither is a dismissed one
+    dismissed = _phase_view(sequences=[_seq("s4", 40_000, state="dismissed")])
+    assert _moments(dismissed) == []
+
+
+def test_his_own_phase_triggers_are_moments_and_win_a_collision():
+    his = {"charge": {"id": "c1", "kind": "charge", "timestamp_ms": 118_000},
+           "lull": None,
+           "drop": {"id": "d1", "kind": "drop", "timestamp_ms": 120_000}}
+    view = _phase_view(authored=[his],
+                       authored_lone=[{"id": "l1", "kind": "lull",
+                                       "timestamp_ms": 150_000}],
+                       # a detection sitting ON his drop (within two beats)
+                       sequences=[_seq("s9", 120_400)])
+    assert _moments(view) == [
+        ("charge", 118_000, "yours"), ("drop", 120_000, "yours"),
+        ("lull", 150_000, "yours")]
+
+
+def test_phase_moments_are_not_narrowed_by_the_rooms_mode():
+    """Like a High Trigger, a phase cue is a moment in the MUSIC: it exists
+    whatever the scene-change tier is, which is why phase_moments takes no
+    mode at all (drop_firing.phase_moments' own docstring)."""
+    from spectra.services import drop_firing
+    import inspect
+    assert list(inspect.signature(drop_firing.phase_moments).parameters) == ["view"]
+
+
+def test_the_engine_publishes_its_phase_moments_off_one_memo(room):
+    """TriggerEngine.phase_cue_moments: None for a song it has not worked
+    out, the list once it has — and the view is read through the same memo
+    the windows ride (one read per revision, never one per tick)."""
+    reads = []
+
+    def view(uri, triggers):
+        reads.append(uri)
+        return _phase_view(sequences=[_seq("s1", 30_000, charge_ms=20_000)])
+    te, _c, _f, _p = _engine()
+    te._drop_view = view
+    te._drop_revision = lambda: ("rev",)
+    te._show_cue_plan = lambda uri: []
+    assert te.phase_cue_moments(URI) is None            # nothing worked out yet
+    assert te.phase_cue_moments(None) is None
+
+    async def go():
+        await te.on_track_state(URI)
+        for p in (0, 1_000, 2_000):
+            await te.tick(p)
+    asyncio.run(go())
+    got = te.phase_cue_moments(URI)
+    assert [(m.cls, m.ms) for m in got] == [("charge", 20_000), ("drop", 30_000)]
+    assert len(reads) == 1, "the view is read once per revision, not once per tick"
+    assert te.phase_cue_moments("spotify:track:other") is None
+
+
+def test_cue_plan_carries_the_phases_beside_the_high_and_low():
+    show_arms.phase_moments = lambda uri: [
+        _PM("charge", 20_000), _PM("drop", 30_000), _PM("drop", 90_000)]
+    show_arms.cue_plan(URI)              # first look for this song: re-derives
+    show_cues._cache[URI] = show_cues.SongCues(
+        uri=URI, high=show_cues.Cue(level="high", timestamp_ms=60_000, source="auto"))
+    plan = show_arms.cue_plan(URI)
+    assert ("high", 60_000, 0) in plan
+    assert [(c, ms) for c, ms, _l in plan if c in show_arms.PHASE_TRIGGERS] == [
+        ("charge", 20_000), ("drop", 30_000), ("drop", 90_000)]
+    # a song whose phases are not worked out yet simply contributes none
+    show_arms.phase_moments = lambda uri: None
+    assert [c for c, _m, _l in show_arms.cue_plan(URI)] == ["high"]
+
+
+def test_an_arm_on_the_next_drop_fires_when_the_clock_crosses_it(room):
+    s = _set()
+    _play_uri(URI)
+    show_arms.phase_moments = lambda uri: (
+        [_PM("charge", 20_000), _PM("drop", 30_000), _PM("drop", 90_000)]
+        if uri == URI else None)
+    arm = show_arms.arm(set_id=s.id, on="drop")
+    te, _c, _f, _p = _engine()
+    te._show_cue_plan = show_arms.cue_plan
+    te._show_cue = show_arms.on_cue
+
+    async def go():
+        await te.on_track_state(URI)
+        for p in (0, 19_900, 20_100, 29_900, 30_100):
+            await te.tick(p)
+        await asyncio.sleep(0.05)
+    asyncio.run(go())
+    done = next(a for a in show_store.state().arms if a.id == arm.id)
+    assert done.status == "fired"
+    assert done.last_outcome["trigger"] == "drop"
+    assert done.last_outcome["cue_ms"] == 30_000, "the FIRST drop, not a later one"
+    assert "tv" in show_store.state().holds
+
+
+def test_a_charge_arm_ignores_the_drop_and_an_arm_fires_once_per_crossing(room):
+    """A song holds several of each: a one-shot arm takes the first of ITS
+    OWN class and is done; a repeat arm fires on every one."""
+    once = show_arms.arm(set_id=_set("Once").id, on="charge")
+    every = show_arms.arm(set_id=_set("Every").id, on="drop", repeat=True)
+    _play_uri(URI)
+    show_arms.phase_moments = lambda uri: [
+        _PM("drop", 30_000), _PM("charge", 50_000), _PM("drop", 90_000)]
+    te, _c, _f, _p = _engine()
+    te._show_cue_plan = show_arms.cue_plan
+    te._show_cue = show_arms.on_cue
+
+    async def go():
+        await te.on_track_state(URI)
+        for p in (0, 29_900, 30_100, 49_900, 50_100, 89_900, 90_100):
+            await te.tick(p)
+        await asyncio.sleep(0.05)
+    asyncio.run(go())
+    ended = next(a for a in show_store.state().arms if a.id == once.id)
+    assert ended.status == "fired" and ended.last_outcome["cue_ms"] == 50_000
+    live = next(a for a in show_arms.active_arms() if a.id == every.id)
+    assert live.fire_count == 2, "the repeat arm fired on BOTH drops"
+
+
+def test_disarming_a_phase_arm_cancels_it_and_it_never_fires(room):
+    s = _set()
+    _play_uri(URI)
+    show_arms.phase_moments = lambda uri: [_PM("lull", 28_000)]
+    arm = show_arms.arm(set_id=s.id, on="lull")
+    assert show_arms.disarm(arm.id) is True
+    assert show_arms.active_arms() == []
+    te, _c, _f, _p = _engine()
+    te._show_cue_plan = show_arms.cue_plan
+    te._show_cue = show_arms.on_cue
+
+    async def go():
+        await te.on_track_state(URI)
+        for p in (0, 27_900, 28_100):
+            await te.tick(p)
+        await asyncio.sleep(0.05)
+    asyncio.run(go())
+    ended = next(a for a in show_store.state().arms if a.id == arm.id)
+    assert ended.status == "disarmed" and ended.fire_count == 0
+    assert show_store.state().holds == {}
+
+
+def test_a_song_with_no_drops_keeps_the_arm_and_says_so(room):
+    s = _set()
+    _play_uri(URI)
+    show_arms.phase_moments = lambda uri: []          # worked out: it has none
+    arm = show_arms.arm(set_id=s.id, on="drop")
+    body = show_arms.status()
+    assert body["song"]["phases"]["known"] is True
+    assert body["song"]["phases"]["counts"]["drop"] == 0
+    assert "no charge, lull or drop" in body["song"]["phases"]["reason"]
+    row = next(a for a in body["armed"] if a["id"] == arm.id)
+    assert row["due_ms"] is None                       # nothing to count down to
+    te, _c, _f, _p = _engine()
+    te._show_cue_plan = show_arms.cue_plan
+    te._show_cue = show_arms.on_cue
+
+    async def go():
+        await te.on_track_state(URI)
+        for p in (0, 30_000, 60_000, 90_000):
+            await te.tick(p)
+        await asyncio.sleep(0.05)
+    asyncio.run(go())
+    assert [a.id for a in show_arms.active_arms()] == [arm.id]   # still waiting
+    assert show_store.state().holds == {}
+    # and "not worked out yet" is a DIFFERENT answer from "it has none"
+    show_arms.phase_moments = lambda uri: None
+    unknown = show_arms.status()["song"]["phases"]
+    assert unknown["known"] is False
+    assert "not been worked out yet" in unknown["reason"]
+
+
+def test_the_gate_never_consumes_a_phase_arm(room):
+    s = _set()
+    _play_uri(URI)
+    show_arms.phase_moments = lambda uri: [_PM("drop", 30_000)]
+    show_arms.arm(set_id=s.id, on="drop")
+    room.gate["reason"] = "a preview is holding the room"
+    te, _c, _f, _p = _engine()
+    te._show_cue_plan = show_arms.cue_plan
+    te._show_cue = show_arms.on_cue
+
+    async def go():
+        await te.on_track_state(URI)
+        for p in (0, 29_900, 30_100):
+            await te.tick(p)
+        await asyncio.sleep(0.05)
+    asyncio.run(go())
+    waiting = show_arms.active_arms()
+    assert len(waiting) == 1 and waiting[0].last_outcome["status"] == "waiting"
+    assert show_store.state().holds == {}
+
+
+def test_a_phase_arm_counts_down_to_the_next_one_ahead_of_the_playhead(room):
+    s = _set()
+    _play_uri(URI)
+    show_arms.phase_moments = lambda uri: [_PM("drop", 30_000), _PM("drop", 90_000)]
+    arm = show_arms.arm(set_id=s.id, on="drop")
+    from spectra.services.trigger_engine import trigger_engine
+    trigger_engine._uri, trigger_engine._last_position_ms = URI, 40_000
+    try:
+        body = show_arms.status()
+        row = next(a for a in body["armed"] if a["id"] == arm.id)
+        assert row["due_ms"] == 90_000, "the next drop AHEAD, not the one passed"
+        assert body["song"]["phases"]["next"]["drop"] == 90_000
+        assert body["song"]["phases"]["counts"]["drop"] == 2
+    finally:
+        trigger_engine._uri, trigger_engine._last_position_ms = None, None
+
+
+def test_finish_on_the_mark_applies_to_a_phase_arm_too(room):
+    """A phase sits at a known song-time moment exactly as a High does, so
+    a set with a fade starts early by the same rule (show_arms.
+    MARK_TRIGGERS) — only "scene_change", with no known time, never does."""
+    s = _set("Fade", [A("device_state", target={"kind": "everything"},
+                        state="dark", fade_ms=2500)])
+    for on in show_arms.PHASE_TRIGGERS:
+        assert show_arms.lead_ms(show_arms.arm(set_id=s.id, on=on)) == 2500
+    assert show_arms.lead_ms(show_arms.arm(set_id=s.id, on="scene_change")) == 0
+    off = show_arms.arm(set_id=_set("Fade2", s.actions).id, on="drop",
+                        finish_on_mark=False)
+    assert show_arms.lead_ms(off) == 0
+
+
+def test_a_phase_arm_is_validated_and_reachable_by_sonic(room):
+    from spectra.services import show_console
+    s = _set("Quiet Hues")
+    for on in show_arms.PHASE_TRIGGERS:
+        assert show_arms.arm(set_id=s.id, on=on).on == on
+    with pytest.raises(show_arms.ArmError):
+        show_arms.arm(set_id=s.id, on="breakdown")
+    assert set(show_arms.PHASE_TRIGGERS) <= set(show_console.TRIGGER_CHOICES)
+    out = asyncio.run(show_console._op_arm_show_set("Quiet Hues", on="drop"))
+    assert out["status"] == "applied"
+    assert "next drop" in out["summary"]

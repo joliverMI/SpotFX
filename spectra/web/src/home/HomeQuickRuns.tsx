@@ -1,18 +1,21 @@
 /** Home's quick-run cards (song-layout-plan, data/ui-layout-plan/
  * report.md §5): "Quick sequences" (his recent sequences, one tap to
- * run) and "Quick actions" (his sets, the Run view's own four one-tap
- * icons ⚡🐇▲▼) side by side, capped width on desktop/tablet — never
- * full width. Deliberately self-contained rather than literally
- * extracting `QuickStartCard`/`SetRunRows` out of the Light Show page's
- * own `SequenceView.tsx`/`RunView.tsx` (the report's own suggested
- * names): those two files are large, stateful, and not otherwise part
- * of this slice's surface, so duplicating the small, read-mostly bits
- * here keeps this change's conflict surface small. A later pass can
- * extract the two shared components properly, which would let the
- * Light Show page's own Run view and this one share one implementation. */
+ * run) and "Quick actions" (his sets, the Run view's own one-tap icons
+ * ⚡🐇▲▼ plus its one phase-cycle button) side by side, capped width on
+ * desktop/tablet — never full width. Deliberately self-contained rather
+ * than literally extracting `QuickStartCard`/`SetRunRows` out of the
+ * Light Show page's own `SequenceView.tsx`/`RunView.tsx` (the report's
+ * own suggested names): those two files are large, stateful, and not
+ * otherwise part of this slice's surface, so duplicating the small,
+ * read-mostly bits here keeps this change's conflict surface small. A
+ * later pass can extract the two shared components properly, which would
+ * let the Light Show page's own Run view and this one share one
+ * implementation. */
 import { useCallback, useEffect, useState } from 'react';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import Icon from '../components/Icon';
+import { cycleActions, phaseButtonLook } from '../lightshow/phaseArmCycle';
+import { TRIGGER_LABEL } from '../lightshow/showSummary';
 import type {
   ArmsStatus, ArmTrigger, RecentSequenceRun, SequenceRun, ShowRun, ShowSequence, ShowSet,
 } from '../lightshow/types';
@@ -25,10 +28,11 @@ function fmtAgo(ms: number): string {
   return `${Math.round(s / 86400)}d ago`;
 }
 
+/** The Light Show's own wording, so Home and the Run view can never
+ * disagree about what an arm is waiting for (it carries the three phase
+ * triggers too since 2026-10-19). */
 const triggerLabel = (t: ArmTrigger | string): string => (
-  t === 'scene_change' ? 'next scene change'
-    : t === 'high' ? 'next High Trigger'
-    : t === 'low' ? 'next Low Trigger' : String(t)
+  TRIGGER_LABEL[t as ArmTrigger] ?? String(t)
 );
 
 export default function HomeQuickRuns() {
@@ -97,6 +101,32 @@ export default function HomeQuickRuns() {
     reloadArms();
   };
 
+  /** The one phase button's tap — ../lightshow/phaseArmCycle.ts owns the
+   * rule (cancel this set's current phase arm first, then arm the next,
+   * or nothing when the cycle comes back to off). */
+  const cyclePhase = async (s: ShowSet, setArms: ArmsStatus['armed']) => {
+    const { disarmIds, arm: next } = cycleActions(setArms);
+    try {
+      // Each disarm is BEST EFFORT: the common failure is a 404 for an
+      // arm that already fired, which has achieved what the cancel
+      // wanted anyway. Nothing is stranded by a real failure either —
+      // `cycleActions` cancels EVERY phase arm on the set, so the next
+      // tap clears whatever this one left behind.
+      for (const id of disarmIds) {
+        await apiDel(`/light-show/arms/${id}`).catch(() => undefined);
+      }
+      if (next) {
+        await apiPost('/light-show/arms', { set_id: s.id, on: next });
+        setToast(`Armed "${s.name}" for the ${triggerLabel(next)}`);
+      } else {
+        setToast(`"${s.name}" is no longer armed on a drop, lull or charge`);
+      }
+    } catch (e) {
+      setToast(String(e));
+    }
+    reloadArms();
+  };
+
   return (
     <div className="home-quick-runs">
       {toast && <div className="home-quick-toast" role="status">{toast}</div>}
@@ -156,6 +186,7 @@ export default function HomeQuickRuns() {
           {sets.map((s) => {
             const armedForSet = s.id ? arms?.armed.filter((a) => a.set_id === s.id) ?? [] : [];
             const armedOn = new Set(armedForSet.map((a) => a.on));
+            const phase = phaseButtonLook(armedForSet, s.name, arms?.song.phases);
             return (
               <li key={s.id} className="home-quick-action-row">
                 <b className="home-quick-action-name">{s.name}</b>
@@ -182,6 +213,14 @@ export default function HomeQuickRuns() {
                   aria-label={`Arm "${s.name}" for the next Low Trigger`}
                   onClick={() => s.id && void arm(s.id, s.name, 'low')}>
                   <Icon name="arrowDown" size={15} />
+                </button>
+                <button type="button" className={`home-quick-icon-btn phase${phase.phase ? ' armed' : ''}`}
+                  disabled={busy || !s.id} aria-pressed={phase.phase !== null}
+                  style={phase.color ? { color: phase.color, borderColor: phase.color } : undefined}
+                  data-phase={phase.phase ?? 'off'}
+                  title={phase.title} aria-label={phase.ariaLabel}
+                  onClick={() => s.id && void cyclePhase(s, armedForSet)}>
+                  <Icon name={phase.icon} size={15} />
                 </button>
                 {armedForSet.map((a) => (
                   <span key={a.id} className="home-quick-armed-tag">

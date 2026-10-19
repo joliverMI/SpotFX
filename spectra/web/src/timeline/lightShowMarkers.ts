@@ -15,8 +15,9 @@
  *
  * Pure, DOM-free, so scripts/check_timeline_light_show_markers.mjs can
  * drive it with no browser. */
-import type { ArmsStatus, ShowArm, SongCues } from '../lightshow/types';
-import { mmss } from '../lightshow/showSummary';
+import type { ArmPhase, ArmsStatus, ShowArm, SongCues } from '../lightshow/types';
+import { PHASE_CYCLE } from '../lightshow/phaseArmCycle';
+import { mmss, TRIGGER_LABEL } from '../lightshow/showSummary';
 
 export interface LightShowCueMarker {
   level: 'high' | 'low';
@@ -53,6 +54,27 @@ export function armAppliesToCue(arm: ShowArm, level: 'high' | 'low', uri: string
  * instead (the Light Show legend). */
 export function sceneChangeArms(arms: ArmsStatus | null | undefined, uri: string | null): ShowArm[] {
   return (arms?.armed ?? []).filter((a) => a.on === 'scene_change' && (a.song_uri === null || a.song_uri === uri));
+}
+
+/** Armed sets waiting on one of the drop-sequence PHASES (2026-10-19's
+ * one cycle button, show_arms.PHASE_TRIGGERS). These are NOT drawn as
+ * Light Show markers, deliberately: the phases already have their own
+ * shapes on the Timeline (the drop-sequence layer's gold/sky/magenta
+ * charge/lull/drop), and a second marker on the same moment in a Light
+ * Show colour would read as a different kind of event. A caller names
+ * them in words beside those shapes instead — see BuilderPage's
+ * drop-sequence legend. Grouped by phase, in PHASE_CYCLE order. */
+export function phaseArms(
+  arms: ArmsStatus | null | undefined, uri: string | null,
+): { phase: ArmPhase; arms: ShowArm[]; label: string }[] {
+  const applies = (a: ShowArm) => a.song_uri === null || a.song_uri === uri;
+  return PHASE_CYCLE
+    .map((phase) => ({
+      phase,
+      arms: (arms?.armed ?? []).filter((a) => a.on === phase && applies(a)),
+      label: TRIGGER_LABEL[phase],
+    }))
+    .filter((g) => g.arms.length > 0);
 }
 
 /** One marker per cue the song actually has (0, 1 or 2 — a song can lack

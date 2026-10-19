@@ -4390,6 +4390,86 @@ first. Five things:
   `fire_history` had no `show` bucket, so the show log never recorded.
   Spec: `tests/test_light_show_arms.py`, `scripts/check_show_cue_flags.mjs`.
 
+**A SET CAN ALSO BE ARMED ON THE NEXT DROP, LULL OR CHARGE — ONE BUTTON
+THAT CYCLES (2026-10-19, the Admiral: "on the light show events, add a
+button for next drop, lull, and charge. make it one button that cycles
+through those to reduce clutter. use thr icons and colors from the
+timeline for those events").** `show_arms.TRIGGERS` is six now, not three
+(`PHASE_TRIGGERS = ("drop", "lull", "charge")`); `MARK_TRIGGERS` is the
+five that sit at a KNOWN song-time moment, so a countdown and the
+finish-on-the-mark lead apply to a phase exactly as to a High. The
+moments are `drop_firing.phase_moments(view)` — the ONE pure rule, the
+same drop-sequence data the Timeline draws as gold/sky/magenta shapes.
+Six things:
+
+- **THE SOURCE: every firing sequence's DECLARED members plus his own
+  authored charge/lull/drop triggers**, his winning a collision within
+  two beats (otherwise a detection matching one of his marks yields the
+  same drop twice). A SUGGESTED detection is not a moment (it waits for
+  his confirm, and the room ignores it) and neither is a dismissed one.
+  Several of each per song is normal — his real EDM songs carry a dozen
+  drops — so `cue_plan` returns one entry per moment and a one-shot arm
+  takes the FIRST its clock crosses, which is what "the next drop" means.
+- **MODE-INDEPENDENT, AND ON THE MARK.** A phase cue is a moment in the
+  MUSIC, the High/Low precedent (`show_cues.py`'s "a cue exists on every
+  analysed song, his own triggers or not"), so it is not narrowed by
+  `scene_change_mode` and `phase_moments` takes no mode at all. It is
+  also NOT relocated by `drop_timing`'s offset (default -400 ms): that is
+  resolved per fire from the room AND the SHOWING scene, so it is neither
+  constant nor knowable without I/O on the tick path, and an arm landing
+  on the mark the Timeline draws is the honest reading. Both arguments
+  live in that function's own docstring — don't re-derive them.
+- **NOTHING NEW FIRES IT.** The phases ride the EXISTING High/Low path
+  unchanged: the same `cue_plan`/`on_cue` pair, the same
+  exactly-once-per-crossing memory in `trigger_engine._tick_show_cues`
+  (its key is `(f"show-cue:{level}", cue_ms)`, already distinct per
+  moment), the same show clock (`av_sync_lead` + `known_buffer` — **this
+  build touches no audio offset, order 30**), the same gate that never
+  consumes an arm, and the same `house.confirmed_wrong_device()` gate in
+  `services/engine._show_cue`.
+- **THE ENGINE PUBLISHES THE MOMENTS OFF ITS OWN PER-TICK MEMO.**
+  `TriggerEngine._drop_state` returns a third element and
+  `_sequence_triggers` stores `(uri, moments)`; `phase_cue_moments(uri)`
+  reads it, and `show_arms.phase_moments` is the seam whose default asks
+  it. That ordering matters: `drop_sequences.view` costs a full
+  ~9.5MB `triggers.json` parse and `cue_plan` is asked EVERY tick, so
+  never read the view from `show_arms`. **`None` from that seam means
+  "not worked out for this song yet" and is a different answer from
+  `[]`** ("this song genuinely has no drop") — `status()["song"]["phases"]`
+  carries both (`known`, per-class `next`/`counts`, a `reason`) so the
+  armed board can say "none on this song" without guessing. It is one
+  tick stale on a brand-new song (`_tick_show_cues` runs before tick()
+  resolves the triggers the view needs), which costs nothing beyond the
+  1 ms rearm window at the first observed position — `phase_cue_moments`'
+  own docstring has the arithmetic.
+- **THE UI IS ONE BUTTON, and `spectra/web/src/lightshow/phaseArmCycle.ts`
+  is the whole rule** (cycle order off → drop → lull → charge → off, what
+  one tap arms AND disarms, the look, the words). Cycling is
+  disarm-then-arm because `show_arms`' replace rule is "the same set on
+  the SAME trigger" — arming drop→lull without cancelling the drop leaves
+  the set armed on both. The glyph is `iconRegistry`'s `pulse` (the
+  generic drop-sequence phase glyph) and the colour is IMPORTED from
+  `timeline/dropSequences`' own `PHASE_COLOR`; a hex literal in that
+  module is what its check script forbids. Mounted on `RunView.tsx` and
+  Home's `HomeQuickRuns.tsx`; state comes from live `arms`, never a click
+  flag. A phase arm is deliberately NOT drawn as a Light Show marker on
+  the Timeline (the phases already have their own shapes there) — the
+  drop-sequence legend names it in words instead, in that phase's colour.
+- **A SEQUENCE STEP AND A PLAYLIST STEP STILL CANNOT.**
+  `SEQUENCE_ARMS`/`WAIT_TRIGGERS`/`PLAYLIST_STEP_TIMINGS` stay the named
+  triggers only, each with the reason on its own constant: a Wait counts
+  NAMED triggers, where "2 drops" means something quite different from
+  "2 High Triggers". Sonic DOES reach every phase — `show_console.
+  TRIGGER_CHOICES` is `show_arms.TRIGGERS` itself, read not re-typed, so
+  the MCP wrapper's `_ArmTriggerEnum` widened for free.
+
+Spec: `tests/test_light_show_arms.py` section 5 (the real trigger clock:
+the right phase fires, a one-shot takes the first, a repeat takes every
+one, disarming cancels, a drop-less song keeps the arm, the gate never
+consumes it — verified RED against both halves removed),
+`tests/test_phase_arm_cycle.py` → `scripts/check_phase_arm_cycle.mjs` +
+`check_light_show_run_icon_buttons.mjs` §SIX. Help: `show-phase-arming`.
+
 **PHASE 3 — THE RUN VIEW, DRAG REORDER, SONIC, AND THE SCENE-CHANGE
 COUNTDOWN (2026-10-04).** Read `spectra/services/show_console.py`'s module
 docstring first (Sonic's authority boundary here, the same shape

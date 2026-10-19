@@ -629,9 +629,15 @@ class TriggerEngine:
         self._drop_view = drop_view or self._default_drop_view
         self._drop_revision = drop_revision or drop_sequences.revision
         self._fire_sequence = fire_sequence or self._default_fire_sequence
-        self._drop_memo: Optional[tuple[tuple, tuple[list, list]]] = None
+        self._drop_memo: Optional[tuple[tuple, tuple[list, list, list]]] = None
         self._seq_meta: dict[str, tuple[drop_firing.FiringSequence, str, str]] = {}
         self._drop_windows: list[drop_firing.Window] = []
+        # (uri, phase moments) from the same memo — THE LIGHT SHOW's own
+        # "next drop / lull / charge" arms read it through
+        # `phase_cue_moments` (show_arms.phase_moments' default seam). Keyed
+        # by uri rather than cleared on a song change, so the previous
+        # song's moments can never be read as this one's.
+        self._phase_cues: tuple[Optional[str], list] = (None, [])
 
         # THE DROP-LED SCENE SWITCH (2026-10-08, spectra/services/
         # drop_switch.py is the binding statement): a drop sequence may be
@@ -1164,11 +1170,18 @@ class TriggerEngine:
     # ── drop sequences (drop_firing.py) ──────────────────────────────────
 
     def _drop_state(self, uri: str, triggers: list[SpectraTrigger]
-                    ) -> tuple[list, list]:
-        """(firing sequences, protected windows) for `uri` — mode-
-        independent, memoised on the store's revision and his own phase
-        triggers (the two things the view reads). A view that cannot be
-        read fires nothing and protects nothing, and says so once."""
+                    ) -> tuple[list, list, list]:
+        """(firing sequences, protected windows, phase moments) for `uri` —
+        mode-independent, memoised on the store's revision and his own
+        phase triggers (the two things the view reads). A view that cannot
+        be read fires nothing, protects nothing and has no phase moment,
+        and says so once.
+
+        The third element is drop_firing.phase_moments: where this song
+        plays a charge/lull/drop, published for the Light Show's own
+        "next drop / lull / charge" arms (`phase_cue_moments` below). It
+        rides this memo rather than a second read because the view costs a
+        full triggers.json parse and the cue plan is asked every tick."""
         marks = tuple(sorted(
             (t.id, t.timestamp_ms, t.trigger_offset_ms, t.enabled, _phase_class(t))
             for t in triggers
@@ -1183,11 +1196,12 @@ class TriggerEngine:
         try:
             view = self._drop_view(uri, triggers)
             state = (drop_firing.firing_sequences(view),
-                     drop_firing.windows_from_view(view))
+                     drop_firing.windows_from_view(view),
+                     drop_firing.phase_moments(view))
         except Exception:
             logger.exception("drop sequences: view unreadable for %s — none "
                              "fire and none protect on this song for now", uri)
-            state = ([], [])
+            state = ([], [], [])
         self._drop_memo = (key, state)
         return state
 
@@ -1199,8 +1213,11 @@ class TriggerEngine:
         which members stand down alone (seq.members(mode) — a member
         within reach of a same-class authored mark that fires in THIS
         mode). Also refreshes `_seq_meta` and `_drop_windows`."""
-        seqs, windows = self._drop_state(uri, triggers)
+        seqs, windows, moments = self._drop_state(uri, triggers)
         self._drop_windows = windows
+        # Published for show_arms.cue_plan (the Light Show's phase arms) —
+        # keyed by uri so a stale list can never be read as this song's.
+        self._phase_cues = (uri, moments)
         out: list[SpectraTrigger] = []
         meta: dict[str, tuple[drop_firing.FiringSequence, str, str]] = {}
         for seq in seqs:
@@ -1291,6 +1308,28 @@ class TriggerEngine:
         if self._flare_plan_uri == uri:
             return self._scene_cue_triggers
         return []
+
+    def phase_cue_moments(self, uri: Optional[str]) -> Optional[list]:
+        """Where `uri` plays a charge / lull / drop (drop_firing.
+        PhaseMoment), or None when this engine has not worked that out for
+        `uri` — a DIFFERENT answer from the empty list, which means the
+        song genuinely has none (so the Light Show's armed board can say
+        "none on this song" rather than implying it is still thinking).
+
+        Published by `_sequence_triggers` off `_drop_state`'s own memo, so
+        reading it costs a tuple compare and never does I/O on the event
+        loop. THE ONE TICK OF LAG, stated: `_tick_show_cues` runs BEFORE
+        `tick()` resolves the triggers the view needs, so on the first
+        tick of a song this still holds the previous song's uri and
+        answers None. Nothing is lost by it beyond the 1 ms rearm window
+        at that first observed position (`_last_position_ms = position_ms
+        - 1`): the next tick's crossing window starts where this one's
+        ended, so a phase anywhere after it is still crossed exactly
+        once.
+        """
+        if uri is None or self._phase_cues[0] != uri:
+            return None
+        return list(self._phase_cues[1])
 
     def cached_scene_cues(self, uri: str) -> Optional[list]:
         """The planned scene cues (CandidateMoment) tick() fires from for

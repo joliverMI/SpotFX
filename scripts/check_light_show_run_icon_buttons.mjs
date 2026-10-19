@@ -26,6 +26,12 @@
 //           `.find` → `.filter`).
 //   FOUR  — each armed tag's own Cancel button disarms exactly that arm
 //           (DELETE /arms/<id>), not some other arm on the same set.
+//   SIX   — the ONE phase button (2026-10-19: "add a button for next drop,
+//           lull, and charge. make it one button that cycles through those
+//           to reduce clutter. use thr icons and colors from the timeline
+//           for those events") cycles off → drop → lull → charge → off on
+//           successive taps, disarming the phase it was on as it goes, and
+//           wears the Timeline's own glyph and PHASE_COLOR while armed.
 //   FIVE  — the specific icon button a set is armed on (bunny/up/down)
 //           carries the `armed` class — filled/accent, clearly different
 //           from idle — driven by live `arms` status, not a local click
@@ -205,15 +211,17 @@ ok(container.querySelector('.light-show-run-sheet') === null, 'the old open/clos
 ok(container.querySelector('.light-show-run-set-button') === null, 'the old name-button-opens-sheet control is gone');
 const blues = rowFor('Blues');
 const blueBtns = iconBtns(blues);
-ok(blueBtns.length === 4, `Blues row has 4 icon buttons (${blueBtns.length})`);
-const [boltBtn, bunnyBtn, upBtn, downBtn] = blueBtns;
+ok(blueBtns.length === 5, `Blues row has 5 icon buttons (${blueBtns.length})`);
+const [boltBtn, bunnyBtn, upBtn, downBtn, phaseBtn] = blueBtns;
 ok(boltBtn.title === 'Fire now' && !!svgD(boltBtn), 'button 1 is Fire now, a real inline SVG');
 ok(bunnyBtn.title === 'Arm: next scene change' && !!svgD(bunnyBtn), 'button 2 is Arm: next scene change, a real inline SVG');
 ok(upBtn.title === 'Arm: next High Trigger' && !!svgD(upBtn), 'button 3 is Arm: next High Trigger, a real inline SVG');
 ok(downBtn.title === 'Arm: next Low Trigger' && !!svgD(downBtn), 'button 4 is Arm: next Low Trigger, a real inline SVG');
-ok(svgD(boltBtn) !== svgD(bunnyBtn) && svgD(bunnyBtn) !== svgD(upBtn) && svgD(upBtn) !== svgD(downBtn),
-  'all four render genuinely different glyphs, not the same path repeated');
-ok(![boltBtn, bunnyBtn, upBtn, downBtn].some((b) => /[⌀-⟿]/.test(b.textContent)),
+ok(phaseBtn.title.includes('next drop') && !!svgD(phaseBtn),
+  `button 5 is the phase cycle, a real inline SVG ("${phaseBtn.title}")`);
+ok(new Set([boltBtn, bunnyBtn, upBtn, downBtn, phaseBtn].map(svgD)).size === 5,
+  'all five render genuinely different glyphs, not the same path repeated');
+ok(![boltBtn, bunnyBtn, upBtn, downBtn, phaseBtn].some((b) => /[⌀-⟿]/.test(b.textContent)),
   'no button falls back to a raw Unicode glyph in its text content');
 
 console.log('TWO — a tap IS the action, no intermediate menu');
@@ -269,12 +277,14 @@ console.log('FIVE — the armed icon itself is highlighted, driven by live arms 
 // AND high in the ORIGINAL fixture, proving the highlight comes from the
 // initial arms poll, not from a click earlier in this same script.
 await rerenderWithArms(ARMS);
-const [, quietBunny, quietUp, quietDown] = iconBtns(rowFor('Quiet Hues'));
+const [, quietBunny, quietUp, quietDown, quietPhase] = iconBtns(rowFor('Quiet Hues'));
 ok(quietBunny.classList.contains('armed') && quietUp.classList.contains('armed'),
   'bunny (scene_change) and up arrow (high) are both marked armed');
 ok(!quietDown.classList.contains('armed'), 'down arrow (low) — not armed — carries no armed class');
 ok(quietBunny.getAttribute('aria-pressed') === 'true' && quietDown.getAttribute('aria-pressed') === 'false',
   'aria-pressed reflects the same live state for assistive tech');
+ok(!quietPhase.classList.contains('armed') && quietPhase.dataset.phase === 'off',
+  'the phase button is NOT lit by a scene-change/High arm — only by its own three');
 const [blueBolt2, blueBunny2] = iconBtns(rowFor('Blues'));
 ok(!blueBolt2.classList.contains('armed') && !blueBunny2.classList.contains('armed'),
   'an unarmed set\'s buttons carry no armed class at all');
@@ -283,6 +293,75 @@ await rerenderWithArms({ ...ARMS, armed: ARMS.armed.filter((a) => a.id !== 'arm-
 const [, quietBunny2, quietUp2] = iconBtns(rowFor('Quiet Hues'));
 ok(quietBunny2.classList.contains('armed') && !quietUp2.classList.contains('armed'),
   'disarming the High arm clears ONLY that icon\'s highlight, scene_change stays lit');
+
+console.log('SIX — the ONE phase button cycles off → drop → lull → charge → off');
+// Blues has no arms at all in the fixture, so its phase button starts off.
+await rerenderWithArms(ARMS);
+let bluePhase = iconBtns(rowFor('Blues'))[4];
+ok(bluePhase.dataset.phase === 'off' && !bluePhase.classList.contains('armed')
+  && !bluePhase.style.color,
+  'off: no phase, no armed class, and no colour of its own');
+requests.length = 0;
+await click(bluePhase);
+const phaseArm1 = requests.find((r) => r.method === 'POST' && r.path === '/spectra/api/light-show/arms');
+ok(phaseArm1 && phaseArm1.body?.set_id === 'set-blues' && phaseArm1.body?.on === 'drop',
+  `tap 1 arms on=drop (${JSON.stringify(phaseArm1?.body)})`);
+ok(!requests.some((r) => r.method === 'DELETE'), 'with nothing armed there is nothing to cancel');
+ok(globalThis.__toasts__.some((t) => t.msg === 'Armed for the next drop'),
+  'the toast names the next drop');
+
+// The button's state is live `arms`, so the server's answer is what moves
+// it — exactly as the other four behave. Feed back a drop arm and tap.
+const withDrop = (on, id = 'arm-phase') => ({
+  ...ARMS,
+  armed: [{ ...ARMS.armed[0], id, on, set_id: 'set-blues', label: 'Blues' }],
+});
+await rerenderWithArms(withDrop('drop'));
+bluePhase = iconBtns(rowFor('Blues'))[4];
+ok(bluePhase.dataset.phase === 'drop' && bluePhase.classList.contains('armed'),
+  'a drop arm from the SERVER lights the button (no click of its own needed)');
+const dropColor = bluePhase.style.color;
+ok(!!dropColor, `armed on drop it carries its own colour (${dropColor})`);
+requests.length = 0;
+await click(bluePhase);
+ok(requests.some((r) => r.method === 'DELETE' && r.path === '/spectra/api/light-show/arms/arm-phase'),
+  `tap 2 CANCELS the drop arm first (${requests.map((r) => `${r.method} ${r.path}`).join(', ')})`);
+const phaseArm2 = requests.find((r) => r.method === 'POST' && r.path === '/spectra/api/light-show/arms');
+ok(phaseArm2?.body?.on === 'lull', `…then arms on=lull (${JSON.stringify(phaseArm2?.body)})`);
+const order = requests.map((r) => r.method);
+ok(order.indexOf('DELETE') < order.indexOf('POST'),
+  'and in that order, so the set is never armed on two phases at once');
+
+await rerenderWithArms(withDrop('lull'));
+const lullColor = iconBtns(rowFor('Blues'))[4].style.color;
+ok(iconBtns(rowFor('Blues'))[4].dataset.phase === 'lull' && lullColor !== dropColor,
+  `armed on lull it wears a DIFFERENT colour from drop (${lullColor})`);
+requests.length = 0;
+await click(iconBtns(rowFor('Blues'))[4]);
+ok(requests.find((r) => r.method === 'POST')?.body?.on === 'charge', 'tap 3 arms on=charge');
+
+await rerenderWithArms(withDrop('charge'));
+const chargeColor = iconBtns(rowFor('Blues'))[4].style.color;
+ok(iconBtns(rowFor('Blues'))[4].dataset.phase === 'charge'
+  && new Set([dropColor, lullColor, chargeColor]).size === 3,
+  `armed on charge it wears a third distinct colour (${chargeColor})`);
+requests.length = 0;
+await click(iconBtns(rowFor('Blues'))[4]);
+ok(requests.some((r) => r.method === 'DELETE' && r.path === '/spectra/api/light-show/arms/arm-phase'),
+  'tap 4 cancels the charge arm');
+ok(!requests.some((r) => r.method === 'POST' && r.path === '/spectra/api/light-show/arms'),
+  'and arms NOTHING — the cycle is back to off');
+ok(globalThis.__toasts__.some((t) => /no longer armed on a drop, lull or charge/i.test(t.msg)),
+  'the toast says it is no longer armed on a drop, lull or charge');
+
+// It is ONE button for three phases, which is the whole ask: the row must
+// not have grown a second or third phase control.
+ok(iconBtns(rowFor('Blues')).filter((b) => b.classList.contains('phase')).length === 1,
+  'exactly ONE phase button per row, not three');
+ok([...container.querySelectorAll('a.help-link, .help-link')].some(
+  (a) => (a.getAttribute('href') || '').includes('show-phase-arming')
+         || (a.getAttribute('title') || '').includes('drop, lull or charge')),
+  'the card deep-links its own help topic (show-phase-arming)');
 
 unmount();
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');
