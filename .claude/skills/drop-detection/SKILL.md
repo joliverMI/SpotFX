@@ -231,7 +231,9 @@ Spec: `tests/test_light_show_arms.py` section 5 (the firing and
 disarming, through the real trigger clock), `scripts/
 check_phase_arm_cycle.mjs` + `scripts/check_light_show_run_icon_buttons.mjs`
 section SIX (the one cycling button), both run by
-`tests/test_phase_arm_cycle.py`. Help topic `show-phase-arming`.
+`tests/test_phase_arm_cycle.py`. Help topic `show-phase-arming`,
+`sonic-light-show`. See "Sonic reach" below for the CLI-backend docstring
+gap this feature's sonic-ops follow-up found and fixed.
 
 ## Sonic reach
 
@@ -265,8 +267,21 @@ numbered by Sonic is the SAME numbering the Timeline review list shows
 
 `arm_show_set` (domain `"show"`, `show_console.py`) reaches the three
 phases too since 2026-10-19 — its `on` enum is `show_arms.TRIGGERS`
-itself, read rather than re-typed, so the MCP wrapper's own
-`_ArmTriggerEnum` widened with it and no wrapper edit was needed.
+itself, read rather than re-typed, so the API-backend's `input_schema`
+and `_op_arm_show_set`'s validation, AND the CLI backend's own
+`_ArmTriggerEnum` (`Literal[tuple(show_console.TRIGGER_CHOICES)]`), all
+widened for free the moment `TRIGGERS` grew — `show_status` already
+surfaces each armed set's `on` plus the song's own per-phase countdown
+(`arms.song.phases`) too. **What did NOT widen automatically**: the two
+hand-written MCP tool wrapper DOCSTRINGS in `settings_mcp_server.py`
+(`arm_show_set`/`show_status` — the CLI/subscription backend's own tool
+*descriptions*, which a model reads, as distinct from the enum TYPE those
+same functions declare) still said only "scene change, or High/Low" after
+this shipped — found live, fixed as a sonic-ops follow-up (prose updated
+to name all six triggers; `tests/test_show_console.py` covers arm/read/
+disarm on each phase plus a docstring regression). The enum and the
+validation are generated from `TRIGGERS`; the wrapper prose is
+hand-maintained and is not — check both on any future widening.
 
 Every new `apply_edit` op name needs either a Sonic operation or a named
 exclusion — `tests/test_drop_console.py::
