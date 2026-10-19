@@ -5,10 +5,11 @@ when they trigger, but never skipping ahead").
 
 WHAT A SEQUENCE IS (spectra/models/light_show.py): a name and an ordered
 list of items. An item is a SET plus how it is armed — `instant`,
-`scene_change`, `high`, `low`, the same four timings as the Run view's
-one-tap buttons — or a WAIT: a fixed time, a count of one trigger kind
-(scene changes / High Triggers / Low Triggers), a count of songs, or "until
-one of these songs plays".
+`scene_change`, `high`, `low` (SEQUENCE_ARMS; the Run view's fifth
+one-tap button, arming on the next drop/lull/charge, is deliberately not
+one of them — see show_arms.py's PHASE_TRIGGERS) — or a WAIT: a fixed time,
+a count of one trigger kind (scene changes / High Triggers / Low Triggers),
+a count of songs, or "until one of these songs plays".
 
 STRICTLY IN ORDER. Exactly one item is current. Item k is armed only once
 item k-1 has COMPLETED, and nothing about item k+1 exists until then:

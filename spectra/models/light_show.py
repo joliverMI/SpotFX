@@ -216,9 +216,9 @@ class LightShowState(BaseModel):
 # only written by an edit; the RUN lives in LightShowState above.
 
 SEQUENCE_ARMS = ("instant", "scene_change", "high", "low")
-"""How a Set item is armed — the same four timings the Run view's one-tap
-buttons offer: bolt (instant), bunny (next scene change), up (next High
-Trigger), down (next Low Trigger).
+"""How a Set item is armed — the same four timings as four of the Run
+view's one-tap buttons: bolt (instant), bunny (next scene change), up
+(next High Trigger), down (next Low Trigger).
 
 DELIBERATELY NOT show_arms.TRIGGERS, which since 2026-10-19 also carries
 the three drop-sequence phases (drop / lull / charge). A sequence runs

@@ -13,9 +13,10 @@
 // stood in by canned /spectra/api/light-show answers recorded as they
 // arrive — there is no backend here.
 //
-//   ONE   — each set row renders exactly four icon buttons (never a
+//   ONE   — each set row renders exactly five icon buttons (never a
 //           name-button-opens-a-sheet control), each a real inline SVG
-//           (iconRegistry.ts), never a raw Unicode glyph.
+//           (iconRegistry.ts), never a raw Unicode glyph — the first four
+//           plus the one phase-cycle button added 2026-10-19 (see SIX).
 //   TWO   — a tap on each icon IS the complete action, with no
 //           intermediate menu/sheet: bolt fires the set now; bunny arms
 //           on the next scene change; up arrow arms on the next High
@@ -26,12 +27,6 @@
 //           `.find` → `.filter`).
 //   FOUR  — each armed tag's own Cancel button disarms exactly that arm
 //           (DELETE /arms/<id>), not some other arm on the same set.
-//   SIX   — the ONE phase button (2026-10-19: "add a button for next drop,
-//           lull, and charge. make it one button that cycles through those
-//           to reduce clutter. use thr icons and colors from the timeline
-//           for those events") cycles off → drop → lull → charge → off on
-//           successive taps, disarming the phase it was on as it goes, and
-//           wears the Timeline's own glyph and PHASE_COLOR while armed.
 //   FIVE  — the specific icon button a set is armed on (bunny/up/down)
 //           carries the `armed` class — filled/accent, clearly different
 //           from idle — driven by live `arms` status, not a local click
@@ -39,6 +34,12 @@
 //           the instant `arms` no longer lists it (his ask, 2026-10-08:
 //           "highlight" the armed button so it is right after a refresh
 //           or when armed from Sonic/another screen).
+//   SIX   — the ONE phase button (2026-10-19: "add a button for next drop,
+//           lull, and charge. make it one button that cycles through those
+//           to reduce clutter. use thr icons and colors from the timeline
+//           for those events") cycles off → drop → lull → charge → off on
+//           successive taps, disarming the phase it was on as it goes, and
+//           wears the Timeline's own glyph and PHASE_COLOR while armed.
 //
 // Run: node scripts/check_light_show_run_icon_buttons.mjs
 import { mkdtempSync, writeFileSync } from 'node:fs';

@@ -249,7 +249,8 @@ export interface ArmsStatus {
 
 // ── Show Sequences (spectra/services/show_sequence.py) ─────────────────────
 
-/** How a Set item is armed: the Run view's four one-tap timings. */
+/** How a Set item is armed: four of the Run view's one-tap timings (the
+ * phase-cycle button a sequence step cannot use — see ArmPhase above). */
 export type SequenceArm = 'instant' | 'scene_change' | 'high' | 'low';
 export type WaitKind = 'duration' | 'trigger_count' | 'songs' | 'song_list';
 
