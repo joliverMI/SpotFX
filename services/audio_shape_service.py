@@ -688,10 +688,11 @@ class AudioShapeService:
         (npz, json, wav, librosa.json) are renamed to *.bak before the new
         save runs. After the save + WAV + librosa + anchor pipeline completes,
         all four atomic-save checks are verified: coverage ≥90%, WAV write
-        success, librosa success, ≥1 anchor candidate. If all pass, the
-        .bak files are deleted (commit). If any fail, the new files are
-        deleted and the .bak files are restored (rollback) — original shape
-        is preserved intact.
+        success, librosa success, ≥1 anchor candidate (when the anchor pass
+        ran — settings.anchor_enabled). If all pass, the .bak files are
+        deleted (commit) and the song comes off the recapture playlist. If
+        any fail, the new files are deleted and the .bak files are restored
+        (rollback) — original shape is preserved intact.
 
         INSTRUMENTATION (data/dream-on-capture-loop/report.md, recommendation
         2): this task's own start/end is logged so it can be correlated
@@ -864,7 +865,12 @@ class AudioShapeService:
                 # — the smart-window xcorr sweep handles song-start snapping by
                 # itself with the round-5 4-band math, so rise detection at
                 # capture time is unnecessary unless re-enabled for debugging.
-                if _s.anchor_enabled:
+                # Read ONCE: the force-recapture commit below requires an
+                # anchor only when this pass actually ran, and the WAV +
+                # librosa await in between must not let a flipped setting
+                # make the two disagree.
+                anchors_ran = bool(_s.anchor_enabled)
+                if anchors_ran:
                     try:
                         from services import anchor_detector, librosa_service
 
@@ -930,8 +936,12 @@ class AudioShapeService:
                         #   1. coverage ≥ 90%      — already passed (line 308)
                         #   2. WAV write success   — wav_librosa_ok subsumes
                         #   3. librosa success     — wav_librosa_ok subsumes
-                        #   4. anchor count ≥ 1    — meta.anchor_candidates
-                        anchor_ok = len(meta.anchor_candidates) >= 1
+                        #   4. anchor count ≥ 1    — meta.anchor_candidates,
+                        #      ONLY when the anchor pass ran. With
+                        #      anchor_enabled off it never runs, the list is
+                        #      always empty, and requiring it rolled back
+                        #      every forced recapture (report §14 item 4).
+                        anchor_ok = (not anchors_ran) or len(meta.anchor_candidates) >= 1
                         commit = bool(wav_librosa_ok) and anchor_ok
                         if commit:
                             # Self-correction BEFORE the .bak files are
@@ -981,6 +991,7 @@ class AudioShapeService:
                                     len(_bak_paths), meta.npz_file,
                                 )
                             # status already defaulted to "ok" above; nothing to override
+                            await _after_successful_capture(meta.spotify_uri)
                         else:
                             # Roll back: delete the just-written files, restore
                             # the .bak files to their original names.
@@ -1028,7 +1039,7 @@ class AudioShapeService:
                         # via recorder.save(). WAV+librosa is fire-and-forget;
                         # capture itself is already marked "ok" below.
                         asyncio.create_task(
-                            _save_wav_and_analyze(meta, raw_pcm, _s.audio_sample_rate)
+                            _save_wav_analyze_and_finish(meta, raw_pcm, _s.audio_sample_rate)
                         )
                 # Auto-generate AI triggers if enabled and no suggestions exist yet
                 if app_state.auto_generate_enabled:
@@ -1182,11 +1193,44 @@ async def _auto_generate_embedded(
     logger.info("Embedded auto-generated %d triggers for %s — %s", len(raw), artist, title)
 
 
+async def _after_successful_capture(spotify_uri: str) -> None:
+    """The capture really succeeded — shape, WAV and librosa all landed, and
+    a forced recapture COMMITTED — so take the song off the recapture
+    playlist and clear its needs_recapture flag. Never called otherwise: it
+    used to run inside _save_wav_and_analyze whatever librosa returned, so a
+    song whose analysis failed (or whose forced recapture then rolled back)
+    left the work playlist with no good capture (report §7.1).
+
+    remove_track() is Spotify HTTP, so it runs off the event loop."""
+    try:
+        from services import recapture_playlist
+        await asyncio.to_thread(recapture_playlist.remove_track, spotify_uri)
+    except Exception:
+        pass
+    try:
+        from services.audio_analyzer import clear_needs_recapture
+        clear_needs_recapture(spotify_uri)
+    except Exception:
+        pass
+
+
+async def _save_wav_analyze_and_finish(meta, raw_pcm, sample_rate: int) -> bool:
+    """A first-time capture's detached WAV + librosa, then the success
+    bookkeeping only if both landed."""
+    ok = await _save_wav_and_analyze(meta, raw_pcm, sample_rate)
+    if ok:
+        await _after_successful_capture(meta.spotify_uri)
+    return ok
+
+
 async def _save_wav_and_analyze(meta, raw_pcm, sample_rate: int) -> bool:
     """Write a WAV file from captured PCM, enforce retention limit, then run
     librosa. Returns True on full success (WAV written + librosa produced an
     analysis), False on any failure. Force-recapture mode awaits the boolean
     to gate the atomic-save commit; legacy first-time captures fire-and-forget.
+    Neither the recapture playlist nor the needs_recapture flag is touched
+    here — that is _after_successful_capture's, once the caller knows the
+    capture really succeeded.
 
     INSTRUMENTATION (data/dream-on-capture-loop/report.md, recommendation
     2): the WAV write already runs off the event loop's own thread (a
@@ -1262,19 +1306,6 @@ async def _save_wav_and_analyze(meta, raw_pcm, sample_rate: int) -> bool:
             invalidate_analyzed_cache(meta.spotify_uri)
         except Exception:
             pass
-
-    # All analysis complete (shape + WAV + librosa). Remove from recapture
-    # playlist if present, and clear the needs_recapture flag on the sidecar.
-    try:
-        from services import recapture_playlist
-        recapture_playlist.remove_track(meta.spotify_uri)
-    except Exception:
-        pass
-    try:
-        from services.audio_analyzer import clear_needs_recapture
-        clear_needs_recapture(meta.spotify_uri)
-    except Exception:
-        pass
 
     return librosa_ok
 
