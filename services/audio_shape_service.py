@@ -11,8 +11,9 @@ import logging
 import os
 import tempfile
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 
@@ -20,8 +21,32 @@ from config import AUDIO_SHAPES_DIR
 from models.state import SpotifyTrackInfo
 from api.audio_capture import AudioCaptureStream
 from services.audio_analyzer import AudioShapeRecorder, MusicMarkDetector, load_audio_shape_meta
+from services.capture_watch import CaptureWatch, Condemnation
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CaptureOutcome:
+    """How one capture ENDED, published once per capture to
+    `AudioShapeService.outcome_listeners` (Absorb Music reads it — report
+    §8.3 item 5: read the outcome, never assume it).
+
+    status "ok" means the capture's own checks passed and the shape is on
+    disk: for a first-time capture only after its WAV and librosa landed
+    too, for a forced one only after the atomic commit. It does NOT mean the
+    shape has its head — the reader applies that bar to the file itself.
+    reason is the same short tag `_last_capture_reason` carries, plus
+    "error", "no_frames" and "cancelled" for the ends that had no tag."""
+    uri: str
+    status: str                      # "ok" | "failed"
+    reason: str = ""
+    forced: bool = False
+    realign: Optional[dict] = None   # realign_after_recapture's summary, on a forced commit
+    # When THIS capture started (time.monotonic()), so a reader can tell the
+    # outcome of a song's earlier, abandoned capture from its current one.
+    capture_started_at: Optional[float] = None
+    at_monotonic: float = field(default_factory=time.monotonic)
 
 
 def _capped_wait_s(wait_s: float, cap_s: float) -> Optional[float]:
@@ -76,6 +101,48 @@ class AudioShapeService:
         # song, so there's no seam to close."
         self._preroll_end_monotonic: Optional[float] = None
         self._preroll_pcm_chunk_count: int = 0
+        # ── Absorb Music's seams (services/absorb.py is their one writer) ──
+        # PER-SONG FORCE (report §8.3 item 1): a URI here is force-recaptured
+        # the next time it starts playing, exactly that song and nothing
+        # else, and leaves the set when its capture starts. The global
+        # `recapture_active` toggle is a counter that forces EVERY song and
+        # is untouched by this.
+        self.force_uris: set[str] = set()
+        # VOUCHED HEAD-STARTS: a URI here was started from position 0 by the
+        # caller, so the ring buffer between Spotify's song start and now IS
+        # this song's own audio and the pre-roll splice is sound even though
+        # no capture was running before it (which is the only way
+        # on_track_change ever learns of a track boundary). Without this, the
+        # first song after anything that did not capture — a warm-up song, a
+        # window opening into silence — would always lose its head.
+        self.preroll_uris: set[str] = set()
+        # Called (synchronously, on the event loop) at most once per capture
+        # when a mid-song detector condemns it (services/capture_watch.py).
+        self.condemn_listeners: list[Callable[[Condemnation], None]] = []
+        # Called once per capture when it ends (CaptureOutcome).
+        self.outcome_listeners: list[Callable[[CaptureOutcome], None]] = []
+        self._watch: Optional[CaptureWatch] = None
+
+    @property
+    def recording_uri(self) -> Optional[str]:
+        """The URI a capture is running for right now, or None."""
+        return self._recording_uri
+
+    def _publish_outcome(self, outcome: CaptureOutcome) -> None:
+        for listener in list(self.outcome_listeners):
+            try:
+                listener(outcome)
+            except Exception as exc:
+                logger.warning("Capture outcome listener failed: %s", exc)
+
+    def _condemn(self, condemnation: Condemnation) -> None:
+        logger.info("Capture condemned mid-song (%s) for %s: %s",
+                    condemnation.reason, condemnation.uri, condemnation.detail)
+        for listener in list(self.condemn_listeners):
+            try:
+                listener(condemnation)
+            except Exception as exc:
+                logger.warning("Capture condemn listener failed: %s", exc)
 
     # How far into a song (ms) counts as "restarted from the beginning"
     _RESTART_THRESHOLD_MS = 10000
@@ -176,6 +243,24 @@ class AudioShapeService:
             if self._recording_uri:
                 logger.info("Device changed away from target — stopping capture")
                 await self._stop_and_save()
+            return
+
+        # ── Per-song force (Absorb Music, report §8.3 item 1) ─────────────
+        # Exactly the URIs the caller put in force_uris, and each only until
+        # its capture starts — a deferred start (stale poll) keeps it for the
+        # next poll. The global counter below is not consulted or touched.
+        if (track and track.is_playing and new_uri in self.force_uris
+                and new_uri != self._recording_uri):
+            if not await self._start(track, force_recapture=True):
+                return
+            self.force_uris.discard(new_uri)
+            self.preroll_uris.discard(new_uri)
+            logger.info("Per-song force-recapture started for %s", new_uri)
+            try:
+                from services.websocket_manager import ws_manager
+                await ws_manager.broadcast_state(app_state)
+            except Exception:
+                pass
             return
 
         # ── Force-recapture branch ────────────────────────────────────────
@@ -295,10 +380,15 @@ class AudioShapeService:
             # ───────────────────────────────────────────────────────────────
 
             if existing is None or not existing.capture_complete:
-                await self._start(track)
+                vouched = new_uri in self.preroll_uris
+                if await self._start(track, head_vouched=vouched) and vouched:
+                    self.preroll_uris.discard(new_uri)
 
     async def stop_capture(self) -> None:
         """Stop any active capture without saving (used when analysis is disabled mid-capture)."""
+        uri = self._recording_uri
+        forced = bool(getattr(self, "_force_recapture", False))
+        started_at = self._capture_started_at
         if self._capture:
             self._capture.stop()
         if self._task:
@@ -307,6 +397,11 @@ class AudioShapeService:
         self._recorder = None
         self._capture = None
         self._recording_uri = None
+        self._force_recapture = False
+        self._watch = None
+        if uri:
+            self._publish_outcome(CaptureOutcome(
+                uri, "failed", "cancelled", forced, capture_started_at=started_at))
 
     async def cancel_capture(self, uri: str) -> None:
         """Discard in-progress capture for *uri* without saving, and block re-capture until
@@ -369,9 +464,14 @@ class AudioShapeService:
             logger.warning("Acoustic boundary: detection failed (%s), falling back to None", exc)
             return None
 
-    async def _start(self, track: SpotifyTrackInfo, force_recapture: bool = False) -> bool:
+    async def _start(self, track: SpotifyTrackInfo, force_recapture: bool = False,
+                     head_vouched: bool = False) -> bool:
         """Open capture stream and kick off the ingest loop. Returns True when
         the capture actually started, False when deferred (stale poll).
+
+        head_vouched=True: the caller started this song from position 0
+        itself (see `preroll_uris`), so the pre-roll splice is sound without
+        an on_track_change track boundary.
 
         force_recapture=True signals an atomic-save force-recapture. The
         always-on PCM ring buffer is consulted for any audio that played
@@ -445,7 +545,7 @@ class AudioShapeService:
         # no-pre-roll path. The `pcm.size > 0` check below still degrades to
         # a no-op when the ring buffer has nothing to offer.
         pre_roll_pcm: list = []
-        pre_roll_allowed = at_track_boundary or bool(force_recapture)
+        pre_roll_allowed = at_track_boundary or bool(force_recapture) or bool(head_vouched)
         # Reset seam-tracking for this song — see _seal_preroll_seam. Only
         # set to a real value below when pre-roll actually produced PCM;
         # otherwise there's no seam (no pre-roll splice to close a hole
@@ -514,11 +614,16 @@ class AudioShapeService:
             # the pre-roll itself.
             self._preroll_pcm_chunk_count = len(pre_roll_pcm)
         self._capture.start()
+        self._watch = CaptureWatch(
+            track.spotify_uri, track.duration_ms,
+            _s.audio_max_gap_ms, _s.audio_shape_min_capture_pct,
+        )
         self._task = asyncio.create_task(self._ingest_loop(), name="audio-capture")
         logger.info(
-            "Audio capture started for: %s — %s%s",
+            "Audio capture started for: %s — %s%s%s",
             track.artist, track.title,
             " (force-recapture)" if force_recapture else "",
+            " (head vouched)" if head_vouched and not force_recapture else "",
         )
         # Boundary has now been consumed by both _stop_and_save (prev) and _start (new)
         self._pending_boundary_monotonic = None
@@ -533,9 +638,31 @@ class AudioShapeService:
                 if first_frame:
                     first_frame = False
                     self._seal_preroll_seam(frame)
+                self._watch_frame(frame)
                 self._recorder.ingest(frame)
         except Exception as exc:
             logger.warning("Audio ingest loop error: %s", exc)
+
+    def _watch_frame(self, frame) -> None:
+        """The mid-song detectors (services/capture_watch.py), judged against
+        the same timestamp sequence finalize will measure. Observation only:
+        a condemnation is announced, the capture keeps running, and whoever
+        listens (Absorb Music) decides what to do about it."""
+        watch, recorder = self._watch, self._recorder
+        if watch is None or recorder is None or watch.fired is not None:
+            return
+        try:
+            ts = getattr(recorder, "_timestamps", None) or []
+            hit = watch.on_frame(
+                frame.timestamp_ms,
+                ts[-1] if ts else None,
+                ts[0] if ts else None,
+            )
+        except Exception as exc:
+            logger.debug("Capture watch error (ignored): %s", exc)
+            return
+        if hit is not None:
+            self._condemn(hit)
 
     def _seal_preroll_seam(self, first_live_frame) -> None:
         """Close the pre-roll/live handover hole (data/dream-on-capture-loop
@@ -653,11 +780,13 @@ class AudioShapeService:
         recording_uri = self._recording_uri
         ingest_task = self._task
         force_recapture = bool(getattr(self, "_force_recapture", False))
+        capture_started_at = self._capture_started_at
         self._capture = None
         self._recorder = None
         self._task = None
         self._recording_uri = None
         self._force_recapture = False
+        self._watch = None
 
         if capture:
             capture.stop()
@@ -667,7 +796,8 @@ class AudioShapeService:
             return
 
         task = asyncio.create_task(
-            self._finalize_capture(capture, recorder, recording_uri, force_recapture, boundary),
+            self._finalize_capture(capture, recorder, recording_uri, force_recapture, boundary,
+                                   capture_started_at=capture_started_at),
             name=f"finalize-capture-{recording_uri}",
         )
         self._finalize_tasks.add(task)
@@ -680,6 +810,7 @@ class AudioShapeService:
         recording_uri: Optional[str],
         force_recapture: bool,
         boundary: Optional[float],
+        capture_started_at: Optional[float] = None,
     ) -> None:
         """Trim, validate, save .npz, run WAV + librosa, realign, update
         sidecar JSON — detached from the poll loop (see _stop_and_save).
@@ -712,6 +843,19 @@ class AudioShapeService:
             "Finalize started for %s (force_recapture=%s)",
             recording_uri, force_recapture,
         )
+        # Exactly one CaptureOutcome per capture. A first-time capture with
+        # PCM hands the job to its detached WAV + librosa tail (`deferred`),
+        # because "ok" there means the analysis landed too.
+        published = [False]
+        deferred = [False]
+
+        def publish(status: str, reason: str = "", realign: Optional[dict] = None) -> None:
+            if published[0] or not recording_uri:
+                return
+            published[0] = True
+            self._publish_outcome(CaptureOutcome(
+                recording_uri, status, reason, force_recapture, realign,
+                capture_started_at=capture_started_at))
         # Acoustic-boundary trim: if a boundary was computed in
         # on_track_change, drop frames + WAV PCM whose timestamp is past
         # the actual track boundary so the previous song's saved shape
@@ -755,6 +899,7 @@ class AudioShapeService:
                     self._last_capture_status = "failed"
                     self._last_capture_reason = "too_short"
                     self._last_capture_uri = recording_uri
+                    publish("failed", "too_short")
                     return
                 # Timestamp-sanity — discard if the capture's song-time baseline
                 # is implausible. A stale poll behind the song_start estimate
@@ -786,6 +931,7 @@ class AudioShapeService:
                     self._last_capture_status = "failed"
                     self._last_capture_reason = "bad_timestamps"
                     self._last_capture_uri = recording_uri
+                    publish("failed", "bad_timestamps")
                     return
                 # Gap detection — discard shape if any inter-sample gap exceeds threshold
                 ts_list = recorder._timestamps
@@ -811,6 +957,7 @@ class AudioShapeService:
                         self._last_capture_status = "failed"
                         self._last_capture_reason = "gap"
                         self._last_capture_uri = recording_uri
+                        publish("failed", "gap")
                         return
 
                 # Drain raw PCM before saving (capture is already stopped)
@@ -943,6 +1090,7 @@ class AudioShapeService:
                         #      every forced recapture (report §14 item 4).
                         anchor_ok = (not anchors_ran) or len(meta.anchor_candidates) >= 1
                         commit = bool(wav_librosa_ok) and anchor_ok
+                        _realign = None
                         if commit:
                             # Self-correction BEFORE the .bak files are
                             # deleted: measure the timebase shift between the
@@ -992,6 +1140,7 @@ class AudioShapeService:
                                 )
                             # status already defaulted to "ok" above; nothing to override
                             await _after_successful_capture(meta.spotify_uri)
+                            publish("ok", "", _realign if isinstance(_realign, dict) else None)
                         else:
                             # Roll back: delete the just-written files, restore
                             # the .bak files to their original names.
@@ -1034,13 +1183,20 @@ class AudioShapeService:
                                         "Atomic-save: failed to restore %s from %s: %s",
                                         orig.name, bak.name, exc,
                                     )
+                            publish("failed", self._last_capture_reason)
                     else:
                         # Legacy first-time capture path: shape already on disk
                         # via recorder.save(). WAV+librosa is fire-and-forget;
                         # capture itself is already marked "ok" below.
+                        deferred[0] = True
                         asyncio.create_task(
-                            _save_wav_analyze_and_finish(meta, raw_pcm, _s.audio_sample_rate)
+                            self._first_capture_tail(meta, raw_pcm, _s.audio_sample_rate, publish)
                         )
+                else:
+                    # No PCM drained, so no WAV and no librosa to wait on:
+                    # the shape itself saved. Whoever reads the outcome
+                    # judges the file (it will have no analysis).
+                    publish("ok")
                 # Auto-generate AI triggers if enabled and no suggestions exist yet
                 if app_state.auto_generate_enabled:
                     asyncio.create_task(_auto_generate_for_uri(meta.spotify_uri))
@@ -1050,16 +1206,34 @@ class AudioShapeService:
                     logger.info("Audio analysis disabled: reached max_songs=%d", _s.audio_analysis_max_songs)
             except Exception as exc:
                 logger.error("Failed to save audio shape: %s", exc)
+                publish("failed", "error")
             finally:
+                # Every path above publishes its own outcome; this is the net
+                # for one that did not (never the shared _last_capture_*,
+                # which an overlapping finalize may have rewritten).
+                if not deferred[0]:
+                    publish("failed", "error")
                 logger.info(
                     "Finalize finished for %s in %.2fs",
                     recording_uri, time.monotonic() - finalize_started_at,
                 )
         else:
+            publish("failed", "no_frames")
             logger.info(
                 "Finalize skipped for %s (no frames captured) after %.2fs",
                 recording_uri, time.monotonic() - finalize_started_at,
             )
+
+    async def _first_capture_tail(self, meta, raw_pcm, sample_rate: int,
+                                  publish: Callable[..., None]) -> bool:
+        """A first-time capture's detached WAV + librosa, then the success
+        bookkeeping, then its CaptureOutcome — "ok" only when both landed."""
+        ok = False
+        try:
+            ok = await _save_wav_analyze_and_finish(meta, raw_pcm, sample_rate)
+        finally:
+            publish("ok" if ok else "failed", "" if ok else "wav_librosa_failed")
+        return ok
 
     def get_live_data(self, uri: str) -> dict | None:
         """Return in-progress frame data if currently recording this URI."""

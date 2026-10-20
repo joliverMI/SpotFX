@@ -10751,6 +10751,54 @@ only when the anchor pass ran (`settings.anchor_enabled`). Specs:
 `tests/test_audio_shape_index_miss.py`, `tests/test_recapture_playlist_cache.py`,
 `tests/test_capture_success_bookkeeping.py`.
 
+## ABSORB MUSIC — unattended capture of a linked playlist (phase 1: the runner)
+
+Plan: `/home/javi/fleet-spotfx/data/absorb-music-plan/report.md` (his six
+asks, his five answers in §0, phases in §12). **`services/absorb.py`'s
+module docstring is the binding statement**; `services/absorb_bar.py` owns
+"already captured", `services/capture_watch.py` the mid-song detectors,
+`models/absorb.py` the three stores. Six things:
+
+- **IT CANNOT PLAY OUT LOUD YET, BY CONSTRUCTION.** `HouseGuard` is phase 2's
+  seam (silence, its proof, the Order 27 gate, the light stand-down); the
+  shipped `UnbuiltHouseGuard` refuses every window by name before any
+  Spotify call. Phase 2 swaps the guard in `production_deps()` — do not add
+  an "allow audible" switch. `AbsorbConfig.enabled` ships False and nothing
+  schedules (phase 3); a refusal is a RECORDED run answered 200.
+- **ABSORB'S QUEUE, NOT SPOTIFY'S.** It sends a window of URIs (never a
+  playlist context, never the queue API) and re-sends only as a song STARTS,
+  so a correction cuts the head of a song that will be replayed, never the
+  tail of a capture. "Requeue after the next song" is `_requeue` after the
+  attempt's `follower`.
+- **TWO SEAMS ON `audio_shape_service`, owned by the runner**: `force_uris`
+  (per-song force-recapture, consumed at capture start; the global
+  `recapture_active` counter is untouched) and `preroll_uris` (a VOUCHED
+  head-start: on_track_change only learns of a track boundary from a running
+  capture, so the first song after anything that did not capture — the
+  warm-up, a cold open — lost its head; the report's D14 warm-up does nothing
+  without it). The runner empties only what it put there.
+- **ONE `CaptureOutcome` PER CAPTURE** (`outcome_listeners`), published at
+  every terminal point of `_finalize_capture` — for a first-time capture only
+  after its WAV + librosa — and carrying `capture_started_at`, which is how a
+  late outcome from an abandoned capture is never read as the current one.
+  A new terminal path in finalize must publish too. "ok" is not "has its
+  head": the runner applies the bar to the file again (§8.4, `head_missed`).
+- **THE SIDECAR HAS NO HEAD FIELD.** The plan expected phase 0 to add
+  `first_timestamp_ms`; it did not. `absorb_bar.read_facts` reads the field
+  when present and the npz's own first timestamp otherwise.
+- **HIS MUSIC ENDS A WINDOW (phase 1) WITHOUT A PLAYBACK CALL**
+  (`_on_session_lost`); phase 2 replaces it with yield-and-resume. His pause
+  stops the capture (`on_target_device` needs `is_playing`), so that outcome
+  is an interruption, never an attempt.
+
+Tests: `tests/absorb_world.py` (fake Spotify / capture / disk / clock — reuse
+it), `tests/test_absorb_runner.py`, `tests/test_absorb_capture_hooks.py` (the
+real ingest loop; a gap at 0:30 skips within one frame),
+`tests/test_absorb_bar.py`; his real library, read-only:
+`scripts/check_absorb_classify.py`. A test that drives
+`audio_shape_service.on_track_change` with analysis on must stub
+`pcm_ring_buffer.ensure_alive` or it opens a real audio stream.
+
 ## The music-analysis test bed (`/testbed`)
 
 Capability state and honest deployment status: `docs/SPECTRA_SPEC.md` §109.

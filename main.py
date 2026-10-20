@@ -29,7 +29,8 @@ from services.websocket_manager import ws_manager
 from services.profile_manager import load_profile_by_uri, load_profile_by_title_artist, save_profile
 from services.audio_shape_service import audio_shape_service
 from models.song_profile import SongProfile
-from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager, setlist_router, timing_viz_router, debug_router, morph_router, color_sets_router, lock_history_router, gif_assets_router, scenes_v2_router, shape_map_router, sequencer_router
+from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager, setlist_router, timing_viz_router, debug_router, morph_router, color_sets_router, lock_history_router, gif_assets_router, scenes_v2_router, shape_map_router, sequencer_router, absorb_router
+from services import absorb
 from routers.settings_router import apply_settings_override
 from services import effect_params
 
@@ -49,6 +50,11 @@ engine = TriggerEngine()
 async def _on_state_update(app_state) -> None:
     """Called after each Spotify poll — load (or auto-create) profile and broadcast."""
     track = app_state.current_track
+    # Absorb Music sees every poll FIRST: it may hand the capture service a
+    # per-song force before that service decides about this track, and it
+    # must see someone else's music (a guest stream included) before
+    # anything else reacts to it. Inert unless a window is open.
+    await absorb.runner.on_track_state(track)
     if track and track.spotify_uri.startswith("guest:"):
         # Guest-owned playback (services/guest_source drives the engine).
         # Skip profile handling entirely: auto-creating profiles or starting
@@ -169,6 +175,13 @@ async def lifespan(app: FastAPI):
     from fx import light_ownership
     light_ownership.recover_stale_handover()
 
+    # Absorb Music: a window a dead process left open is stamped ended, and
+    # the runner starts listening to the capture service. Nothing here
+    # starts playback — a window opens only on his press (AbsorbConfig
+    # ships `enabled: false`; scheduling is phase 3).
+    absorb.recover_orphaned_run()
+    absorb.install()
+
     # Launch background tasks
     tasks = [
         asyncio.create_task(_song_polling_loop(_on_state_update), name=_song_task_name),
@@ -256,6 +269,7 @@ app.include_router(gif_assets_router.router)
 app.include_router(scenes_v2_router.router)
 app.include_router(shape_map_router.router)
 app.include_router(sequencer_router.router)
+app.include_router(absorb_router.router)
 
 # ── SPECTRA (her OWN process since the S3 split) ──────────────────────────────
 # SPECTRA runs standalone (python -m spectra under spectra.service) so this

@@ -717,5 +717,15 @@ class Settings(BaseSettings):
     # "ledfx"   — LedFX song_detected WebSocket events (event-driven, faster)
     song_source: str = "spotify"
 
+    # ── Absorb Music (services/absorb.py) ─────────────────────────────────────
+    # River's parec offset governor publishes {seq, dropped_total_ms} here.
+    # A `seq` that moves during a capture means the governor dropped audio —
+    # a silent elision the gap check can never see — so Absorb re-queues the
+    # song. Unreadable / absent = unknown, which never condemns anything.
+    # His settings (the playlist, the bar, the schedule) are NOT here: they
+    # live in storage/absorb.json (models/absorb.py's AbsorbConfig).
+    absorb_governor_status_path: str = (
+        "/home/javi/spotify-stack/spotify-config/parec-governor.json")
+
 
 settings = Settings()
