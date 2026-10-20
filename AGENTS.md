@@ -10731,6 +10731,26 @@ against an exact window without guessing. Do not move the WAV write or
 librosa off-thread further on the strength of this report alone; the
 report's own words are "correlation, not proven."
 
+**The audio-shape URI index refreshes on a lookup MISS only when it could
+have missed something (2026-10-20, `data/absorb-music-plan/report.md`
+§4.2).** `services/audio_analyzer._build_shape_index`'s docstring is the
+binding statement. A miss used to re-parse every sidecar (142 ms, 3,294
+times on 2026-10-13, 468 s of event-loop blocking). Now a miss refreshes
+only when the directory's mtime moved, the last look was racy, or 30 s
+passed, and a refresh re-parses only sidecars whose (mtime, size) moved. So
+a sidecar another process writes is found on the next miss (a new directory
+entry), an in-place rewrite that changes a sidecar's `spotify_uri` is seen
+within 30 s, and an in-process `AudioShapeRecorder.save()` updates the
+index directly. **After a capture, the recapture playlist and the
+`needs_recapture` flag are touched only on real success**
+(`audio_shape_service._after_successful_capture`: shape + WAV + librosa
+landed, and a forced recapture COMMITTED); `recapture_playlist.remove_track`
+is blocking Spotify HTTP (call it via `asyncio.to_thread`) and caches the
+playlist id. A forced recapture's "≥1 anchor candidate" commit check applies
+only when the anchor pass ran (`settings.anchor_enabled`). Specs:
+`tests/test_audio_shape_index_miss.py`, `tests/test_recapture_playlist_cache.py`,
+`tests/test_capture_success_bookkeeping.py`.
+
 ## The music-analysis test bed (`/testbed`)
 
 Capability state and honest deployment status: `docs/SPECTRA_SPEC.md` §109.

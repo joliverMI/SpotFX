@@ -14,6 +14,8 @@ Selection modes:
 from __future__ import annotations
 import json
 import logging
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -34,24 +36,71 @@ def _me_id(sp: spotipy.Spotify) -> str:
 
 
 def find_playlist(sp: Optional[spotipy.Spotify] = None) -> Optional[str]:
-    """Return the playlist id of the existing SpotFX Recapture playlist, or None."""
+    """Return the playlist id of the existing SpotFX Recapture playlist, or None.
+
+    Pages through every one of his playlists, 50 at a time — callers that run
+    once per captured song go through `_cached_playlist_id` instead. Whatever
+    this finds (including "not there") is recorded in that cache."""
     sp = sp or get_spotify()
     user_id = _me_id(sp)
     offset = 0
+    found: Optional[str] = None
     while True:
         page = sp.user_playlists(user_id, limit=50, offset=offset)
         for pl in page.get("items", []):
             if pl.get("name") == PLAYLIST_NAME and (pl.get("owner") or {}).get("id") == user_id:
-                return pl["id"]
-        if not page.get("next"):
-            return None
+                found = pl["id"]
+                break
+        if found or not page.get("next"):
+            break
         offset += len(page.get("items", []))
+    _remember_playlist_id(found)
+    return found
+
+
+# The playlist's id does not change once it exists, so remove_track() — run
+# for every captured song — must not page through all his playlists to
+# re-learn it each time (report §7.1). A found id is trusted for
+# _PLAYLIST_FOUND_TTL_S; "not there" only for _PLAYLIST_ABSENT_TTL_S, because
+# the playlist is normally built by scripts/recapture_playlist.py, a separate
+# process whose creation this cache cannot hear about. In this process,
+# find_playlist(), find_or_create_playlist() and a failed removal update it
+# at once.
+_PLAYLIST_FOUND_TTL_S = 1800.0
+_PLAYLIST_ABSENT_TTL_S = 120.0
+_playlist_cache_lock = threading.Lock()
+_playlist_cache: Optional[tuple[Optional[str], float]] = None  # (id or None, monotonic expiry)
+
+
+def _remember_playlist_id(pid: Optional[str]) -> None:
+    global _playlist_cache
+    ttl = _PLAYLIST_FOUND_TTL_S if pid else _PLAYLIST_ABSENT_TTL_S
+    with _playlist_cache_lock:
+        _playlist_cache = (pid, time.monotonic() + ttl)
+
+
+def _forget_playlist_id() -> None:
+    global _playlist_cache
+    with _playlist_cache_lock:
+        _playlist_cache = None
+
+
+def _cached_playlist_id(sp: spotipy.Spotify, trust_absent: bool = True) -> Optional[str]:
+    """find_playlist(), answered from the cache while it is fresh. With
+    trust_absent=False a cached "not there" is looked up again — a caller
+    about to CREATE the playlist must not make a duplicate on a stale no."""
+    with _playlist_cache_lock:
+        cached = _playlist_cache
+    if (cached is not None and time.monotonic() < cached[1]
+            and (cached[0] or trust_absent)):
+        return cached[0]
+    return find_playlist(sp)
 
 
 def find_or_create_playlist(sp: Optional[spotipy.Spotify] = None) -> str:
     """Return the playlist id, creating an empty private playlist if missing."""
     sp = sp or get_spotify()
-    pid = find_playlist(sp)
+    pid = _cached_playlist_id(sp, trust_absent=False)
     if pid:
         return pid
     user_id = _me_id(sp)
@@ -62,6 +111,7 @@ def find_or_create_playlist(sp: Optional[spotipy.Spotify] = None) -> str:
         description=PLAYLIST_DESCRIPTION,
     )
     logger.info("Created %s (id=%s)", PLAYLIST_NAME, pl["id"])
+    _remember_playlist_id(pl["id"])
     return pl["id"]
 
 
@@ -136,11 +186,13 @@ def build(mode: str = "all") -> dict:
 
 
 def remove_track(spotify_uri: str) -> bool:
-    """Remove a single track from the recapture playlist. Returns True if removed."""
+    """Remove a single track from the recapture playlist. Returns True if removed.
+
+    BLOCKING (Spotify HTTP): an async caller runs it with asyncio.to_thread."""
     if not spotify_uri.startswith("spotify:track:"):
         return False
     sp = get_spotify()
-    pid = find_playlist(sp)
+    pid = _cached_playlist_id(sp)
     if not pid:
         return False
     try:
@@ -148,6 +200,9 @@ def remove_track(spotify_uri: str) -> bool:
         logger.info("Removed %s from recapture playlist", spotify_uri)
         return True
     except Exception as exc:
+        # The cached id may be the reason (the playlist was deleted and
+        # rebuilt elsewhere); look it up afresh next time.
+        _forget_playlist_id()
         logger.warning("Failed to remove %s from recapture playlist: %s", spotify_uri, exc)
         return False
 

@@ -12,6 +12,9 @@ MusicMarkDetector:
 from __future__ import annotations
 import json
 import logging
+import os
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -396,54 +399,138 @@ class MusicMarkDetector:
 
 
 def _build_shape_index() -> None:
-    """Scan every audio_shape sidecar JSON once and populate the URI →
-    filename index. Re-run on miss so newly-added files are picked up
-    without rebooting. The previous implementation globbed-and-parsed all
-    437+ files on every call (called once per Spotify poll AND once per
-    xcorr window), which was the dominant CPU cost of the worker process
-    (json.decoder.raw_decode at 85% in py-spy)."""
-    _audio_shape_index.clear()
-    for path in AUDIO_SHAPES_DIR.glob("*.json"):
-        # `*.json` ALSO matches `*.librosa.json` — those have the same
-        # spotify_uri field and would silently overwrite the audio-shape
-        # index entry, causing load_audio_shape_meta to point at a librosa
-        # file and fail to parse as AudioShapeMeta (returning None and
-        # spuriously triggering a fresh capture for songs that already have
-        # complete shapes). Skip them.
-        if path.name.endswith(".librosa.json"):
-            continue
+    """Bring the URI -> sidecar-stem index up to date with AUDIO_SHAPES_DIR.
+
+    The first call parses every sidecar (~142 ms for his ~1,260). After that
+    a call is INCREMENTAL: the directory is listed and each sidecar stat'ed
+    (~5 ms), and only a sidecar whose (mtime, size) moved since it was last
+    read is parsed again, so a refresh costs a listing plus the files that
+    actually changed. It used to re-parse all of them every time, and it ran
+    on every lookup MISS: 3,294 times on 2026-10-13, 468 s of event-loop
+    blocking (data/absorb-music-plan/report.md §4.2). A miss now only calls
+    this when `_index_may_be_stale()` says the directory could hold
+    something it has not seen.
+
+    The index is built into a fresh dict and REBOUND, never cleared in
+    place: a worker thread (the next-track pre-warm, an executor save)
+    can read it while another thread refreshes it, and a cleared dict reads
+    as a miss for every song."""
+    global _audio_shape_index, _index_files
+    with _index_lock:
+        # Stat the directory BEFORE listing it, so a sidecar written while
+        # the listing runs moves the mtime past the value recorded here.
+        dir_mtime = _dir_mtime_ns()
+        scan_wall_ns = time.time_ns()
         try:
-            # We only need the spotify_uri field — but json.loads parses
-            # the whole document. There's no compelling-enough win to
-            # parse-by-prefix here since the index is built once per session.
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        uri = data.get("spotify_uri") or ""
-        if uri:
-            _audio_shape_index[uri] = path.stem
-    _audio_shape_index_built[0] = True
-    logger.info("Audio shape index built: %d URIs", len(_audio_shape_index))
+            entries = list(os.scandir(AUDIO_SHAPES_DIR))
+        except OSError:
+            entries = []
+        previous = _index_files
+        files: dict[str, tuple[Optional[int], int, str]] = {}
+        index: dict[str, str] = {}
+        parsed = 0
+        for entry in entries:
+            name = entry.name
+            # `*.json` ALSO matches `*.librosa.json` — those have the same
+            # spotify_uri field and would silently overwrite the audio-shape
+            # index entry, causing load_audio_shape_meta to point at a librosa
+            # file and fail to parse as AudioShapeMeta (returning None and
+            # spuriously triggering a fresh capture for songs that already have
+            # complete shapes). Skip them.
+            if not name.endswith(".json") or name.endswith(".librosa.json"):
+                continue
+            try:
+                st = entry.stat()
+            except OSError:
+                continue
+            known = previous.get(name)
+            if known is not None and known[0] == st.st_mtime_ns and known[1] == st.st_size:
+                uri = known[2]
+            else:
+                try:
+                    data = json.loads(Path(entry.path).read_text(encoding="utf-8"))
+                except Exception:
+                    continue  # unrecorded, so the next refresh reads it again
+                parsed += 1
+                uri = data.get("spotify_uri") or ""
+            # A file modified within the racy window could be rewritten again
+            # inside the same timestamp tick without its (mtime, size) moving;
+            # don't trust this read next time.
+            trusted_mtime = (st.st_mtime_ns
+                             if scan_wall_ns - st.st_mtime_ns >= _INDEX_RACY_WINDOW_NS
+                             else None)
+            files[name] = (trusted_mtime, st.st_size, uri)
+            if uri:
+                index[uri] = name[:-len(".json")]
+        _audio_shape_index = index
+        _index_files = files
+        _index_dir_mtime_ns[0] = dir_mtime
+        _index_built_at[0] = time.monotonic()
+        # Same idea one level up: a directory changed within the racy window
+        # may change again without its mtime moving, so the next miss looks.
+        _index_racy[0] = (dir_mtime is not None
+                          and scan_wall_ns - dir_mtime < _INDEX_RACY_WINDOW_NS)
+        first = not _audio_shape_index_built[0]
+        _audio_shape_index_built[0] = True
+    if first or parsed:
+        logger.info("Audio shape index built: %d URIs (parsed %d of %d sidecars)",
+                    len(index), parsed, len(files))
+    else:
+        logger.debug("Audio shape index refreshed: %d URIs, nothing changed", len(index))
+
+
+def _dir_mtime_ns() -> Optional[int]:
+    try:
+        return AUDIO_SHAPES_DIR.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _index_may_be_stale() -> bool:
+    """Whether a lookup MISS should refresh the index. A new sidecar is a new
+    directory entry, so it moves the directory's mtime — that is the signal,
+    one stat (~7 us). The interval is the backstop for what the mtime cannot
+    see (a sidecar rewritten in place with a different spotify_uri)."""
+    if _index_racy[0]:
+        return True
+    if _dir_mtime_ns() != _index_dir_mtime_ns[0]:
+        return True
+    return time.monotonic() - _index_built_at[0] >= _INDEX_MISS_RESCAN_INTERVAL_S
+
+
+def _shape_filename_for(spotify_uri: str) -> Optional[str]:
+    """The sidecar stem for a URI, or None. Refreshes on a miss only when the
+    directory may have changed since the index last looked."""
+    if not _audio_shape_index_built[0]:
+        _build_shape_index()
+    filename = _audio_shape_index.get(spotify_uri)
+    if filename is None and _index_may_be_stale():
+        _build_shape_index()
+        filename = _audio_shape_index.get(spotify_uri)
+    return filename
 
 
 # Lookup index for audio shape metadata. Populated lazily; mutated by
-# AudioShapeRecorder.save() and the *_needs_recapture helpers below so
-# subsequent lookups stay O(1). Mirror of the profile_manager pattern.
+# AudioShapeRecorder.save() so a shape this process just wrote is found
+# without a refresh. `_index_files` is what the last refresh saw, per sidecar
+# name: (mtime_ns or None when untrusted, size, spotify_uri).
 _audio_shape_index: dict[str, str] = {}
 _audio_shape_index_built: list[bool] = [False]
+_index_files: dict[str, tuple[Optional[int], int, str]] = {}
+_index_dir_mtime_ns: list[Optional[int]] = [None]
+_index_built_at: list[float] = [0.0]
+_index_racy: list[bool] = [False]
+_index_lock = threading.Lock()
+_INDEX_MISS_RESCAN_INTERVAL_S = 30.0
+# Coarse enough for a filesystem with 1-2 s timestamps (git's "racily clean").
+_INDEX_RACY_WINDOW_NS = 2_000_000_000
 
 
 def load_audio_shape_meta(spotify_uri: str) -> Optional[AudioShapeMeta]:
     """Find and load the sidecar JSON for a given Spotify URI."""
-    if not _audio_shape_index_built[0]:
-        _build_shape_index()
-    filename = _audio_shape_index.get(spotify_uri)
+    filename = _shape_filename_for(spotify_uri)
     if filename is None:
-        # Maybe a new shape file was dropped in — rescan once.
-        _build_shape_index()
-        filename = _audio_shape_index.get(spotify_uri)
-        if filename is None:
-            return None
+        return None
     path = AUDIO_SHAPES_DIR / f"{filename}.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -466,14 +553,9 @@ def flag_needs_recapture(spotify_uri: str, reason: str) -> bool:
     `needs_recapture_flag_count` and `needs_recapture_flagged_at` update.
     """
     import datetime
-    if not _audio_shape_index_built[0]:
-        _build_shape_index()
-    filename = _audio_shape_index.get(spotify_uri)
+    filename = _shape_filename_for(spotify_uri)
     if filename is None:
-        _build_shape_index()
-        filename = _audio_shape_index.get(spotify_uri)
-        if filename is None:
-            return False
+        return False
     path = AUDIO_SHAPES_DIR / f"{filename}.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -490,14 +572,9 @@ def flag_needs_recapture(spotify_uri: str, reason: str) -> bool:
 def clear_needs_recapture(spotify_uri: str) -> bool:
     """Reset the recapture-suggested flag. Called by audio_shape_service after
     a fresh capture saves over the same URI. Returns True on success."""
-    if not _audio_shape_index_built[0]:
-        _build_shape_index()
-    filename = _audio_shape_index.get(spotify_uri)
+    filename = _shape_filename_for(spotify_uri)
     if filename is None:
-        _build_shape_index()
-        filename = _audio_shape_index.get(spotify_uri)
-        if filename is None:
-            return False
+        return False
     path = AUDIO_SHAPES_DIR / f"{filename}.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
