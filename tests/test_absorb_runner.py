@@ -736,6 +736,41 @@ def test_unpark_mid_run_survives_a_later_ledger_persist(world):
     assert on_disk.entries[a].lifetime_attempts == 1
 
 
+def test_unpark_mid_run_requeues_right_after_the_next_song_and_a_reconcile_never_duplicates_it(
+        world):
+    """A mid-run Retry must actually re-enter the active queue during THIS
+    run, not wait on `_reconcile` (which can never see it: unparking never
+    touches the Spotify playlist, and the URI is already known via
+    `self.source_uris` regardless). It lands at the requeue position —
+    right after the song at the head of the queue — and a later reconcile
+    (triggered by an unrelated playlist edit) must never add it a second
+    time nor drop it."""
+    a, b, c = uri(1), uri(2), uri(3)
+    world.gw.playlists[SOURCE_ID] = [a, b, c]
+    ledger = absorb_store.load_ledger()
+    from models.absorb import LedgerEntry
+    ledger.entries[c] = LedgerEntry(uri=c, parked=True, parked_reason="gap")
+    absorb_store.save_ledger(ledger)
+    absorb_store.save_config(absorb_store.load_config().model_copy(update={"warm_up": False}))
+    _go(world.runner.start())
+    assert world.run.queue == [a, b]       # C starts out parked, left out
+
+    async def scenario():
+        await world.arrive(a)
+        assert await world.runner.unpark(c) is True
+        assert world.run.queue[:2] == [b, c]      # right after the head of the queue
+        # an unrelated playlist edit now triggers a reconcile
+        world.gw.playlists[SOURCE_ID].append(uri(9))
+        world.gw._bump(SOURCE_ID)
+        await world.finish(a)
+        world.cap.recording_uri = None
+        await world.arrive(b)
+
+    _go(scenario())
+    run = world.run
+    assert run.queue.count(c) == 1 and c in run.queue
+
+
 def test_run_file_write_drops_a_stale_generation_behind_a_newer_save(tmp_path, monkeypatch):
     """A synchronous `save_run` (`_refuse`/`recover_orphaned_run`'s own
     call shape) can land while an earlier-prepared, async off-loop write

@@ -1271,7 +1271,10 @@ class AbsorbRunner:
 
     async def unpark(self, uri: str) -> bool:
         """His per-song Retry: the song is captured again from the next
-        window (or, mid-run, the next reconcile). True when it was parked.
+        window — or, mid-run, right away: `_requeue_unparked` puts it
+        straight into `run.queue` at the requeue position, with a fresh
+        per-run attempt count. True when it was parked.
+
         While THIS run holds the ledger in memory, mutate that SAME object
         and persist it through the ordered ledger persist — a direct disk
         edit here would be invisible to a run that never reloads its
@@ -1283,12 +1286,32 @@ class AbsorbRunner:
                 if not _unpark_entry(self._ledger, uri):
                     return False
                 await self._persist_ledger()
-                return True
-            ledger = absorb_store.load_ledger()
-            if not _unpark_entry(ledger, uri):
-                return False
-            absorb_store.save_ledger(ledger)
+            else:
+                ledger = absorb_store.load_ledger()
+                if not _unpark_entry(ledger, uri):
+                    return False
+                absorb_store.save_ledger(ledger)
+            if self.active:
+                self._requeue_unparked(uri)
             return True
+
+    def _requeue_unparked(self, uri: str) -> None:
+        """Put a just-unparked song back into play THIS SAME run, right
+        away. `_reconcile` can never do this on its own: unparking never
+        touches the Spotify playlist, so its snapshot-unchanged guard
+        always returns before looking at anything; and even a reconcile
+        triggered for some OTHER reason would find the URI already known
+        via `self.source_uris` — a parked song stays in the source
+        playlist (report §7), so it was never purged from there — and so
+        would never treat it as newly added either. Only act when it is
+        genuinely not already in play, and reset its per-run attempt
+        count so it gets a fresh `max_attempts` in this run."""
+        run = self.run
+        if uri not in self.source_uris or uri in run.queue or uri in self.awaiting \
+                or (run.now_playing is not None and run.now_playing.uri == uri):
+            return
+        run.attempts.pop(uri, None)
+        self._requeue(uri, run.queue[0] if run.queue else None)
 
     # ── endings ─────────────────────────────────────────────────────────────
 
