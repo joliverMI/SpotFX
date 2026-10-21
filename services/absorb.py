@@ -1909,10 +1909,19 @@ async def preview(deps: Optional[AbsorbDeps] = None) -> dict:
 
 # ── config edits ─────────────────────────────────────────────────────────────
 
-def apply_config_patch(patch: dict) -> AbsorbConfig:
+async def playlists(deps: Optional[AbsorbDeps] = None) -> list[dict]:
+    """His Spotify playlists, for linking one by NAME (Sonic's
+    `set_absorb_playlist`, spectra/services/absorb_console.py). Reads only."""
+    d = deps or runner.deps
+    return await d.to_thread(d.gateway.list_playlists)
+
+
+def apply_config_patch(patch: dict, *, save: bool = True) -> AbsorbConfig:
     """A PARTIAL update: only the keys sent change, every other key keeps
     its stored value. An unknown key is refused by name (a typo must never
-    read as success)."""
+    read as success). `save=False` validates exactly as a real edit does and
+    writes nothing — what lets Sonic ask "go ahead?" only about a change the
+    one validator would accept."""
     if not isinstance(patch, dict):
         raise ValueError("expected an object of settings")
     unknown = sorted(set(patch) - set(AbsorbConfig.model_fields))
@@ -1924,7 +1933,8 @@ def apply_config_patch(patch: dict) -> AbsorbConfig:
     bad = absorb_schedule.problems(cfg.windows)
     if bad:
         raise ValueError("; ".join(bad))
-    absorb_store.save_config(cfg)
+    if save:
+        absorb_store.save_config(cfg)
     return cfg
 
 

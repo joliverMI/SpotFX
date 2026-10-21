@@ -19,6 +19,11 @@
  *                    them) with a per-song Retry, and the songs whose
  *                    authored triggers a re-capture moved (§8.3 item 4).
  *
+ * The floating 💬 Sonic (phase 5, spectra/services/absorb_console.py) is
+ * the same chat as everywhere, scoped by its help topic to `sonic-absorb`;
+ * it reaches these very routes, so it can never get around a gate this
+ * page has.
+ *
  * Every sentence is decided in absorbSummary.ts; this file only lays them
  * out. No visible help circle — each control's label explains itself on
  * hover / long-press and carries its own help topic (the one-help-"?"-per-
@@ -28,6 +33,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import Icon from '../components/Icon';
 import InfoTip from '../components/InfoTip';
 import PowerButton from '../components/PowerButton';
+import SonicChatPopover from '../components/SonicChatPopover';
 import { useToast } from '../components/Toast';
 import {
   agoLabel, countTiles, DAY_LETTER, DAY_SHORT, DAYS, DEFAULT_WINDOW, forceRecaptureMeaning,
@@ -121,6 +127,7 @@ export default function AbsorbPage() {
         <AttentionCard cfg={cfg} open={open} run={run} earlier={earlier}
           parked={parkedQ.data?.parked ?? null} />
       </div>
+      <SonicChatPopover helpTopic="sonic-absorb" />
     </div>
   );
 }

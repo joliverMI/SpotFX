@@ -581,3 +581,19 @@ def test_the_lock_domain_widening_parses_from_its_structured_tool_result():
         _load("cli_transcript_synthetic_whole_song_applied.json"))
     assert [c["key"] for c in result["changes"]] == ["xcorr_whole_song_locked_every"]
     assert (result["changes"][0]["old"], result["changes"][0]["new"]) == (4, 2)
+
+
+def test_the_absorb_domain_widening_parses_from_its_structured_tool_result():
+    """Absorb Music's Sonic reach (spectra/services/absorb_console.py,
+    data/absorb-music-plan/report.md §10, phase 5) on the CURRENT manifest.
+    The point of this fixture is its SECOND call: an unconfirmed start
+    answers needs_confirmation, and nothing that has not happened may ever
+    be parsed as a change — the model's reply asking "shall I start it?"
+    notwithstanding."""
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(
+        _load("cli_transcript_synthetic_absorb_asks_first.json"))
+    assert [c["new"] for c in result["changes"]] == [{"max_attempts": 4}]
+    assert [r["status"] for r in result["rejected"]] == ["needs_confirmation"]
+    assert result["rejected"][0]["op"] == "start_absorb"

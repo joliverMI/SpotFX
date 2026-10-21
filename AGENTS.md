@@ -10751,7 +10751,7 @@ only when the anchor pass ran (`settings.anchor_enabled`). Specs:
 `tests/test_audio_shape_index_miss.py`, `tests/test_recapture_playlist_cache.py`,
 `tests/test_capture_success_bookkeeping.py`.
 
-## ABSORB MUSIC — unattended capture of a linked playlist (phases 1-4)
+## ABSORB MUSIC — unattended capture of a linked playlist (phases 1-5)
 
 Plan: `/home/javi/fleet-spotfx/data/absorb-music-plan/report.md` (his six
 asks, his five answers in §0, phases in §12). **`services/absorb.py`'s
@@ -10889,6 +10889,29 @@ Phase 4 — the interface (2026-10-21): SPECTRA's `/absorb` (Engine ▾ Absorb,
   on a sideways scroll or a page error — never the vite dev server, whose
   proxy would forward an unmocked request to the live :8000. Help section
   `absorb-music` and its five topics.
+
+Phase 5 — Sonic (2026-10-21): domain `absorb`, `spectra/services/
+absorb_console.py` (its docstring is the binding statement; the
+`absorb-music` skill is the cold-start map), in `lock_console.py`'s shape —
+every op reaches SpotFX's own routes over HTTP, so a start through Sonic is
+`POST /api/absorb/start` with every refusal the page meets, in its words.
+Three things:
+
+- **ASKING FIRST IS A TWO-CALL PROTOCOL**: a write that newly lets Absorb act
+  on the house or his playlists without a press (start, force recapture ON,
+  the schedule newly opening windows, the playlist changing while it is on,
+  running-while-asleep back ON, Recently Captured's cap lowered) answers
+  `needs_confirmation` + a single-use `confirm_id` bound to the op, its
+  arguments and his config as they were; only the second call acts.
+- **ONE VALIDATOR, DRY-RUN FIRST**: `PUT /api/absorb/config?dry_run=true`
+  validates exactly as an edit and writes nothing, so he is never asked
+  about a change that would be refused. `GET /api/absorb/playlists` (his
+  library, with `editable`) is what a playlist is linked from, by EXACT name
+  only — a close name is refused naming the candidate.
+- **A NEW AbsorbConfig FIELD owes Sonic** a place in `SETTING_KEYS` (or its
+  own op) or a named line on the module docstring's off-limits list.
+  Spec: `tests/test_absorb_console.py` (the real router over the fake world),
+  `scripts/check_absorb_page.mjs` §5; help topic `sonic-absorb`.
 
 ## The music-analysis test bed (`/testbed`)
 
