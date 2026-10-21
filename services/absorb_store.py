@@ -117,6 +117,30 @@ def _load_runs_file() -> None:
                        latest_id=latest.id if latest else None, earlier=earlier)
 
 
+def prepare_run_write(run: AbsorbRun) -> dict:
+    """The cheap, synchronous half of a run save: bound `run` in place and
+    fold it into the cache (pushing a changed previous run into history),
+    returning the dict ready to write. Callers that want the write OFF the
+    event loop (the runner's own `_persist_run_record`) do this part on the
+    loop and hand the returned dict to `write_run_file` via `to_thread` —
+    so the only thing a worker thread ever touches is the file itself."""
+    with _lock:
+        _load_runs_file()
+        prev = _runs_cache["latest"]
+        if prev is not None and prev.id != run.id:
+            _runs_cache["earlier"] = ([compact(prev)] + _runs_cache["earlier"])[:RUN_HISTORY_MAX]
+        _bound(run)
+        data = {"run": run.model_dump(mode="json"), "earlier": _runs_cache["earlier"]}
+        _runs_cache.update(latest=run, latest_id=run.id)
+        return data
+
+
+def write_run_file(data: dict) -> None:
+    """The I/O-only half of a run save — safe to call from a worker thread,
+    since `data` is already a plain dict with no shared mutable state."""
+    _write(RUN_FILE, data)
+
+
 def _bound(run: AbsorbRun) -> AbsorbRun:
     for name in ("captured", "failed", "parked", "skipped", "realigned"):
         items = getattr(run, name)
@@ -145,15 +169,7 @@ def earlier_runs() -> list[dict]:
 def save_run(run: AbsorbRun) -> None:
     """Write `run` as the latest. A run with a new id pushes the previous
     latest into the compact history."""
-    with _lock:
-        _load_runs_file()
-        prev = _runs_cache["latest"]
-        if prev is not None and prev.id != run.id:
-            _runs_cache["earlier"] = ([compact(prev)] + _runs_cache["earlier"])[:RUN_HISTORY_MAX]
-        _bound(run)
-        _write(RUN_FILE, {"run": run.model_dump(mode="json"),
-                          "earlier": _runs_cache["earlier"]})
-        _runs_cache.update(latest=run, latest_id=run.id)
+    write_run_file(prepare_run_write(run))
 
 
 # ── ledger (per song, across runs) ───────────────────────────────────────────
@@ -171,5 +187,13 @@ def load_ledger() -> AbsorbLedger:
 
 
 def save_ledger(ledger: AbsorbLedger) -> None:
+    save_ledger_dict(ledger.model_dump(mode="json"))
+
+
+def save_ledger_dict(data: dict) -> None:
+    """The dict-only half of a ledger save — the runner's own
+    `_persist_ledger` dumps the in-memory ledger to a dict on the event
+    loop (cheap) and hands this off to a worker thread, so a worker
+    thread never touches the shared, still-mutating model object."""
     with _lock:
-        _write(LEDGER_FILE, ledger.model_dump(mode="json"))
+        _write(LEDGER_FILE, data)

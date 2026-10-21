@@ -518,6 +518,33 @@ def test_a_failure_while_draining_brings_the_song_back(world):
     assert world.last_play[0] == uri(1)
 
 
+def test_send_window_drains_when_every_remaining_song_is_already_captured_by_send_time(
+        tmp_path, monkeypatch):
+    """A race, not the common empty-queue path: between the queue build and
+    this particular send, EVERY song still in the window gets captured out
+    of band (his own listening on another device). `_send_window` then has
+    nothing left to send and must drain exactly as a genuinely empty queue
+    would — never leave the run "running" with nothing driving it forward.
+    `max_attempts=1` parks A outright (rather than requeuing it) so B is
+    the only thing left in the queue for this send."""
+    w = World(tmp_path, monkeypatch, warm_up=False, max_attempts=1)
+    a, b = uri(1), uri(2)
+    w.gw.playlists[SOURCE_ID] = [a, b]
+    _go(w.runner.start())
+
+    async def scenario():
+        await w.arrive(a)
+        # B passes the bar out of band before absorb ever gets to send it
+        w.disk.set(b, "skip", head_ms=0)
+        await w.condemn(a, "gap")
+
+    _go(scenario())
+    assert w.run.state == "ended" and w.run.end_reason == "queue_done"
+    assert w.run.queue == [] and w.run.now_playing is None
+    assert any(e.uri == b and e.reason == "captured_meanwhile" for e in w.run.skipped)
+    assert w.run.parked[0].uri == a
+
+
 # ── his playlist edits mid-run (D6) ─────────────────────────────────────────
 
 def test_songs_he_adds_join_the_end_and_songs_he_removes_leave(world):
@@ -612,6 +639,71 @@ def test_a_parked_song_is_left_out_until_he_retries_it(world):
     assert absorb.unpark(uri(1)) is False
     _go(world.runner.start())
     assert uri(1) in world.run.queue
+
+
+# ── concurrent ledger writes (one in-memory ledger, persisted off the loop) ─
+
+def test_a_failure_resolved_mid_filing_keeps_both_the_filing_flags_and_the_attempt_increment(
+        tmp_path, monkeypatch):
+    """`_file_locked` loads the ledger, awaits several Spotify calls, then
+    saves; `_resolve_failure` can load, mutate and save the SAME ledger
+    while that filing is still in flight. Before the runner held ONE
+    in-memory ledger for the whole run, whichever of the two saved LAST
+    would silently discard the other's write (here: B's filing flags, or
+    A's failure/attempt count) — a lost update, not a crash, so nothing
+    but reading the file back afterward would ever catch it."""
+    w = World(tmp_path, monkeypatch, warm_up=False)
+    a, b = uri(1), uri(2)
+    w.gw.playlists[SOURCE_ID] = [a, b]
+
+    paused = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def gating_to_thread(fn, *args):
+        if getattr(fn, "__name__", "") == "find_or_create_playlist":
+            paused.set()
+            await resume.wait()
+        return fn(*args)
+
+    w.deps.to_thread = gating_to_thread
+
+    spawned: list[asyncio.Task] = []
+    real_spawn = w.runner._spawn
+
+    def recording_spawn(coro):
+        task = real_spawn(coro)
+        if task is not None:
+            spawned.append(task)
+        return task
+
+    monkeypatch.setattr(w.runner, "_spawn", recording_spawn)
+
+    async def scenario():
+        await w.runner.start()
+        await w.arrive(a)
+        # B's filing starts as a background task (the same shape a
+        # committed capture's own `self._spawn(self._file(...))` takes) and
+        # pauses mid-flight, right at its Spotify call.
+        w.runner._spawn(w.runner._file([b], "skipped"))
+        await paused.wait()
+        stuck = next(t for t in spawned if not t.done())
+        # while B's filing is still mid-Spotify-call, A's capture fails
+        w.cap.condemn(a, "gap")
+        while True:
+            pending = [t for t in w.runner._tasks if t is not stuck and not t.done()]
+            if not pending:
+                break
+            await asyncio.gather(*pending, return_exceptions=True)
+        resume.set()
+        await w.runner.settle()
+
+    _go(scenario())
+
+    ledger = absorb_store.load_ledger()
+    assert ledger.entries[b].filing.rc_added and ledger.entries[b].filing.source_removed
+    assert ledger.entries[b].filing.done_ms
+    assert ledger.entries[a].lifetime_attempts == 1
+    assert ledger.entries[a].last_failure == "gap"
 
 
 # ── recovery, config, brief ─────────────────────────────────────────────────

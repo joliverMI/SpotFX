@@ -63,8 +63,8 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from models.absorb import (
-    AbsorbConfig, AbsorbRun, Filing, HeadTally, LedgerEntry, NowPlaying,
-    RealignEntry, SongEntry,
+    AbsorbConfig, AbsorbLedger, AbsorbRun, Filing, HeadTally, LedgerEntry,
+    NowPlaying, RealignEntry, SongEntry,
 )
 from services import absorb_bar, absorb_store
 from services.capture_watch import Condemnation, governor_moved
@@ -268,10 +268,18 @@ class AbsorbRunner:
         self.run: Optional[AbsorbRun] = None
         self._lock: Optional[asyncio.Lock] = None
         self._file_lock: Optional[asyncio.Lock] = None
+        # Serialize the two off-loop persists (below) so a slower write can
+        # never land its older snapshot after a faster one's newer write.
+        self._ledger_persist_lock: Optional[asyncio.Lock] = None
+        self._run_persist_lock: Optional[asyncio.Lock] = None
         self._tasks: set[asyncio.Task] = set()
         self._reset_live_state()
 
     def _reset_live_state(self) -> None:
+        # The ONE in-memory ledger for this run — loaded once (`_load_ledger_
+        # once`), mutated only on the event loop, never reloaded from disk
+        # mid-run. See `_persist_ledger`'s own docstring for why.
+        self._ledger: Optional[AbsorbLedger] = None
         self.cfg: AbsorbConfig = AbsorbConfig()
         self.device_id: Optional[str] = None
         self.source_id: str = ""
@@ -327,7 +335,7 @@ class AbsorbRunner:
         if self._on_outcome_sync not in cap.outcome_listeners:
             cap.outcome_listeners.append(self._on_outcome_sync)
 
-    def _spawn(self, coro) -> None:
+    def _spawn(self, coro) -> Optional[asyncio.Task]:
         async def guarded():
             try:
                 await coro
@@ -338,10 +346,11 @@ class AbsorbRunner:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             coro.close()
-            return
+            return None
         task = loop.create_task(guarded())
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+        return task
 
     async def settle(self) -> None:
         """Wait for every task the runner spawned (tests, shutdown)."""
@@ -357,10 +366,67 @@ class AbsorbRunner:
     def _persist(self) -> None:
         if self.run is None:
             return
-        try:
-            absorb_store.save_run(self.run)
-        except Exception as exc:
-            logger.warning("Absorb: could not save the run record: %s", exc)
+        self._spawn(self._persist_run_record())
+
+    async def _persist_run_record(self) -> None:
+        """Bound + cache + dump `self.run` (cheap CPU, on the loop, inside
+        the lock) and write the result off the loop. Whichever call is LAST
+        to hold the lock always serializes the freshest `self.run` state,
+        however task scheduling actually orders several of these — the same
+        guarantee `_persist_ledger` keeps for the ledger."""
+        if self._run_persist_lock is None:
+            self._run_persist_lock = asyncio.Lock()
+        async with self._run_persist_lock:
+            if self.run is None:
+                return
+            data = absorb_store.prepare_run_write(self.run)
+            try:
+                await self.deps.to_thread(absorb_store.write_run_file, data)
+            except Exception as exc:
+                logger.warning("Absorb: could not save the run record: %s", exc)
+
+    async def _load_ledger_once(self) -> AbsorbLedger:
+        """The ONE in-memory ledger for this run, loaded once off the event
+        loop. Call this only at the start of a run (`_open_queue`); every
+        later read/mutate — `_pick_warm_up`, `_file_locked`, `_resolve_
+        failure`, `_judge_committed`, `_reconcile` — uses `_ledger_ref()`,
+        which returns this SAME object, never a fresh disk copy. That is
+        what closes the lost-update race `_file_locked` used to have: it
+        loads, awaits several Spotify calls, then saves — and while it is
+        in flight, `_resolve_failure`/`_judge_committed` used to load their
+        OWN fresh copy, mutate it, and save it, discarding whatever
+        `_file_locked` was still building up (or vice versa)."""
+        if self._ledger is None:
+            self._ledger = await self.deps.to_thread(absorb_store.load_ledger)
+        return self._ledger
+
+    def _ledger_ref(self) -> AbsorbLedger:
+        """The in-memory ledger `_load_ledger_once` already loaded for this
+        run. A defensive fallback (a fresh disk read) covers only the
+        shouldn't-happen case of a caller reaching this before a run ever
+        opened its queue."""
+        if self._ledger is None:
+            self._ledger = absorb_store.load_ledger()
+        return self._ledger
+
+    async def _persist_ledger(self) -> None:
+        """Snapshot the in-memory ledger and write it off the loop. The
+        snapshot is taken INSIDE the lock, right before the write, so
+        whichever persist is physically LAST to hold the lock always wins
+        with the then-current (always freshest, since mutations only ever
+        accumulate on the one shared `self._ledger` object) state — this
+        holds regardless of the order several spawned persists actually
+        get scheduled in."""
+        if self._ledger_persist_lock is None:
+            self._ledger_persist_lock = asyncio.Lock()
+        async with self._ledger_persist_lock:
+            if self._ledger is None:
+                return
+            snapshot = self._ledger.model_dump(mode="json")
+            try:
+                await self.deps.to_thread(absorb_store.save_ledger_dict, snapshot)
+            except Exception as exc:
+                logger.warning("Absorb: could not save the ledger: %s", exc)
 
     def _title(self, uri: str) -> str:
         if self.run is not None:
@@ -484,7 +550,7 @@ class AbsorbRunner:
         tracks = await self._read_source()
         uris = [t["uri"] for t in tracks]
         verdicts = await self._classify_all(uris)
-        ledger = absorb_store.load_ledger()
+        ledger = await self._load_ledger_once()
         parked = {u for u, e in ledger.entries.items() if e.parked}
         skips = [v for v in verdicts if v.kind == "skip"]
         work = [v for v in verdicts if v.kind != "skip" and v.uri not in parked]
@@ -519,7 +585,7 @@ class AbsorbRunner:
         if skip_uris:
             return skip_uris[0]
         d, cfg = self.deps, self.cfg
-        ledger = absorb_store.load_ledger()
+        ledger = self._ledger_ref()
         candidates = [u for u, e in ledger.entries.items()
                       if e.filing is not None and e.filing.done_ms]
 
@@ -565,7 +631,7 @@ class AbsorbRunner:
 
     async def _file_locked(self, uris: list[str], kind: str) -> None:
         d, cfg = self.deps, self.cfg
-        ledger = absorb_store.load_ledger()
+        ledger = self._ledger_ref()
         now = d.now_ms()
         include_rc = kind == "captured" or cfg.recently_captured_includes_skipped
         to_add: list[str] = []
@@ -581,7 +647,7 @@ class AbsorbRunner:
                 to_add.append(u)
             if not f.source_removed:
                 to_remove.append(u)
-        absorb_store.save_ledger(ledger)
+        await self._persist_ledger()
 
         if to_add:
             try:
@@ -615,7 +681,7 @@ class AbsorbRunner:
             f = ledger.entries[u].filing
             if f is not None and f.source_removed and (f.rc_added or not include_rc):
                 f.done_ms = d.now_ms()
-        absorb_store.save_ledger(ledger)
+        await self._persist_ledger()
 
     # ── playback ────────────────────────────────────────────────────────────
 
@@ -656,6 +722,11 @@ class AbsorbRunner:
             self._spawn(self._file(done, "skipped"))
         uris = ([lead] if lead else []) + head
         if not uris:
+            # every remaining queued song passed the bar between the queue
+            # build/reconcile and this send — nothing is left to play. Drain
+            # exactly as a genuinely empty queue would, so the run is never
+            # left "running" with nothing driving it forward.
+            await self._drain()
             return False
         self.modes.update(modes)
         force = {u for u in head if modes.get(u) == "recapture"}
@@ -952,7 +1023,7 @@ class AbsorbRunner:
         run.counts.failed += 1
         if reason == "head_missed":
             run.counts.head_missed += 1
-        ledger = absorb_store.load_ledger()
+        ledger = self._ledger_ref()
         e = ledger.entries.get(att.uri) or LedgerEntry(uri=att.uri, title=self._title(att.uri))
         e.lifetime_attempts += 1
         e.last_failure = reason
@@ -971,7 +1042,10 @@ class AbsorbRunner:
             self._requeue(att.uri, att.follower)
             run.counts.requeued += 1
         ledger.entries[att.uri] = e
-        absorb_store.save_ledger(ledger)
+        # sync — spawn the write rather than await it (`_resolve_failure`
+        # is called synchronously from several places); the persist lock
+        # still serializes it against every other save.
+        self._spawn(self._persist_ledger())
 
     def _requeue(self, uri: str, follower: Optional[str]) -> None:
         """Back in the queue right AFTER the song that followed it — his
@@ -1072,13 +1146,13 @@ class AbsorbRunner:
         run.captured.append(self._entry(att.uri, attempt=att.number, mode=att.mode,
                                         head_ms=verdict.head_ms))
         self.distrust.discard(att.uri)
-        ledger = absorb_store.load_ledger()
+        ledger = self._ledger_ref()
         e = ledger.entries.get(att.uri) or LedgerEntry(uri=att.uri, title=self._title(att.uri))
         e.lifetime_attempts += 1
         e.last_attempt_ms = d.now_ms()
         e.parked = False
         ledger.entries[att.uri] = e
-        absorb_store.save_ledger(ledger)
+        await self._persist_ledger()
         self._log(f"captured {self._title(att.uri) or att.uri} "
                   f"(head at {verdict.head_ms} ms, {att.mode})")
         self._spawn(self._file([att.uri], "captured"))
@@ -1137,7 +1211,7 @@ class AbsorbRunner:
                 if not added:
                     self._persist()
                     return
-                ledger = absorb_store.load_ledger()
+                ledger = self._ledger_ref()
                 verdicts = await self._classify_all(added)
                 skips = [v for v in verdicts if v.kind == "skip"]
                 for v in verdicts:
