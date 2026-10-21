@@ -3,7 +3,7 @@ SpotFX — Absorb Music data model.
 
 Absorb Music plays a linked Spotify playlist on Serenity, unattended, so that
 every song's audio shape gets captured (data/absorb-music-plan/report.md,
-phase 1 — the runner). Three stores, each with one job:
+phase 1 — the runner). Four stores, each with one job:
 
   AbsorbConfig  storage/absorb.json         HIS settings. Only an edit writes
                                             it; a run never does.

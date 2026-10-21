@@ -10857,15 +10857,16 @@ Phase 3 — scheduling and the clean close (2026-10-20):
 
 Tests: `tests/absorb_world.py` (fake Spotify / capture / disk / clock — reuse
 it), `tests/test_absorb_schedule.py` (house time, the shipped-off week, the
-three phase-3 acceptances, the close's edges), `tests/test_absorb_runner.py`, `tests/test_absorb_capture_hooks.py` (the
-real ingest loop; a gap at 0:30 skips within one frame),
-`tests/test_absorb_bar.py`, `tests/test_absorb_silence.py` (the fake house:
-snapserver + HA + the volume automation, which can reach the capture client,
-drop a room in mid-window or play an announcement),
-`tests/test_absorb_house_audio.py` (the transports underneath — `ha_client`,
-`snapcast_status`, `house_audio` — against mocked HTTP only, never a live
-house), `tests/test_absorb_stand_down.py` (the lights, from the show side);
-his real library, read-only: `scripts/check_absorb_classify.py`. A test that drives
+three phase-3 acceptances, the close's edges), `tests/test_absorb_runner.py`,
+`tests/test_absorb_capture_hooks.py` (the real ingest loop; a gap at 0:30
+skips within one frame), `tests/test_absorb_bar.py`, `tests/
+test_absorb_silence.py` (the fake house: snapserver + HA + the volume
+automation, which can reach the capture client, drop a room in mid-window
+or play an announcement), `tests/test_absorb_house_audio.py` (the
+transports underneath — `ha_client`, `snapcast_status`, `house_audio` —
+against mocked HTTP only, never a live house), `tests/
+test_absorb_stand_down.py` (the lights, from the show side); his real
+library, read-only: `scripts/check_absorb_classify.py`. A test that drives
 `audio_shape_service.on_track_change` with analysis on must stub
 `pcm_ring_buffer.ensure_alive` or it opens a real audio stream.
 
