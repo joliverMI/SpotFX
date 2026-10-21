@@ -20,8 +20,12 @@
 //   3. The shipped state: nothing linked, so Start is disabled and says
 //      why; a pasted ALBUM link is refused with no write; a playlist link
 //      is saved canonical; Start (once linked) asks before it presses.
-//   4. The six help topics exist, are each linked from the page's own
-//      controls, and the menu row's "?" maps /absorb to `absorb-music`.
+//   4. The six help topics are real HELP_SECTIONS entries, the menu row's
+//      "?" maps /absorb to `absorb-music`, /absorb carries its own icon in
+//      the Engine group — and, behaviourally, hovering the page's own
+//      controls actually opens each of the six topics (never a dead or
+//      misdirected InfoTip): every control is hovered for real and the
+//      portaled help panel's rendered <HelpLink> href is read back.
 //
 // Run: node scripts/check_absorb_page.mjs
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
@@ -53,6 +57,18 @@ async function bundle(entrySrc, name) {
   });
   if (r.errors.length) throw new Error(r.errors.map((e) => e.text).join('; '));
   return require(out);
+}
+
+// A pure-data TS module with no runtime imports (helpContent.ts,
+// routeTopics.ts, navGroups.ts — whose only import is `import type`, which
+// erases — and iconRegistry.ts) needs no bundling, just the transform +
+// require check_nav_menu.mjs's §1 already established for navGroups.ts.
+function loadData(file, name) {
+  const code = esbuild.transformSync(readFileSync(file, 'utf8'), { loader: 'ts', format: 'cjs' }).code;
+  const tmp = mkdtempSync(join(tmpdir(), `absorb-${name}-`));
+  const outFile = join(tmp, 'out.cjs');
+  writeFileSync(outFile, code);
+  return require(outFile);
 }
 
 // ── 1. the words ─────────────────────────────────────────────────────────
@@ -141,13 +157,15 @@ const S = await bundle(`export * from ${JSON.stringify(join(web, 'src/absorb/abs
 
 // ── 2-3. the page, mounted ───────────────────────────────────────────────
 let jsdomMod;
+let hasJsdom = false;
 try {
   jsdomMod = require('jsdom');
 } catch {
-  console.log('\njsdom not installed in spectra/web/node_modules (dev-only) — skipping §2-3.');
+  console.log('\njsdom not installed in spectra/web/node_modules (dev-only) — skipping §2-4b.');
   report();
 }
 const { JSDOM } = jsdomMod;
+hasJsdom = true;
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/absorb' });
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
@@ -404,23 +422,64 @@ console.log('\n§3 the shipped state — nothing linked, nothing ever run');
     'a Yes posts /start as his press');
   P.unmount();
 }
-report();
+await report();
 
-function report() {
-  // ── 4. the help topics and the route's "?" ─────────────────────────────
-  console.log('\n§4 the six help topics: written, and each linked from its own control');
-  const page = readFileSync(join(web, 'src/absorb/AbsorbPage.tsx'), 'utf8');
-  const help = readFileSync(join(web, 'src/help/helpContent.ts'), 'utf8');
+async function report() {
+  // ── 4. the six help topics: content, route mapping, and the page's own
+  //      controls actually opening them ─────────────────────────────────
+  console.log('\n§4 the six help topics: HELP_SECTIONS, the route\'s "?", and every control');
   const topics = ['absorb-music', 'absorb-silence', 'absorb-failures', 'absorb-schedule',
     'absorb-already-captured', 'absorb-sleeping'];
-  for (const id of topics) {
-    ok(help.includes(`id: '${id}'`), `help topic "${id}" exists in helpContent.ts`);
-    ok(page.includes(`topic="${id}"`), `and a control on the Absorb page links it`);
+
+  const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
+  const knownIds = new Set();
+  for (const section of HELP_SECTIONS) {
+    knownIds.add(section.id);
+    for (const e of section.entries ?? []) knownIds.add(e.id);
+    for (const sub of section.subsections ?? []) {
+      knownIds.add(sub.id);
+      for (const e of sub.entries ?? []) knownIds.add(e.id);
+    }
   }
-  const routes = readFileSync(join(web, 'src/help/routeTopics.ts'), 'utf8');
-  ok(/\['\/absorb', 'absorb-music'\]/.test(routes), 'the menu row\'s "?" opens absorb-music on /absorb');
-  const nav = readFileSync(join(web, 'src/nav/navGroups.ts'), 'utf8');
-  ok(/to: '\/absorb', label: 'Absorb'.*icon: 'absorb'/.test(nav), '/absorb is in the Engine menu with its own icon');
+  for (const id of topics) ok(knownIds.has(id), `"${id}" is a real section/entry in HELP_SECTIONS`);
+
+  const { topicForPath } = loadData(join(web, 'src/help/routeTopics.ts'), 'routes');
+  ok(topicForPath('/absorb') === 'absorb-music', 'the menu row\'s "?" opens absorb-music on /absorb');
+
+  const { NAV_GROUPS, activeGroupId } = loadData(join(web, 'src/nav/navGroups.ts'), 'nav');
+  const { ICONS } = loadData(join(web, 'src/components/iconRegistry.ts'), 'icons');
+  const engine = NAV_GROUPS.find((g) => g.id === 'engine');
+  const absorbItem = engine?.items?.find((it) => it.to === '/absorb');
+  ok(!!absorbItem && absorbItem.icon === 'absorb', '/absorb is in the Engine menu with icon "absorb"');
+  ok(activeGroupId('/absorb') === 'engine', 'activeGroupId("/absorb") === "engine"');
+  ok(typeof ICONS.absorb === 'string' && ICONS.absorb.length > 0, 'ICONS.absorb is a real, non-empty icon path');
+
+  if (hasJsdom) {
+    // Behaviour, not text: hover every real InfoTip-wrapped control on the
+    // mounted page and read back the HelpLink <a href> its open panel
+    // actually renders — proving each topic is reachable from the page
+    // itself, not merely present in a string nearby. A dead/commented-out/
+    // misdirected InfoTip would leave its topic missing from `reached`.
+    world = newWorld('running');
+    const c = P.mount();
+    await P.settle();
+    const tips = [...c.querySelectorAll('.info-tip')];
+    ok(tips.length > 0, 'the page renders InfoTip-wrapped controls to hover');
+    for (const tip of tips) {
+      P.actSync(() => tip.dispatchEvent(new dom.window.MouseEvent('mouseover', { bubbles: true, cancelable: true })));
+    }
+    const reached = new Set(
+      [...document.querySelectorAll('.info-tip-panel a.help-link')]
+        .map((a) => new URLSearchParams((a.getAttribute('href') || '').split('?')[1] || '').get('topic'))
+        .filter(Boolean),
+    );
+    ok(topics.every((id) => reached.has(id)) && topics.length === reached.size,
+      `hovering the page's own controls opens exactly the six absorb topics (${[...reached].sort().join(', ')})`);
+    P.unmount();
+  } else {
+    console.log('  (jsdom unavailable — skipping the hover-behaviour half of §4)');
+  }
+
   console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);
   process.exit(failures === 0 ? 0 : 1);
 }
