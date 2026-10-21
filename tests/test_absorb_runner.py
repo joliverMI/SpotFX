@@ -635,8 +635,8 @@ def test_a_parked_song_is_left_out_until_he_retries_it(world):
     _go(world.runner.start())
     assert world.run.queue == [uri(2)]
     _go(world.runner.stop())
-    assert absorb.unpark(uri(1)) is True
-    assert absorb.unpark(uri(1)) is False
+    assert _go(absorb.unpark(uri(1))) is True
+    assert _go(absorb.unpark(uri(1))) is False
     _go(world.runner.start())
     assert uri(1) in world.run.queue
 
@@ -704,6 +704,52 @@ def test_a_failure_resolved_mid_filing_keeps_both_the_filing_flags_and_the_attem
     assert ledger.entries[b].filing.done_ms
     assert ledger.entries[a].lifetime_attempts == 1
     assert ledger.entries[a].last_failure == "gap"
+
+
+def test_unpark_mid_run_survives_a_later_ledger_persist(world):
+    """Retry (`unpark`) mid-run must mutate the SAME in-memory ledger this
+    run holds — a direct disk edit would be invisible to a run that never
+    reloads its ledger from disk, and the run's own very next ledger-
+    mutating persist (here: a different song's failure) would silently
+    revert it, since that persist writes the whole (stale) in-memory
+    ledger back over whatever `unpark` wrote underneath it."""
+    a, b = uri(1), uri(2)
+    world.gw.playlists[SOURCE_ID] = [a, b]
+    ledger = absorb_store.load_ledger()
+    from models.absorb import LedgerEntry
+    ledger.entries[b] = LedgerEntry(uri=b, parked=True, parked_reason="gap")
+    absorb_store.save_ledger(ledger)
+    absorb_store.save_config(absorb_store.load_config().model_copy(update={"warm_up": False}))
+    _go(world.runner.start())
+    assert world.run.queue == [a]      # B starts out parked, left out
+
+    async def scenario():
+        assert await world.runner.unpark(b) is True
+        # a DIFFERENT song's failure now persists the (shared) ledger
+        await world.arrive(a)
+        await world.condemn(a, "gap")
+
+    _go(scenario())
+
+    on_disk = absorb_store.load_ledger()
+    assert on_disk.entries[b].parked is False
+    assert on_disk.entries[a].lifetime_attempts == 1
+
+
+def test_run_file_write_drops_a_stale_generation_behind_a_newer_save(tmp_path, monkeypatch):
+    """A synchronous `save_run` (`_refuse`/`recover_orphaned_run`'s own
+    call shape) can land while an earlier-prepared, async off-loop write
+    is still in flight. The earlier write must never clobber the later
+    one just because its own `os.replace()` happens to run last."""
+    monkeypatch.setattr(absorb_store, "RUN_FILE", tmp_path / "absorb_run.json")
+    from models.absorb import AbsorbRun
+    old_run = AbsorbRun(id="r1", state="running")
+    gen_old, data_old = absorb_store.prepare_run_write(old_run)
+    new_run = AbsorbRun(id="r1", state="ended", end_reason="stopped")
+    absorb_store.save_run(new_run)                       # the newer save lands first
+    absorb_store.write_run_file(gen_old, data_old)        # the stale write arrives last
+    stored = absorb_store.latest_run()
+    assert stored.state == "ended" and stored.end_reason == "stopped"
 
 
 # ── recovery, config, brief ─────────────────────────────────────────────────

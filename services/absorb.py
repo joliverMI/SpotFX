@@ -373,15 +373,18 @@ class AbsorbRunner:
         the lock) and write the result off the loop. Whichever call is LAST
         to hold the lock always serializes the freshest `self.run` state,
         however task scheduling actually orders several of these — the same
-        guarantee `_persist_ledger` keeps for the ledger."""
+        guarantee `_persist_ledger` keeps for the ledger. `write_run_file`'s
+        own generation check extends that guarantee past this lock too, to
+        cover `_refuse`/`recover_orphaned_run`'s synchronous `save_run`
+        calls, which never acquire it."""
         if self._run_persist_lock is None:
             self._run_persist_lock = asyncio.Lock()
         async with self._run_persist_lock:
             if self.run is None:
                 return
-            data = absorb_store.prepare_run_write(self.run)
+            gen, data = absorb_store.prepare_run_write(self.run)
             try:
-                await self.deps.to_thread(absorb_store.write_run_file, data)
+                await self.deps.to_thread(absorb_store.write_run_file, gen, data)
             except Exception as exc:
                 logger.warning("Absorb: could not save the run record: %s", exc)
 
@@ -1266,6 +1269,27 @@ class AbsorbRunner:
             self._persist()
             return {"status": "skipped", "skipped_uri": np_.uri, "run": brief(run)}
 
+    async def unpark(self, uri: str) -> bool:
+        """His per-song Retry: the song is captured again from the next
+        window (or, mid-run, the next reconcile). True when it was parked.
+        While THIS run holds the ledger in memory, mutate that SAME object
+        and persist it through the ordered ledger persist — a direct disk
+        edit here would be invisible to a run that never reloads its
+        ledger from disk, and the run's own very next ledger-mutating
+        persist would silently revert it. With no ledger loaded yet (no
+        run has opened its queue), edit the file directly."""
+        async with self._get_lock():
+            if self._ledger is not None:
+                if not _unpark_entry(self._ledger, uri):
+                    return False
+                await self._persist_ledger()
+                return True
+            ledger = absorb_store.load_ledger()
+            if not _unpark_entry(ledger, uri):
+                return False
+            absorb_store.save_ledger(ledger)
+            return True
+
     # ── endings ─────────────────────────────────────────────────────────────
 
     async def _on_session_lost(self, code: str, detail: str) -> None:
@@ -1390,16 +1414,18 @@ def apply_config_patch(patch: dict) -> AbsorbConfig:
 
 # ── un-parking ───────────────────────────────────────────────────────────────
 
-def unpark(uri: str) -> bool:
-    """His per-song Retry: the song is captured again from the next window
-    (or, mid-run, the next reconcile). True when it was parked."""
-    ledger = absorb_store.load_ledger()
+def _unpark_entry(ledger: AbsorbLedger, uri: str) -> bool:
     e = ledger.entries.get(uri)
     if e is None or not e.parked:
         return False
     e.parked, e.parked_reason, e.parked_ms = False, "", 0
-    absorb_store.save_ledger(ledger)
     return True
+
+
+async def unpark(uri: str) -> bool:
+    """His per-song Retry. See `AbsorbRunner.unpark`'s own docstring for why
+    this goes through the live runner rather than always touching disk."""
+    return await runner.unpark(uri)
 
 
 # ── recovery ─────────────────────────────────────────────────────────────────

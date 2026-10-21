@@ -89,7 +89,7 @@ class RetryBody(BaseModel):
 
 @router.post("/retry")
 async def retry(body: RetryBody) -> dict:
-    return {"uri": body.uri, "unparked": absorb.unpark(body.uri)}
+    return {"uri": body.uri, "unparked": await absorb.unpark(body.uri)}
 
 
 @router.get("/preview")
