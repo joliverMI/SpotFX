@@ -7,6 +7,7 @@ import HelpLink from '../help/HelpLink';
 import { useEngineStatus } from '../queries';
 
 const DEFER_LABEL: Record<string, string> = {
+  absorb: 'Absorb Music (the house is silent)',
   paused: 'paused',
   dinner_party: 'Dinner Party',
   ambient: 'Ambient Mode',

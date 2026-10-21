@@ -7,10 +7,10 @@ Spotify, a fake capture service and a fake shape disk (tests/absorb_world.py)
   headless capture re-queues rather than counting as done; the ledger makes a
   re-run a no-op.
 
-Plus the safety properties phase 1 owes before phase 2 exists: the shipped
-guard refuses every window (nothing can play out loud), a refusal is a
-recorded outcome, and someone else's music ends the window without a single
-playback call."""
+Plus the safety properties: a guard refusal stops a window before any
+Spotify call, a refusal is a recorded outcome, and someone else's music
+makes the window YIELD (phase 2, his Q4) without a single playback call.
+Phase 2's silence itself is tests/test_absorb_silence.py."""
 from __future__ import annotations
 
 import asyncio
@@ -50,22 +50,28 @@ def _twenty(world: World) -> dict:
 
 # ── the shipped guard, and refusals ─────────────────────────────────────────
 
-def test_the_shipped_guard_refuses_every_window_and_touches_nothing(tmp_path, monkeypatch):
-    """Phase 1 alone must never play music out loud: until phase 2's silence
-    exists, the production guard refuses before any Spotify call."""
-    w = World(tmp_path, monkeypatch, guard=absorb.UnbuiltHouseGuard())
+class _RefusingGuard(absorb.HouseGuard):
+    def ready(self, cfg):
+        return ("hard_block", "River's audio hard block is in place.")
+
+
+def test_a_guard_refusal_stops_the_window_before_any_spotify_call(tmp_path, monkeypatch):
+    """The guard's `ready()` runs before any Spotify call: a house that
+    can't be made silent never gets a song started."""
+    w = World(tmp_path, monkeypatch, guard=_RefusingGuard())
     _twenty(w)
     result = _go(w.runner.start())
     assert result["status"] == "refused"
-    assert result["reason"] == "silence_unbuilt"
+    assert result["reason"] == "hard_block"
     assert w.gw.calls == []
     assert w.cap.force_uris == set() and w.cap.preroll_uris == set()
     stored = absorb_store.latest_run()
-    assert stored.state == "refused" and stored.end_reason == "silence_unbuilt"
+    assert stored.state == "refused" and stored.end_reason == "hard_block"
 
 
-def test_production_deps_use_the_unbuilt_guard():
-    assert isinstance(absorb.production_deps().guard, absorb.UnbuiltHouseGuard)
+def test_production_deps_use_the_silent_house_guard():
+    from services import absorb_silence
+    assert isinstance(absorb.production_deps().guard, absorb_silence.SilentHouseGuard)
 
 
 def test_config_ships_off():
@@ -385,7 +391,7 @@ def test_the_force_set_carries_exactly_the_windows_recaptures(world):
 
 # ── his own music, his pause, his presses ───────────────────────────────────
 
-def test_his_music_ends_the_window_without_a_single_playback_call(world):
+def test_his_music_makes_the_window_yield_without_a_single_playback_call(world):
     a, b, c, d = _start_plain(world)
 
     async def scenario():
@@ -396,13 +402,13 @@ def test_his_music_ends_the_window_without_a_single_playback_call(world):
         return before
 
     before = _go(scenario())
-    assert world.run.state == "ended" and world.run.end_reason == "foreign_playback"
+    assert world.run.state == "paused" and world.run.yields[-1]["code"] == "foreign_playback"
     assert len(world.gw.writes()) == before            # no pause, no play
     assert world.cap.force_uris == set() and world.cap.preroll_uris == set()
     assert world.run.attempts.get(a, 0) == 0            # an interruption is not an attempt
 
 
-def test_playback_moving_off_serenity_ends_the_window(world):
+def test_playback_moving_off_serenity_yields(world):
     a, *_ = _start_plain(world)
 
     async def scenario():
@@ -411,11 +417,11 @@ def test_playback_moving_off_serenity_ends_the_window(world):
         await world.poll()
 
     _go(scenario())
-    assert world.run.end_reason == "left_device"
+    assert world.run.state == "paused" and world.run.yields[-1]["code"] == "left_device"
     assert world.gw.pauses == 0
 
 
-def test_his_pause_is_not_an_attempt_and_ends_the_window_after_the_grace(world):
+def test_his_pause_is_not_an_attempt_and_yields_after_the_grace(world):
     a, *_ = _start_plain(world)
 
     async def scenario():
@@ -430,7 +436,7 @@ def test_his_pause_is_not_an_attempt_and_ends_the_window_after_the_grace(world):
         await world.poll()
 
     _go(scenario())
-    assert world.run.end_reason == "paused"
+    assert world.run.state == "paused" and world.run.yields[-1]["code"] == "paused"
     assert world.run.counts.failed == 0 and world.gw.pauses == 0
 
 

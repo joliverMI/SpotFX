@@ -183,7 +183,13 @@ async def fire_scene_by_id(scene_id: str,
     overrode_dwell_for_drop (the seconds still owed), the overrode_dwell
     shape. cut=True lands it as a hard cut (scene_compiler.fire_scene's
     cut). Every other gate (preview, house mode, disabled, mode
-    availability) applies exactly as to any automatic pick."""
+    availability) applies exactly as to any automatic pick.
+
+    ABSORB MUSIC (2026-10-20, spectra/services/absorb_hold.py): while an
+    Absorb window holds the lights still, every origin but "house" is
+    deferred (skipped="absorb", recorded to the "deferred" bucket with
+    reason "absorb", never an update flare) — checked right after the
+    preview and ahead of Force Scene."""
     from spectra.services import (color_set_groups, color_sets, dwell,
                                   fire_history, force_color, mode_availability,
                                   preview_pause, scene_compiler, scene_store)
@@ -197,6 +203,20 @@ async def fire_scene_by_id(scene_id: str,
         })
         return {"skipped": "preview", "scene_id": scene_id,
                "scene_name": scene_name}
+    # ABSORB MUSIC (spectra/services/absorb_hold.py): a window plays songs
+    # nobody hears, so no automatic scene change lands — checked right
+    # after the preview, ahead of Force Scene (a reassert would still be a
+    # write). origin="house" passes: the house layer's own look belongs to
+    # the house, not to the music.
+    if origin != "house":
+        from spectra.services import absorb_hold
+        if absorb_hold.active():
+            scene = scene_store.get_by_id(scene_id)
+            scene_name = scene.name if scene is not None else scene_id
+            absorb_hold.record_deferral(scene_id, {"scene_name": scene_name,
+                                                   "origin": origin})
+            return {"skipped": "absorb", "scene_id": scene_id,
+                    "scene_name": scene_name}
     controls = load_room_controls()
     forced = False
     # Captured BEFORE a Force Scene substitution overwrites scene_id below —

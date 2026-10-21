@@ -183,6 +183,18 @@ class AbsorbRun(_Model):
     yields: list[dict] = Field(default_factory=list)
     resumes: int = 0
     log: list[str] = Field(default_factory=list)
+    # ── phase 2: the house guard (services/absorb_silence.py) ─────────────
+    # The silence is proven and the house volume is absorb's (until restored).
+    silent: bool = False
+    # SPECTRA's light stand-down: set once the silence is proven, cleared the
+    # moment the house is given back (yield or close). Rides the websocket
+    # `absorb` key — spectra/services/absorb_hold.py reads it.
+    lights_held: bool = False
+    # The last restore: {at_ms, ok, detail, why}.
+    restore: dict = Field(default_factory=dict)
+    # Why the house may still be silent after the window (a restore that did
+    # not read back, or absorb's song still playing) — "" when it is back.
+    restore_pending: str = ""
     # ── beyond §5, the runner's own bookkeeping ───────────────────────────
     source_playlist_uri: str = ""
     source_playlist_name: str = ""

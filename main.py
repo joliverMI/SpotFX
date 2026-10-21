@@ -178,12 +178,15 @@ async def lifespan(app: FastAPI):
     # Absorb Music: a window a dead process left open is stamped ended, and
     # the runner starts listening to the capture service. Nothing here
     # starts playback — a window opens only on his press (AbsorbConfig
-    # ships `enabled: false`; scheduling is phase 3).
+    # ships `enabled: false`; scheduling is phase 3). Its supervisor is the
+    # FIRST task: its first tick restores a house volume a dead process
+    # left at 0 (services/absorb_silence.py), before anything else.
     absorb.recover_orphaned_run()
     absorb.install()
 
     # Launch background tasks
     tasks = [
+        asyncio.create_task(absorb.run_supervised(), name="absorb-supervisor"),
         asyncio.create_task(_song_polling_loop(_on_state_update), name=_song_task_name),
         asyncio.create_task(ledfx_client.latency_loop(), name="ledfx-latency"),
         asyncio.create_task(ledfx_client.poll_virtual_states(), name="ledfx-virtual-poll"),

@@ -159,8 +159,11 @@ async def _show_cue(level, cue_ms, ahead_ms):
     crossing's own _fired bookkeeping (trigger_engine._tick_show_cues)
     still consumes the mark either way, so a gated cue is skipped once,
     never retried or stuck."""
-    from spectra.services import house, show_arms
+    from spectra.services import absorb_hold, house, show_arms
     if house.confirmed_wrong_device():
+        return []
+    if absorb_hold.active():
+        # An Absorb window's songs are nobody's music: no arm fires on them.
         return []
     return await show_arms.on_cue(level, cue_ms, ahead_ms)
 
@@ -179,8 +182,11 @@ async def fire_analysed_color_event(selection_intensity: float,
     intensity — scene_transition_lead.crossfade_ms_for, the SAME length
     tick() aimed the cue's lead at — so the colour change's middle lands on
     the mark. Precedence and holds: responses.analysed_color_jump."""
-    from spectra.services import (fire_history, house, room_controls, scene_store,
-                                  scene_transition_lead)
+    from spectra.services import (absorb_hold, fire_history, house, room_controls,
+                                  scene_store, scene_transition_lead)
+    if absorb_hold.active():
+        absorb_hold.record_deferral("analysed_colour", {"scene_id": scene_id})
+        return {"skipped": absorb_hold.REASON}
     house_reason = house.scene_deferral()
     if house_reason is not None:
         # A house mode that keeps its look owns the colours (house.py).
@@ -258,8 +264,12 @@ async def fire_response_event(event_class: str, intensity: float,
     the density cut, fired as a flare): its tier is the analysed one, so
     "analysed" is admitted beside "full"/"triggers_only". trigger_engine
     has already applied the per-song rule before calling."""
-    from spectra.services import fire_history
-    if _response_gate(via_trigger, analysed) is not None:
+    from spectra.services import absorb_hold, fire_history
+    gate = _response_gate(via_trigger, analysed)
+    if gate is not None:
+        if gate == absorb_hold.REASON:
+            absorb_hold.record_deferral(f"response:{event_class}", {
+                "event_class": event_class, "intensity": intensity})
         return
     await responses.on_event(event_class, intensity, gap_ms,
                              anchor_relocated=via_trigger)
@@ -300,10 +310,12 @@ def _response_gate(via_trigger: bool, analysed: bool = False) -> Optional[str]:
     see fire_response_event's docstring for the via_trigger split), or
     None to fire. Also what a staggered batch from such a fire re-checks
     when it wakes."""
-    from spectra.services import house, preview_pause
+    from spectra.services import absorb_hold, house, preview_pause
     from spectra.services.room_controls import load_room_controls
     if preview_pause.active():
         return "preview"
+    if absorb_hold.active():
+        return absorb_hold.REASON
     if house.response_deferral() is not None:
         return "house_mode"
     mode = load_room_controls().scene_change_mode
@@ -340,10 +352,12 @@ def _update_gate() -> Optional[str]:
     trigger_engine._trigger_allowed never lets a non-authored trigger fire
     there, and this function's own docstring/behaviour for that mode is
     otherwise unchanged."""
-    from spectra.services import house, preview_pause
+    from spectra.services import absorb_hold, house, preview_pause
     from spectra.services.room_controls import load_room_controls
     if preview_pause.active():
         return "preview"
+    if absorb_hold.active():
+        return absorb_hold.REASON
     if house.response_deferral() is not None:
         return "house_mode"
     if load_room_controls().scene_change_mode not in ("full", "triggers_only", "analysed"):
@@ -462,7 +476,12 @@ async def fire_scene_update_event(intensity: float) -> Optional[dict]:
     needs to know what happened — dwell's own fire_history "deferred"
     record — can log it; the trigger-driven caller still discards it,
     unchanged."""
-    if _update_gate() is not None:
+    gate = _update_gate()
+    if gate is not None:
+        from spectra.services import absorb_hold
+        if gate == absorb_hold.REASON:
+            absorb_hold.record_deferral("update", {"event_class": "update",
+                                                   "intensity": intensity})
         return None
     record = await responses.on_update(intensity)
     _schedule_fire_tail(_update_gate)
@@ -512,10 +531,13 @@ async def _on_track_uri(uri) -> None:
             from spectra.services import drop_sequences
             drop_sequences.on_song_played(uri)
             # THE SHOW SEQUENCE (spectra/services/show_sequence.py): a song
-            # starting counts for a "songs" / song-list Wait.
+            # starting counts for a "songs" / song-list Wait — never an
+            # Absorb Music song (spectra/services/absorb_hold.py): nobody is
+            # hearing it, and a counted song can fire a set.
             try:
-                from spectra.services import show_sequence
-                show_sequence.on_track_change(uri)
+                from spectra.services import absorb_hold, show_sequence
+                if not absorb_hold.active():
+                    show_sequence.on_track_change(uri)
             except Exception:                            # noqa: BLE001
                 logger.exception("light show: sequence song hook failed")
     from spectra.services.scene_sequencer import scene_sequencer
@@ -535,7 +557,19 @@ async def _on_track_uri(uri) -> None:
     # retries), and this callback must not stall the WS message loop for
     # that long. The gate's own lock still serialises the actual work.
     from spectra.services import ambient_music_gate
-    asyncio.create_task(ambient_music_gate.reconcile(bridge.is_playing()))
+    asyncio.create_task(ambient_music_gate.reconcile(_room_is_playing()))
+
+
+def _room_is_playing() -> Optional[bool]:
+    """bridge.is_playing() for the Ambient music gate — except while an
+    Absorb Music window holds the lights, when it is UNKNOWN (None): the
+    gate's own rule for an unknown read is to carry the current hold
+    forward, so absorb's silent songs can neither release a held room nor
+    start a hold (spectra/services/absorb_hold.py)."""
+    from spectra.services import absorb_hold
+    if absorb_hold.active():
+        return None
+    return bridge.is_playing()
 
 
 bridge = SpotEffectsBridge(

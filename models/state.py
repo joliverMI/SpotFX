@@ -64,6 +64,15 @@ class AppState:
     current_track: Optional[SpotifyTrackInfo] = None
     last_poll_time: float = 0.0
     last_activity_time: float = field(default_factory=time.monotonic)
+    # Did the LAST Spotify poll get an answer? True for any answer (a track,
+    # or "nothing is playing"), False when the call itself failed — in which
+    # case `current_track` is the previous poll's, unchanged. None before
+    # the first poll. Absorb's resume clock reads it: an unknown read must
+    # hold the clock, never advance it (report §6.1).
+    poll_ok: Optional[bool] = None
+    # Absorb Music holds the house silent: poll fast so his own music taking
+    # over is seen quickly (api/spotify_client._poll_interval_ms).
+    absorb_fast_poll: bool = False
 
     # ── Service control ───────────────────────────────────────────────────────
     paused: bool = False          # True = triggers suppressed, polling continues

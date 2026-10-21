@@ -2192,6 +2192,14 @@ class TriggerEngine:
         # rather than silently logging an apply of a set he never wrote.
         # Resolved once, here, which is also the single advance of a
         # pinned GROUP's rotation for this fire.
+        # ABSORB MUSIC (spectra/services/absorb_hold.py): a stored colour
+        # trigger on a song nobody is hearing lands nothing — ahead of
+        # Force Colour, whose apply would still be a write.
+        from spectra.services import absorb_hold
+        if absorb_hold.active():
+            absorb_hold.record_deferral(f"select_color_set:{set_id}",
+                                        {"set_id": set_id})
+            return
         forced = force_color.pinned_card()
         if forced is not None:
             await engine.conductor.apply_set_directly(forced,

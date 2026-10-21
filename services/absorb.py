@@ -5,10 +5,13 @@ Plays a linked Spotify playlist on Serenity, song after song, so that the
 capture path (services/audio_shape_service.py) records every song's audio
 shape. His six asks, and where each lives:
 
-  1. silent playback        PHASE 2. `HouseGuard` is the seam. The default
-                            (`UnbuiltHouseGuard`) REFUSES every window, so
-                            until the silence and the light stand-down exist
-                            no press can make this play music out loud.
+  1. silent playback        services/absorb_silence.py (`SilentHouseGuard`,
+                            the `HouseGuard` below): the house volume to 0
+                            with the capture client untouched, PROVEN from
+                            Snapcast's own status, re-proven every minute,
+                            River's hard block and the Order 27 exception,
+                            the light stand-down, and the restore on every
+                            exit — a crash included.
   2. requeue / skip ahead   here: the mid-song detectors condemn a doomed
                             capture (capture_watch.py on the frames, the
                             governor and the device on the poll), the runner
@@ -47,9 +50,17 @@ start time, so a late outcome from an abandoned capture can never be read as
 the current one's.
 
 WHAT A LOST SESSION IS. There is one Spotify playback session per account.
-If his own music starts, playback leaves Serenity, or Spotify sits paused,
-Absorb has lost the session. Phase 1 ENDS the window and never touches
-playback again (`_on_session_lost`); phase 2 turns that into yield-and-resume.
+If his own music starts, playback leaves Serenity, Spotify sits paused, or
+someone plays to the house's Guest/AirPlay stream, Absorb has lost the
+session and YIELDS (his Q4: "resume"; report §6.1): the house volume comes
+back FIRST — he has just pressed play into a silent house — the lights are
+given back second, the queue stops third, and playback is never touched.
+The window is then "paused" and comes back after `resume_after_quiet_min`
+of CONFIRMED quiet (Spotify answered and nothing was playing; a failed poll
+holds the clock, never advances it), as a full re-open — the volume is
+remembered and silenced again and the proof is run again — at most
+`max_resumes_per_window` times. The song he interrupted goes back at the
+front of the queue.
 
 One process-wide runner, `runner`; `install()` wires its listeners.
 """
@@ -86,8 +97,6 @@ SENTENCES: dict[str, str] = {
                         "and every re-capture would roll back without it."),
     "analysis_disabled": "Audio analysis is switched off, so nothing would be captured.",
     "music_playing": "Music is already playing on Spotify — Absorb won't take over your listening.",
-    "silence_unbuilt": ("Absorb can't open a window yet: silencing the house and holding the "
-                        "lights still (phase 2) aren't built, and it will not play music out loud."),
     "night_run_active": "A night run has the room.",
     "camera_run_active": "A camera run is in progress.",
     "spectra_unreadable": "Couldn't confirm that no night run or camera run is in progress.",
@@ -104,7 +113,14 @@ SENTENCES: dict[str, str] = {
     "paused": "Spotify was paused, so Absorb stepped aside.",
     "process_restarted": "SpotFX restarted while the window was open.",
     "guard": "The house guard stopped the window.",
+    "resume_cap": ("Your music took over {n} time(s) this window — the most it comes back "
+                   "from — so Absorb ended it."),
+    "window_ending": "Too little of the window was left to come back for.",
 }
+
+# A guard refusal that means "someone wants to listen", not "unsafe": the
+# window yields (and may resume) instead of ending.
+YIELD_CODES = frozenset({"foreign_playback", "left_device", "paused", "foreign_stream"})
 
 
 def sentence(code: str, detail: str = "", **fmt: Any) -> str:
@@ -123,14 +139,22 @@ Refusal = tuple[str, str]   # (code, sentence)
 
 class HouseGuard:
     """What makes a window safe to run in his house: silence (and its
-    proof), the Order 27 gate, the light stand-down. Phase 2 implements it.
+    proof), the Order 27 gate, the light stand-down. This base class is the
+    inert seam the offline runner tests drive; production is
+    services/absorb_silence.py's `SilentHouseGuard`.
 
-    ready()   cheap, before any Spotify call; a refusal stops the window.
-    open()    after every other gate passed; may change the house (phase 2
-              writes the volume here) and must undo its own change before
-              returning a refusal.
-    recheck() every poll while a window runs; a refusal ENDS the window.
-    close()   every ending, whatever the reason."""
+    ready()          cheap, before any Spotify call; a refusal stops the window.
+    open()           after every other gate passed; changes the house (writes
+                     the volume) and must undo its own change before
+                     returning a refusal. Also every resume.
+    recheck()        every poll and supervisor tick while a window runs; a
+                     refusal ENDS the window, except a YIELD_CODES one.
+    holding()        the house volume is (or may still be) absorb's.
+    yield_now()      his music took over: give the house back NOW.
+    close()          every ending, whatever the reason — never restores
+                     the volume over absorb's own song (`ours`).
+    retry_pending()  no window running but the house may still be silent:
+                     a crash, or a restore that did not read back."""
 
     def ready(self, cfg: AbsorbConfig) -> Optional[Refusal]:
         return None
@@ -141,16 +165,20 @@ class HouseGuard:
     async def recheck(self, run: AbsorbRun, cfg: AbsorbConfig) -> Optional[Refusal]:
         return None
 
-    async def close(self, run: AbsorbRun, reason: str) -> None:
+    def holding(self) -> bool:
+        return False
+
+    async def yield_now(self, run: AbsorbRun) -> dict:
+        run.lights_held = False
+        return {"ok": True, "detail": ""}
+
+    async def close(self, run: AbsorbRun, reason: str, ours: frozenset = frozenset()) -> None:
+        run.lights_held = False
         return None
 
-
-class UnbuiltHouseGuard(HouseGuard):
-    """The shipped guard until phase 2: refuses, by name, before anything
-    else happens — the runner never plays a song out loud."""
-
-    def ready(self, cfg: AbsorbConfig) -> Optional[Refusal]:
-        return ("silence_unbuilt", sentence("silence_unbuilt"))
+    async def retry_pending(self, run: Optional[AbsorbRun],
+                            ours: frozenset = frozenset()) -> Optional[dict]:
+        return None
 
 
 # ── dependencies ─────────────────────────────────────────────────────────────
@@ -197,26 +225,51 @@ class AbsorbDeps:
     request_burst: Callable[[float], None] = lambda seconds: None
     monotonic: Callable[[], float] = time.monotonic
     now_ms: Callable[[], int] = lambda: int(time.time() * 1000)
+    # Did the last Spotify poll get an answer (models.state.poll_ok)? The
+    # resume clock counts only CONFIRMED quiet.
+    poll_ok: Callable[[], Optional[bool]] = lambda: True
+    # Fast Spotify polling while the house is silent (state.absorb_fast_poll).
+    set_fast_poll: Callable[[bool], None] = lambda on: None
 
 
 def production_deps() -> AbsorbDeps:
     from config import settings
     from models.state import state
-    from services import absorb_spotify
+    from services import absorb_silence, absorb_spotify
     from services.audio_shape_service import audio_shape_service
     from services.capture_watch import read_governor
+    gateway = absorb_spotify.default_gateway()
+
+    def device_name() -> str:
+        return (settings.spotify_device_names or ["Serenity"])[0]
+
+    def set_fast_poll(on: bool) -> None:
+        state.absorb_fast_poll = bool(on)
+
     return AbsorbDeps(
-        gateway=absorb_spotify.default_gateway(),
+        gateway=gateway,
         capture=audio_shape_service,
-        guard=UnbuiltHouseGuard(),
+        guard=absorb_silence.production_guard(
+            gateway=gateway, to_thread=_default_to_thread,
+            device_name=device_name, announce=_announce),
         spectra_runs=_spectra_runs,
         governor=lambda: read_governor(settings.absorb_governor_status_path),
         analysis_enabled=lambda: bool(state.audio_analysis_enabled),
         anchor_enabled=lambda: bool(settings.anchor_enabled),
         current_track=lambda: state.current_track,
-        device_name=lambda: (settings.spotify_device_names or ["Serenity"])[0],
+        device_name=device_name,
         request_burst=_request_burst,
+        poll_ok=lambda: state.poll_ok,
+        set_fast_poll=set_fast_poll,
     )
+
+
+async def _announce() -> None:
+    """Push the websocket state now, so SPECTRA sees the light stand-down
+    change at once rather than on the next Spotify poll (30 s when idle)."""
+    from models.state import state
+    from services.websocket_manager import ws_manager
+    await ws_manager.broadcast_state(state)
 
 
 def _request_burst(seconds: float) -> None:
@@ -303,6 +356,10 @@ class AbsorbRunner:
         self.my_vouch: set[str] = set()
         self.ours: set[str] = set()        # every URI absorb has sent Spotify this run
         self.reconciling: bool = False
+        # the resume clock (report §6.1): confirmed-quiet seconds so far,
+        # and the monotonic time of the last confirmed-quiet read
+        self.quiet_s: float = 0.0
+        self.quiet_mark: Optional[float] = None
 
     # ── plumbing ────────────────────────────────────────────────────────────
 
@@ -320,6 +377,11 @@ class AbsorbRunner:
     @property
     def active(self) -> bool:
         return self.run is not None and self.run.state == "running"
+
+    @property
+    def open_window(self) -> bool:
+        """Running, or yielded to his music and waiting to come back."""
+        return self.run is not None and self.run.state in ("running", "paused")
 
     def install(self) -> None:
         """Listen to the capture service, and pick up the last run from disk
@@ -496,7 +558,7 @@ class AbsorbRunner:
         """Open a window now. Every refusal is RECORDED (a run in state
         "refused" with its reason) and answered, never a silence."""
         async with self._get_lock():
-            if self.active:
+            if self.open_window:
                 return {"status": "already_running", "reason": "already_running",
                         "detail": sentence("already_running"), "run": brief(self.run)}
             self._reset_live_state()
@@ -516,6 +578,7 @@ class AbsorbRunner:
             if refusal is not None:
                 self._reset_live_state()
                 return self._refuse(run, refusal)
+            d.set_fast_poll(True)
             self._log(f"window opened ({started_by}) on {run.source_playlist_name or cfg.source_playlist_uri}")
             self._persist()
             try:
@@ -822,17 +885,50 @@ class AbsorbRunner:
         try:
             async with self._get_lock():
                 self._sweep_outcomes()
+                if self.run is not None and self.run.state == "paused":
+                    await self._paused_poll(track)
+                    return
                 if not self.active:
                     return
                 await self._poll(track)
         except Exception:
             logger.exception("Absorb: poll handling failed")
 
+    async def tick(self) -> None:
+        """The supervisor's tick (`run_supervised`): the minute-by-minute
+        silence re-proof while a window runs — it must not wait for a
+        Spotify poll — and, with no window running, a restore the last one
+        left pending (the FIRST tick of a new process restores a window a
+        dead process left silent, before anything else)."""
+        async with self._get_lock():
+            self._sweep_outcomes()
+            d = self.deps
+            if self.active:
+                refusal = await d.guard.recheck(self.run, self.cfg)
+                if refusal:
+                    await self._guard_refused(refusal)
+                return
+            if not d.guard.holding():
+                return
+            result = await d.guard.retry_pending(self.run, self._ours_for_restore())
+            if result is not None:
+                self._log(("house restored: " if result.get("ok") else
+                           "house NOT restored yet: ") + str(result.get("detail") or ""))
+                self._persist()
+
+    async def _guard_refused(self, refusal: Refusal) -> None:
+        code, text = refusal
+        if code in YIELD_CODES:
+            await self._yield(code, text)
+        else:
+            logger.critical("Absorb: the window was STOPPED — %s", text)
+            await self._end(code, text, pause=True)
+
     async def _poll(self, track: Any) -> None:
         d, run = self.deps, self.run
         refusal = await d.guard.recheck(run, self.cfg)
         if refusal:
-            await self._end(refusal[0], refusal[1], pause=True)
+            await self._guard_refused(refusal)
             return
         now = d.monotonic()
         uri = getattr(track, "spotify_uri", None) if track else None
@@ -1041,7 +1137,7 @@ class AbsorbRunner:
             run.counts.parked += 1
             self._log(f"parked {self._title(att.uri) or att.uri} after "
                       f"{run.attempts[att.uri]} attempts: {tag}")
-        elif self.active:
+        elif self.open_window:
             self._requeue(att.uri, att.follower)
             run.counts.requeued += 1
         ledger.entries[att.uri] = e
@@ -1236,10 +1332,11 @@ class AbsorbRunner:
 
     async def stop(self, reason: str = "stopped") -> dict:
         async with self._get_lock():
-            if not self.active:
+            if not self.open_window:
                 return {"status": "not_running", "run": brief(self.run)}
+            # A yielded window is HIS music playing — never pause it.
             await self._end(reason, sentence(reason) if reason in SENTENCES else reason,
-                            pause=True)
+                            pause=self.active)
             return {"status": "ended", "run": brief(self.run)}
 
     async def skip_song(self) -> dict:
@@ -1318,22 +1415,135 @@ class AbsorbRunner:
     # ── endings ─────────────────────────────────────────────────────────────
 
     async def _on_session_lost(self, code: str, detail: str) -> None:
-        """His listening (or something else) took the Spotify session.
-        PHASE 1: end the window and never touch playback again. Phase 2
-        replaces this with yield-and-resume (report §6.1). The interrupted
-        song is not counted as an attempt — it stays in the playlist."""
-        await self._end(code, sentence(code, detail, device=self.deps.device_name()),
-                        pause=False)
+        """His listening (or something else) took the Spotify session."""
+        await self._yield(code, sentence(code, detail, device=self.deps.device_name()))
+
+    async def _yield(self, code: str, text: str) -> None:
+        """YIELD (report §6.1), in this order, and the order is the point:
+        1. the house volume back — he has just pressed play into a silent
+           house (the guard's `yield_now`, one snapped write, no teardown
+           first); 2. the lights given back (also the guard); 3. only then
+        stop the queue. Playback is never touched — it is his now. The
+        interrupted song is not an attempt; it goes back at the front."""
+        d, run, cfg = self.deps, self.run, self.cfg
+        restored = await d.guard.yield_now(run)
+        d.set_fast_poll(False)
+        att = self.current
+        interrupted = None
+        if att is not None and not att.condemned:
+            att.condemned, att.counted = "interrupted", True
+            att.ended_mono = d.monotonic()
+            interrupted = att.uri
+        self.current = None
+        self.switching_to = None
+        self.switch_retries = 0
+        self.paused_since = None
+        run.now_playing = None
+        self._clear_sets()
+        self.sent, self.sent_pos = [], -1
+        self.warmup_pending = False
+        if interrupted and interrupted != run.warm_up_uri:
+            self._requeue(interrupted, None)
+        run.yields.append({"at_ms": d.now_ms(), "code": code, "detail": text,
+                           "restored_ms": restored.get("restored_ms"),
+                           "restore_ok": restored.get("ok", True),
+                           "restore_detail": restored.get("detail", "")})
+        self._log(f"yielded: {text} — house volume "
+                  f"{'back' if restored.get('ok', True) else 'NOT back: ' + str(restored.get('detail'))}")
+        # paused BEFORE any ending: an ending from here must never pause the
+        # music — it is his now
+        run.state = "paused"
+        run.stage = "yielded"
+        self.quiet_s, self.quiet_mark = 0.0, None
+        if run.resumes >= cfg.max_resumes_per_window:
+            await self._end("resume_cap", sentence("resume_cap", n=len(run.yields)), pause=False)
+            return
+        self._persist()
+
+    async def _paused_poll(self, track: Any) -> None:
+        """The resume clock: only a CONFIRMED-quiet read advances it (Spotify
+        answered and nothing is playing — a paused track included); a failed
+        poll holds it; any music resets it."""
+        d, cfg = self.deps, self.cfg
+        if d.poll_ok() is not True:
+            self.quiet_mark = None
+            return
+        if track is not None and getattr(track, "is_playing", False):
+            self.quiet_s, self.quiet_mark = 0.0, None
+            return
+        now = d.monotonic()
+        if self.quiet_mark is not None:
+            self.quiet_s += max(0.0, now - self.quiet_mark)
+        self.quiet_mark = now
+        if self.quiet_s >= cfg.resume_after_quiet_min * 60:
+            await self._resume()
+
+    async def _resume(self) -> None:
+        """A full RE-OPEN, never a continuation: every gate again, the
+        volume remembered (as he last left it) and silenced again, the proof
+        run again, the lights held again — then the queue where it was. A
+        re-proof that fails ends the window, named."""
+        d, run, cfg = self.deps, self.run, self.cfg
+        end = (run.window or {}).get("end")
+        if end is not None and end - d.now_ms() < cfg.min_remaining_min * 60_000:
+            await self._end("window_ending", sentence("window_ending"), pause=False)
+            return
+        if d.guard.holding():
+            return          # the yield's restore has not landed; wait for it
+        if not run.queue and not any(not a.condemned for a in self.awaiting.values()):
+            await self._end("queue_done", sentence("queue_done"), pause=False)
+            return
+        refusal = await self._gates(cfg)
+        if refusal is None:
+            refusal = await d.guard.open(run, cfg)
+        if refusal is not None and (refusal[0] in YIELD_CODES or refusal[0] == "music_playing"):
+            # someone is still listening (a guest stream Spotify can't see):
+            # not quiet after all — keep waiting
+            self.quiet_s, self.quiet_mark = 0.0, None
+            self._log(f"not resuming yet: {refusal[1]}")
+            return
+        if refusal is not None:
+            await self._end(refusal[0], refusal[1], pause=False)
+            return
+        run.resumes += 1
+        run.state = "running"
+        run.stage = "capturing"
+        self.quiet_s, self.quiet_mark = 0.0, None
+        d.set_fast_poll(True)
+        self._log(f"resumed after {cfg.resume_after_quiet_min} min of quiet "
+                  f"({run.resumes} of {cfg.max_resumes_per_window})")
+        if run.queue:
+            await self._send_window()
+        else:
+            await self._drain()
+        self._persist()
+
+    def _ours_for_restore(self) -> frozenset:
+        """Every song that could be absorb's own if Spotify is playing it —
+        so a close or a recovered crash pauses it before the volume comes
+        back, and never pauses his."""
+        run = self.run
+        out = set(self.ours)
+        if run is not None:
+            out.update(run.queue)
+            out.update(run.titles)
+            if run.warm_up_uri:
+                out.add(run.warm_up_uri)
+            if run.now_playing is not None:
+                out.add(run.now_playing.uri)
+        return frozenset(out)
 
     async def _end(self, code: str, text: str, pause: bool) -> None:
         d, run = self.deps, self.run
-        if run is None or run.state != "running":
+        if run is None or run.state not in ("running", "paused"):
             return
+        was_running = run.state == "running"
         att = self.current
         if att is not None and not att.condemned:
             att.condemned = "interrupted"
             att.counted = True
             att.ended_mono = d.monotonic()
+        ours = self._ours_for_restore()
         run.state = "ended"
         run.ended_ms = d.now_ms()
         run.end_reason = code
@@ -1343,15 +1553,23 @@ class AbsorbRunner:
         self.current = None
         self.switching_to = None
         self._clear_sets()
-        if pause and self.device_id:
+        d.set_fast_poll(False)
+        # The close order (report §5): stop the queue (above) → pause → the
+        # in-flight capture finalizes on its own (the pause stops it) →
+        # restore and read back → lift the stand-down → the record. With
+        # the house silenced, absorb's own song is ALWAYS paused before the
+        # volume comes back, whatever the ending.
+        if was_running and (pause or d.guard.holding()) and self.device_id:
             try:
                 await d.to_thread(d.gateway.pause, self.device_id)
             except Exception as exc:
                 self._log(f"pause failed: {str(exc)[:80]}")
         try:
-            await d.guard.close(run, code)
+            await d.guard.close(run, code, ours=ours)
         except Exception as exc:
-            logger.warning("Absorb: house guard close failed: %s", exc)
+            logger.exception("Absorb: house guard close failed: %s", exc)
+        if run.restore_pending:
+            self._log(f"the house is NOT back yet: {run.restore_pending}")
         self._log(f"window ended: {text}")
         self.sent, self.sent_pos = [], -1
         self._persist()
@@ -1377,6 +1595,13 @@ def brief(run: Optional[AbsorbRun]) -> dict:
         "counts": run.counts.model_dump(),
         "head_rate": {"attempted": run.head_rate.attempted,
                       "with_head": run.head_rate.with_head},
+        # phase 2 — SPECTRA reads `lights_held` (spectra/services/absorb_hold.py)
+        "lights_held": bool(run.lights_held),
+        "silent": bool(run.silent),
+        "restore_pending": run.restore_pending,
+        "sleeping_at_open": run.sleeping_at_open,
+        "yields": len(run.yields),
+        "resumes": run.resumes,
     }
 
 
@@ -1456,24 +1681,53 @@ async def unpark(uri: str) -> bool:
 # ── recovery ─────────────────────────────────────────────────────────────────
 
 def recover_orphaned_run() -> Optional[str]:
-    """At startup: a run left "running" by a process that died is stamped
-    ended. (Phase 2 also restores the house's volume here, first.)"""
+    """At startup: a run left "running" (or yielded) by a process that died
+    is stamped ended. Its house volume is NOT restored here: the silence
+    snapshot it left (services/absorb_silence.py) is restored by the FIRST
+    supervisor tick (`run_supervised` → `AbsorbRunner.tick`), which first
+    pauses absorb's song if Spotify is still playing it. Until then the
+    lights stay held if the house is still silent."""
+    from services import absorb_silence
     try:
         run = absorb_store.latest_run()
     except Exception:
         return None
     if run is None or run.state not in ("running", "paused"):
         return None
+    silent = absorb_silence.load_snapshot() is not None
     run.state = "ended"
     run.end_reason = "process_restarted"
     run.end_detail = sentence("process_restarted")
     run.ended_ms = int(time.time() * 1000)
     run.stage = ""
     run.now_playing = None
+    if not silent:
+        run.lights_held = False
+        run.silent = False
+    else:
+        run.restore_pending = "SpotFX restarted with the house silent; restoring"
     run.log.append("ended: SpotFX restarted while the window was open")
     absorb_store.save_run(run)
-    logger.warning("Absorb: run %s was open when SpotFX stopped — marked ended", run.id)
+    logger.warning("Absorb: run %s was open when SpotFX stopped — marked ended%s", run.id,
+                   " (the house volume is restored on the first tick)" if silent else "")
     return run.id
+
+
+SUPERVISE_S = 2.0
+
+
+async def run_supervised() -> None:
+    """main.py's lifespan task: `runner.tick()` every SUPERVISE_S. The first
+    tick runs at once — a silence a dead process left behind is restored
+    before anything else touches the house."""
+    while True:
+        try:
+            await runner.tick()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Absorb: supervisor tick failed")
+        await asyncio.sleep(SUPERVISE_S)
 
 
 runner = AbsorbRunner()

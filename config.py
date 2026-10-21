@@ -727,5 +727,35 @@ class Settings(BaseSettings):
     absorb_governor_status_path: str = (
         "/home/javi/spotify-stack/spotify-config/parec-governor.json")
 
+    # ── Absorb Music: the silence (services/absorb_silence.py, phase 2) ──────
+    # How the house volume (input_number.snap_volume, via River's
+    # script.music_volume_set) is reached. "spectra" (the default) goes
+    # through SPECTRA's narrow /spectra/api/house-audio route, which holds the
+    # working Home Assistant token and the ONE ramp owner
+    # (spectra/services/ha_volume_ease.py). "direct" calls Home Assistant
+    # with HOME_ASSISTANT_HOST / HOME_ASSISTANT_TOKEN below — verified
+    # 2026-10-20 to be the .env.template placeholder (HA answers 401), so it
+    # is not the default. See api/ha_client.py.
+    absorb_ha_via: str = "spectra"
+    home_assistant_host: str = ""
+    home_assistant_token: str = ""    # never logged
+    # The Snapcast client that FEEDS THE CAPTURE (a null sink — no room
+    # hears it). Never silenced; the proof asserts it is untouched.
+    absorb_capture_client_name: str = "Effects Host"
+    # The stream absorb's music rides, and the announcement stream: a room
+    # on the TTS stream is hearing an announcement, not absorb, and is left
+    # alone (River's announcements may be urgent — report §6.2).
+    absorb_music_stream_id: str = "Spotify"
+    absorb_tts_stream_id: str = "TTS"
+    # River's unconditional per-window audio block (pretake-endpoint.py's
+    # AUDIO_HARD_BLOCK). Present = Absorb refuses (and stops), unless an
+    # "allow=" line in it names "absorb" — her own label rule, verbatim.
+    absorb_audio_hard_block_path: str = (
+        "/home/javi/fleet-homelab/state/.audio-hard-block")
+    # Spotify poll interval while a window holds the house silent, so his
+    # own music taking over is seen within about a second, not five
+    # (report §6.1 — the yield is the one thing that must be fast).
+    absorb_poll_interval_ms: int = 1000
+
 
 settings = Settings()

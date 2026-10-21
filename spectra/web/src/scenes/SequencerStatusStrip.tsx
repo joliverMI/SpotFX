@@ -8,6 +8,7 @@ import { useSequencerStatus, useSpotColorSets } from '../queries';
 import type { SceneV2 } from '../types';
 
 const DEFER_LABEL: Record<string, string> = {
+  absorb: 'Absorb Music (the house is silent)',
   force_scene: 'Force Scene',
   paused: 'paused',
   dinner_party: 'Dinner Party',

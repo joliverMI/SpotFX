@@ -88,6 +88,14 @@ def _poll_interval_ms() -> int:
     - If paused: poll_interval_paused_ms.
     - Otherwise (playing): poll_interval_playing_ms.
     """
+    base = _base_poll_interval_ms()
+    if state.absorb_fast_poll:
+        # Absorb Music holds the house silent: his music must be seen fast.
+        return min(base, settings.absorb_poll_interval_ms)
+    return base
+
+
+def _base_poll_interval_ms() -> int:
     if time.monotonic() < _burst_until:
         return settings.poll_interval_end_song_ms
 
@@ -128,8 +136,10 @@ def fetch_current_track() -> Optional[SpotifyTrackInfo]:
         t_fetched = time.monotonic()
     except Exception as exc:
         logger.error("Spotify poll failed: %s", exc)
+        state.poll_ok = False
         return None
 
+    state.poll_ok = True
     _cur = state.current_track
     _guest_owned = _cur is not None and _cur.spotify_uri.startswith("guest:")
 

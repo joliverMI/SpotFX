@@ -418,6 +418,33 @@ def _isolated_fire_history(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_absorb_silence(tmp_path, monkeypatch):
+    """Absorb Music's silence snapshot (services/absorb_silence.py) is the
+    restore contract for a house volume absorb lowered — read at startup by
+    recover_orphaned_run() and the production guard. A test must never read
+    (or leave) one in the real storage/."""
+    from services import absorb_silence
+    monkeypatch.setattr(absorb_silence, "SNAPSHOT_FILE",
+                        tmp_path / "absorb_silence.json")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_absorb_hold():
+    """SPECTRA's light stand-down rides the engine bridge singleton's last
+    `absorb` state (spectra/services/absorb_hold.py) — a held window left by
+    one test would hold every later test's show. Reset only when the engine
+    is already imported: importing it here would load it for every test."""
+    def reset():
+        engine = sys.modules.get("spectra.services.engine")
+        if engine is not None:
+            b = engine.bridge
+            b._absorb, b._absorb_at, b._absorb_held_seen = None, None, False
+    reset()
+    yield
+    reset()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_night_run(tmp_path, monkeypatch):
     """The NIGHT RUN's declaration and its per-night records
     (spectra/services/night_run.py) are plain module-level file reads and
