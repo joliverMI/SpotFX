@@ -97,3 +97,41 @@ def test_the_websocket_state_carries_the_absorb_brief(client, monkeypatch):
     monkeypatch.setattr(mgr, "broadcast", capture)
     asyncio.run(mgr.broadcast_state(AppState()))
     assert "absorb" in sent[0] and "state" in sent[0]["absorb"]
+
+
+def test_parked_lists_every_parked_song_across_runs_newest_first(client):
+    """Needs attention reads the LEDGER, not a run: a song parked on an
+    earlier evening is still parked (and still Retry-able) after that run
+    is over, when the current run's own `parked` list no longer names it."""
+    from models.absorb import LedgerEntry
+    ledger = absorb_store.load_ledger()
+    ledger.entries[uri(1)] = LedgerEntry(uri=uri(1), title="Old park", parked=True,
+                                         parked_reason="head_unreachable", parked_ms=1000,
+                                         lifetime_attempts=3, last_failure="head_missed")
+    ledger.entries[uri(2)] = LedgerEntry(uri=uri(2), title="New park", parked=True,
+                                         parked_reason="gap", parked_ms=2000,
+                                         lifetime_attempts=4, last_failure="gap")
+    ledger.entries[uri(3)] = LedgerEntry(uri=uri(3), title="Captured", parked=False,
+                                         lifetime_attempts=1)
+    absorb_store.save_ledger(ledger)
+    body = client.get("/api/absorb/parked").json()
+    assert [p["uri"] for p in body["parked"]] == [uri(2), uri(1)]
+    first = body["parked"][1]
+    assert first["reason"] == "head_unreachable" and first["lifetime_attempts"] == 3
+    assert first["last_failure"] == "head_missed" and first["title"] == "Old park"
+    # Retry takes it off the list
+    assert client.post("/api/absorb/retry", json={"uri": uri(1)}).json()["unparked"] is True
+    assert [p["uri"] for p in client.get("/api/absorb/parked").json()["parked"]] == [uri(2)]
+
+
+def test_parked_reads_the_live_runs_in_memory_ledger(client):
+    """While a run holds the ledger in memory that copy is newer than the
+    file — a park the run made a moment ago is listed before it is
+    persisted."""
+    from models.absorb import AbsorbLedger, LedgerEntry
+    live = AbsorbLedger()
+    live.entries[uri(5)] = LedgerEntry(uri=uri(5), parked=True, parked_reason="too_short",
+                                       parked_ms=5)
+    client.world.runner._ledger = live
+    assert [p["uri"] for p in client.get("/api/absorb/parked").json()["parked"]] == [uri(5)]
+    assert absorb_store.load_ledger().entries.get(uri(5)) is None    # never written by a read

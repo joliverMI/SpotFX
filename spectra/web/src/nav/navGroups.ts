@@ -4,7 +4,8 @@
  * Show) | Engine ▾ (Debug, Status, Timing, Review, AV Sync, House, Test
  * Bed, Timeline) | Settings." Feedback is in neither of his lists; filed
  * under Engine next to Review (his decided answer, §13 Q4 — Review reads
- * feedback sessions).
+ * feedback sessions). Absorb (Absorb Music, data/absorb-music-plan/
+ * report.md §10) joined Engine later, after Test Bed.
  *
  * Kept as a plain data table (no JSX) so `scripts/check_nav_menu.mjs` can
  * import it directly and prove every route is reachable, with no DOM. */
@@ -65,6 +66,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: '/avsync', label: 'AV Sync', match: exact('/avsync'), icon: 'sync' },
       { to: '/house', label: 'House', match: exact('/house'), icon: 'home' },
       { to: '/testbed', label: 'Test Bed', match: exact('/testbed'), icon: 'flask' },
+      { to: '/absorb', label: 'Absorb', match: exact('/absorb'), icon: 'absorb' },
       { to: '/timeline', label: 'Timeline', match: exact('/timeline'), icon: 'timeline' },
     ],
   },
@@ -73,11 +75,13 @@ export const NAV_GROUPS: NavGroup[] = [
 
 /** Every route the OLD 16-link NavBar reached, for the "every route still
  * reachable" proof — `/live` is deliberately excluded (it's a pop-out with
- * no menu entry, unchanged). */
+ * no menu entry, unchanged) — plus every top-level route added since
+ * (`/absorb`, Absorb Music, 2026-10-21, filed under Engine beside Test Bed,
+ * Timing and Review: the other library-maintenance surfaces). */
 export const ALL_NAV_ROUTES = [
   '/', '/scenes', '/colorsets', '/devices', '/rooms', '/room-effects', '/show',
   '/debug', '/status', '/timing', '/review', '/feedback', '/avsync', '/house',
-  '/testbed', '/timeline', '/settings',
+  '/testbed', '/timeline', '/settings', '/absorb',
 ];
 
 /** Which group (if any) contains the current route — for highlighting the

@@ -182,6 +182,10 @@ export const ICONS = {
   review: 'M4 4h16v12H8l-4 4Z',
   /** Warning triangle — the ⚠ chip at the right end of the bar. */
   warn: 'M12 3l10 18H2Z M12 10v5 M12 18h.01',
+  /** A music note dropping into a tray — Absorb Music (Engine ▾ Absorb,
+   * /absorb): a linked playlist played silently so every song's audio
+   * shape is captured into the library. */
+  absorb: 'M3 14h5l1.5 3h5l1.5-3h5v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z M13 2v7 M13 2l4 2 M11 11a2 2 0 1 0 0-4a2 2 0 0 0 0 4Z',
 } satisfies Record<string, string>;
 
 export type IconName = keyof typeof ICONS;

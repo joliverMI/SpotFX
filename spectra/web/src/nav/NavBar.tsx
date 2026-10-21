@@ -43,7 +43,7 @@ export default function NavBar() {
         * right (idea 5, "one help '?' per page"). */}
       <InfoTip
         topic="nav-menu"
-        text="Home · Artifacts ▾ (Scenes, Colours, Devices, Rooms, Room FX, Light Show) · Engine ▾ (Debug, Status, Timing, Review, Feedback, AV Sync, House, Test Bed, Timeline) · Settings."
+        text="Home · Artifacts ▾ (Scenes, Colours, Devices, Rooms, Room FX, Light Show) · Engine ▾ (Debug, Status, Timing, Review, Feedback, AV Sync, House, Test Bed, Absorb, Timeline) · Settings."
       >
         <span className="logo"><span className="logo-gem" aria-hidden /><span className="logo-text">SPECTRA</span></span>
       </InfoTip>

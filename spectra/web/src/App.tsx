@@ -12,6 +12,7 @@ import HomePage from './home/HomePage';
 import ReviewPage from './review/ReviewPage';
 import ScenesPage from './scenes/ScenesPage';
 import TestbedPage from './testbed/TestbedPage';
+import AbsorbPage from './absorb/AbsorbPage';
 import SettingsConsolePage from './settings/SettingsConsolePage';
 import StatusPage from './status/StatusPage';
 import BuilderPage from './timeline/BuilderPage';
@@ -34,6 +35,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/feedback', 'Feedback'],
   ['/review', 'Review'],
   ['/testbed', 'Test Bed'],
+  ['/absorb', 'Absorb Music'],
   ['/timing', 'Timing'],
   ['/avsync', 'AV Sync'],
   ['/show', 'Light Show'],
@@ -118,6 +120,7 @@ export default function App() {
           <Route path="/feedback" element={<FeedbackPage />} />
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/testbed" element={<TestbedPage />} />
+          <Route path="/absorb" element={<AbsorbPage />} />
           <Route path="/timing" element={<TimingVizPage />} />
           <Route path="/avsync" element={<AvSyncPage />} />
           <Route path="/show" element={<LightShowPage />} />

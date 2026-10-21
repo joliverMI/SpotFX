@@ -54,4 +54,5 @@ export async function apiPostForm<T = unknown>(path: string, form: FormData): Pr
 
 export const spotfxGet = <T = unknown>(path: string) => call<T>('GET', '/api' + path);
 export const spotfxPost = <T = unknown>(path: string, body?: unknown) => call<T>('POST', '/api' + path, body);
+export const spotfxPut = <T = unknown>(path: string, body?: unknown) => call<T>('PUT', '/api' + path, body);
 export const spotfxDel = <T = unknown>(path: string) => call<T>('DELETE', '/api' + path);

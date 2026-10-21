@@ -76,7 +76,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'The grouped top menu',
         keywords: 'home artifacts engine settings dropdown keyboard touch tap hold group',
         body: [
-          'Home · Artifacts ▾ (Scenes, Colours, Devices, Rooms, Room FX, Light Show) · Engine ▾ (Debug, Status, Timing, Review, Feedback, AV Sync, House, Test Bed, Timeline) · Settings.',
+          'Home · Artifacts ▾ (Scenes, Colours, Devices, Rooms, Room FX, Light Show) · Engine ▾ (Debug, Status, Timing, Review, Feedback, AV Sync, House, Test Bed, Absorb, Timeline) · Settings.',
           'Tap a group to open its dropdown; tap an item to go there (closes the menu); tap outside, tap the group again, or press Escape to close. With a mouse, pointing at the other group while one is open switches straight to it. Keyboard: ↑/↓ moves between items, Enter/Space opens a group or follows an item, Escape returns focus to the group button.',
           'Every dropdown item carries its own icon. The group containing the page you\'re on is highlighted with an accent underline; inside an open dropdown, the current page\'s row is filled and carries an accent bar down its left edge. Feedback lives under Engine, next to Review (it reads feedback sessions).',
         ],
@@ -2132,6 +2132,72 @@ export const HELP_SECTIONS: HelpSection[] = [
           'A pushed trigger is marked the same as anything you place by hand ("authored") — it will never be silently touched or removed by a later automatic regeneration pass.',
           'On a song that has no triggers of your own yet, while scene changes are set to "My triggers only", pushing one is not an addition — that mode plays only your own triggers on any song that has some, so the song\'s automatic scene change and every analysed mid-song change stop for it. The dialog says so before you confirm, and deleting the trigger again puts the song back.',
           'A pushed mark is still drawn in your own lane, in its own colour, but it is deliberately left OUT of precision/recall/F1: it sits exactly where the engine put it, so counting it would score that engine against its own suggestion. The Metrics card says how many were left out.',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'absorb-music',
+    title: 'Absorb Music — capturing your library, silently',
+    keywords: 'absorb music capture library playlist silent serenity unattended recently captured backlog audio shape spotify engine',
+    intro:
+      'Absorb Music (Engine ▾ Absorb, /absorb) plays a linked Spotify playlist on Serenity with the house silent, so every song\'s audio shape gets captured — the recording every timing feature in SPECTRA is built on. It files the songs that are already captured without playing them, captures the ones with no shape, re-captures the ones whose shape is missing its head, moves each captured song out of the playlist and on top of "Recently Captured", and brings a failed song back right after the next one. It runs inside SpotFX; this page is its window. Nothing starts on its own unless you switch the evening schedule on and give it a window.',
+    entries: [
+      {
+        id: 'absorb-silence',
+        title: 'Silent playback, and how it is proven',
+        keywords: 'silent silence mute snapcast volume zero snap volume effects host capture client restore read back lights stand down yield resume quiet',
+        body: [
+          'A window turns the house volume to 0 (snapped, not eased) and leaves the capture client — the inaudible "Effects Host" snapclient the capture listens to — exactly as it was. Spotify\'s own volume is never touched: it sits upstream of the capture, so turning it down would record silence.',
+          'It does not trust its own write. After the volume goes to 0 it reads every room back from Snapcast and proves each other connected room is at 0 % or muted, and the capture client untouched. The proof is re-run every minute; a room that joins the stream un-silenced mid-window is muted directly. If the proof ever fails, the snapserver cannot be read, or anything could be audible, the window STOPS — it never carries on hoping.',
+          'The volume it found is written to disk before the first change, and put back — and read back — on every way out: Stop, the end of the window, the queue running out, and a SpotFX crash (the first tick after the restart restores it before anything else touches the house). The Silence proof list on the Run card shows each of those, with a green dot only for what was actually read back.',
+          'The lights stand down while the house is silent: SPECTRA writes nothing to a light during a window (your answer to Q3, "nothing").',
+          'If your own music starts mid-window, Absorb steps aside at once: the house volume comes back FIRST, then the lights, then its queue stops — your playback is never touched. The window comes back after 20 minutes of confirmed quiet (a moment Spotify could not be read holds that clock rather than advancing it), at most 3 times per window.',
+        ],
+      },
+      {
+        id: 'absorb-failures',
+        title: 'When a capture fails — skip ahead, requeue, park',
+        keywords: 'failed failure gap requeue retry park parked head missed head unreachable skip ahead detector attempts needs attention triggers moved realigned',
+        body: [
+          'Most failed captures can be seen the moment they happen. Absorb watches every song as it captures — a gap in the audio, coverage that can no longer reach enough of the song, a start past the song\'s end, River\'s audio buffer draining, playback leaving Serenity — and on any of them gives up on that play, plays the next song now, and puts the failed one back RIGHT AFTER the next song.',
+          'A capture that commits is checked again before it counts: if its shape still does not start within the first second of the song it is "head missed" — counted as a failure and requeued, never as captured.',
+          'After 3 attempts in one window a song is PARKED: it stays in the playlist, is left out of later windows, and is listed under Needs attention with its last failure — "its head never arrived" when the attempts kept missing the head. Retry un-parks it: it is tried again at the next window, or straight away if a window is running.',
+          'The Run card\'s counts: Captured (committed with its head — filed into Recently Captured), Skipped (already captured, filed without playing), Failed (attempts that did not land), Requeued (put back after the next song), Head missed, and Parked. Skip this song moves on by hand; it requeues the song and is not counted as an attempt.',
+          'When a re-capture lands, your hand-placed triggers on that song are moved to follow the new capture\'s timing (a trigger must stay on the music it was placed against). Every song where that happened is listed under "Triggers moved by a re-capture", with how far and how confident the match was — so you never find out from the room.',
+        ],
+      },
+      {
+        id: 'absorb-schedule',
+        title: 'The evening schedule',
+        keywords: 'schedule window evening every night days start end time house time new york midnight automatic open close overrun grace refused waiting',
+        body: [
+          'Each window is a set of days plus a start and an end, in house time (New York, daylight saving included). An end earlier than the start runs past midnight; the days name the evening it STARTS on, so Mon 21:30–00:30 runs Monday evening into Tuesday.',
+          'A window opens on its own only while the schedule is switched ON and at least one window is set. Start now opens one by hand at any time, scheduled or not; Stop ends either kind at once and gives the house back.',
+          'A window that finds your music playing at its start waits — the house untouched — and opens after 20 minutes of quiet. Every evening the schedule acted on is recorded under the schedule (opened, waited, refused with its reason), so "did last night run, and why not?" is something you can read.',
+          'When a window\'s time is up it closes in order: the queue stops, playback pauses, the last capture is allowed to land, the volume is put back and read back, and only then do the lights come back. A song that would end within 5 minutes of the end is finished first; otherwise it is abandoned and simply played again next time.',
+        ],
+      },
+      {
+        id: 'absorb-already-captured',
+        title: 'Already captured, re-captures, the head rate, and force recapture',
+        keywords: 'already captured skip skipped recently captured re-capture recapture fresh head headless bar first second force recapture tag head success rate warm up',
+        body: [
+          'A song is ALREADY CAPTURED when its shape is complete, analysed, not flagged for re-capture, and starts within the first second of the song — the head is required (your answer to Q1). Those songs are moved into Recently Captured, tagged as skipped, without being played (your answer to Q2).',
+          'Every other song is work: one with no shape is captured fresh, and goes first in the queue; one whose shape fails the bar — missing its head, unanalysed, or flagged — is re-captured, worst head first. The Playlist card shows that split for your linked playlist before you start, and why each re-capture is needed.',
+          'The HEAD-SUCCESS RATE is, of the captures that committed, how many landed their head. It is the first evening\'s measurement of whether the re-captures are actually fixing the headless shapes; the Run card shows it for the window, and the re-captures on their own.',
+          'FORCE RECAPTURE is off by default. Because a normal window already re-captures every song missing its head, turning it ON now means "re-capture even the ones that pass": every song in the playlist plays and is captured again, and nothing is skipped. A song individually flagged for re-capture is re-captured either way.',
+          'Every window opens with one warm-up song that is already captured, so the first song Absorb actually wants starts at a clean track boundary and keeps its first seconds.',
+        ],
+      },
+      {
+        id: 'absorb-sleeping',
+        title: 'Running while the house sleeps',
+        keywords: 'sleep sleeping asleep night bedtime order 27 exception permission silence proof stop',
+        body: [
+          'Absorb may keep running after the house goes to sleep — an exception granted for Absorb only (your answer to Q5), because it is silent. Sleep never refuses a window; whether the house was asleep when it opened is recorded on the Run card.',
+          'The permission rests entirely on the silence proof. It is re-proven every minute, and the window stops — never retries — if a room cannot be read, a room joins and cannot be silenced, or River\'s hard block on house audio is present.',
+          'Switch "Keep going while the house sleeps" off to stop windows from running while the house is asleep. Either way, pick the schedule\'s end with the morning in mind.',
         ],
       },
     ],

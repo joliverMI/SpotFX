@@ -10751,7 +10751,7 @@ only when the anchor pass ran (`settings.anchor_enabled`). Specs:
 `tests/test_audio_shape_index_miss.py`, `tests/test_recapture_playlist_cache.py`,
 `tests/test_capture_success_bookkeeping.py`.
 
-## ABSORB MUSIC — unattended capture of a linked playlist (phases 1-3)
+## ABSORB MUSIC — unattended capture of a linked playlist (phases 1-4)
 
 Plan: `/home/javi/fleet-spotfx/data/absorb-music-plan/report.md` (his six
 asks, his five answers in §0, phases in §12). **`services/absorb.py`'s
@@ -10869,6 +10869,26 @@ test_absorb_stand_down.py` (the lights, from the show side); his real
 library, read-only: `scripts/check_absorb_classify.py`. A test that drives
 `audio_shape_service.on_track_change` with analysis on must stub
 `pcm_ring_buffer.ensure_alive` or it opens a real audio stream.
+
+Phase 4 — the interface (2026-10-21): SPECTRA's `/absorb` (Engine ▾ Absorb,
+`spectra/web/src/absorb/`) reaches SpotFX's `/api/absorb/*` same-origin
+(`spotfxGet/Post/Put`); SPECTRA's backend is not involved. Three things:
+
+- **EVERY SENTENCE IS `absorb/absorbSummary.ts`**, pure, so
+  `scripts/check_absorb_page.mjs` (run by `tests/test_absorb_page.py`)
+  drives it directly AND mounts the real page under jsdom against a
+  recording fake of the routes. It never claims what the run did not
+  record: no committed capture is a head rate of "none", not 0 %; a silence
+  never read back earns no green dot.
+- **`GET /api/absorb/parked` IS THE LEDGER, not a run** — a park outlives
+  its run, so Needs attention and Retry read every parked song across
+  runs (the live runner's in-memory ledger while it holds one).
+- **Screenshots come from `spectra/web/harness/absorb.html`** (real chrome
+  + page, mocked fetch, `?state=running|idle|paused`) served from the
+  BUILT `harness-dist` by `scripts/render_absorb_page.py`, which also fails
+  on a sideways scroll or a page error — never the vite dev server, whose
+  proxy would forward an unmocked request to the live :8000. Help section
+  `absorb-music` and its five topics.
 
 ## The music-analysis test bed (`/testbed`)
 
