@@ -90,6 +90,7 @@ if str(_REPO_ROOT) not in sys.path:
 from mcp.server import MCPServer  # noqa: E402
 
 from spectra.services import (  # noqa: E402
+    absorb_console,
     analysis_console,  # noqa: F401 — its operation is wrapped below
     device_console,
     drop_console,  # noqa: F401 — its operations are wrapped below
@@ -128,6 +129,7 @@ _VoiceStateEnum = Literal[tuple(house_console.VOICE_STATES)]
 _DropHandleEnum = Literal["lull", "charge"]
 _DropReviewChoiceEnum = Literal["keep", "take"]
 _LockKeyEnum = Literal[tuple(lock_console.KEYS)]
+_AbsorbKeyEnum = Literal[tuple(absorb_console.SETTING_KEYS)]
 
 mcp = MCPServer("settings-console")
 
@@ -1001,6 +1003,94 @@ async def set_whole_song_check_setting(key: _LockKeyEnum,
                                        value: Union[bool, float]) -> dict:
     """Change one whole-song check setting."""
     return await _call("set_whole_song_check_setting", key=key, value=value)
+
+
+
+# Absorb (spectra/services/absorb_console.py): Absorb Music — silent capture
+# of a linked playlist, run by the SpotFX process. A write that would newly
+# let it act on the house or his playlists answers needs_confirmation with a
+# confirm_id first; only a second call carrying that id acts.
+
+
+@mcp.tool()
+async def absorb_status(include_playlist: bool = False) -> dict:
+    """Is Absorb Music running, what it is doing, what the last windows got,
+    and when the schedule opens next."""
+    return await _call("absorb_status", include_playlist=include_playlist)
+
+
+@mcp.tool()
+async def absorb_head_report(runs: int = 1) -> dict:
+    """How many committed captures landed their head -- the latest window
+    that opened, or the last `runs` of them."""
+    return await _call("absorb_head_report", runs=runs)
+
+
+@mcp.tool()
+async def start_absorb(confirm_id: Optional[str] = None) -> dict:
+    """Start an Absorb window now (the first call asks; pass its confirm_id
+    only after he says yes)."""
+    return await _call("start_absorb", confirm_id=confirm_id)
+
+
+@mcp.tool()
+async def stop_absorb() -> dict:
+    """Stop the Absorb window now and give the house back."""
+    return await _call("stop_absorb")
+
+
+@mcp.tool()
+async def absorb_skip_song() -> dict:
+    """Skip the song Absorb is playing; it comes back after the next one."""
+    return await _call("absorb_skip_song")
+
+
+@mcp.tool()
+async def list_absorb_parked() -> dict:
+    """Which songs Absorb is stuck on (parked), with why."""
+    return await _call("list_absorb_parked")
+
+
+@mcp.tool()
+async def retry_absorb_song(song: str) -> dict:
+    """Un-park one parked song, by its title, so Absorb tries it again."""
+    return await _call("retry_absorb_song", song=song)
+
+
+@mcp.tool()
+async def get_absorb_settings() -> dict:
+    """Read Absorb's settings."""
+    return await _call("get_absorb_settings")
+
+
+@mcp.tool()
+async def set_absorb_setting(key: _AbsorbKeyEnum, value: Union[bool, int],
+                             confirm_id: Optional[str] = None) -> dict:
+    """Change one Absorb number, or whether it keeps going while the house
+    sleeps."""
+    return await _call("set_absorb_setting", key=key, value=value, confirm_id=confirm_id)
+
+
+@mcp.tool()
+async def set_absorb_force_recapture(on: bool, confirm_id: Optional[str] = None) -> dict:
+    """Turn Absorb's force recapture tag on or off (on asks first)."""
+    return await _call("set_absorb_force_recapture", on=on, confirm_id=confirm_id)
+
+
+@mcp.tool()
+async def set_absorb_window(windows: Optional[list[dict]] = None,
+                            schedule_on: Optional[bool] = None,
+                            confirm_id: Optional[str] = None) -> dict:
+    """Set Absorb's evening windows ({days, start, end}, house time; the list
+    replaces the old one) and/or switch the schedule on or off."""
+    return await _call("set_absorb_window", windows=windows, schedule_on=schedule_on,
+                       confirm_id=confirm_id)
+
+
+@mcp.tool()
+async def set_absorb_playlist(playlist: str, confirm_id: Optional[str] = None) -> dict:
+    """Link the Spotify playlist Absorb captures from, by its exact name."""
+    return await _call("set_absorb_playlist", playlist=playlist, confirm_id=confirm_id)
 
 
 if __name__ == "__main__":

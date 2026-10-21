@@ -175,6 +175,34 @@ class SpotifyGateway:
             offset += len(items)
         return [u for u in out if u]
 
+    def list_playlists(self) -> list[dict]:
+        """Every playlist in his library — his own and the ones he follows —
+        in Spotify's order. Reads only. `editable` is whether Absorb could
+        take captured songs out of it: his own, or a collaborative one (a
+        removal from anyone else's is refused by Spotify)."""
+        sp = self._client()
+        user_id = sp.me()["id"]
+        out: list[dict] = []
+        offset = 0
+        while True:
+            page = sp.current_user_playlists(limit=50, offset=offset) or {}
+            items = page.get("items") or []
+            for pl in items:
+                if not pl or not pl.get("id"):
+                    continue
+                owned = (pl.get("owner") or {}).get("id") == user_id
+                collaborative = bool(pl.get("collaborative"))
+                out.append({"id": pl["id"],
+                            "uri": pl.get("uri") or f"spotify:playlist:{pl['id']}",
+                            "name": pl.get("name") or "",
+                            "tracks": int((pl.get("tracks") or {}).get("total") or 0),
+                            "owned": owned, "collaborative": collaborative,
+                            "editable": owned or collaborative})
+            if not page.get("next") or not items:
+                break
+            offset += len(items)
+        return out
+
     def find_or_create_playlist(self, name: str, known_id: str = "") -> str:
         """His private playlist called `name`: the one `known_id` names if it
         still exists under that name, else the first of his own playlists

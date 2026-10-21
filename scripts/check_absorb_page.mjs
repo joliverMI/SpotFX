@@ -5,7 +5,7 @@
 // /api/absorb routes (no network — every request lands in `world.requests`
 // and nothing else), and drive real events.
 //
-// Four things proven:
+// Five things proven:
 //   1. The words (absorbSummary.ts) — the playlist-link parser accepts the
 //      same three shapes the runner does and nothing else; a head rate with
 //      nothing committed is "none", never 0 %; a silence the run never
@@ -26,6 +26,9 @@
 //      controls actually opens each of the six topics (never a dead or
 //      misdirected InfoTip): every control is hovered for real and the
 //      portaled help panel's rendered <HelpLink> href is read back.
+//   5. Sonic (phase 5): the page carries the floating Sonic chat, and
+//      opening it shows the `sonic-absorb` topic — linked, not orphaned —
+//      without calling a single Absorb route.
 //
 // Run: node scripts/check_absorb_page.mjs
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
@@ -478,6 +481,31 @@ async function report() {
     P.unmount();
   } else {
     console.log('  (jsdom unavailable — skipping the hover-behaviour half of §4)');
+  }
+
+  // ── 5. Sonic (phase 5): the page carries the chat, and its own "?" opens
+  //      the absorb topic — the topic is linked from the page, not orphaned
+  console.log('\n§5 Sonic on the Absorb page');
+  ok(knownIds.has('sonic-absorb'), '"sonic-absorb" is a real section/entry in HELP_SECTIONS');
+  if (hasJsdom) {
+    world = newWorld('running');
+    const c = P.mount();
+    await P.settle();
+    const fab = $(c, 'button.sonic-popover-fab');
+    ok(!!fab, 'the page renders the floating Sonic button');
+    const before = world.requests.length;
+    // jsdom lays nothing out, so it has no Element.scrollTo — the panel
+    // scrolls its message list to the bottom when it opens
+    if (!dom.window.HTMLElement.prototype.scrollTo) {
+      dom.window.HTMLElement.prototype.scrollTo = () => {};
+    }
+    if (fab) await click(fab);
+    const helpTopics = [...c.querySelectorAll('.sonic-popover-panel a.help-link')]
+      .map((a) => new URLSearchParams((a.getAttribute('href') || '').split('?')[1] || '').get('topic'));
+    ok(helpTopics.includes('sonic-absorb'),
+      `opening it shows the sonic-absorb help topic (${helpTopics.join(', ')})`);
+    ok(world.requests.length === before, 'opening the chat calls no Absorb route');
+    P.unmount();
   }
 
   console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);

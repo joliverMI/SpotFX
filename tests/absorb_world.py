@@ -42,6 +42,8 @@ class FakeGateway:
         self.titles: dict[str, str] = {}
         self.now_playing: Optional[dict] = None    # {uri, is_playing, device_name}
         self.playback_unknown = False
+        self.followed: set[str] = set()            # playlist ids he follows, not owns
+        self.fail_list = False
 
     def _bump(self, pid: str) -> str:
         self.snapshots[pid] = self.snapshots.get(pid, 0) + 1
@@ -107,6 +109,20 @@ class FakeGateway:
     def tracks_beyond(self, pid, keep):
         self.calls.append(("tracks_beyond", pid, keep))
         return self.playlists.get(pid, [])[keep:]
+
+    def list_playlists(self):
+        """His library: every playlist this fake knows, his own unless
+        `followed` names it (Spotify refuses a removal from one of those)."""
+        self.calls.append(("list_playlists",))
+        if self.fail_list:
+            raise RuntimeError("Spotify said no")
+        out = []
+        for pid, name in self.names.items():
+            owned = pid not in self.followed
+            out.append({"id": pid, "uri": f"spotify:playlist:{pid}", "name": name,
+                        "tracks": len(self.playlists.get(pid, [])), "owned": owned,
+                        "collaborative": False, "editable": owned})
+        return out
 
     def find_or_create_playlist(self, name, known_id=""):
         self.calls.append(("find_or_create_playlist", name))

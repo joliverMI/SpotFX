@@ -2247,6 +2247,18 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'sonic-absorb',
+        title: 'Sonic on the Absorb page: start, stop, the schedule, the head rate',
+        keywords: 'sonic absorb music chat popup pop-up start absorbing stop absorbing skip song playlist chill schedule every night window force recapture parked stuck retry head rate last night heads confirm yes',
+        body: [
+          'The Absorb page has the same floating 💬 button, scoped to Absorb Music. Ask it "is absorb running?", "how many did it get last night?", "how many got their heads last night?", "which songs is it stuck on?", "retry Dreams", "skip this song", "stop absorbing", "absorb from my Chill playlist", "absorb every night from nine thirty to half past midnight", "turn force recapture on", or change one of its numbers (attempts per song, songs sent at a time, the overrun grace, Recently Captured\'s cap).',
+          'It goes through the very same routes as this page, so nothing it does can get around a gate the page has: a start through Sonic is the same Start, refused for the same reasons — music already playing, no playlist linked, a night or camera run, the silence proof failing, River\'s hard block, the sleeping-house rule — and it tells you the reason in the page\'s own words. A window it starts is recorded as started by Sonic.',
+          'It ASKS FIRST, and nothing happens until you say yes, before starting a window, turning force recapture on, letting the schedule open windows on its own (or changing which ones), changing the linked playlist while the schedule is on, switching "keep going while the house sleeps" back on, and lowering Recently Captured\'s cap (the oldest songs are taken out of it). A yes covers exactly the question as it was asked: if a setting changed in between, it asks again. Stop, Skip this song, Retry and the plain numbers happen at once, as they do here.',
+          'A playlist is linked only by its exact name in your Spotify library (or its link): a close but different name is answered with the closest one, never linked on a guess, because Absorb takes captured songs out of that playlist. A playlist you follow but do not own is refused — Absorb could not take songs out of it.',
+          'The head report counts only captures that committed, and a window with none has no head rate — it never says 0%. The head bar itself, the queue order, the warm-up song, the quiet rules and the silence re-check are your plan\'s decisions: Sonic reads them but does not change them by voice.',
+        ],
+      },
+      {
         id: 'sonic-scene-backups',
         title: 'Backups, undo, and preview for scene edits',
         keywords: 'backup verify undo restore genesis preview check-in overwrite safety net',

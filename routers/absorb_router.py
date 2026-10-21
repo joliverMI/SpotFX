@@ -4,7 +4,11 @@ SpotFX — Absorb Music API (services/absorb.py is the runner).
   GET  /api/absorb/config        his settings
   PUT  /api/absorb/config        a PARTIAL update — only the keys sent change;
                                  an unknown key or an out-of-range value is a
-                                 422 naming it
+                                 422 naming it. `?dry_run=true` validates
+                                 exactly the same way and writes nothing (it
+                                 answers the config the edit WOULD leave) —
+                                 Sonic asks "go ahead?" only about a change
+                                 this validator accepts
   GET  /api/absorb/run           the current (or last) run, plus earlier ones
   POST /api/absorb/start         open a window now (his press)
   POST /api/absorb/stop          end the window
@@ -12,6 +16,10 @@ SpotFX — Absorb Music API (services/absorb.py is the runner).
   POST /api/absorb/retry         un-park one song ({"uri": ...})
   GET  /api/absorb/parked        every song parked across runs (the ledger),
                                  newest first — what Retry acts on; reads only
+  GET  /api/absorb/playlists     his Spotify playlists (his own and the ones
+                                 he follows), with whether Absorb could edit
+                                 each — for linking one by NAME (Sonic) —
+                                 reads only
   GET  /api/absorb/preview       already captured / to capture / to re-capture
                                  for the linked playlist — reads only
   GET  /api/absorb/schedule      the schedule: switched on or not, his windows
@@ -43,13 +51,13 @@ async def get_config() -> dict:
 
 
 @router.put("/config")
-async def put_config(request: Request) -> dict:
+async def put_config(request: Request, dry_run: bool = False) -> dict:
     try:
         patch = await request.json()
     except Exception:
         raise HTTPException(status_code=422, detail="expected a JSON object")
     try:
-        cfg = absorb.apply_config_patch(patch)
+        cfg = absorb.apply_config_patch(patch, save=not dry_run)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=[
             {"field": ".".join(str(p) for p in e["loc"]), "error": e["msg"]}
@@ -103,6 +111,14 @@ async def retry(body: RetryBody) -> dict:
 @router.get("/parked")
 async def parked() -> dict:
     return {"parked": absorb.parked_songs()}
+
+
+@router.get("/playlists")
+async def playlists() -> dict:
+    try:
+        return {"playlists": await absorb.playlists()}
+    except Exception as exc:
+        return {"playlists": None, "detail": absorb.sentence("spotify_error", str(exc)[:120])}
 
 
 @router.get("/preview")

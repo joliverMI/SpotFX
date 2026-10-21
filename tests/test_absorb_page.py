@@ -5,8 +5,9 @@ data/absorb-music-plan/report.md).
 (absorbSummary.ts) and mounts the REAL page under jsdom against a recording
 fake of SpotFX's /api/absorb routes: the three cards and their counts, the
 head-success rate, force recapture's meaning, every control's route and
-body (Start asks first; an album link writes nothing), and the six help
-topics each linked from the page. This test runs it so the proof fires on
+body (Start asks first; an album link writes nothing), the six help
+topics each linked from the page, and the floating Sonic chat opening its
+`sonic-absorb` topic (phase 5). This test runs it so the proof fires on
 every full test run.
 
 Skipped (not failed) when the frontend toolchain isn't installed — the
