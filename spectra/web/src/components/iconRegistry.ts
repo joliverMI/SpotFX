@@ -102,7 +102,7 @@ export const ICONS = {
    * Devices, Rooms, Room FX, Light Show). */
   cube: 'M12 2L21 7V17L12 22L3 17V7Z M3 7L12 12L21 7 M12 12V22',
   /** Speed gauge — the top menu's "Engine ▾" group (Debug, Status, Timing,
-   * Review, AV Sync, House, Test Bed, Timeline, Feedback). */
+   * Review, AV Sync, House, Test Bed, Absorb, Timeline, Feedback). */
   gauge: 'M3.5 17.5A9 9 0 1 1 20.5 17.5 M12 14L16.5 9.5 M12 15.5A1.5 1.5 0 1 0 12 12.5A1.5 1.5 0 0 0 12 15.5Z',
   /** Electrical plug — the panic-release control's icon (replaces the
    * house glyph there, 2026-10-14: a house glyph now means house
