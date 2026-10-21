@@ -1307,7 +1307,9 @@ class AbsorbRunner:
         genuinely not already in play, and reset its per-run attempt
         count so it gets a fresh `max_attempts` in this run."""
         run = self.run
-        if uri not in self.source_uris or uri in run.queue or uri in self.awaiting \
+        active = self.awaiting.get(uri)
+        if uri not in self.source_uris or uri in run.queue \
+                or (active is not None and not active.condemned and not active.counted) \
                 or (run.now_playing is not None and run.now_playing.uri == uri):
             return
         run.attempts.pop(uri, None)

@@ -771,6 +771,30 @@ def test_unpark_mid_run_requeues_right_after_the_next_song_and_a_reconcile_never
     assert run.queue.count(c) == 1 and c in run.queue
 
 
+def test_unpark_mid_run_requeues_even_while_the_condemned_attempt_still_awaits_its_outcome(
+        tmp_path, monkeypatch):
+    """A song parked through the live condemn path (a mid-song detector
+    reaching `max_attempts`) still sits in `self.awaiting` — `_resolve_
+    failure` never removes it; only the real outcome report (or the 300s
+    sweep) does. Retrying it before that report ever arrives must still
+    requeue it right away: a RESOLVED (condemned) attempt sitting in
+    `self.awaiting` is not "still being captured"."""
+    w = World(tmp_path, monkeypatch, warm_up=False, max_attempts=1)
+    a, b = uri(1), uri(2)
+    w.gw.playlists[SOURCE_ID] = [a, b]
+    _go(w.runner.start())
+
+    async def scenario():
+        await w.arrive(a)
+        await w.condemn(a, "gap")          # one attempt → parked at the cap
+        assert a in (e.uri for e in w.run.parked)
+        assert a in w.runner.awaiting      # its outcome report never arrived
+        assert await w.runner.unpark(a) is True
+        assert a in w.run.queue
+
+    _go(scenario())
+
+
 def test_run_file_write_drops_a_stale_generation_behind_a_newer_save(tmp_path, monkeypatch):
     """A synchronous `save_run` (`_refuse`/`recover_orphaned_run`'s own
     call shape) can land while an earlier-prepared, async off-loop write
