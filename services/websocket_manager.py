@@ -134,6 +134,12 @@ class WebSocketManager:
                 track.spotify_uri if track else None)
         except Exception:
             payload["lock_state"] = None
+        # Absorb Music: the live (or last) window, small and flat.
+        try:
+            from services import absorb as _absorb
+            payload["absorb"] = _absorb.status_brief()
+        except Exception:
+            payload["absorb"] = None
         # Last Scene Update — the scene the fixed Update/Reset Scene events act on.
         if state.last_scene_update_id:
             try:
