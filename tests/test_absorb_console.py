@@ -14,7 +14,9 @@ house volume is never written when it is."""
 from __future__ import annotations
 
 import asyncio
-import re
+import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -28,6 +30,8 @@ from spectra.services import absorb_console as ac
 from tests.absorb_world import SOURCE, SOURCE_ID, World, uri
 
 REPO = Path(__file__).resolve().parents[1]
+WEB = REPO / "spectra" / "web"
+ESBUILD_PKG = WEB / "node_modules" / "esbuild"
 
 
 def _run(coro):
@@ -90,11 +94,50 @@ def test_the_mirrors_match_spotfx():
         assert ac.window_label(w.model_dump()) == absorb_schedule.window_label(w)
 
 
-def test_the_reason_words_are_the_absorb_pages_own():
-    ts = (REPO / "spectra/web/src/absorb/absorbSummary.ts").read_text()
-    block = ts.split("const REASONS: Record<string, string> = {", 1)[1].split("};", 1)[0]
-    page = dict(re.findall(r"(\w+): '([^']*)'", block))
-    assert page == ac.REASON_WORDS
+@pytest.mark.skipif(
+    not ESBUILD_PKG.exists() or shutil.which("node") is None,
+    reason="frontend toolchain (node + esbuild in spectra/web) not installed",
+)
+def test_the_reason_words_are_the_absorb_pages_own(tmp_path):
+    # Bundle the REAL absorbSummary.ts with esbuild (the scripts/
+    # check_absorb_page.mjs pattern) and call its exported reasonLabel() —
+    # never parse the TS source as text, which proves nothing about the
+    # live function after a behavior-preserving refactor of REASONS.
+    codes = list(ac.REASON_WORDS) + ["some_unmapped_tag"]
+    entry = tmp_path / "entry.mjs"
+    entry.write_text(
+        f"export * from {json.dumps(str(WEB / 'src/absorb/absorbSummary.ts'))};\n"
+    )
+    bundled = tmp_path / "bundled.cjs"
+    runner = tmp_path / "run.mjs"
+    runner.write_text(
+        f"""
+import {{ createRequire }} from 'node:module';
+const require = createRequire({json.dumps(str(WEB / 'package.json'))});
+const esbuild = require('esbuild');
+esbuild.buildSync({{
+  entryPoints: [{json.dumps(str(entry))}], bundle: true, format: 'cjs', platform: 'node',
+  outfile: {json.dumps(str(bundled))}, nodePaths: [{json.dumps(str(WEB / 'node_modules'))}],
+  logLevel: 'silent',
+}});
+const mod = require({json.dumps(str(bundled))});
+const codes = {json.dumps(codes)};
+const out = {{}};
+for (const c of codes) out[c] = mod.reasonLabel(c);
+out.__none__ = mod.reasonLabel(undefined);
+process.stdout.write(JSON.stringify(out));
+"""
+    )
+    result = subprocess.run(
+        ["node", str(runner)], cwd=REPO, capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, f"node bundling failed:\n{result.stdout}\n{result.stderr}"
+    page = json.loads(result.stdout)
+    for code in codes:
+        assert page[code] == ac._reason_words(code), (
+            f"{code}: page said {page[code]!r}, console said {ac._reason_words(code)!r}"
+        )
+    assert page["__none__"] == ac._reason_words(None)
 
 
 # ═══ 2. reads ════════════════════════════════════════════════════════════════
