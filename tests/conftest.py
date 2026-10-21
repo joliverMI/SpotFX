@@ -429,6 +429,21 @@ def _isolated_absorb_silence(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_absorb_stores(tmp_path, monkeypatch):
+    """Absorb Music's own stores (services/absorb_store.py) and the
+    schedule's in-memory copy of its own (services/absorb_schedule.py). The
+    schedule ticks inside absorb's supervisor and reads his windows; a test
+    must never read his real config, open a window from it, or leave a
+    marker that stops a later test's occurrence from opening."""
+    from services import absorb_schedule, absorb_store
+    monkeypatch.setattr(absorb_store, "CONFIG_FILE", tmp_path / "absorb.json")
+    monkeypatch.setattr(absorb_store, "RUN_FILE", tmp_path / "absorb_run.json")
+    monkeypatch.setattr(absorb_store, "LEDGER_FILE", tmp_path / "absorb_ledger.json")
+    monkeypatch.setattr(absorb_store, "SCHEDULE_FILE", tmp_path / "absorb_schedule.json")
+    monkeypatch.setattr(absorb_schedule, "scheduler", absorb_schedule.Scheduler())
+
+
+@pytest.fixture(autouse=True)
 def _isolated_absorb_hold():
     """SPECTRA's light stand-down rides the engine bridge singleton's last
     `absorb` state (spectra/services/absorb_hold.py) — a held window left by

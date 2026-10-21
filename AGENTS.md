@@ -10751,18 +10751,21 @@ only when the anchor pass ran (`settings.anchor_enabled`). Specs:
 `tests/test_audio_shape_index_miss.py`, `tests/test_recapture_playlist_cache.py`,
 `tests/test_capture_success_bookkeeping.py`.
 
-## ABSORB MUSIC — unattended capture of a linked playlist (phases 1-2)
+## ABSORB MUSIC — unattended capture of a linked playlist (phases 1-3)
 
 Plan: `/home/javi/fleet-spotfx/data/absorb-music-plan/report.md` (his six
 asks, his five answers in §0, phases in §12). **`services/absorb.py`'s
 module docstring is the binding statement** for the runner and
-**`services/absorb_silence.py`'s for the house guard**;
+**`services/absorb_silence.py`'s for the house guard** and
+**`services/absorb_schedule.py`'s for the schedule**;
 `services/absorb_bar.py` owns "already captured", `services/capture_watch.py`
-the mid-song detectors, `models/absorb.py` the three stores. Phase 1:
+the mid-song detectors, `models/absorb.py` the four stores. Phase 1:
 
-- **NOTHING STARTS ON ITS OWN.** `AbsorbConfig.enabled` ships False and
-  nothing schedules (phase 3); a window opens only on a press, and a refusal
-  is a RECORDED run answered 200. Do not add an "allow audible" switch.
+- **NOTHING STARTS ON ITS OWN UNLESS HE SCHEDULED IT.** `AbsorbConfig.
+  enabled` (the schedule's switch) ships False and `windows` ships empty; a
+  window opens on its own only when BOTH are set (phase 3, below), otherwise
+  only on a press, and a refusal is a RECORDED run answered 200. Do not add
+  an "allow audible" switch.
 - **ABSORB'S QUEUE, NOT SPOTIFY'S.** It sends a window of URIs (never a
   playlist context, never the queue API) and re-sends only as a song STARTS,
   so a correction cuts the head of a song that will be replayed, never the
@@ -10825,16 +10828,45 @@ Phase 2 — silence, the Order 27 gate, stand-down, restore (2026-10-20):
   binding statement for every SPECTRA choke point it gates (house fires,
   `origin="house"`, pass) — `tests/test_absorb_stand_down.py` is the bar.
 
+Phase 3 — scheduling and the clean close (2026-10-20):
+
+- **HOUSE TIME, ONE OPEN PER OCCURRENCE.** Windows are `{days, start, end}`
+  in America/New_York via `zoneinfo` (days name the START day; Mon
+  21:30-00:30 runs into Tuesday). `storage/absorb_schedule.json` remembers
+  which occurrence STARTS it acted on, written BEFORE the open, so a restart
+  never opens one twice and his Stop is never undone. The schedule's tick
+  runs inside the absorb supervisor AFTER the runner's (`absorb.
+  supervise_once`), and waits while a dead process's silence is unrestored.
+  A refusal is final for that occurrence and recorded (run + schedule log);
+  `GET /api/absorb/schedule` joins each outcome to how its run ended.
+- **HIS MUSIC AT THE START IS A WAIT, NOT A REFUSAL** (his Q4 at second
+  zero): the run is `paused`/`waiting` with the house untouched; its first
+  `_resume` is its first open (`_first_open`) and is not counted as a resume.
+  A window cut by a restart is NOT reopened if it had opened (a crash loop
+  must not flap the volume); one still waiting is tried again.
+- **THE CLOSE ORDER IS THE SEMANTICS** (`absorb._window_end` →
+  `_close_stop` → `_advance_close` → `_end`): stop the queue → pause →
+  WAIT for in-flight captures' outcomes (bounded, `CLOSE_FINALIZE_WAIT_S`) →
+  restore + read back → lift the stand-down → the record, whose "ended" is
+  written only after the restore. A song ending within `overrun_grace_min`
+  is finished first; otherwise abandoned (not an attempt). Every "move on"
+  goes through `_next()`, which turns into the close while one is under way.
+  A safety stop and his Stop still end at once. A test that asserts write
+  ORDER needs the fake's I/O to yield (`asyncio.sleep(0)`) or a queued write
+  can never interleave.
+
 Tests: `tests/absorb_world.py` (fake Spotify / capture / disk / clock — reuse
-it), `tests/test_absorb_runner.py`, `tests/test_absorb_capture_hooks.py` (the
-real ingest loop; a gap at 0:30 skips within one frame),
-`tests/test_absorb_bar.py`, `tests/test_absorb_silence.py` (the fake house:
-snapserver + HA + the volume automation, which can reach the capture client,
-drop a room in mid-window or play an announcement),
-`tests/test_absorb_house_audio.py` (the transports underneath — `ha_client`,
-`snapcast_status`, `house_audio` — against mocked HTTP only, never a live
-house), `tests/test_absorb_stand_down.py` (the lights, from the show side);
-his real library, read-only: `scripts/check_absorb_classify.py`. A test that drives
+it), `tests/test_absorb_schedule.py` (house time, the shipped-off week, the
+three phase-3 acceptances, the close's edges), `tests/test_absorb_runner.py`,
+`tests/test_absorb_capture_hooks.py` (the real ingest loop; a gap at 0:30
+skips within one frame), `tests/test_absorb_bar.py`, `tests/
+test_absorb_silence.py` (the fake house: snapserver + HA + the volume
+automation, which can reach the capture client, drop a room in mid-window
+or play an announcement), `tests/test_absorb_house_audio.py` (the
+transports underneath — `ha_client`, `snapcast_status`, `house_audio` —
+against mocked HTTP only, never a live house), `tests/
+test_absorb_stand_down.py` (the lights, from the show side); his real
+library, read-only: `scripts/check_absorb_classify.py`. A test that drives
 `audio_shape_service.on_track_change` with analysis on must stub
 `pcm_ring_buffer.ensure_alive` or it opens a real audio stream.
 

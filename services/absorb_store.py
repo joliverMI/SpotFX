@@ -1,5 +1,5 @@
 """
-SpotFX — Absorb Music's three stores (models/absorb.py says what each holds).
+SpotFX — Absorb Music's four stores (models/absorb.py says what each holds).
 
 Every write is tmp + os.replace, so a reader (or a crash) only ever sees a
 whole file. Every read tolerates a missing or unreadable file by returning
@@ -17,18 +17,20 @@ from pathlib import Path
 from typing import Optional
 
 from config import BASE_DIR
-from models.absorb import AbsorbConfig, AbsorbLedger, AbsorbRun
+from models.absorb import AbsorbConfig, AbsorbLedger, AbsorbRun, AbsorbSchedule
 
 logger = logging.getLogger(__name__)
 
 CONFIG_FILE = BASE_DIR / "storage" / "absorb.json"
 RUN_FILE = BASE_DIR / "storage" / "absorb_run.json"
 LEDGER_FILE = BASE_DIR / "storage" / "absorb_ledger.json"
+SCHEDULE_FILE = BASE_DIR / "storage" / "absorb_schedule.json"
 
 # Bounds that keep the run file small enough to rewrite on every song.
 RUN_HISTORY_MAX = 20          # earlier runs kept beside the current one
 RUN_LIST_MAX = 600            # each of captured/failed/parked/skipped/realigned
 RUN_LOG_MAX = 400
+SCHEDULE_OUTCOMES_MAX = 60   # the scheduler's outcome log, newest first
 
 _lock = threading.Lock()
 
@@ -99,6 +101,7 @@ def compact(run: AbsorbRun) -> dict:
         "id": run.id, "state": run.state, "started_ms": run.started_ms,
         "ended_ms": run.ended_ms, "end_reason": run.end_reason,
         "end_detail": run.end_detail, "started_by": run.started_by,
+        "window": dict(run.window or {}), "opened_ms": run.opened_ms,
         "source_playlist_uri": run.source_playlist_uri,
         "source_playlist_name": run.source_playlist_name,
         "counts": run.counts.model_dump(), "head_rate": run.head_rate.model_dump(),
@@ -220,3 +223,24 @@ def save_ledger_dict(data: dict) -> None:
     thread never touches the shared, still-mutating model object."""
     with _lock:
         _write(LEDGER_FILE, data)
+
+
+# ── schedule (the scheduler's own memory) ────────────────────────────────────
+
+def load_schedule() -> AbsorbSchedule:
+    raw = _read(SCHEDULE_FILE)
+    if not isinstance(raw, dict):
+        return AbsorbSchedule()
+    try:
+        return AbsorbSchedule.model_validate(raw)
+    except Exception as exc:
+        logger.warning("Absorb: %s does not validate (%s) — starting empty",
+                       SCHEDULE_FILE.name, exc)
+        return AbsorbSchedule()
+
+
+def save_schedule(schedule: AbsorbSchedule) -> None:
+    if len(schedule.outcomes) > SCHEDULE_OUTCOMES_MAX:
+        schedule.outcomes = schedule.outcomes[:SCHEDULE_OUTCOMES_MAX]
+    with _lock:
+        _write(SCHEDULE_FILE, schedule.model_dump(mode="json"))
