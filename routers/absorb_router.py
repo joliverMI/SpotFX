@@ -10,6 +10,8 @@ SpotFX — Absorb Music API (services/absorb.py is the runner).
   POST /api/absorb/stop          end the window
   POST /api/absorb/skip-song     move on from the song playing now
   POST /api/absorb/retry         un-park one song ({"uri": ...})
+  GET  /api/absorb/parked        every song parked across runs (the ledger),
+                                 newest first — what Retry acts on; reads only
   GET  /api/absorb/preview       already captured / to capture / to re-capture
                                  for the linked playlist — reads only
   GET  /api/absorb/schedule      the schedule: switched on or not, his windows
@@ -96,6 +98,11 @@ class RetryBody(BaseModel):
 @router.post("/retry")
 async def retry(body: RetryBody) -> dict:
     return {"uri": body.uri, "unparked": await absorb.unpark(body.uri)}
+
+
+@router.get("/parked")
+async def parked() -> dict:
+    return {"parked": absorb.parked_songs()}
 
 
 @router.get("/preview")

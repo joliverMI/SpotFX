@@ -1944,6 +1944,22 @@ async def unpark(uri: str) -> bool:
     return await runner.unpark(uri)
 
 
+def parked_songs() -> list[dict]:
+    """Every song the ledger holds parked, newest first — the Needs-attention
+    list his Retry acts on. A park outlives the run that made it (a parked
+    song stays parked until he retries it), so a run's own `parked` list
+    alone forgets the songs parked on an earlier evening. While a run holds
+    the ledger in memory that copy is the newest one (`_ledger_ref`'s own
+    rule), so it is read instead of the file. Reads only."""
+    ledger = runner._ledger if runner._ledger is not None else absorb_store.load_ledger()
+    out = [{"uri": e.uri, "title": e.title, "reason": e.parked_reason,
+            "parked_ms": e.parked_ms, "lifetime_attempts": e.lifetime_attempts,
+            "last_failure": e.last_failure, "last_attempt_ms": e.last_attempt_ms}
+           for e in list(ledger.entries.values()) if e.parked]
+    out.sort(key=lambda d: d["parked_ms"], reverse=True)
+    return out
+
+
 # ── recovery ─────────────────────────────────────────────────────────────────
 
 def recover_orphaned_run() -> Optional[str]:

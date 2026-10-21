@@ -3581,3 +3581,202 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
  * this width — superseded by the Admiral's own decision (two rows, shed
  * nothing) once that was found to grow the bar tall/cause sideways
  * scroll for the reasons documented above this rule. */
+
+/* ── ABSORB MUSIC (/absorb, absorb/AbsorbPage.tsx) ─────────────────────────
+ * Three cards (report §10): Run spans the full width and splits into a
+ * main column (now capturing, the counts, the head rate) and a side
+ * column (the silence proof, the evening schedule); Playlist and Needs
+ * attention sit side by side below it. One column under 900px. Every
+ * fixed-size icon button sets `padding: 0` (the global button padding
+ * would leave a 30px button four pixels of content box — AGENTS.md's
+ * design-fidelity note). */
+.absorb-page { display: flex; flex-direction: column; gap: 12px; }
+/* The global button styles have no disabled look, so a disabled Start
+ * (nothing linked yet) read exactly like an enabled one. */
+.absorb-page button:disabled { opacity: 0.45; cursor: not-allowed; }
+.absorb-page button:disabled:hover { border-color: var(--border); }
+.absorb-head h2 { font-size: 20px; font-weight: 700; }
+.absorb-title { display: inline-flex; align-items: center; gap: 8px; }
+.absorb-title svg { color: var(--accent); }
+.absorb-sub { color: var(--text-muted); font-size: 13px; margin-top: 4px; max-width: 78ch; line-height: 1.45; }
+.absorb-error { border-color: var(--danger); color: #fecaca; font-size: 13px; margin-bottom: 0; }
+.absorb-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.absorb-grid > .card { margin-bottom: 0; min-width: 0; }
+.absorb-run-card { grid-column: 1 / -1; }
+.absorb-card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 32px; }
+.absorb-card-title { margin-bottom: 0; }
+.absorb-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.absorb-actions button { display: inline-flex; align-items: center; gap: 6px; height: 32px; }
+.absorb-state {
+  display: inline-flex; align-items: center; height: 22px; padding: 0 10px;
+  border-radius: 11px; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  background: var(--surface2); color: var(--text-muted);
+}
+.absorb-state.absorb-tone-live { background: rgba(74, 222, 128, 0.14); color: var(--ok); }
+.absorb-state.absorb-tone-warn { background: #3a2c0e; color: var(--warning); }
+.absorb-state.absorb-tone-bad { background: #3a0e0e; color: var(--danger); }
+.absorb-state-detail { font-size: 13px; color: var(--text); margin-top: 8px; line-height: 1.45; }
+.absorb-meta { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.absorb-dim { color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.absorb-note { margin-top: 6px; }
+.absorb-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.absorb-run-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 8px 28px;
+  margin-top: 4px;
+}
+.absorb-run-main, .absorb-run-side { min-width: 0; }
+.absorb-section { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.absorb-section-title {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-muted);
+}
+
+.absorb-now {
+  margin-top: 12px; padding: 10px 12px; border-radius: var(--radius);
+  background: var(--surface2); border: 1px solid var(--border);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.absorb-now-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+.absorb-now-title { font-size: 16px; font-weight: 700; margin-top: 2px; overflow-wrap: anywhere; }
+.absorb-now-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+.absorb-mode {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 600; background: #2a1444; color: var(--accent);
+}
+.absorb-mode-recapture { background: #3a2c0e; color: var(--warning); }
+.absorb-mode-warmup { background: var(--bg); color: var(--text-muted); }
+
+.absorb-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.absorb-tiles-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.absorb-tile {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  padding: 8px 10px; border-radius: var(--radius);
+  background: var(--bg); border: 1px solid var(--border);
+}
+.absorb-tile-value { font-size: 20px; font-weight: 750; color: var(--text); line-height: 1.1; }
+/* Labels WRAP rather than truncate: "Head missed" / "Already captured"
+ * are the words the counts are read by, and an ellipsis hid them at
+ * 1440 (six tiles in the Run card's main column) and on a phone. */
+.absorb-tile-label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted);
+  line-height: 1.25; overflow-wrap: anywhere;
+}
+.absorb-tile.absorb-tone-ok .absorb-tile-value { color: var(--ok); }
+.absorb-tile.absorb-tone-warn .absorb-tile-value { color: var(--warning); }
+.absorb-tile.absorb-tone-bad .absorb-tile-value { color: var(--danger); }
+.absorb-kind-skip .absorb-tile-value { color: var(--text-muted); }
+.absorb-kind-recapture .absorb-tile-value { color: var(--warning); }
+.absorb-kind-fresh .absorb-tile-value { color: var(--accent); }
+
+.absorb-headrate { display: flex; align-items: center; gap: 14px; }
+.absorb-headrate-pct { font-size: 30px; font-weight: 800; color: var(--text); min-width: 76px; }
+.absorb-headrate-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; font-size: 13px; }
+.absorb-bar { height: 6px; border-radius: 3px; background: var(--surface2); overflow: hidden; }
+.absorb-bar > span { display: block; height: 100%; background: var(--ok); border-radius: 3px; }
+
+.absorb-split { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--surface2); }
+.absorb-split > span { display: block; height: 100%; }
+.absorb-split-skip { background: #4b3d66; }
+.absorb-split-recapture { background: var(--warning); }
+.absorb-split-fresh { background: var(--accent); }
+.absorb-split-parked { background: var(--danger); }
+
+.absorb-proof { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.absorb-proof li { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.4; }
+.absorb-dot {
+  flex: none; width: 10px; height: 10px; border-radius: 50%; margin-top: 4px;
+  border: 1.5px solid var(--text-muted);
+}
+.absorb-proof-ok .absorb-dot { background: var(--ok); border-color: var(--ok); box-shadow: 0 0 6px rgba(74, 222, 128, 0.5); }
+.absorb-proof-bad .absorb-dot { background: var(--danger); border-color: var(--danger); }
+.absorb-proof-bad { color: #fecaca; }
+.absorb-proof-none { color: var(--text-muted); }
+
+.absorb-switch-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.absorb-sleeping { margin-top: 4px; }
+.absorb-meaning {
+  font-size: 13px; line-height: 1.45; color: var(--text);
+  padding: 8px 10px; border-radius: var(--radius); background: var(--bg); border: 1px solid var(--border);
+}
+
+.absorb-windows { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.absorb-window {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  padding: 8px; border-radius: var(--radius); background: var(--bg); border: 1px solid var(--border);
+}
+.absorb-days { display: flex; gap: 3px; }
+.absorb-day {
+  width: 28px; height: 28px; padding: 0; border-radius: 50%;
+  font-size: 12px; font-weight: 600; color: var(--text-muted); background: transparent;
+}
+.absorb-day[aria-pressed='true'] { background: #2a1444; border-color: var(--accent); color: var(--accent); }
+.absorb-times { display: flex; align-items: center; gap: 6px; }
+.absorb-times input[type='time'] {
+  background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 4px 6px; font-family: var(--font); font-size: 13px;
+  font-variant-numeric: tabular-nums; color-scheme: dark;
+}
+.absorb-window-label { flex-basis: 100%; }
+.absorb-icon-btn {
+  width: 30px; height: 30px; padding: 0; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.absorb-row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.absorb-row-actions button { display: inline-flex; align-items: center; gap: 6px; }
+.absorb-problems { list-style: none; font-size: 12px; color: var(--danger); }
+.absorb-problem-line { font-size: 13px; color: var(--danger); }
+
+.absorb-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.absorb-list li {
+  display: flex; align-items: center; gap: 10px; padding: 6px 0;
+  border-bottom: 1px solid rgba(55, 37, 82, 0.6); font-size: 13px; min-width: 0;
+}
+.absorb-list li:last-child { border-bottom: 0; }
+.absorb-earlier li, .absorb-outcomes li { flex-direction: column; align-items: flex-start; gap: 1px; }
+.absorb-outcomes li { font-size: 12px; color: var(--text-muted); }
+.absorb-outcomes li.absorb-outcome-refused { color: var(--warning); }
+.absorb-list-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.absorb-list-main { color: var(--text); overflow-wrap: anywhere; }
+.absorb-parked-head .absorb-list-main::before {
+  content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--danger); margin-right: 6px; vertical-align: 1px;
+}
+
+.absorb-linked { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.absorb-linked-name { font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.absorb-link { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.absorb-offers { display: flex; flex-wrap: wrap; gap: 6px; }
+.absorb-offers button { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.absorb-paste { display: flex; gap: 8px; }
+.absorb-paste input {
+  flex: 1; min-width: 0; background: var(--surface2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px;
+  font-family: var(--font); font-size: 13px;
+}
+.absorb-link-btn { align-self: flex-start; background: transparent; color: var(--text-muted); }
+.absorb-reasons { overflow-wrap: anywhere; }
+
+@media (max-width: 900px) {
+  .absorb-grid { grid-template-columns: minmax(0, 1fr); }
+  .absorb-run-body { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  .absorb-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .absorb-run-card .absorb-actions { margin-left: 0; width: 100%; }
+  .absorb-run-card .absorb-actions button { flex: 1; justify-content: center; }
+  .absorb-headrate-pct { font-size: 26px; min-width: 64px; }
+}
+@media (pointer: coarse) {
+  .absorb-day { width: 34px; height: 34px; }
+  .absorb-icon-btn { width: 40px; height: 40px; }
+  .absorb-actions button, .absorb-row-actions button { min-height: 40px; }
+}

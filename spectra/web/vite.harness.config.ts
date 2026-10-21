@@ -8,7 +8,8 @@ import { resolve } from 'node:path';
 // own harnesses), and fidelity.html the WHOLE chrome + Home against the
 // approved artifact's own song data (scripts/check_ui_fidelity.py — the
 // design-fidelity gate; it is also the only harness page that renders the
-// EMPTY state, which is what the live app used to unmount).
+// EMPTY state, which is what the live app used to unmount), and absorb.html
+// the Absorb Music page under the real chrome (scripts/render_absorb_page.py).
 export default defineConfig({
   plugins: [react()], root: 'harness', base: '/spectra/',
   build: {
@@ -19,6 +20,7 @@ export default defineConfig({
       songstrip: resolve(__dirname, 'harness/songstrip.html'),
       hometimeline: resolve(__dirname, 'harness/hometimeline.html'),
       fidelity: resolve(__dirname, 'harness/fidelity.html'),
+      absorb: resolve(__dirname, 'harness/absorb.html'),
     } },
   },
 });

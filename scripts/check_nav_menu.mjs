@@ -85,6 +85,7 @@ console.log('§1 every old route is still reachable from the grouped data (navGr
   ok(activeGroupId('/show') === 'artifacts', 'activeGroupId("/show") === "artifacts" (Light Show)');
   ok(activeGroupId('/review') === 'engine', 'activeGroupId("/review") === "engine"');
   ok(activeGroupId('/feedback') === 'engine', 'activeGroupId("/feedback") === "engine" (filed next to Review)');
+  ok(activeGroupId('/absorb') === 'engine', 'activeGroupId("/absorb") === "engine" (Absorb Music, beside Test Bed)');
   ok(activeGroupId('/settings') === 'settings', 'activeGroupId("/settings") === "settings"');
   ok(activeGroupId('/') === 'home', 'activeGroupId("/") === "home"');
 }
