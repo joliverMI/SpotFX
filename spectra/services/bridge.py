@@ -60,6 +60,18 @@ force_scene_enabled is not broadcast, so it rides a read-only GET
 /api/settings poll (sequencer deferral only — Force Scene deliberately
 does NOT defer drift; the conductor's deferral reads pause / Dinner Party /
 Ambient alone).
+
+ABSORB MUSIC'S LIGHT STAND-DOWN (data/absorb-music-plan/report.md §6.3,
+phase 2; his Q3, "nothing" — the lights stay untouched during a window).
+SpotFX's "state" message carries `absorb` (services/absorb.py's
+`status_brief()`); `absorb_holds_lights()` is True while that says
+`lights_held`, which SpotFX sets only after it has proven the house silent
+and clears the moment it gives the house back (yield or close). Read by
+`conductor_deferral`/`sequencer_deferral` here and by every other choke
+point through spectra/services/absorb_hold.py. The flag is held across a
+DISCONNECT (a SpotFX restart must not hand a silent song to the show for
+the seconds it takes to come back) but never past `ABSORB_STALE_S` since
+the last state that carried it, so it can never stick.
 """
 from __future__ import annotations
 
@@ -80,6 +92,13 @@ SCENE_CHANGE_TYPES = ("scene_update", "update_scene", "reset_scene",
 RECONNECT_MIN_S = 1.0
 RECONNECT_MAX_S = 30.0
 SETTINGS_POLL_S = 15.0
+# How long Absorb's `lights_held` stands without a fresh "state" message
+# carrying it. SpotFX broadcasts state on every Spotify poll — every ~1 s
+# while a window holds the house silent (services/absorb.py's fast poll),
+# 30 s at the slowest — so 90 s is three idle polls: long enough for a
+# SpotFX restart, short enough that a dead SpotFX can't hold the show
+# forever.
+ABSORB_STALE_S = 90.0
 
 
 def classify_event(event_type: str) -> Optional[str]:
@@ -136,6 +155,9 @@ class SpotEffectsBridge:
         self.force_scene = False
         self.last_scene_id: str | None = None
         self._last_event: dict | None = None
+        self._absorb: dict | None = None
+        self._absorb_at: float | None = None
+        self._absorb_held_seen = False
         self.counts = {"state": 0, "trigger_fired": 0, "responses": 0,
                        "scene_changes": 0}
         self._task: asyncio.Task | None = None
@@ -158,6 +180,14 @@ class SpotEffectsBridge:
             self._next_track = {"uri": payload.get("next_track_uri") or None,
                                 "title": payload.get("next_track_title") or ""}
             self._context_name = payload.get("context_name") or None
+            absorb = payload.get("absorb")
+            self._absorb = absorb if isinstance(absorb, dict) else None
+            self._absorb_at = self._clock()
+            held = bool(self._absorb and self._absorb.get("lights_held") is True)
+            if held != self._absorb_held_seen:
+                self._absorb_held_seen = held
+                from spectra.services import absorb_hold
+                absorb_hold.record_transition(held, self._absorb)
             if self._on_track_uri is not None:
                 uri = (self._track or {}).get("spotify_uri")
                 await self._on_track_uri(uri)
@@ -355,14 +385,41 @@ class SpotEffectsBridge:
         from spectra.services import intensity_scale
         return intensity_scale.song_scaling_factor(uri, self.track_genres())
 
+    def absorb_holds_lights(self) -> bool:
+        """True while an Absorb Music window holds the show still (SpotFX
+        proved the house silent and has not given it back yet). See this
+        module's docstring for the staleness bound."""
+        a = self._absorb
+        if not isinstance(a, dict) or a.get("lights_held") is not True:
+            return False
+        if self._absorb_at is None:
+            return False
+        return (self._clock() - self._absorb_at) < ABSORB_STALE_S
+
+    def absorb_status(self) -> dict:
+        """What the engine status page shows about Absorb's stand-down."""
+        a = self._absorb or {}
+        now = self._clock()
+        return {
+            "lights_held": self.absorb_holds_lights(),
+            "state": a.get("state"),
+            "run_id": a.get("run_id"),
+            "age_s": (round(now - self._absorb_at, 1)
+                      if self._absorb_at is not None else None),
+        }
+
     def conductor_deferral(self) -> Optional[str]:
-        """Preview / Pause / Dinner Party / Ambient hold drift; Force Scene
-        does NOT (a pinned scene keeps its declared life). A colour Preview
-        (spectra/services/preview_pause.py) outranks all three — see that
-        module's docstring."""
+        """Preview / Absorb / Pause / Dinner Party / Ambient hold drift;
+        Force Scene does NOT (a pinned scene keeps its declared life). A
+        colour Preview (spectra/services/preview_pause.py) outranks all of
+        them — see that module's docstring — and an Absorb Music window
+        (absorb_holds_lights) comes next: the house is silent and the
+        lights stay as they are."""
         from spectra.services import preview_pause
         if preview_pause.active():
             return "preview"
+        if self.absorb_holds_lights():
+            return "absorb"
         if self.paused:
             return "paused"
         if self.dinner_party:
@@ -375,6 +432,8 @@ class SpotEffectsBridge:
         from spectra.services import preview_pause
         if preview_pause.active():
             return "preview"
+        if self.absorb_holds_lights():
+            return "absorb"
         if self.force_scene:
             return "force_scene"
         return self.conductor_deferral()
@@ -474,6 +533,7 @@ class SpotEffectsBridge:
             } if self._track else None),
             "next_track": self.next_track(),
             "deferral": self.sequencer_deferral(),
+            "absorb": self.absorb_status(),
             "intensity": self.intensity(),
             "genre_bucket": self.genre_bucket(),
             "last_event": self._last_event,

@@ -10751,20 +10751,18 @@ only when the anchor pass ran (`settings.anchor_enabled`). Specs:
 `tests/test_audio_shape_index_miss.py`, `tests/test_recapture_playlist_cache.py`,
 `tests/test_capture_success_bookkeeping.py`.
 
-## ABSORB MUSIC — unattended capture of a linked playlist (phase 1: the runner)
+## ABSORB MUSIC — unattended capture of a linked playlist (phases 1-2)
 
 Plan: `/home/javi/fleet-spotfx/data/absorb-music-plan/report.md` (his six
 asks, his five answers in §0, phases in §12). **`services/absorb.py`'s
-module docstring is the binding statement**; `services/absorb_bar.py` owns
-"already captured", `services/capture_watch.py` the mid-song detectors,
-`models/absorb.py` the three stores. Six things:
+module docstring is the binding statement** for the runner and
+**`services/absorb_silence.py`'s for the house guard**;
+`services/absorb_bar.py` owns "already captured", `services/capture_watch.py`
+the mid-song detectors, `models/absorb.py` the three stores. Phase 1:
 
-- **IT CANNOT PLAY OUT LOUD YET, BY CONSTRUCTION.** `HouseGuard` is phase 2's
-  seam (silence, its proof, the Order 27 gate, the light stand-down); the
-  shipped `UnbuiltHouseGuard` refuses every window by name before any
-  Spotify call. Phase 2 swaps the guard in `production_deps()` — do not add
-  an "allow audible" switch. `AbsorbConfig.enabled` ships False and nothing
-  schedules (phase 3); a refusal is a RECORDED run answered 200.
+- **NOTHING STARTS ON ITS OWN.** `AbsorbConfig.enabled` ships False and
+  nothing schedules (phase 3); a window opens only on a press, and a refusal
+  is a RECORDED run answered 200. Do not add an "allow audible" switch.
 - **ABSORB'S QUEUE, NOT SPOTIFY'S.** It sends a window of URIs (never a
   playlist context, never the queue API) and re-sends only as a song STARTS,
   so a correction cuts the head of a song that will be replayed, never the
@@ -10786,16 +10784,57 @@ module docstring is the binding statement**; `services/absorb_bar.py` owns
 - **THE SIDECAR HAS NO HEAD FIELD.** The plan expected phase 0 to add
   `first_timestamp_ms`; it did not. `absorb_bar.read_facts` reads the field
   when present and the npz's own first timestamp otherwise.
-- **HIS MUSIC ENDS A WINDOW (phase 1) WITHOUT A PLAYBACK CALL**
-  (`_on_session_lost`); phase 2 replaces it with yield-and-resume. His pause
-  stops the capture (`on_target_device` needs `is_playing`), so that outcome
-  is an interruption, never an attempt.
+- **HIS PAUSE IS NOT AN ATTEMPT.** It stops the capture
+  (`on_target_device` needs `is_playing`), so that outcome is an
+  interruption, never an attempt.
+
+Phase 2 — silence, the Order 27 gate, stand-down, restore (2026-10-20):
+
+- **SILENCE IS `snap_volume` → 0, NEVER THE CAPTURE CLIENT.** The capture
+  taps a null sink only `Effects Host` writes into, so that client stays
+  untouched; Spotify volume 0 would record silence. The write goes through
+  SPECTRA's narrow `/spectra/api/house-audio` (`spectra/api/house_audio.py`
+  → `ha_volume_ease.set_absolute(ease_s=0)`, which also stops a Light Show
+  ramp) because SpotFX's own `HOME_ASSISTANT_TOKEN` is the `.env.template`
+  placeholder (verified 401, 2026-10-20); `settings.absorb_ha_via="direct"`
+  exists for a real one (`api/ha_client.py`).
+- **PROVEN, NOT BELIEVED, AND RE-PROVEN.** After the write, HA's own number
+  must read back 0 and Snapcast's own status (`services/snapcast_status.py`,
+  a FRESH connection per request — snapserver mishandles keep-alive) must
+  show every other connected room at 0 %/muted and `Effects Host` exactly as
+  it was; a room the volume misses is muted directly (remembered first), a
+  room on the TTS stream is an announcement and left alone, and the proof
+  re-runs every `silence_recheck_s`. Every failure — the capture client
+  moved, an unreadable snapserver, River's hard block (her `allow=` label
+  rule, label "absorb"), sleeping with `run_while_sleeping` off — STOPS the
+  window; a Guest/AirPlay stream playing YIELDS it.
+- **THE YIELD RESTORES FIRST** (`_yield`): volume, then lights, then the
+  queue; never a playback call. Resume needs `resume_after_quiet_min` of
+  CONFIRMED quiet — `state.poll_ok` (new) tells a failed poll, which holds
+  the clock, from "nothing playing" — and is a full re-open, at most
+  `max_resumes_per_window` times. Spotify polls at
+  `absorb_poll_interval_ms` while the house is silent.
+- **RESTORE ON EVERY EXIT, NEVER OVER ABSORB'S OWN SONG.** The contract is
+  `storage/absorb_silence.json`, written before the first write; a restore
+  is read back before the file goes, a failure is CRITICAL and retried by the
+  supervisor (`absorb.run_supervised`, the FIRST lifespan task — its first
+  tick restores a crashed window), and a close pauses absorb's song first and
+  keeps the house silent if it can't confirm the song stopped.
+- **THE LIGHTS STAND DOWN, PROVEN FROM THE SHOW SIDE.** `run.lights_held`
+  rides the websocket `absorb` key; `spectra/services/absorb_hold.py` is the
+  binding statement for every SPECTRA choke point it gates (house fires,
+  `origin="house"`, pass) — `tests/test_absorb_stand_down.py` is the bar.
 
 Tests: `tests/absorb_world.py` (fake Spotify / capture / disk / clock — reuse
 it), `tests/test_absorb_runner.py`, `tests/test_absorb_capture_hooks.py` (the
 real ingest loop; a gap at 0:30 skips within one frame),
-`tests/test_absorb_bar.py`; his real library, read-only:
-`scripts/check_absorb_classify.py`. A test that drives
+`tests/test_absorb_bar.py`, `tests/test_absorb_silence.py` (the fake house:
+snapserver + HA + the volume automation, which can reach the capture client,
+drop a room in mid-window or play an announcement),
+`tests/test_absorb_house_audio.py` (the transports underneath — `ha_client`,
+`snapcast_status`, `house_audio` — against mocked HTTP only, never a live
+house), `tests/test_absorb_stand_down.py` (the lights, from the show side);
+his real library, read-only: `scripts/check_absorb_classify.py`. A test that drives
 `audio_shape_service.on_track_change` with analysis on must stub
 `pcm_ring_buffer.ensure_alive` or it opens a real audio stream.
 

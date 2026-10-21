@@ -11,6 +11,7 @@ const BUCKET_LABEL: Record<ReviewEventItem['bucket'], string> = {
   deferred: 'Deferred (dwell)',
   watchdog: 'Watchdog',
   show: 'Light Show',
+  absorb: 'Absorb Music',
 };
 
 export const BUCKET_COLOR: Record<ReviewEventItem['bucket'], string> = {
@@ -21,12 +22,14 @@ export const BUCKET_COLOR: Record<ReviewEventItem['bucket'], string> = {
   deferred: '#94a3b8',
   watchdog: '#64748b',
   show: '#f472b6',
+  absorb: '#38bdf8',
 };
 
 /** engine._response_gate/_update_gate's refusal words, as a reader says them.
  * An unlisted reason is shown verbatim rather than guessed at. */
 const KIND_BATCH_SKIP_REASON: Record<string, string> = {
   preview: 'a Preview held the room',
+  absorb: 'Absorb Music held the lights',
   scene_change_mode: 'scene-change mode closed',
 };
 
@@ -111,6 +114,13 @@ export function describeEvent(item: ReviewEventItem): string {
         const delay = d.delay_ms as number | undefined;
         return `Flare kinds skipped (${why}): ${names?.length ? names.join(', ') : item.key}${delay != null ? `, +${delay}ms` : ''}`;
       }
+      if (d.reason === 'absorb') {
+        // spectra/services/absorb_hold.py: an Absorb Music window kept the
+        // lights still while it played songs nobody was hearing.
+        const what = (d.scene_name as string | undefined)
+          ?? (d.event_class as string | undefined) ?? item.key;
+        return `Held for Absorb Music (the house is silent): ${what}`;
+      }
       const name = (d.scene_name as string | undefined) ?? item.key;
       const remaining = d.remaining_dwell_s as number | undefined;
       const result = d.update_result as string | undefined;
@@ -131,6 +141,10 @@ export function describeEvent(item: ReviewEventItem): string {
       const detail = d.detail as string | undefined;
       return `Light Show: ${set ?? ''}${step ? ` · ${step}` : ''}${detail ? ` — ${detail}` : ''}`;
     }
+    case 'absorb':
+      return item.key === 'held'
+        ? 'Absorb Music: the house went silent; the lights hold still'
+        : 'Absorb Music: the house is back; the lights are free';
     default:
       return `${BUCKET_LABEL[item.bucket] ?? item.bucket}: ${item.key}`;
   }

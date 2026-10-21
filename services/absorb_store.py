@@ -163,7 +163,8 @@ def write_run_file(gen: int, data: dict) -> None:
 
 
 def _bound(run: AbsorbRun) -> AbsorbRun:
-    for name in ("captured", "failed", "parked", "skipped", "realigned"):
+    for name in ("captured", "failed", "parked", "skipped", "realigned",
+                 "silence_checks", "yields"):
         items = getattr(run, name)
         if len(items) > RUN_LIST_MAX:
             setattr(run, name, items[-RUN_LIST_MAX:])

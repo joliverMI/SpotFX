@@ -83,6 +83,18 @@ class SpotifyGateway:
         self._spaced()
         self._client().pause_playback(device_id=device_id)
 
+    def current_playback(self) -> Optional[dict]:
+        """What Spotify is playing right now — {uri, is_playing,
+        device_name} — or None when nothing is. RAISES when Spotify can't
+        say, which a caller must treat as "could be absorb's song"
+        (services/absorb_silence.py never restores the volume over it)."""
+        data = self._client().current_playback()
+        if not data or not data.get("item"):
+            return None
+        return {"uri": (data.get("item") or {}).get("uri"),
+                "is_playing": bool(data.get("is_playing")),
+                "device_name": (data.get("device") or {}).get("name", "")}
+
     # ── playlists ───────────────────────────────────────────────────────────
 
     def resolve_playlist(self, link: str) -> Optional[dict]:

@@ -86,7 +86,11 @@ BUCKETS = ("scenes", "responses", "color_sets", "triggers", "deferred",
            "show",
            # "house": house lighting (spectra/services/house.py) — every
            # mode change, who asked, and what the resting layer did.
-           "house")
+           "house",
+           # "absorb": an Absorb Music window holding the lights still
+           # starting ("held") and ending ("released") —
+           # spectra/services/absorb_hold.py.
+           "absorb")
 
 # Entry-count cap for the show log — bounded, never unbounded growth. On
 # each append, entries beyond this count are dropped oldest-first.

@@ -40,6 +40,8 @@ class FakeGateway:
         self.fail_remove_from: set[str] = set()
         self.fail_play = False
         self.titles: dict[str, str] = {}
+        self.now_playing: Optional[dict] = None    # {uri, is_playing, device_name}
+        self.playback_unknown = False
 
     def _bump(self, pid: str) -> str:
         self.snapshots[pid] = self.snapshots.get(pid, 0) + 1
@@ -58,6 +60,18 @@ class FakeGateway:
     def pause(self, device_id):
         self.calls.append(("pause",))
         self.pauses += 1
+        if self.now_playing is not None:
+            self.now_playing["is_playing"] = False
+
+    def current_playback(self):
+        """What Spotify says is playing (absorb_silence's "is absorb's song
+        still on" read); `playback_unknown` makes it raise."""
+        self.calls.append(("current_playback",))
+        if self.playback_unknown:
+            raise RuntimeError("Spotify can't say")
+        if self.now_playing is None:
+            return None
+        return dict(self.now_playing)
 
     def resolve_playlist(self, link):
         self.calls.append(("resolve_playlist", link))
@@ -173,6 +187,8 @@ class World:
         monkeypatch.setattr(absorb_store, "CONFIG_FILE", tmp_path / "absorb.json")
         monkeypatch.setattr(absorb_store, "RUN_FILE", tmp_path / "absorb_run.json")
         monkeypatch.setattr(absorb_store, "LEDGER_FILE", tmp_path / "absorb_ledger.json")
+        from services import absorb_silence
+        monkeypatch.setattr(absorb_silence, "SNAPSHOT_FILE", tmp_path / "absorb_silence.json")
         self.gw = FakeGateway()
         self.cap = capture if capture is not None else FakeCapture()
         self.disk = Disk()
@@ -183,6 +199,8 @@ class World:
         self.spectra: Optional[tuple] = None
         self.governor_reading: Optional[dict] = {"seq": 24, "dropped_total_ms": 14243}
         self.bursts: list[float] = []
+        self.poll_ok: Optional[bool] = True
+        self.fast_polls: list[bool] = []
 
         async def inline(fn, *a):
             return fn(*a)
@@ -204,6 +222,8 @@ class World:
             request_burst=self.bursts.append,
             monotonic=lambda: self.clock[0],
             now_ms=lambda: int(self.clock[0] * 1000),
+            poll_ok=lambda: self.poll_ok,
+            set_fast_poll=self.fast_polls.append,
         )
         self.runner = absorb.AbsorbRunner(self.deps)
         self.runner.install()
@@ -223,7 +243,9 @@ class World:
                 device: str = DEVICE, duration_ms: int = 200_000) -> None:
         if u is None:
             self.track = None
+            self.gw.now_playing = None
             return
+        self.gw.now_playing = {"uri": u, "is_playing": is_playing, "device_name": device}
         self.track = SpotifyTrackInfo(
             spotify_uri=u, title=u[-6:], artist="A", duration_ms=duration_ms,
             progress_ms=progress_ms, is_playing=is_playing, fetched_at=time.monotonic(),

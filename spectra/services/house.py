@@ -319,6 +319,12 @@ def _default_playing() -> Optional[bool]:
         is_playing = bridge.is_playing()
         if is_playing is not True:
             return is_playing
+        if bridge.absorb_holds_lights():
+            # ABSORB MUSIC (spectra/services/absorb_hold.py): its songs play
+            # with the house silent, so they are not the room's music — a
+            # "show" mode stays on its own look, exactly as for a device he
+            # never authorised.
+            return False
         return _music_device_allowed(bridge.device_name())
     except Exception:                                    # noqa: BLE001
         return None

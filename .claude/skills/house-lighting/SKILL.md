@@ -89,7 +89,11 @@ worth knowing cold:
    `response_deferral()` alone reaches them; both call sites must be
    checked. A manual Fire button / scene-change arm is never gated by
    any of this. See `house.py`'s own "THE MUSIC-DEVICE GATE" docstring
-   section.
+   section. **An Absorb Music window's songs read as NOT playing here too**
+   (`_default_playing` returns False while `bridge.absorb_holds_lights()`,
+   2026-10-20): they play with the house silent, so a "show" mode never
+   hands in to them; the rest of the stand-down is
+   `spectra/services/absorb_hold.py`.
 
 7. **A WLED'S BRIGHTNESS IS HOME ASSISTANT'S (the Admiral, 2026-10-12,
    `data/wled-bri-audit/report.md`)** — `house_fixtures.py`'s "BRIGHTNESS

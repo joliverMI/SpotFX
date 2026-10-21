@@ -605,8 +605,10 @@ async def reconcile_now(*, wait: bool = True, snap: bool = False) -> dict:
     import: spectra.services.engine imports this module (for status(),
     folded into engine.status()), so a module-level import here would
     cycle."""
-    from spectra.services.engine import bridge
-    return await reconcile(bridge.is_playing(), wait=wait, snap=snap)
+    from spectra.services.engine import _room_is_playing
+    # _room_is_playing: bridge.is_playing(), but UNKNOWN while an Absorb
+    # Music window holds the lights (spectra/services/absorb_hold.py).
+    return await reconcile(_room_is_playing(), wait=wait, snap=snap)
 
 
 async def _apply(controls: RoomControlState, desired: bool, color: Optional[str],
