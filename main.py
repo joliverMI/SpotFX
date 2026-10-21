@@ -177,11 +177,16 @@ async def lifespan(app: FastAPI):
 
     # Absorb Music: a window a dead process left open is stamped ended, and
     # the runner starts listening to the capture service. Nothing here
-    # starts playback — a window opens only on his press (AbsorbConfig
-    # ships `enabled: false`; scheduling is phase 3). Its supervisor is the
-    # FIRST task: its first tick restores a house volume a dead process
-    # left at 0 (services/absorb_silence.py), before anything else.
-    absorb.recover_orphaned_run()
+    # starts playback. The schedule (services/absorb_schedule.py) is ARMED
+    # here — its memory of which occurrences it already acted on is on disk,
+    # so a restart never reopens one — but it opens a window only when he
+    # switched it on AND named one (AbsorbConfig ships `enabled: false`,
+    # `windows: []`). Its supervisor is the FIRST task, and each step runs
+    # the runner before the schedule: the first step restores a house
+    # volume a dead process left at 0 (services/absorb_silence.py) before
+    # the schedule may open anything.
+    from services import absorb_schedule
+    absorb_schedule.arm(absorb.recover_orphaned_run())
     absorb.install()
 
     # Launch background tasks

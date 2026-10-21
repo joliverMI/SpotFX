@@ -12,6 +12,12 @@ SpotFX — Absorb Music API (services/absorb.py is the runner).
   POST /api/absorb/retry         un-park one song ({"uri": ...})
   GET  /api/absorb/preview       already captured / to capture / to re-capture
                                  for the linked playlist — reads only
+  GET  /api/absorb/schedule      the schedule: switched on or not, his windows
+                                 in house time, the one open now, the next
+                                 one, and what the schedule did with each
+                                 recent occurrence (opened / waiting /
+                                 refused, with its reason) — reads only.
+                                 Windows are edited through PUT /config.
 
 A refusal to open is a RECORDED outcome answered with 200 and its reason
 (`{"status": "refused", "reason": ..., "detail": ...}`), never a silence and
@@ -24,7 +30,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 
-from services import absorb, absorb_store
+from services import absorb, absorb_schedule, absorb_store
 
 router = APIRouter(prefix="/api/absorb", tags=["absorb"])
 
@@ -99,3 +105,8 @@ async def preview() -> dict:
     except Exception as exc:
         return {"linked": True, "resolved": False,
                 "detail": absorb.sentence("spotify_error", str(exc)[:120])}
+
+
+@router.get("/schedule")
+async def schedule(outcomes: int = 20) -> dict:
+    return absorb_schedule.status(limit=max(0, min(outcomes, 60)))

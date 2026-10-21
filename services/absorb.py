@@ -22,7 +22,11 @@ shape. His six asks, and where each lives:
   3+5. the two playlists    here: a captured song leaves the source playlist
                             and goes on top of "Recently Captured" in one
                             filing, recorded step by step in the ledger.
-  4. scheduling             PHASE 3 (AbsorbConfig.windows is stored, unread).
+  4. scheduling             services/absorb_schedule.py opens a window at its
+                            house-time start (only when he switched the
+                            schedule on AND named a window); here, the
+                            window's END: the overrun grace and the ordered
+                            close (see THE CLOSE below).
   6. skip the captured      here: the skip pass files every song that already
                             passes the bar without playing it, unless his
                             force-recapture tag is on.
@@ -60,7 +64,24 @@ of CONFIRMED quiet (Spotify answered and nothing was playing; a failed poll
 holds the clock, never advances it), as a full re-open — the volume is
 remembered and silenced again and the proof is run again — at most
 `max_resumes_per_window` times. The song he interrupted goes back at the
-front of the queue.
+front of the queue. A SCHEDULED window that finds his music already playing
+at its start waits the same way from its first second — paused, the house
+untouched — and its first "resume" is its first open.
+
+THE CLOSE (report §5, §9, phase 3). When a scheduled window's time is up the
+order is the semantics: stop the queue → pause playback → let the in-flight
+capture finalize → restore the house and read it back → lift the light
+stand-down → write the record. Two refinements:
+  - a song mid-capture that will END within `overrun_grace_min` (5) of the
+    window's end is FINISHED first ("finishing"), then closed; one that
+    won't is abandoned — not counted as an attempt, played again next time;
+  - "let it finalize" waits for the outcome of every capture still in
+    flight, bounded by CLOSE_FINALIZE_WAIT_S (the measured finalize max is
+    ~62 s), so the record carries it. The house stays silent and the
+    lights held while it waits — and his music starting in that wait gets
+    the volume back at once, exactly like a yield.
+A safety stop (the guard) and his Stop still end at once: the volume back
+now, no waiting.
 
 One process-wide runner, `runner`; `install()` wires its listeners.
 """
@@ -77,7 +98,7 @@ from models.absorb import (
     AbsorbConfig, AbsorbLedger, AbsorbRun, Filing, HeadTally, LedgerEntry,
     NowPlaying, RealignEntry, SongEntry,
 )
-from services import absorb_bar, absorb_store
+from services import absorb_bar, absorb_schedule, absorb_store
 from services.capture_watch import Condemnation, governor_moved
 
 logger = logging.getLogger(__name__)
@@ -88,6 +109,8 @@ CAPTURE_START_GRACE_S = 30.0  # a song playing this long with no capture is cond
 PAUSE_GRACE_S = 20.0          # Spotify paused this long mid-song = the session is lost
 END_TOLERANCE_MS = 8000       # a song whose last seen progress was this close to its end ended naturally
 OUTCOME_TIMEOUT_S = 300.0     # a capture whose outcome never arrives is failed "no_outcome"
+FINISH_SLACK_S = 20.0         # a song finished in the overrun grace may end this late (polls)
+CLOSE_FINALIZE_WAIT_S = 90.0  # the close waits this long for in-flight captures to finalize
 
 # ── refusals and endings: ONE sentence per code ──────────────────────────────
 SENTENCES: dict[str, str] = {
@@ -116,11 +139,25 @@ SENTENCES: dict[str, str] = {
     "resume_cap": ("Your music took over {n} time(s) this window — the most it comes back "
                    "from — so Absorb ended it."),
     "window_ending": "Too little of the window was left to come back for.",
+    "window_closed": "The window's time was up.",
+    "window_closed_waiting": ("Your music played until the window's time was up, so Absorb "
+                              "never started."),
+    "schedule_off": "The schedule was switched off, so the window won't open again.",
 }
+
+# A refusal that means "he (or a guest) is listening right now". A SCHEDULED
+# window that meets one at its start waits for his quiet instead of losing the
+# evening — the house is untouched when either is returned.
+LISTENING_CODES = frozenset({"music_playing", "foreign_stream"})
 
 # A guard refusal that means "someone wants to listen", not "unsafe": the
 # window yields (and may resume) instead of ending.
 YIELD_CODES = frozenset({"foreign_playback", "left_device", "paused", "foreign_stream"})
+
+
+def _hhmm(ms: Optional[int]) -> str:
+    """House time, for a log line a person reads."""
+    return absorb_schedule.house_hhmm(int(ms)) if ms is not None else "—"
 
 
 def sentence(code: str, detail: str = "", **fmt: Any) -> str:
@@ -360,6 +397,13 @@ class AbsorbRunner:
         # and the monotonic time of the last confirmed-quiet read
         self.quiet_s: float = 0.0
         self.quiet_mark: Optional[float] = None
+        # the window's close (THE CLOSE in the module docstring): the ending
+        # it will record, the overrun grace's deadline, the finalize wait's
+        # deadline, and whether the close already paused playback
+        self.closing: Optional[Refusal] = None
+        self.finish_by: float = 0.0
+        self.close_deadline: float = 0.0
+        self.close_paused: bool = False
 
     # ── plumbing ────────────────────────────────────────────────────────────
 
@@ -554,9 +598,29 @@ class AbsorbRunner:
         return {"status": "refused", "reason": code, "detail": text,
                 "run": brief(run)}
 
-    async def start(self, started_by: str = "press") -> dict:
+    def _wait_from_start(self, refusal: Refusal) -> None:
+        """A scheduled window found him (or a guest) listening at its start:
+        it waits — paused, nothing in the house changed — exactly as if his
+        music had taken over at its first second. `_resume` opens it."""
+        code, text = refusal
+        run = self.run
+        run.state = "paused"
+        run.stage = "waiting"
+        run.wait_reason, run.wait_detail = code, text
+        self.quiet_s, self.quiet_mark = 0.0, None
+        self._log(f"waiting: {text} — opens after {self.cfg.resume_after_quiet_min} min of quiet")
+        self._persist()
+
+    async def start(self, started_by: str = "press", window: Optional[dict] = None,
+                    wait_if_listening: bool = False) -> dict:
         """Open a window now. Every refusal is RECORDED (a run in state
-        "refused" with its reason) and answered, never a silence."""
+        "refused" with its reason) and answered, never a silence.
+
+        `window` is the schedule's {start, end, scheduled_start, label}
+        (epoch ms); a press has no end. With `wait_if_listening` (the
+        schedule), a refusal in LISTENING_CODES does not refuse: the window
+        WAITS, paused with the house untouched, and opens after his quiet
+        clock (`_resume`)."""
         async with self._get_lock():
             if self.open_window:
                 return {"status": "already_running", "reason": "already_running",
@@ -569,15 +633,21 @@ class AbsorbRunner:
                 id=uuid.uuid4().hex[:12], state="running", started_ms=d.now_ms(),
                 started_by=started_by if started_by in ("schedule", "press", "sonic", "ha") else "press",
                 source_playlist_uri=cfg.source_playlist_uri,
-                window={"start": d.now_ms(), "end": None}, stage="opening",
+                window=dict(window) if window else {"start": d.now_ms(), "end": None},
+                stage="opening",
             )
             self.run = run
             refusal = await self._gates(cfg)
             if refusal is None:
                 refusal = await d.guard.open(run, cfg)
+            if refusal is not None and wait_if_listening and refusal[0] in LISTENING_CODES:
+                self._wait_from_start(refusal)
+                return {"status": "waiting", "reason": refusal[0], "detail": refusal[1],
+                        "run": brief(run)}
             if refusal is not None:
                 self._reset_live_state()
                 return self._refuse(run, refusal)
+            run.opened_ms = d.now_ms()
             d.set_fast_poll(True)
             self._log(f"window opened ({started_by}) on {run.source_playlist_name or cfg.source_playlist_uri}")
             self._persist()
@@ -773,6 +843,9 @@ class AbsorbRunner:
         """Send Spotify the next window and arm the per-song force sets.
         Returns False when there was nothing to send or the play failed."""
         d, run, cfg = self.deps, self.run, self.cfg
+        if self.closing:
+            await self._close_stop()
+            return False
         size = cfg.play_window_size
         while True:
             head = run.queue[: size - (1 if lead else 0)]
@@ -899,10 +972,16 @@ class AbsorbRunner:
         silence re-proof while a window runs — it must not wait for a
         Spotify poll — and, with no window running, a restore the last one
         left pending (the FIRST tick of a new process restores a window a
-        dead process left silent, before anything else)."""
+        dead process left silent, before anything else). It is also the
+        window's clock: a scheduled window whose time is up starts its close
+        here, and the close advances here."""
         async with self._get_lock():
             self._sweep_outcomes()
             d = self.deps
+            if self.open_window and self.closing is None and self._window_over():
+                await self._window_end()
+            if self.closing is not None:
+                await self._advance_close()
             if self.active:
                 refusal = await d.guard.recheck(self.run, self.cfg)
                 if refusal:
@@ -1044,14 +1123,22 @@ class AbsorbRunner:
                 self.awaiting.pop(att.uri, None)
                 self._resolve_failure(att, "no_capture", "no capture started for this song")
         run.now_playing = None
-        if arrived is not None and run.queue and arrived == run.queue[0] \
-                and not self.warmup_pending:
+        if self.closing is None and arrived is not None and run.queue \
+                and arrived == run.queue[0] and not self.warmup_pending:
             self._arrive(arrived, track)
             return
-        if run.queue:
+        await self._next()
+
+    async def _next(self) -> None:
+        """Move on from the song that just stopped being absorb's: the next
+        window of songs, or — with nothing left — the drain; while the
+        window is closing, the close instead."""
+        if self.closing is not None:
+            await self._close_stop()
+        elif self.run.queue:
             await self._send_window()
-            return
-        await self._drain()
+        else:
+            await self._drain()
 
     async def _drain(self) -> None:
         """Nothing left to play. Stop the music; end once every outcome has
@@ -1069,6 +1156,9 @@ class AbsorbRunner:
 
     async def _maybe_finish(self) -> None:
         run = self.run
+        if self.closing is not None:
+            await self._advance_close()     # the close decides how the window ends
+            return
         if not self.active or run.queue or run.now_playing or self.switching_to:
             return
         if any(not a.condemned for a in self.awaiting.values()):
@@ -1107,10 +1197,7 @@ class AbsorbRunner:
         self._resolve_failure(att, reason, detail)
         self.current = None
         run.now_playing = None
-        if run.queue:
-            await self._send_window()
-        else:
-            await self._drain()
+        await self._next()
         self._persist()
 
     def _resolve_failure(self, att: _Attempt, reason: str, detail: str) -> None:
@@ -1205,10 +1292,7 @@ class AbsorbRunner:
             if still_playing and self.active:
                 # the song is still on, but its capture is over — move on
                 self.run.now_playing = None
-                if self.run.queue:
-                    await self._send_window()
-                else:
-                    await self._drain()
+                await self._next()
             await self._maybe_finish()
             self._persist()
 
@@ -1359,10 +1443,9 @@ class AbsorbRunner:
             run.now_playing = None
             if self.warmup_pending or np_.mode == "warmup":
                 self.warmup_pending = False
-            if run.queue:
-                await self._send_window()
-            else:
-                await self._drain()
+            # in the overrun grace, skipping the song being finished closes
+            # the window now
+            await self._next()
             self._persist()
             return {"status": "skipped", "skipped_uri": np_.uri, "run": brief(run)}
 
@@ -1454,7 +1537,14 @@ class AbsorbRunner:
         # music — it is his now
         run.state = "paused"
         run.stage = "yielded"
+        run.wait_reason, run.wait_detail = code, text
         self.quiet_s, self.quiet_mark = 0.0, None
+        if self.closing is not None:
+            # his music came on while the window was closing: the volume is
+            # already back (above); the close has nothing left to wait for
+            code_c, text_c = self.closing
+            await self._end(code_c, text_c, pause=False)
+            return
         if run.resumes >= cfg.max_resumes_per_window:
             await self._end("resume_cap", sentence("resume_cap", n=len(run.yields)), pause=False)
             return
@@ -1482,7 +1572,11 @@ class AbsorbRunner:
         """A full RE-OPEN, never a continuation: every gate again, the
         volume remembered (as he last left it) and silenced again, the proof
         run again, the lights held again — then the queue where it was. A
-        re-proof that fails ends the window, named."""
+        re-proof that fails ends the window, named.
+
+        A scheduled window that has been WAITING since its start (it never
+        opened) opens here for the first time: every gate, the silence, the
+        queue built — and it is not counted as a resume."""
         d, run, cfg = self.deps, self.run, self.cfg
         end = (run.window or {}).get("end")
         if end is not None and end - d.now_ms() < cfg.min_remaining_min * 60_000:
@@ -1490,6 +1584,17 @@ class AbsorbRunner:
             return
         if d.guard.holding():
             return          # the yield's restore has not landed; wait for it
+        if run.started_by == "schedule":
+            try:
+                on = absorb_store.load_config().enabled
+            except Exception:                                     # noqa: BLE001
+                on = True
+            if not on:
+                await self._end("schedule_off", sentence("schedule_off"), pause=False)
+                return
+        if not run.opened_ms:
+            await self._first_open()
+            return
         if not run.queue and not any(not a.condemned for a in self.awaiting.values()):
             await self._end("queue_done", sentence("queue_done"), pause=False)
             return
@@ -1508,6 +1613,7 @@ class AbsorbRunner:
         run.resumes += 1
         run.state = "running"
         run.stage = "capturing"
+        run.wait_reason, run.wait_detail = "", ""
         self.quiet_s, self.quiet_mark = 0.0, None
         d.set_fast_poll(True)
         self._log(f"resumed after {cfg.resume_after_quiet_min} min of quiet "
@@ -1517,6 +1623,42 @@ class AbsorbRunner:
         else:
             await self._drain()
         self._persist()
+
+    async def _first_open(self) -> None:
+        """The scheduled window that waited from its start opens now, after
+        his quiet: the same gates and the same silence `start()` runs. A
+        listener still there keeps it waiting; any other refusal ends it as
+        REFUSED (it never opened), recorded with its reason."""
+        d, run, cfg = self.deps, self.run, self.cfg
+        refusal = await self._gates(cfg)
+        if refusal is None:
+            refusal = await d.guard.open(run, cfg)
+        if refusal is not None and refusal[0] in LISTENING_CODES:
+            self.quiet_s, self.quiet_mark = 0.0, None
+            run.wait_reason, run.wait_detail = refusal
+            self._log(f"not opening yet: {refusal[1]}")
+            self._persist()
+            return
+        if refusal is not None:
+            self._clear_sets()
+            self._reset_live_state()
+            self._refuse(run, refusal)
+            return
+        run.opened_ms = d.now_ms()
+        run.state = "running"
+        run.stage = "opening"
+        run.wait_reason, run.wait_detail = "", ""
+        self.quiet_s, self.quiet_mark = 0.0, None
+        d.set_fast_poll(True)
+        self._log(f"window opened after {cfg.resume_after_quiet_min} min of quiet "
+                  f"on {run.source_playlist_name or cfg.source_playlist_uri}")
+        self._persist()
+        try:
+            await self._open_queue()
+        except Exception as exc:
+            logger.exception("Absorb: building the queue failed")
+            await self._end("spotify_error", sentence("spotify_error", str(exc)[:120]),
+                            pause=False)
 
     def _ours_for_restore(self) -> frozenset:
         """Every song that could be absorb's own if Spotify is playing it —
@@ -1544,22 +1686,21 @@ class AbsorbRunner:
             att.counted = True
             att.ended_mono = d.monotonic()
         ours = self._ours_for_restore()
-        run.state = "ended"
-        run.ended_ms = d.now_ms()
-        run.end_reason = code
-        run.end_detail = text
-        run.stage = ""
+        run.stage = "closing"
         run.now_playing = None
         self.current = None
         self.switching_to = None
+        self.sent, self.sent_pos = [], -1
         self._clear_sets()
         d.set_fast_poll(False)
         # The close order (report §5): stop the queue (above) → pause → the
-        # in-flight capture finalizes on its own (the pause stops it) →
-        # restore and read back → lift the stand-down → the record. With
-        # the house silenced, absorb's own song is ALWAYS paused before the
-        # volume comes back, whatever the ending.
-        if was_running and (pause or d.guard.holding()) and self.device_id:
+        # in-flight capture finalizes (a scheduled window's end waited for it
+        # in `_advance_close`; any other ending lets it finish on its own,
+        # the pause stops it) → restore and read back → lift the stand-down
+        # → the record. With the house silenced, absorb's own song is ALWAYS
+        # paused before the volume comes back, whatever the ending.
+        if was_running and (pause or d.guard.holding()) and self.device_id \
+                and not self.close_paused:
             try:
                 await d.to_thread(d.gateway.pause, self.device_id)
             except Exception as exc:
@@ -1568,11 +1709,127 @@ class AbsorbRunner:
             await d.guard.close(run, code, ours=ours)
         except Exception as exc:
             logger.exception("Absorb: house guard close failed: %s", exc)
+        # The record, LAST: "ended" is written only once the house is back
+        # (or named as not back) and the lights are given back.
+        self.closing = None
+        self.close_paused = False
+        run.state = "ended"
+        run.ended_ms = d.now_ms()
+        run.end_reason = code
+        run.end_detail = text
+        run.stage = ""
+        run.wait_reason, run.wait_detail = "", ""
         if run.restore_pending:
             self._log(f"the house is NOT back yet: {run.restore_pending}")
         self._log(f"window ended: {text}")
-        self.sent, self.sent_pos = [], -1
         self._persist()
+
+    # ── the window's end (phase 3) ──────────────────────────────────────────
+
+    def _window_over(self) -> bool:
+        end = (self.run.window or {}).get("end") if self.run is not None else None
+        return end is not None and self.deps.now_ms() >= int(end)
+
+    async def move_window_end(self, end_ms: int, why: str) -> None:
+        """The schedule moved this window's end (an overlapping window, or he
+        edited tonight's end time). A close already under way is not undone."""
+        async with self._get_lock():
+            run = self.run
+            if not self.open_window or run.started_by != "schedule" \
+                    or (run.window or {}).get("end") is None or self.closing is not None:
+                return
+            old = run.window["end"]
+            run.window["end"] = int(end_ms)
+            self._log(f"the window's end moved from {_hhmm(old)} to {_hhmm(end_ms)} ({why})")
+            self._persist()
+
+    async def _window_end(self) -> None:
+        """A scheduled window's time is up. A window waiting or yielded to
+        his music just ends — his playback is never touched. A running one
+        closes in order (`_close_stop`), after finishing the song being
+        captured if it ends inside the overrun grace."""
+        d, run, cfg = self.deps, self.run, self.cfg
+        if run.state == "paused":
+            code = "window_closed_waiting" if not run.opened_ms else "window_closed"
+            await self._end("window_closed", sentence(code), pause=False)
+            return
+        self.closing = ("window_closed", sentence("window_closed"))
+        att, np_ = self.current, run.now_playing
+        grace_ms = cfg.overrun_grace_min * 60_000
+        remaining = None
+        if att is not None and not att.condemned and np_ is not None \
+                and np_.mode != "warmup" and self.switching_to is None \
+                and self.np_duration_ms > 0:
+            remaining = max(0, self.np_duration_ms - self.np_progress_ms)
+        if remaining is not None and grace_ms > 0 and remaining <= grace_ms:
+            self.finish_by = d.monotonic() + remaining / 1000 + FINISH_SLACK_S
+            run.stage = "finishing"
+            self._log(f"the window's time is up; finishing {self._title(att.uri) or att.uri} "
+                      f"first ({remaining // 1000} s left, grace {cfg.overrun_grace_min} min)")
+            self._persist()
+            return
+        await self._close_stop()
+
+    async def _close_stop(self) -> None:
+        """The close, steps one and two: stop the queue, pause playback. A
+        song still being captured is abandoned — not an attempt (absorb
+        stopped it, the capture didn't fail); it stays in the playlist and
+        plays again next window. Then wait for the in-flight captures."""
+        d, run = self.deps, self.run
+        if run.stage == "closing":
+            return
+        att = self.current
+        if att is not None and not att.condemned:
+            att.condemned, att.counted = "window_closed", True
+            att.ended_mono = d.monotonic()
+            self._log(f"abandoned {self._title(att.uri) or att.uri}: the window closed "
+                      "mid-song (it plays again next window)")
+        self.current = None
+        run.now_playing = None
+        self.sent, self.sent_pos, self.switching_to = [], -1, None
+        self.warmup_pending = False
+        self._clear_sets()
+        run.stage = "closing"
+        if self.device_id:
+            try:
+                await d.to_thread(d.gateway.pause, self.device_id)
+                self.close_paused = True
+            except Exception as exc:
+                self._log(f"pause failed: {str(exc)[:80]}")
+        self.close_deadline = d.monotonic() + CLOSE_FINALIZE_WAIT_S
+        self._persist()
+        await self._advance_close()
+
+    def _in_flight(self) -> list[_Attempt]:
+        """The captures that started and haven't reported their outcome."""
+        rec = self.deps.capture.recording_uri
+        return [a for a in self.awaiting.values() if a.capture_seen or rec == a.uri]
+
+    async def _advance_close(self) -> None:
+        """Step three: once every in-flight capture has finalized (or the
+        bounded wait is over), the rest of the close — restore, read back,
+        lift the stand-down, the record — happens in `_end`. While a song is
+        being finished, only its deadline is watched here; its end arrives
+        on the poll (`_song_ended` → `_next` → `_close_stop`)."""
+        if self.closing is None or not self.active:
+            return
+        d, run = self.deps, self.run
+        if run.stage == "finishing":
+            if d.monotonic() >= self.finish_by:
+                self._log("the song didn't end inside the overrun grace; abandoning it")
+                await self._close_stop()
+            return
+        if run.stage != "closing":
+            return
+        pending = self._in_flight()
+        if pending and d.monotonic() < self.close_deadline:
+            return
+        if pending:
+            self._log("closing without the outcome of "
+                      + ", ".join(self._title(a.uri) or a.uri for a in pending)
+                      + " — recorded when it lands")
+        code, text = self.closing
+        await self._end(code, text, pause=False)
 
 
 # ── reads ────────────────────────────────────────────────────────────────────
@@ -1602,6 +1859,12 @@ def brief(run: Optional[AbsorbRun]) -> dict:
         "sleeping_at_open": run.sleeping_at_open,
         "yields": len(run.yields),
         "resumes": run.resumes,
+        # phase 3 — the window: {start, end} in epoch ms (end None for a
+        # press), plus `scheduled_start`/`label` for a scheduled one
+        "window": dict(run.window or {}),
+        "opened_ms": run.opened_ms,
+        "wait_reason": run.wait_reason,
+        "wait_detail": run.wait_detail,
     }
 
 
@@ -1658,6 +1921,9 @@ def apply_config_patch(patch: dict) -> AbsorbConfig:
     current = absorb_store.load_config().model_dump(mode="json")
     current.update(patch)
     cfg = AbsorbConfig.model_validate(current)
+    bad = absorb_schedule.problems(cfg.windows)
+    if bad:
+        raise ValueError("; ".join(bad))
     absorb_store.save_config(cfg)
     return cfg
 
@@ -1716,17 +1982,35 @@ def recover_orphaned_run() -> Optional[str]:
 SUPERVISE_S = 2.0
 
 
+async def supervise_once(r: Optional["AbsorbRunner"] = None,
+                         sched: Optional["absorb_schedule.Scheduler"] = None) -> None:
+    """One supervisor step: the runner first (a pending restore, the
+    silence re-proof, the window's end), THEN the schedule — so a silence a
+    dead process left behind is always restored before the schedule may
+    open anything, and a window is never opened in the same step another
+    one is closing."""
+    r = r if r is not None else runner
+    s = sched if sched is not None else absorb_schedule.scheduler
+    try:
+        await r.tick()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Absorb: supervisor tick failed")
+    try:
+        await s.tick(r)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Absorb: schedule tick failed")
+
+
 async def run_supervised() -> None:
-    """main.py's lifespan task: `runner.tick()` every SUPERVISE_S. The first
-    tick runs at once — a silence a dead process left behind is restored
-    before anything else touches the house."""
+    """main.py's lifespan task: `supervise_once()` every SUPERVISE_S. The
+    first step runs at once — a silence a dead process left behind is
+    restored before anything else touches the house."""
     while True:
-        try:
-            await runner.tick()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Absorb: supervisor tick failed")
+        await supervise_once()
         await asyncio.sleep(SUPERVISE_S)
 
 
