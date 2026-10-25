@@ -12232,6 +12232,34 @@ charge/lull/drop via `dropSeqBody`'s gold-wedge/blue-band/drop, high/low
 via `lightShowMarkers`) before this build touched anything — confirmed,
 not assumed, by reading each layer; no Timeline change was needed.
 
+**HOME'S RMS BANDS NOW READ THE SAME SCALE MULTIPLIERS THE TIMELINE PAGE
+DOES (2026-10-25, his report: "I don't like the scalings of all the rms
+values on the home page. Match it to what I have right now in the
+timeline graph.").** `spectra/web/src/timeline/BuilderPage.tsx` seeds its
+sticky `scales` state (Total/Bass/Mid/High RMS multipliers drawn by the
+shared `rmsBands`/`intensityBackground` canvas layers) from the SpotFX
+settings `shape_scale_total`/`_bass`/`_mid`/`_high` (`config.py`,
+tunable on `web/src/settings/SettingsPage.tsx`) via `useSticky('scales',
+...)` — and persists hand-adjustments from its own `ShapeControls`
+sliders to the SAME `spotfx.builder.v1.scales` localStorage key
+(`spectra/web/src/lib/useSticky.ts`), which outlives the settings seed.
+`HomeTimeline.tsx` used to hardcode `scales: { total: 1, bass: 1, mid: 1,
+high: 1 }`, ignoring both — so the identical song's RMS fill bands drew
+at a different height on Home than on the Timeline page, even though
+both already render through the SAME canvas layer code
+(`BUILDER_LAYERS`/`TimelineCanvas`). Fixed by having Home read the
+IDENTICAL sticky key with the identical settings seed
+(`spectra/web/src/lib/shapeScales.ts`'s `shapeScalesSeed()`/
+`DEFAULT_SHAPE_SCALES`, the one shared definition both pages' own
+`useSticky('scales', ...)` calls now draw from) — "right now" means
+whatever he currently has dialed in there, hand-tuned sliders included,
+not just the server default. `scaleOverall` was already `1` on both
+pages (the Timeline page hardcodes it too, unlike `NowPlayingPage.tsx`)
+and needed no change. Spec: `scripts/check_home_rms_scaling.mjs` (run by
+`tests/test_home_rms_scaling.py`) transpiles the pure seed module with
+esbuild and asserts it against the Timeline page's own inline `?? 1`
+fallback.
+
 ## THE GROUPED MENU, ONE BAR, AND HOME — UI declutter plan (2026-10-14)
 
 The Admiral's layout declutter plan (`data/ui-layout-plan/` in
