@@ -57,6 +57,9 @@ import {
   useAnalysedPlan, useAudioShapeData, useAudioShapeMeta, useDropSequences,
   useLibrosa, useShowArms,
 } from '../timeline/queries';
+import { useSettings } from '../api/queries';
+import { useSticky } from '../lib/useSticky';
+import { DEFAULT_SHAPE_SCALES, shapeScalesSeed } from '../lib/shapeScales';
 import { getShowClockMs } from '../lib/showClock';
 import { AnalysedGlyph, DropSeqGlyph, LightShowGlyph } from './markerGlyphs';
 
@@ -121,6 +124,15 @@ export default function HomeTimeline({
   const { data: dropResp } = useDropSequences(uri);
   const offsetMs = Number(meta?.timestamp_offset_ms ?? 0);
 
+  // THE SAME RMS SCALE MULTIPLIERS THE TIMELINE PAGE USES — his 2026-10-25
+  // ask. `useSticky('scales', ...)` reads the identical `spotfx.builder.
+  // v1.scales` key `BuilderPage.tsx` writes from its own sliders, seeded
+  // from the same SpotFX settings when that key has never been written —
+  // see ../lib/shapeScales.ts for why this must be the SAME key, not a
+  // fresh copy of the same seed.
+  const { data: settings } = useSettings();
+  const [scales] = useSticky('scales', DEFAULT_SHAPE_SCALES, shapeScalesSeed(settings));
+
   // THE SHARED VIEW STATE the chrome's timeline row owns (the window, the
   // marker filters, the view history) — this card's control row is where
   // he sets it, and registering as its listener is what turns the row's
@@ -167,7 +179,7 @@ export default function HomeTimeline({
       onsets: lanes.more, harmonic: lanes.more,
       bass: lanes.more, snare: lanes.more, mfcc: lanes.more,
     },
-    scales: { total: 1, bass: 1, mid: 1, high: 1 },
+    scales,
     scaleOverall: 1,
     offsetMs,
     // ZERO, DELIBERATELY — the raw convention. `librosa_offset_ms` is
@@ -192,7 +204,7 @@ export default function HomeTimeline({
     // (components/songStrip.ts::terrainPath).
     intensityMode: intensityBg ? 'section' : 'off',
     advanced: false,
-  }), [bands, lanes, intensityBg, offsetMs, maxRms]);
+  }), [bands, lanes, intensityBg, offsetMs, maxRms, scales]);
 
   const data: LayerDataBag = useMemo(() => ({
     shape: shape ?? null,
