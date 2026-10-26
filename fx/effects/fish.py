@@ -3718,6 +3718,14 @@ class Fish2d(Twod, GradientEffect):
                 fire_event=False,
             )
 
+    def _decay_tail_kick(self, n, dt):
+        """The beat envelope decays every frame tail_drive is on, whether or
+        not any fish is eligible to stroke from it this frame — a kick
+        armed just before a school forms (the charge gates `pulse_eligible`
+        off for its whole duration) must not freeze and survive, unaged,
+        into the fish that resumes ordinary swimming after the drop."""
+        self.p_tkick[:n] *= np.float32(0.5 ** (dt / TAIL_BEAT_HL))
+
     def _tail_drive_step(self, eligible, want_tail, prev, dt, cruise, spike,
                          jump_eff, weight, tau, tau_ordinary):
         """THE TAIL DRIVE's controller and thrust law (the block of that name
@@ -3735,7 +3743,7 @@ class Fish2d(Twod, GradientEffect):
         if spike >= LUNGE_SPIKE_MIN and jump_eff > 0.0:
             beat = min(jump_eff * float(spike), TAIL_BEAT_MAX)
             self.p_tkick[idx] = np.maximum(self.p_tkick[idx], beat)
-        self.p_tkick[:n] *= np.float32(0.5 ** (dt / TAIL_BEAT_HL))
+        self._decay_tail_kick(n, dt)
         kick = self.p_tkick[idx]
 
         fc = max(float(self.flap_rate), 0.05)
@@ -5471,6 +5479,12 @@ class Fish2d(Twod, GradientEffect):
             np.where(pulse_eligible, want_full, want) if tail_w > 0.0
             else None
         )
+        if want_tail is None and self.tail_drive > 0.0:
+            # no fish is eligible this frame (a formed school) — the beat
+            # envelope still ages, or a kick armed just before the charge
+            # would resume ordinary swimming after the drop still above
+            # TAIL_BEAT_ON and force an extra stroke
+            self._decay_tail_kick(n, dt)
         # The ease is per fish (the pulse split makes `tau` an array even
         # for ordinary swimming). At stroke_speed_cap=0 (with
         # min_drift_speed at its max of 1) `want` above is `want_full`

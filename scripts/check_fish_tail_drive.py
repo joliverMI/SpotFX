@@ -34,9 +34,11 @@ section is one of the plan's acceptance bars:
      middle past the lit edge and no more pivoting than the old edge
      (check_fish_wall's own scene measure), repeated bursts held on screen
      (check_fish_burst_bounds' own run), mutual avoidance still cutting
-     overlap (check_fish_avoidance's own measure), and no ordinary fish's
+     overlap (check_fish_avoidance's own measure), no ordinary fish's
      middle on the big fish where the panel has room
-     (check_fish_big_fish_avoid's own measure).
+     (check_fish_big_fish_avoid's own measure), and the searching lull
+     still disperses every non-keeper off the panel by its half, with no
+     dimming (check_fish_disperse's own lull_run, told the hand-off hook).
 
 Read-only, offline. No live access.
 
@@ -513,6 +515,37 @@ def section_guards():
               "its body in the middle columns")
         check(m["middles_mid"] == 0, f"big fish at {intensity}: no ordinary "
               "fish swims through it where the panel has room")
+
+    import check_fish_disperse as DISP
+    from fx.effects import lull_handoff as lh
+    print("   dispersal (the searching lull), tail_drive 1:")
+    for keep in (1, 3):
+        for gap in (0.9, 2.5, 6.04):
+            for seed in (3,):
+                rec = asyncio.run(DISP.lull_run(
+                    "fish", gap, seed, told=lh.keys_for(keep, "", gap),
+                    config=dict(DISP.HIS, **ON)))
+                t, others, keep_n, vis = (
+                    rec["t"], rec["others"], rec["keep"], rec["vis"])
+                half = gap / 2.0
+                before = t < half
+                last_before = int(others[before][-1]) if before.any() else -1
+                after = t >= half
+                tag = f"keep {keep} gap {gap}s seed {seed}"
+                leftover = sorted(set(vis[after].tolist()))
+                print(f"      {tag}: non-keepers at the half's last frame "
+                      f"{last_before}  after the half {leftover}  "
+                      f"min brightness {rec['minb'].min():.3f}")
+                check(last_before == 0, f"{tag}: every non-keeper is OFF "
+                      "the panel before the half's backstop runs")
+                check(int(others[after].max(initial=0)) == 0,
+                      f"{tag}: none but the keepers after the half")
+                check(bool(after.any()) and (keep_n[after] == keep).all()
+                      and (vis[after] == keep).all(),
+                      f"{tag}: exactly {keep} keeper(s) on the panel from "
+                      "the half to the drop")
+                check(rec["minb"].min() >= 0.99,
+                      f"{tag}: no fish dims while it is on the panel")
 
 
 def main():

@@ -80,8 +80,13 @@ binding statement (`fx/VENDOR.md` #84); what is not visible cold:
   ~50 ms away). A beat does not shorten the ease.
 - **Scope = the thrust pulse's**: mode < 2, not cap-exempt, no school. The
   beat envelope `p_tkick` arms where the lunge arms and forces a stroke;
-  it decays for every fish so one rejoining after a school carries none.
-  No random numbers are drawn, so the shared generator is untouched.
+  it decays for every fish so one rejoining after a school carries none —
+  `_decay_tail_kick` runs even on a frame with no eligible fish at all (a
+  formed school, i.e. the whole charge/lull/drop), via the standalone call
+  beside `tail_w`, or a kick armed just before a charge would freeze and
+  force an extra stroke on the fish that resumes ordinary swimming after
+  the drop. No random numbers are drawn, so the shared generator is
+  untouched.
 - **Registered first guesses**: `glide_drag` (d + l, 1.6/s; cruise is held
   at any value) and `glide_below` (0.75); help topic `fish-tail-drive`.
   On for the music Fish scene only (the fish-scene skill's script).
@@ -618,7 +623,10 @@ arcs, with `test_fish_wake_blend.py`),
 `check_fish_help_topics.mjs` (every help topic a fish param links is a
 real `helpContent.ts` entry, not a substring match),
 `check_fish_tail_drive.py` (the tail drive's acceptance list, with
-`test_fish_tail_drive.py`),
+`test_fish_tail_drive.py` — its own guards section re-runs
+`check_fish_disperse.py`'s searching-lull dispersal measurement at
+`tail_drive=1` too, alongside the wall, repeated bursts, mutual avoidance
+and big-fish avoidance),
 `check_fish_wall.py` (`--gifs DIR` writes old-edge / PR 361 / new GIFs and
 track plots on his real crystal shape), `tests/test_fish.py`, `test_fish_camera.py`,
 `test_fish_disperse.py`, `test_fish_wall.py`,

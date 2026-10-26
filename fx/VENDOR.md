@@ -2533,7 +2533,9 @@ against that commit.
     reaching half its rise 83-133 ms before the speed; at an effort of 0.5
     it glides 49.7% of the time with no speed rise starting in a glide; the
     swim burst's 300 ms dash -9.6% and on its trigger; the wall, burst
-    bounds, avoidance and big-fish guards hold. Evidence:
+    bounds, avoidance, big-fish and searching-lull dispersal guards hold
+    (the last re-runs `check_fish_disperse.py`'s own searching-lull
+    measurement at `tail_drive=1`). Evidence:
     `scripts/check_fish_tail_drive.py` + `tests/test_fish_tail_drive.py`,
     `tests/fixtures/fish_swim/`. On for the music Fish scene only via
     `scripts/set_fish_tail_drive.py` (a deploy step). Unverified against

@@ -85,6 +85,39 @@ def test_the_tail_moves_before_the_fish_does():
     assert lead >= 0.06, lead
 
 
+def test_the_beat_envelope_decays_even_while_no_fish_is_eligible():
+    """A formed school (`_school_on`) makes every fish ineligible for the
+    tail drive's own pulse, so `_tail_drive_step` — where the beat
+    envelope `p_tkick` used to decay — never ran for as long as the school
+    held. A kick armed just before a charge therefore froze, unaged,
+    through the whole charge/lull/drop and could still force an extra
+    stroke on the fish that resumes ordinary swimming after the drop. The
+    decay must keep running on every such frame instead."""
+    import check_fish_disperse as DISP
+
+    async def run():
+        r = await DISP.room("tkick-decay", "fish",
+                            dict(DISP.HIS, particle_count=1, **ON), seed=3)
+        eff = r.effect
+        r.step(240)
+        eff.p_tkick[0] = FX.TAIL_BEAT_MAX
+        eff._school_on = True
+        hold_s = 3.0
+        r.step(int(round(hold_s / DISP.DT)))
+        froze = float(eff.p_tkick[0])
+        eff._school_on = False
+        await DISP.close(r)
+        return froze, hold_s
+
+    kick, hold_s = asyncio.run(run())
+    expected = FX.TAIL_BEAT_MAX * 0.5 ** (hold_s / FX.TAIL_BEAT_HL)
+    assert kick < FX.TAIL_BEAT_ON, (
+        "the kick must have decayed below the stroke threshold during a "
+        f"{hold_s}s school; it is still {kick}"
+    )
+    assert abs(kick - expected) <= 0.05 * expected + 1e-4, (kick, expected)
+
+
 def test_at_tail_drive_zero_none_of_it_runs():
     """The escape hatch is structural: at 0 the tail drive's code is never
     entered, so nothing it would compute can reach the fish; at 1 it is."""

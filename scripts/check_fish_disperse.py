@@ -161,10 +161,12 @@ def on_panel(eff):
 
 
 # ── 1. the lull ─────────────────────────────────────────────────────────
-async def lull_run(effect_type, gap_s, seed, told=None):
+async def lull_run(effect_type, gap_s, seed, told=None, config=None):
     """`told`: the lull hand-off hook's keys on the lull's arm write
-    (fx/effects/lull_handoff.py); None = an untold lull."""
-    r = await room(f"lull{seed}{effect_type[-3:]}", effect_type, seed=seed)
+    (fx/effects/lull_handoff.py); None = an untold lull. `config`: the
+    effect's own config, None = the module's `HIS`."""
+    r = await room(f"lull{seed}{effect_type[-3:]}", effect_type,
+                   config=config, seed=seed)
     eff = r.effect
     r.step(240)
     r.ramp("charge", 4.0, beats_every=12)
