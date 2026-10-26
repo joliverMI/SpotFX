@@ -17,9 +17,9 @@ writing the matrix goes through it, the registry, and Sonic's reach.
 """
 from __future__ import annotations
 
-import ast
 import asyncio
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -136,28 +136,207 @@ def test_with_no_water_every_blend_is_the_bodies(tmp_path):
         assert np.array_equal(out, outs[0])
 
 
-def test_every_path_that_writes_the_matrix_goes_through_the_blend():
-    """The draw, the held-transition `_fade_only` and the outgoing
-    `_draw_collapse` may not mix the layers three different ways: the
-    matrix has exactly ONE writer, `_composite`, and all three call it."""
-    tree = ast.parse((REPO / "fx" / "effects" / "fish.py").read_text())
-    writers, callers = [], set()
-    for fn in ast.walk(tree):
-        if not isinstance(fn, ast.FunctionDef):
-            continue
-        for node in ast.walk(fn):
-            if isinstance(node, ast.Assign) and any(
-                isinstance(t, ast.Attribute) and t.attr == "matrix"
-                and isinstance(t.value, ast.Name) and t.value.id == "self"
-                for t in node.targets
-            ):
-                writers.append(fn.name)
-            if (isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "_composite"):
-                callers.add(fn.name)
-    assert writers == ["_composite"], writers
-    assert {"draw", "_fade_only", "_draw_collapse"} <= callers, callers
+class _Audio:
+    """What the fish reads from the audio source, real methods, a steady
+    level under our own control."""
+    def __init__(self):
+        self.lows = 0.35
+        self.beat = False
+
+    def lows_power(self, filtered=True):
+        return self.lows
+
+    def bpm_beat_now(self):
+        return self.beat
+
+
+MUSIC_FISH = {
+    "particle_count": 3, "horizon_scale": 0.3, "radius_scale": 1.8,
+    "blob_size": 2.5, "x_offset": 0.5, "y_offset": 0.5, "spin": 0.37,
+    "base_speed": 0.3, "jiggle": 0.5, "tether_scatter": 0,
+    "reactivity_scale": 1, "speed_jump": 1, "speed_jog": 1,
+    "brightness_audio": 0.5, "size_audio": 0.5, "color_shift": 1,
+    "flap_amount": 0.45, "school_variation": 0.08, "roam_scale": 0.75,
+    "reverse": False,
+}
+
+
+def _spy_composite(effect):
+    """Shadow `effect._composite` with a wrapper that captures every
+    (body, wake, big) it is handed while letting the real blend run —
+    the same capture shape scripts/check_fish_wake_blend.py's own cost
+    section uses."""
+    orig = effect._composite
+    calls = []
+
+    def composite(body, wake, big):
+        calls.append((
+            np.asarray(body, dtype=np.float32).copy(),
+            None if wake is None else np.asarray(wake, dtype=np.float32).copy(),
+            None if big is None else np.asarray(big, dtype=np.float32).copy(),
+        ))
+        return orig(body, wake, big)
+
+    effect._composite = composite
+    return calls
+
+
+def _expected_mix(body, wake, big, blend):
+    """`_composite`'s own arithmetic, re-derived independently here (the
+    same formulas test_add_is_the_old_mix_operation_for_operation/
+    test_lighten_is_.../test_under_hides_... above already prove against
+    synthetic layers) — against a canvas that is always black, because
+    `Twod.render()` resets `self.matrix` before every `draw()` and none
+    of the three call sites below ever paints onto it before `_composite`
+    runs."""
+    fish = body.astype(np.float32)
+    if blend == "add":
+        out = fish
+        if wake is not None:
+            out = out + wake
+        if big is not None:
+            out = out + big
+        return np.clip(out, 0, 255).astype(np.uint8).astype(np.float32)
+    water = None
+    for layer in (wake, big):
+        if layer is not None:
+            water = layer if water is None else water + layer
+    if water is None:
+        out = fish
+    else:
+        peak = water.max(axis=2, keepdims=True)
+        clipped = np.where(
+            peak > 255.0, water * (255.0 / np.maximum(peak, 1e-6)), water
+        )
+        if blend == "lighten":
+            out = np.maximum(fish, clipped)
+        else:  # under
+            fish = np.clip(fish, 0, 255)
+            alpha = fish.max(axis=2, keepdims=True) / 255.0
+            out = fish + clipped * (1.0 - alpha)
+    return np.clip(out, 0, 255).astype(np.uint8).astype(np.float32)
+
+
+def _assert_blend_matches(calls, blend, matrix):
+    assert len(calls) == 1, calls
+    body, wake, big = calls[0]
+    expected = _expected_mix(body, wake, big, blend)
+    actual = np.asarray(matrix, dtype=np.float32)
+    assert np.array_equal(actual, expected)
+
+
+async def _warmed_up_fish(tmp_path, tag, blend, frames=180):
+    """A real fish, swum for `frames` real frames under a real audio
+    signal, so its trail and wake carry genuine (not synthetic) data by
+    the time a path is driven against it. A big-fish poke partway through
+    (frame 100) means `big` is ALSO genuinely non-None by the time we
+    capture — without it `_draw_collapse` (which never lays a wake) would
+    composite with no water at all, where every `wake_blend` renders
+    identically and a call site that silently ignored the setting would
+    go undetected."""
+    host = await headless.start_headless_host(
+        str(tmp_path / tag), pixel_count=ROWS * COLS, rows=ROWS,
+        device_id=tag,
+    )
+    virtual = host.virtuals.get(tag)
+    cm = headless.fake_clock()
+    clock = cm.__enter__()
+    eff = headless.attach_effect(
+        host, virtual, "fish", dict(MUSIC_FISH, wake_blend=blend)
+    )
+    eff._rng = np.random.default_rng(11)
+    audio = _Audio()
+    for i in range(frames):
+        audio.lows = 0.3 + 0.25 * ((i // 12) % 2)
+        audio.beat = (i % 18 == 0)
+        if i == 100:
+            eff.update_config({"big_fish": 0.9})
+        clock.advance(DT)
+        eff.audio_data_updated(audio)
+        frame = virtual.assemble_frame()
+        if frame is not None:
+            virtual.flush(frame)
+    return host, cm, virtual, clock, eff, audio
+
+
+@pytest.mark.parametrize("blend", FX.WAKE_BLENDS)
+def test_the_ordinary_draw_applies_the_configured_blend(tmp_path, blend):
+    """draw()'s own last statement, `self._composite(body_out, self.wake,
+    big)`, on a real swimming fish — not a synthetic layer, and not an
+    AST walk over the source."""
+    async def main():
+        host, cm, virtual, clock, eff, audio = await _warmed_up_fish(
+            tmp_path, f"draw-{blend}", blend
+        )
+        try:
+            calls = _spy_composite(eff)
+            audio.lows, audio.beat = 0.6, True
+            clock.advance(DT)
+            eff.audio_data_updated(audio)
+            virtual.assemble_frame()
+            _assert_blend_matches(calls, blend, eff.matrix)
+        finally:
+            cm.__exit__(None, None, None)
+            await host.shutdown()
+    asyncio.run(main())
+
+
+@pytest.mark.parametrize("blend", FX.WAKE_BLENDS)
+def test_the_held_transition_fade_only_applies_the_configured_blend(
+        tmp_path, blend):
+    """`_fade_only`'s own last statement — the held-transition path, with
+    the exact precondition it always runs under in production (a matrix
+    `Twod.render()` has just reset to black)."""
+    async def main():
+        host, cm, virtual, clock, eff, audio = await _warmed_up_fish(
+            tmp_path, f"fade-{blend}", blend
+        )
+        try:
+            eff.matrix = Image.new("RGB", (COLS, ROWS))
+            calls = _spy_composite(eff)
+            eff._fade_only(DT)
+            _assert_blend_matches(calls, blend, eff.matrix)
+        finally:
+            cm.__exit__(None, None, None)
+            await host.shutdown()
+    asyncio.run(main())
+
+
+@pytest.mark.parametrize("blend", FX.WAKE_BLENDS)
+def test_the_outgoing_collapse_toward_an_incoming_radial_applies_the_configured_blend(
+        tmp_path, blend):
+    """draw() dispatching to `_draw_collapse` for real — a genuine incoming
+    Radial attached as `_active_effect` while our fish is
+    `_transition_effect`, so `particle_handoff.incoming_sibling` reports
+    it and `draw()`'s own collapse-latch logic takes the branch, exactly
+    as it would in a live crossfade."""
+    async def main():
+        host, cm, virtual, clock, eff, audio = await _warmed_up_fish(
+            tmp_path, f"collapse-{blend}", blend
+        )
+        try:
+            headless.attach_effect(host, virtual, "radial", {})
+            virtual._transition_effect = eff
+            virtual._config["transition_mode"] = "Add"
+            virtual.frame_transitions = virtual.transitions["Add"]
+            virtual.transition_frame_total = int(
+                round(virtual.refresh_rate * 0.5)
+            )
+            virtual.transition_frame_counter = 0
+
+            calls = _spy_composite(eff)
+            clock.advance(DT)
+            eff.audio_data_updated(audio)
+            virtual.assemble_frame()
+            assert eff._collapse is not None, (
+                "draw() did not take the collapse branch"
+            )
+            _assert_blend_matches(calls, blend, eff.matrix)
+            assert calls[0][1] is None, "the collapse composites no wake"
+        finally:
+            cm.__exit__(None, None, None)
+            await host.shutdown()
+    asyncio.run(main())
 
 
 # ── the defaults, the registry, Sonic ───────────────────────────────────
@@ -179,9 +358,31 @@ def test_the_two_settings_are_registered_for_the_editor_and_sonic():
         assert meta["type"] == "enum" and meta["options"] == options, key
         assert meta["default"] == schema[key] == fish["defaults"][key], key
         assert meta["help_topic"] == "fish-wake-colour", key
-    help_ts = (REPO / "spectra" / "web" / "src" / "help"
-               / "helpContent.ts").read_text()
-    assert "id: 'fish-wake-colour'" in help_ts
+
+
+ESBUILD = REPO / "spectra" / "web" / "node_modules" / ".bin" / "esbuild"
+HELP_TOPIC_SCRIPT = REPO / "scripts" / "check_fish_wake_help_topic.mjs"
+
+
+@pytest.mark.skipif(
+    not ESBUILD.exists() or shutil.which("node") is None,
+    reason="frontend toolchain (node + esbuild in spectra/web) not installed",
+)
+def test_the_help_topic_is_a_real_help_sections_entry():
+    """`fish-wake-colour` must be a real id inside helpContent.ts's own
+    HELP_SECTIONS tree, evaluated by transpiling the real module with
+    esbuild (scripts/check_fish_wake_help_topic.mjs) — never a raw
+    substring match over the file, which a commented-out or differently
+    formatted id would still satisfy."""
+    result = subprocess.run(
+        ["node", str(HELP_TOPIC_SCRIPT)],
+        cwd=REPO, capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, (
+        f"check_fish_wake_help_topic.mjs failed:\n{result.stdout}\n"
+        f"{result.stderr}"
+    )
+    assert "ALL OK" in result.stdout
 
 
 def test_sonic_can_set_them_and_is_refused_a_made_up_one():
