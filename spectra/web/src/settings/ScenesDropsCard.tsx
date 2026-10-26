@@ -2,8 +2,9 @@
  * every set-and-forget tuning number that used to live behind the Scenes
  * button's own popover — transition times, lull darkness, strip phase
  * strength, breath-hold, drop timing, drop Shockwave + its energy floor,
- * Pulse flash floor, stale-drop rules, thematic transitions, music
- * devices, the transition placement rule, and the analysed-action rates.
+ * Pulse flash floor, the drop colour change, stale-drop rules, thematic
+ * transitions, music devices, the transition placement rule, and the
+ * analysed-action rates.
  * The Scenes popover itself (RoomControlsBar.tsx) now keeps only Force
  * Scene (moved to the TOP, his edited ask), the scene-change tier, and
  * recent picks — this card is everything else.
@@ -151,6 +152,27 @@ export default function ScenesDropsCard() {
           </InfoTip>
           <input type="number" min={0} max={1} step={0.05} {...field('pulse_flash_min_energy')} />
         </div>
+        <div className="top-bar-group-field">
+          <InfoTip topic="drop-colour-change" text="Every drop arrives in a new colour set, about opposite the one showing on the colour wheel — instantly, on the drop.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <PowerButton
+              on={local.drop_colour_change}
+              onChange={(on) => commit({ ...local, drop_colour_change: on })}
+              size={22}
+              ariaLabel="Drop colour change"
+            />
+            Drops change colour</label>
+          </InfoTip>
+        </div>
+        {local.drop_colour_change && (
+          <div className="top-bar-group-field">
+            <label title="How far from exactly opposite (180° on the colour wheel) the drop's new set may sit: 30 = anywhere 150–210° away, the sets nearest 180° likeliest.">
+              Drop colour spread ±
+            </label>
+            <input type="number" min={5} max={90} step={5} {...field('drop_colour_spread_deg')} />
+            <span className="settings-field-unit">° from opposite</span>
+          </div>
+        )}
         <div className="top-bar-group-field">
           <InfoTip topic="drop-led-switch" text="A drop can BE the scene change: the cut lands on the drop (or early in the charge if it does not fit at the drop).">
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>

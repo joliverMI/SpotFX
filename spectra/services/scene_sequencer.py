@@ -71,6 +71,47 @@ POOL_EXHAUSTED = "pool_exhausted"
 FORCED_COLOR = "forced_color"
 
 
+def automatic_pool_cards(scene, room, intensity: float) -> list:
+    """THE AUTOMATIC COLOUR-SET POOL's gate chain — the ONE definition, read
+    by the sequencer's own colour roll (SceneSequencer._default_eligible_
+    sets) and by the drop colour change (scene_response.ResponseEngine.
+    drop_color_change), so the two can never disagree about which sets an
+    automatic pick may land: every "set" card that is not DISABLED, that
+    `scene` accepts (its accept list and the set's own opt-out; no scene =
+    no accept filter), that the room's display mode makes available, that
+    the scene's dark/light preference admits in Hybrid, and that the
+    rainbow limit allows at `intensity`. `room` is the RoomControlState
+    the gates read; the cards come back in storage order."""
+    from spectra.services import color_sets, mode_availability, rainbow_select
+    room_mode = room.display_mode
+    preference = getattr(scene, "preferred_color_set_mode", "default") if scene else "default"
+    out: list = []
+    for card in color_sets.list_all():
+        if card.kind != "set":
+            continue
+        # DISABLED (owner ask 2026-08-25) — checked first and
+        # independent of room mode, the same order fire_scene_by_id
+        # applies to a disabled SCENE. A disabled set simply stops
+        # being chosen; it is never yanked out of the room mid-paint
+        # (scene_compiler.room_active_set, the terminal fallback,
+        # deliberately does not check this).
+        if getattr(card, "disabled", False):
+            continue
+        if scene is not None and not scene.accepts_color_set(card):
+            continue
+        if not mode_availability.available_in_room_mode(
+                card.display_availability, room_mode):
+            continue
+        if not mode_availability.color_set_preferred(
+                card.display_availability, preference, room_mode):
+            continue
+        if not rainbow_select.eligible(card.is_rainbow, intensity,
+                                       room.rainbow_select_limit):
+            continue
+        out.append(card)
+    return out
+
+
 async def fire_scene_by_id(scene_id: str,
                            color_set_id: Optional[str] = None,
                            intensity: float = 0.5,
@@ -750,40 +791,12 @@ class SceneSequencer:
         return await fire_scene_by_id(scene_id, color_set_id, intensity)
 
     def _default_eligible_sets(self, scene_id: str) -> dict[str, Optional[float]]:
-        from spectra.services import (color_sets, color_wheel,
-                                      mode_availability, rainbow_select,
-                                      scene_store)
+        from spectra.services import color_wheel, scene_store
         from spectra.services.room_controls import load_room_controls
         scene = scene_store.get_by_id(scene_id)
-        room = load_room_controls()
-        room_mode = room.display_mode
-        preference = getattr(scene, "preferred_color_set_mode", "default") if scene else "default"
-        intensity = self._intensity()
-        out: dict[str, Optional[float]] = {}
-        for card in color_sets.list_all():
-            if card.kind != "set":
-                continue
-            # DISABLED (owner ask 2026-08-25) — checked first and
-            # independent of room mode, the same order fire_scene_by_id
-            # applies to a disabled SCENE. A disabled set simply stops
-            # being chosen; it is never yanked out of the room mid-paint
-            # (scene_compiler.room_active_set, the terminal fallback,
-            # deliberately does not check this).
-            if getattr(card, "disabled", False):
-                continue
-            if scene is not None and not scene.accepts_color_set(card):
-                continue
-            if not mode_availability.available_in_room_mode(
-                    card.display_availability, room_mode):
-                continue
-            if not mode_availability.color_set_preferred(
-                    card.display_availability, preference, room_mode):
-                continue
-            if not rainbow_select.eligible(card.is_rainbow, intensity,
-                                           room.rainbow_select_limit):
-                continue
-            out[card.id] = color_wheel.wheel_position(card).position_deg
-        return out
+        return {card.id: color_wheel.wheel_position(card).position_deg
+                for card in automatic_pool_cards(scene, load_room_controls(),
+                                                 self._intensity())}
 
     def _default_group_ids_by_set(self) -> dict[str, list[str]]:
         from spectra.services import color_set_groups

@@ -540,6 +540,13 @@ export interface RoomControlState {
    * would, approved or not; removed and switched-off ones never. Default
    * off; stays on until switched off. Optional for an older server. */
   drop_testing?: boolean;
+  /** THE DROP COLOUR CHANGE (spectra/services/drop_colour.py, scene_response
+   * drop_color_change): every drop that plays arrives in a colour set about
+   * opposite the one showing — drop_colour_spread_deg either side of 180°
+   * (default 30, i.e. 150–210° away), instantly on the drop. Force Colour, a
+   * resting house mode, a 2D gradient and a preview still win. Default on. */
+  drop_colour_change: boolean;
+  drop_colour_spread_deg: number;
   /** THE PULSE FLASH'S ENERGY FLOOR (scene_response.pulse_flash_allowed):
    * the Pulse flash flare fires only when the top bar's Energy is at least
    * this. Default 0.8; 0 = never gated; an unknown energy is never gated. */

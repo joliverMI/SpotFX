@@ -148,6 +148,7 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "drop_timing_offset_ms": "ms, negative = earlier, 0 = on the mark",
             "drop_shock_min_energy": "top-bar displayed energy, fraction 0.0-1.0",
             "pulse_flash_min_energy": "top-bar displayed energy, fraction 0.0-1.0",
+            "drop_colour_spread_deg": "degrees either side of 180",
             "drop_switch_stale_margin_s": "seconds beyond the scene's own dwell",
             "drop_switch_drops_in_a_row": "drops, 0 = off",
             "drop_switch_swallow_delay_s": "seconds after the drop",
@@ -384,6 +385,27 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "switched off and a drop he switched off never play, even with "
         "testing on. The room's 'Scene changes' setting still decides "
         "whether analysed drops play at all. Stays on until switched off."),
+    "drop_colour_change": _spec(
+        "drop_colour_change", "Drop colour change",
+        "On (default): every drop that plays arrives in a new colour set, "
+        "about opposite the one showing on the colour wheel (see 'Drop "
+        "colour spread') — instantly on the drop, or, once pre-drops play, "
+        "fading across the pre-drop and landing on the drop. It picks from "
+        "the sets the showing scene accepts (the incoming scene's, when the "
+        "drop switches the scene), never a disabled one, through his own "
+        "selector weights and rainbow limit; a rainbow counts as a big "
+        "change. Force Colour, a resting house mode, a 2D drift gradient "
+        "or a preview still win. Applies to his own drop triggers and the "
+        "detected drop sequences alike. Off: drops change no colour, as "
+        "before. Takes effect on the very next drop."),
+    "drop_colour_spread_deg": _spec(
+        "drop_colour_spread_deg", "Drop colour spread",
+        "How far from exactly opposite (180 degrees on the colour wheel) "
+        "the drop colour change may land, in degrees either side. Default "
+        "30, i.e. 150-210 degrees away; the sets nearest 180 are likeliest. "
+        "Narrower is a more extreme change but fewer sets qualify; when "
+        "none does, the drop takes the farthest set it can and the show log "
+        "says so. Range 5-90."),
     "drop_shock_min_energy": _spec(
         "drop_shock_min_energy", "Shockwave minimum energy (top-bar Energy)",
         "The drop Shockwave (on the crystal and on the strips), and Star's "

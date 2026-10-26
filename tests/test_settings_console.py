@@ -78,6 +78,9 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         "lull_breath_hold_s",
         # 2026-10-12, every drop fires this far off its mark (drop_timing.py):
         "drop_timing_offset_ms",
+        # 2026-10-26, every drop arrives in a new colour set (predrop plan
+        # step 2, drop_colour.py):
+        "drop_colour_change", "drop_colour_spread_deg",
         # 2026-10-08, the drop-led scene switch's tunables:
         "drop_switch_enabled", "drop_switch_after_previous_drop",
         "drop_switch_stale_margin_s", "drop_switch_drops_in_a_row",

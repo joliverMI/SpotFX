@@ -222,6 +222,54 @@ async def fire_analysed_color_event(selection_intensity: float,
 trigger_engine._analysed_color = fire_analysed_color_event
 
 
+async def fire_drop_colour_event(selection_intensity: float,
+                                 pool_scene_id: Optional[str],
+                                 ramp_ms: int = 0,
+                                 moment: str = "drop",
+                                 analysed: bool = True) -> dict:
+    """THE DROP COLOUR CHANGE's choke point (predrop plan step 2 — spectra/
+    services/drop_colour.py is the pick): trigger_engine calls this for
+    every drop that fires — a drop sequence's (analysed=True, the tier its
+    members fire on) or one of his own drop triggers (analysed=False) —
+    before the drop-led cut and the drop's own response, or on the drop's
+    pre-drop when one plays. The drop's OWN response gate first
+    (_response_gate: a preview, Absorb, a house mode that ignores music,
+    the scene-change tier — a drop that would not fire changes no colour),
+    then a house mode that owns the room's colours (house.scene_deferral,
+    the analysed colour moment's own hold), then responses.
+    drop_color_change's precedence. A landed change counts in fire_history's
+    colour sets. Returns the record the drop's show-log entry carries."""
+    from spectra.services import absorb_hold, fire_history, house, scene_store
+    gate = _response_gate(True, analysed)
+    if gate is not None:
+        if gate == absorb_hold.REASON:
+            absorb_hold.record_deferral("drop_colour", {"moment": moment})
+        return {"result": "held", "held_for": gate, "moment": moment}
+    house_reason = house.scene_deferral()
+    if house_reason is not None:
+        return {"result": "held", "held_for": "house_mode",
+                "reason": house_reason, "moment": moment}
+    pool_scene = (scene_store.get_by_id(pool_scene_id)
+                  if pool_scene_id is not None else None)
+    record = await responses.drop_color_change(
+        selection_intensity, pool_scene=pool_scene, ramp_ms=int(ramp_ms),
+        moment=moment)
+    jump = record.get("color_jump") or {}
+    if jump.get("result") == "jumped":
+        status = trigger_engine.status()
+        fire_history.record_fire("color_sets", jump["picked_id"], {
+            "set_name": jump.get("set_name"), "via": "drop_colour",
+            "moment": moment, "ramp_ms": int(ramp_ms),
+            "from_set_id": record.get("from_set_id"),
+            "distance_deg": record.get("distance_deg"),
+            "rung": jump.get("rung")},
+            uri=status.get("track_uri"), position_ms=status.get("position_ms"))
+    return record
+
+
+trigger_engine._drop_colour = fire_drop_colour_event
+
+
 async def fire_response_event(event_class: str, intensity: float,
                               gap_ms: int | None = None,
                               via_trigger: bool = False,

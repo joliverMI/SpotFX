@@ -752,6 +752,23 @@ class RoomControlState(BaseModel):
     # Sonic-tellable.
     drop_testing: bool = False
 
+    # THE DROP COLOUR CHANGE (2026-10-26, predrop plan step 2 — the Admiral:
+    # "I want it to change color cleanly so the drop comes in a new color
+    # set ... It should be a big color change, but it can vary, just close
+    # to 180 degrees"; at approval: "if we have a pre-drop, fade the color
+    # throught the predrop, not an instant change. drops without them should
+    # have an instant change"). Every drop that fires — a drop sequence's or
+    # one of his own drop triggers — lands a colour set about opposite the
+    # one showing: drop_colour_spread_deg either side of 180 degrees (150-
+    # 210 at 30), the sets nearest 180 likeliest, through the automatic
+    # pool's own gates. spectra/services/drop_colour.py is the pick,
+    # scene_response.ResponseEngine.drop_color_change the precedence (a
+    # preview, Force Colour, a house mode or a 2D gradient still wins, each
+    # named). Both Sonic-tellable. Off = drops change no colour, exactly as
+    # before this existed.
+    drop_colour_change: bool = True
+    drop_colour_spread_deg: float = Field(default=30.0, ge=5.0, le=90.0)
+
     # THE PULSE FLASH'S ENERGY FLOOR (2026-10-12, the Admiral: "The flash
     # flare on pulse should only happen on high energy, .8 or higher"): a
     # pulse_flash flare writes nothing unless the top bar's Energy

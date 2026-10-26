@@ -417,6 +417,7 @@ from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
 from spectra.models.sequencer import CurvePoint
 from spectra.services import binding_resolver, color_journey, color_rotate
 from spectra.services import selection_kernel as kernel
+from spectra.services import drop_colour
 from spectra.services.binding_resolver import FireContext
 
 logger = logging.getLogger(__name__)
@@ -488,6 +489,9 @@ class PendingKindBatch:
     # THE FLARE PUNCH: False for a batch a charge/lull/drop event's own band
     # queued (_PUNCH_OK), so it never punches the lull it belongs to.
     punch: bool = True
+    # THE DROP COLOUR CHANGE: True for a batch a drop queued after its
+    # colour already moved (_DROP_COLOUR_DONE) — its colour jump skips.
+    drop_colour_done: bool = False
 
 # A dice re-roll's own eased landing (registry "smooth": true params only —
 # see _reroll). Live-measured ordinary flare cadence during active music is
@@ -852,6 +856,20 @@ _BATCH_WRITES: ContextVar[Optional[set]] = ContextVar(
 # hold its own start lit — and carried on a PendingKindBatch it queues.
 _PUNCH_OK: ContextVar[bool] = ContextVar("spectra_flare_punch_ok",
                                          default=True)
+# ... and whether this batch belongs to a DROP whose colour the drop colour
+# change already moved (drop_color_change): its own colour-jump kind then
+# skips, named, so a drop lands ONE colour change. Set by on_event for a
+# "drop" that took the claim, carried on a PendingKindBatch it queues.
+_DROP_COLOUR_DONE: ContextVar[bool] = ContextVar("spectra_drop_colour_done",
+                                                 default=False)
+
+# How long a drop colour change's claim waits for its drop's own response
+# (on_event), past the change's own ramp: the drop follows its colour
+# change in the same trigger-clock call (or, after a fade across a
+# pre-drop, on the drop's own tick), so a second covers a late tick with
+# margin and lets a claim whose drop never fired (a gated response) lapse
+# long before the next drop could take it.
+DROP_COLOUR_CLAIM_S = 1.0
 
 
 # The phase effects held back while a house mode's resting look owns the
@@ -1189,8 +1207,22 @@ class ResponseEngine:
         song_position: Callable[[], tuple[Optional[str], Optional[int]]] | None = None,
         flare_blocked: Callable[[], frozenset] | None = None,
         room_energy: Callable[[], Optional[float]] | None = None,
+        drop_colour_pool: Callable[[SceneV2, float], dict] | None = None,
+        set_wheel: Callable[[str], Any] | None = None,
+        group_ids_by_set: Callable[[], dict] | None = None,
     ) -> None:
         self.conductor = conductor
+        # THE DROP COLOUR CHANGE (drop_color_change; spectra/services/
+        # drop_colour.py is the pick): the automatic pool for a scene at an
+        # intensity ({set_id: ColorWheelPosition}), one set's wheel position
+        # (the set showing may be outside the pool), and the reverse group
+        # lookup the selector's group curves read. Lazy defaults, like every
+        # other injectable here; `_drop_colour_claim_until` is the "one
+        # colour change per drop" claim (_take_drop_colour_claim).
+        self._drop_colour_pool = drop_colour_pool or self._default_drop_colour_pool
+        self._set_wheel = set_wheel or self._default_set_wheel
+        self._group_ids_by_set = group_ids_by_set or self._default_group_ids_by_set
+        self._drop_colour_claim_until: Optional[float] = None
         # THE DROP SHOCKWAVE'S ENERGY FLOOR: the top bar's Energy right now
         # (engine.py wires bridge.intensity()). None — scratch engines, the
         # previews — is "unknown", which is never gated (_drop_shock_keys).
@@ -1295,6 +1327,12 @@ class ResponseEngine:
             "at": started_at, "class": event_class,
             "intensity": round(intensity, 4),
         }
+        # THE DROP COLOUR CHANGE already moved this drop's colour: taken by
+        # every drop, band or not, so a claim never outlives its own drop;
+        # the band's colour jump then skips (one colour change per drop).
+        colour_done = event_class == "drop" and self._take_drop_colour_claim()
+        if colour_done:
+            record["drop_colour_done"] = True
         if scene is None:
             record["result"] = "no_active_scene"
             self.surges.append(record)
@@ -1317,11 +1355,13 @@ class ResponseEngine:
         record["band"] = {"intensity_min": band.intensity_min,
                           "intensity_max": band.intensity_max}
         punch_token = _PUNCH_OK.set(event_class not in PHASE_RAMP_MS)
+        colour_token = _DROP_COLOUR_DONE.set(colour_done)
         try:
             await self._execute_band(scene, band, intensity, record,
                                      started_at=started_at,
                                      anchor_relocated=anchor_relocated)
         finally:
+            _DROP_COLOUR_DONE.reset(colour_token)
             _PUNCH_OK.reset(punch_token)
         self.surges.append(record)
         await self._broadcast({"type": "surge", **record})
@@ -1449,7 +1489,8 @@ class ResponseEngine:
                 scene=scene, kinds=kinds, intensity=intensity,
                 due_at=started_at + delay_ms / 1000.0,
                 fire_seq=fire_seq, delay_ms=delay_ms,
-                punch=_PUNCH_OK.get()))
+                punch=_PUNCH_OK.get(),
+                drop_colour_done=_DROP_COLOUR_DONE.get()))
 
     async def _jump(self, vid: str, effect_type: str, params: dict):
         """Every write this engine makes goes through here (or _glide): the
@@ -1623,7 +1664,15 @@ class ResponseEngine:
                 "gain_envelope": await self._gain(kind, scale, carry,
                                                   fire_seq)})
 
-        if colours:   # one selector roll per batch — a jump is a jump
+        if colours and _DROP_COLOUR_DONE.get():
+            # THE DROP COLOUR CHANGE already gave this drop its new set
+            # (drop_color_change): a second jump would undo it. Named.
+            kind, scale = colours[0]
+            kind_records.append({
+                "name": kind.name, "type": kind.type, "jump": "color_set",
+                "scale": scale, "result": "skipped",
+                "skipped": "drop_colour_change"})
+        elif colours:   # one selector roll per batch — a jump is a jump
             kind, scale = colours[0]
             sel_intensity = max(0.0, min(1.0, intensity * scale))
             result["color_jump"] = await self._color_jump(
@@ -1726,6 +1775,7 @@ class ResponseEngine:
                 current_scene_id=current.id if current is not None else None)
         fire_seq = self._begin_fire()
         punch_token = _PUNCH_OK.set(batch.punch)
+        colour_token = _DROP_COLOUR_DONE.set(batch.drop_colour_done)
         try:
             result = await self._run_kinds(batch.scene, batch.kinds,
                                            batch.intensity, fire_seq)
@@ -1737,6 +1787,7 @@ class ResponseEngine:
             return self.note_kind_batch(
                 batch, "error", error=f"{type(exc).__name__}: {exc}")
         finally:
+            _DROP_COLOUR_DONE.reset(colour_token)
             _PUNCH_OK.reset(punch_token)
             self._end_fire(fire_seq)
         return self.note_kind_batch(batch, "landed", kinds=result["kinds"],
@@ -3268,11 +3319,171 @@ class ResponseEngine:
         record["result"] = record["color_jump"].get("result")
         return record
 
+    async def drop_color_change(self, intensity: float, *,
+                                pool_scene: Optional[SceneV2] = None,
+                                ramp_ms: int = 0,
+                                moment: str = "drop") -> dict:
+        """THE DROP COLOUR CHANGE (predrop plan step 2; spectra/services/
+        drop_colour.py is the pick and its binding statement): a drop
+        arrives in a colour set about opposite the one showing.
+        trigger_engine's drop path is the caller, through engine.
+        fire_drop_colour_event (which applies the house, Absorb and
+        response gates first).
+
+        `intensity` is the drop's own selection intensity (the pool's
+        rainbow limit and his selector curves read it); `pool_scene` the
+        scene whose pool the set must come from — the INCOMING scene when
+        the drop switches the scene, else the one showing; `ramp_ms` 0 is
+        the instant switch on the drop, anything longer the fade across a
+        pre-drop that lands on the drop; `moment` ("drop" / "pre_drop")
+        names which in the record.
+
+        PRECEDENCE, first match wins, each NAMED in the record:
+          1. the room setting off (drop_colour_change) — nothing moves;
+          2. a conductor deferral (preview / pause / dinner party / Hue
+             Hold / Absorb) — nothing moves, the holds that stop the drift;
+          3. FORCE COLOUR — a pinned SET stays; a pinned GROUP rolls its
+             next member, as a flare's colour jump does (_color_jump's own
+             forced branch);
+          4. an ACTIVE 2D GRADIENT — held: the gradient's own drop kick
+             (DriftConductor.on_drop_event, fired with the drop's response)
+             IS the drop's colour change;
+          5. otherwise the pick (drop_colour.pick over the automatic pool,
+             weighted by his selector) lands through _color_jump's picked_id
+             path with flare=False (a colour change, not a flare: a Light
+             Show "flares off" target changes colour too), the room's active
+             set and wheel move to it and the journey's bearing clears.
+
+        A landed change CLAIMS the drop (_claim_drop_colour): the drop's own
+        band then skips any colour-jump kind it carries, so one drop makes
+        one colour change."""
+        from spectra.services import force_color
+        record: dict[str, Any] = {"at": self._clock(), "kind": "drop_colour",
+                                  "moment": moment,
+                                  "intensity": round(intensity, 4),
+                                  "ramp_ms": int(ramp_ms)}
+        controls = self._room_controls()
+        if not getattr(controls, "drop_colour_change", True):
+            record["result"] = "off"
+            return record
+        deferred_by = self.conductor._deferral()
+        if deferred_by is not None:
+            record.update(result="held", held_for=deferred_by)
+            return record
+        scene = self.conductor.scene
+        if force_color.active(controls):
+            record["forced_color"] = force_color.pinned_id(controls)
+            if not self._pinned_is_group(controls) or scene is None:
+                record.update(result="held", held_for=force_color.HELD_FOR)
+                return record
+            # a pinned POOL: the drop rolls the pin's next member
+            carry: dict[tuple[str, str], Any] = {}
+            record["color_jump"] = await self._color_jump(
+                scene, intensity, carry, ramp_ms=int(ramp_ms), flare=False)
+            self.conductor.on_surge(carry)
+            record.update(result=record["color_jump"].get("result"),
+                          rung="pinned_group")
+            if record["result"] == "jumped":
+                self._claim_drop_colour(ramp_ms)
+            return record
+        if self.conductor.effective_gradient_id(controls) is not None:
+            record.update(result="held", held_for="gradient_drift")
+            return record
+        if scene is None:
+            record["result"] = "no_active_scene"
+            return record
+        pool_scene = pool_scene or scene
+        record["pool_scene"] = pool_scene.name
+        config = self._sequencer_config()
+        if not config.color_set_entries:
+            record["result"] = "selector_unconfigured"
+            return record
+        pool = self._drop_colour_pool(pool_scene, intensity)
+        options = self._drop_colour_options(config, pool, intensity)
+        room = self._room_load()
+        current_id = room.active_set_id
+        wheel = self._set_wheel(current_id) if current_id else None
+        current_rainbow = bool(wheel is not None and wheel.rainbow)
+        current_deg = None if current_rainbow else room.wheel_position_deg
+        if current_deg is None and wheel is not None and not current_rainbow:
+            current_deg = wheel.position_deg
+        pick = drop_colour.pick(
+            current_id, current_deg, options,
+            spread_deg=getattr(controls, "drop_colour_spread_deg",
+                               drop_colour.DEFAULT_SPREAD_DEG),
+            rng=self._rng, current_rainbow=current_rainbow)
+        record.update(from_set_id=current_id,
+                      from_wheel_deg=(round(current_deg, 1)
+                                      if current_deg is not None else None),
+                      from_rainbow=current_rainbow, pool_size=len(options),
+                      pick=pick.as_dict(), rung=pick.rung,
+                      distance_deg=pick.as_dict()["distance_deg"],
+                      spread_deg=pick.spread_deg)
+        if pick.set_id is None:
+            record["result"] = "kept_current"
+            return record
+        carry = {}
+        record["color_jump"] = await self._color_jump(
+            scene, intensity, carry, ramp_ms=int(ramp_ms),
+            picked_id=pick.set_id, flare=False, rung=pick.rung)
+        self.conductor.on_surge(carry)
+        record["result"] = record["color_jump"].get("result")
+        if record["result"] == "jumped":
+            self._claim_drop_colour(ramp_ms)
+        return record
+
+    def _drop_colour_options(self, config, pool: dict,
+                             intensity: float) -> list:
+        """The pool as drop_colour Options, each with his own selector
+        weight here: curve x genre x group (no wheel-travel factor — the
+        pick's closeness to 180 degrees takes its place). Only sets with a
+        selector entry are candidates, as in every colour pick; a set his
+        own curve zeroes at this intensity is vetoed outright."""
+        candidates = kernel.build_color_set_candidates(
+            config.color_set_entries, self._curve_profiles(),
+            genre_bucket=self._genre_bucket(), room_deg=None,
+            set_positions={sid: w.position_deg for sid, w in pool.items()},
+            wheel_points=[CurvePoint(x=0.0, y=1.0)],
+            group_ids_by_set=self._group_ids_by_set())
+        options: list = []
+        for c in candidates:
+            curve_y = kernel.curve_eval(c.points, intensity)
+            if curve_y <= 0.0:
+                continue
+            weight = (kernel.compose(curve_y, c.genre_mult, 1.0)
+                      * kernel.group_curve_mult(c.group_points, intensity))
+            w = pool[c.id]
+            options.append(drop_colour.Option(
+                set_id=c.id, position_deg=w.position_deg,
+                rainbow=bool(w.rainbow), weight=weight))
+        return options
+
+    def _claim_drop_colour(self, ramp_ms: int) -> None:
+        """This drop's colour has changed: its own response, when it fires
+        within the change's ramp plus DROP_COLOUR_CLAIM_S, takes the claim
+        (on_event) and skips its band's colour jump."""
+        self._drop_colour_claim_until = (self._clock() + max(0, ramp_ms) / 1000.0
+                                         + DROP_COLOUR_CLAIM_S)
+
+    def _take_drop_colour_claim(self) -> bool:
+        until, self._drop_colour_claim_until = self._drop_colour_claim_until, None
+        return until is not None and self._clock() <= until
+
+    @staticmethod
+    def _pinned_is_group(controls) -> bool:
+        """Is the Force Colour pin a GROUP? Read off the stored card, never
+        force_color.pinned_card() — resolving a group advances its rotation
+        cursor, which only the landing itself may do."""
+        from spectra.services import color_sets, force_color
+        card = color_sets.get_by_id(force_color.pinned_id(controls) or "")
+        return getattr(card, "kind", None) == "group"
+
     async def _color_jump(self, scene: SceneV2, intensity: float,
                           carry: dict, *,
                           ramp_ms: Optional[int] = None,
                           picked_id: Optional[str] = None,
-                          flare: bool = True) -> dict:
+                          flare: bool = True,
+                          rung: Optional[str] = None) -> dict:
         """The flare colour jump: the shipped selector picks (curve × genre
         × wheel-travel, terminal KEEP), the pick lands on set-mode virtuals
         with the intensity-scaled RAMP-IN (color_jump_ramp_ms — a hue-arc
@@ -3284,7 +3495,12 @@ class ResponseEngine:
         overrides the intensity-scaled ramp (analysed_color_jump's cue
         crossfade); None keeps it. picked_id lands THAT set instead of a
         selector draw (analysed_color_jump: the set the trigger-timed walk
-        was heading for); force colour still wins over it."""
+        was heading for); force colour still wins over it. `rung` names
+        why picked_id was chosen (drop_color_change: the drop colour pick's
+        own rung); None keeps "journey_destination". A ramp of 0 lands
+        each virtual's entry with a JUMP (the executor's own 1 ms jump,
+        which also retargets any glide still in flight), never a
+        zero-length glide — the drop colour change's instant switch."""
         config = self._sequencer_config()
         room = self._room_load()
         # FORCE COLOUR (owner ask 2026-08-27, spectra/services/
@@ -3312,7 +3528,7 @@ class ResponseEngine:
             return {"result": "selector_unconfigured"}
         if timed_card is not None:
             card = timed_card
-            rung = "journey_destination"
+            rung = rung or "journey_destination"
             eligible = {picked_id: self.conductor._set_position(picked_id)}
         elif forced is not None:
             card = forced
@@ -3379,8 +3595,11 @@ class ResponseEngine:
             if entry.background_brightness is not None:
                 params["background_brightness"] = entry.background_brightness
             if params:
-                await self._glide(vid, state.effect_type, params,
-                                          ramp_ms)
+                if ramp_ms > 0:
+                    await self._glide(vid, state.effect_type, params,
+                                      ramp_ms)
+                else:
+                    await self._jump(vid, state.effect_type, params)
                 landed += 1
         position = eligible.get(picked_id)
         update: dict[str, Any] = {"active_set_id": picked_id}
@@ -3430,6 +3649,28 @@ class ResponseEngine:
                 continue
             out[card.id] = color_wheel.wheel_position(card).position_deg
         return out
+
+    @staticmethod
+    def _default_drop_colour_pool(scene: SceneV2, intensity: float) -> dict:
+        """The drop colour change's pool: the AUTOMATIC one (scene_sequencer.
+        automatic_pool_cards, the sequencer's own gate chain) for `scene`
+        at the drop's intensity, as each set's wheel position."""
+        from spectra.services import color_wheel, scene_sequencer
+        from spectra.services.room_controls import load_room_controls
+        return {card.id: color_wheel.wheel_position(card)
+                for card in scene_sequencer.automatic_pool_cards(
+                    scene, load_room_controls(), intensity)}
+
+    @staticmethod
+    def _default_set_wheel(set_id: str):
+        from spectra.services import color_sets, color_wheel
+        card = color_sets.get_by_id(set_id)
+        return color_wheel.wheel_position(card) if card is not None else None
+
+    @staticmethod
+    def _default_group_ids_by_set() -> dict:
+        from spectra.services import color_set_groups
+        return color_set_groups.group_ids_by_set()
 
     @staticmethod
     def _default_room_controls():

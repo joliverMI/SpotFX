@@ -1,0 +1,437 @@
+{
+ "_about": "His 54 colour sets' wheel positions (spectra/services/color_wheel.wheel_position), derived 2026-10-26 from a read-only GET of /api/color-sets on the live app (names and positions only \u2014 no colours). Used by tests/test_drop_colour.py's property test of the drop colour pick (predrop plan step 2, section 2.4).",
+ "sets": [
+  {
+   "name": "Bass Drop Brightness",
+   "position_deg": null,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Black Hole - Blue",
+   "position_deg": 241.2,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Black Hole - Cyan",
+   "position_deg": 176.5,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Black Hole - Green",
+   "position_deg": 119.1,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Black Hole - Orange",
+   "position_deg": 13.4,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Black Hole - Purple",
+   "position_deg": 290.0,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Black Hole - Red",
+   "position_deg": 0.0,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Black Hole - Yellow",
+   "position_deg": 61.2,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Black Hole Rainbow",
+   "position_deg": null,
+   "rainbow": true,
+   "is_rainbow": true,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Blood Red",
+   "position_deg": 1.5,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Calm - Base",
+   "position_deg": 279.0,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Calm - Cyan",
+   "position_deg": 209.4,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Calm - Evening Cyan",
+   "position_deg": 209.4,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Calm - Evening Green",
+   "position_deg": 158.8,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Calm - Evening Purple",
+   "position_deg": 279.2,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Calm - Green",
+   "position_deg": 158.8,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Calm - Purple",
+   "position_deg": 279.2,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Dim Setting Brightness",
+   "position_deg": null,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Hype 1",
+   "position_deg": null,
+   "rainbow": true,
+   "is_rainbow": true,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Hype 2",
+   "position_deg": null,
+   "rainbow": true,
+   "is_rainbow": true,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Hype 3",
+   "position_deg": null,
+   "rainbow": true,
+   "is_rainbow": true,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Line - Blue",
+   "position_deg": 241.2,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Line - Cyan",
+   "position_deg": 176.5,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Line - Green",
+   "position_deg": 121.6,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Line - Orange",
+   "position_deg": 13.4,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Line - Red",
+   "position_deg": 0.0,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Line - Yellow",
+   "position_deg": 61.2,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Mid - Blue with Cyan",
+   "position_deg": 141.8,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Mid - Blush",
+   "position_deg": 308.6,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Mid - Bright Purple",
+   "position_deg": 308.7,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Mid - Fire",
+   "position_deg": 13.4,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Mid - Green with Yellow",
+   "position_deg": 119.6,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Mid - Ice",
+   "position_deg": 207.5,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Mid - Purple Blue Waves",
+   "position_deg": 250.8,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Mid - Purple Mid",
+   "position_deg": 264.7,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Mid Setting Brightness",
+   "position_deg": null,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Night Light",
+   "position_deg": null,
+   "rainbow": true,
+   "is_rainbow": false,
+   "scene_v2_opt_out": true,
+   "disabled": false
+  },
+  {
+   "name": "Orbit - Blue",
+   "position_deg": 241.2,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Orbit - Cyan",
+   "position_deg": 176.5,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Orbit - Green",
+   "position_deg": 129.3,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Orbit - Orange",
+   "position_deg": 22.2,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Orbit - Purple",
+   "position_deg": 291.9,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Orbit - Red",
+   "position_deg": 360.0,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Orbit - Yellow",
+   "position_deg": 44.5,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Power - Blue with Cyan",
+   "position_deg": 155.2,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Power - Blush",
+   "position_deg": 310.4,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Power - Bright Purple",
+   "position_deg": 310.0,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Power - Fire",
+   "position_deg": 14.9,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Power - Green with Yellow",
+   "position_deg": 110.9,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Power - Ice",
+   "position_deg": 208.3,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Power - Purple Blue Waves",
+   "position_deg": 242.4,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Power - Purple Mid",
+   "position_deg": 256.9,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Puerto Rico Blue",
+   "position_deg": 346.1,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  },
+  {
+   "name": "Puerto Rico Red",
+   "position_deg": 1.7,
+   "rainbow": false,
+   "is_rainbow": false,
+   "scene_v2_opt_out": false,
+   "disabled": false
+  }
+ ]
+}
