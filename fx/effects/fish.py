@@ -400,6 +400,81 @@ THRUST_TAU = 0.09        # speed-ease time constant once any stroke cap is
 # requires for "the coast approaches a stop." It only ever engages in the
 # one combination that would otherwise be permanent, never a real one.
 MOTION_FLOOR_FRAC = 0.02
+
+# ── THE TAIL DRIVE (2026-10-26, data/fish-swim-plan part 2) ───────────────
+# His ask: "the fish could get more realism if their velocity bursts were
+# more directly tied to their swimming motion, so a slow moving fish, or
+# barely moving fish, would show it's tail swimming and that motion would
+# visually propel the fish ... so we still get the good reactive movement,
+# but also a more realistic swim"; the plan he approved: "tail-driven
+# swimming with beats as strong as today".
+#
+# Without it the music sets a SPEED and the tail follows the speed (the
+# flap's rate and size are read off how fast the fish is going). With
+# `tail_drive` on, the music sets an EFFORT and the TAIL IS THE ENGINE: the
+# tail's own stroke — its size A and rate f, the very numbers that draw it —
+# makes the thrust, the water's drag takes speed away, and the speed is what
+# is left. So the tail visibly moves first and the fish surges because of it.
+#
+#   effort e = the target speed this effect always computed, / cruise (the
+#              music's ask, unchanged: the lunge, the swim burst, the solo
+#              burst and the big fish's flee all still act on it)
+#   thrust   = K (A f)^2 * 2 cos^2(tail-tip phase)   two pushes per stroke
+#              cycle, one per sweep, at mid-sweep
+#   drag     = d v^2 + l v    cruise units per second; d + l = `glide_drag`,
+#              l = TAIL_DRAG_LINEAR_SHARE of it
+#   K        = (d + l) / flap_rate^2, so A = 1 at f = flap_rate holds exactly
+#              cruise. A stroke for effort e_s beats at f = flap_rate (0.4 +
+#              0.6 e_s), today's own rate law, with A = sqrt((d e_s^2 + l e_s)
+#              / (d + l)) flap_rate / f, the size that holds e_s steady.
+#
+# BURST AND GLIDE. Below `glide_below` (an effort) a fish does not wiggle
+# slowly all the time: it strokes a short bout harder than asked
+# (TAIL_BOUT_GAIN), then GLIDES with its body near straight (TAIL_AMP_GLIDE)
+# until it has slowed out of the band H = TAIL_GLIDE_BAND * (1 - e /
+# glide_below) either side of the effort. A stroke always runs at least half
+# a cycle, and a beat strokes until its envelope (`p_tkick`) falls below
+# TAIL_BEAT_ON. The ordinary target never drops below cruise, so this engages
+# only when something asks a fish for less than cruise.
+#
+# No separate power stroke: one was tried in the plan's prototype (rate x2,
+# size x1.45) and overshot to 13.7x cruise; the effort alone already matches
+# today's beat strength.
+#
+# SCOPE is exactly the thrust pulse's: mode < 2, not cap-exempt, no school.
+# `tail_drive` blends the speed and the drawn flap between the two laws: 0 is
+# the pre-tail-drive motion bit for bit (no tail-drive code runs at all, the
+# escape hatch), 1 is the tail drive, and the thrust dial
+# (`min_drift_speed`/`stroke_speed_cap`) fades out as it rises. It draws no
+# random numbers, so the shared generator is consumed exactly as before.
+TAIL_DRAG_LINEAR_SHARE = 0.25   # l / (d + l): the linear drag that lets a
+                                # glide come to rest (0.4 of 1.6 per s)
+TAIL_GLIDE_BAND = 0.5           # the burst-and-glide band at zero effort
+                                # (+- this share of the effort)
+TAIL_BOUT_GAIN = 2.0            # a bout strokes at this x the effort (never
+                                # past glide_below), so the glide that
+                                # follows averages it
+TAIL_AMP_MAX = 1.5              # tail size ceiling (1 = its cruise size); a
+                                # bigger ask beats faster instead
+TAIL_AMP_GLIDE = 0.06           # tail size while gliding: near straight
+TAIL_FREQ_GLIDE = 0.25          # ... and its slow ripple, x flap_rate
+TAIL_AMP_UP_S = 0.04            # the tail's size eases up into a stroke ...
+TAIL_AMP_DOWN_S = 0.14          # ... and settles straight into a glide
+TAIL_FREQ_S = 0.06              # the stroke rate's ease
+TAIL_BEAT_HL = 0.22             # the beat envelope's half-life, s ...
+TAIL_BEAT_MAX = 1.5             # ... its ceiling ...
+TAIL_BEAT_ON = 0.05             # ... and above this the fish strokes
+# THE QUICK MOMENTS: the swim burst's dash, a solo burst and a flee from the
+# big fish each ask a fish to answer FASTER than ordinary swimming does (the
+# speed ease's own shorter time constant: BURST_SPEED_TAU, SOLO_SPEED_TAU,
+# BIG_FLEE_TAU). The tail drive keeps that: while a moment has shortened the
+# ease, thrust and drag are scaled together so the speed answers within that
+# same time constant (the water's own, 1 / (2 d v + l), is far slower near
+# cruise) and settles at the same speed, and its strokes (several a second)
+# push with their cycle mean rather than sweep by sweep, so the dash starts
+# on its trigger instead of waiting for the next mid-sweep. A beat does not
+# shorten the ease, so a beat is the tail drive's own response.
+TAIL_STIFF_MAX = 12.0           # the most a moment may quicken it
 ACCEL_TAU = 0.18        # acceleration smoothing
 TURN_GAIN = 3.0         # 1/s: desired turn rate per radian of heading
                         # error, BEFORE the turn-rate clamp. Frame-rate
@@ -1145,6 +1220,10 @@ _SOA_NAMES = (
     # a successor continues the turn), and which released object a fish
     # born by a matched birth came from
     "p_om", "p_pid",
+    # the tail drive (the TAIL DRIVE block): the tail's size and stroke rate,
+    # whether it is stroking, the flap phase that stroke began at, and the
+    # beat envelope
+    "p_tamp", "p_tf", "p_tst", "p_tph0", "p_tkick",
 )
 
 
@@ -1619,6 +1698,39 @@ class Fish2d(Twod, GradientEffect):
                 ),
                 default=0.4,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=2.0)),
+            # 2026-10-26, the plan he approved: "tail-driven swimming with
+            # beats as strong as today" (the TAIL DRIVE block at the top of
+            # this module)
+            vol.Optional(
+                "tail_drive",
+                description=(
+                    "How much the tail itself drives the fish: 0 = speed "
+                    "follows the music and the tail follows the speed (the "
+                    "motion before 2026-10-26, exactly), 1 = the tail's "
+                    "strokes push the fish and the water's drag slows it"
+                ),
+                default=0.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            vol.Optional(
+                "glide_drag",
+                description=(
+                    "Tail drive: the water's drag at cruise, per second. "
+                    "Higher = a gliding fish slows sooner and the speed "
+                    "follows the tail more tightly; cruise is held either "
+                    "way"
+                ),
+                default=1.6,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.4, max=4.0)),
+            vol.Optional(
+                "glide_below",
+                description=(
+                    "Tail drive: below this effort (a share of cruise) a "
+                    "fish strokes a short burst and then glides with its "
+                    "body straight instead of beating steadily; 0 = never "
+                    "glide"
+                ),
+                default=0.75,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.5)),
             vol.Optional(
                 "ripple_amount",
                 description="Wake strength: how much smear a fish lays down",
@@ -1979,6 +2091,14 @@ class Fish2d(Twod, GradientEffect):
         # THE HOST FRAME (the shoal-burst plan §5.2): the id a program's
         # cloud follows a fish born by a matched birth by
         self.p_pid = np.full(CAP, -1, dtype=np.int64)
+        # THE TAIL DRIVE: tail size (1 = its cruise size), stroke rate (Hz,
+        # 0 = not yet set), stroking (1) or gliding (0), the flap phase the
+        # current stroke began at, and the beat envelope
+        self.p_tamp = np.ones(CAP, dtype=np.float32)
+        self.p_tf = np.zeros(CAP, dtype=np.float32)
+        self.p_tst = np.ones(CAP, dtype=np.float32)
+        self.p_tph0 = np.zeros(CAP, dtype=np.float32)
+        self.p_tkick = np.zeros(CAP, dtype=np.float32)
         self._prog_birth_snap = None
         self._prog_birth_pids = None
         self._prog_birth_token = None
@@ -2084,6 +2204,9 @@ class Fish2d(Twod, GradientEffect):
         self.flap_accel = self._config["flap_accel"]
         self.min_drift_speed = self._config["min_drift_speed"]
         self.stroke_speed_cap = self._config["stroke_speed_cap"]
+        self.tail_drive = self._config["tail_drive"]
+        self.glide_drag = self._config["glide_drag"]
+        self.glide_below = self._config["glide_below"]
         self.ripple_amount = self._config["ripple_amount"]
         self.ripple_spread = self._config["ripple_spread"]
         self.ripple_life = self._config["ripple_life"]
@@ -2322,6 +2445,11 @@ class Fish2d(Twod, GradientEffect):
         self.p_peel[s] = np.nan
         self.p_om[s] = 0.0
         self.p_pid[s] = -1
+        self.p_tamp[s] = 1.0
+        self.p_tf[s] = 0.0
+        self.p_tst[s] = 1.0
+        self.p_tph0[s] = self.p_flap[s]
+        self.p_tkick[s] = 0.0
         self.p_wurg[s] = 0.0
         self.p_wcmd[s] = 0.0
         self.p_wauth[s] = 0.0
@@ -3589,6 +3717,128 @@ class Fish2d(Twod, GradientEffect):
                 validate=False,
                 fire_event=False,
             )
+
+    def _decay_tail_kick(self, n, dt):
+        """The beat envelope decays every frame tail_drive is on, whether or
+        not any fish is eligible to stroke from it this frame — a kick
+        armed just before a school forms (the charge gates `pulse_eligible`
+        off for its whole duration) must not freeze and survive, unaged,
+        into the fish that resumes ordinary swimming after the drop."""
+        self.p_tkick[:n] *= np.float32(0.5 ** (dt / TAIL_BEAT_HL))
+
+    def _tail_drive_step(self, eligible, want_tail, prev, dt, cruise, spike,
+                         jump_eff, weight, tau, tau_ordinary):
+        """THE TAIL DRIVE's controller and thrust law (the block of that name
+        at the top of the module), for every eligible fish: decide stroke or
+        glide, ease the tail toward the stroke that effort asks for, push
+        with the tail's CURRENT motion, lose speed to drag. `p_spd` (already
+        eased the old way this frame) becomes the blend `weight` of the two.
+        `tau`/`tau_ordinary` are this frame's speed ease and the ordinary
+        one, so a quick moment stays quick (TAIL_STIFF_MAX's block).
+        """
+        n = eligible.size
+        idx = np.flatnonzero(eligible)
+        # the beat envelope: a strong beat arms it where the lunge arms, and
+        # a fish strokes while it is up
+        if spike >= LUNGE_SPIKE_MIN and jump_eff > 0.0:
+            beat = min(jump_eff * float(spike), TAIL_BEAT_MAX)
+            self.p_tkick[idx] = np.maximum(self.p_tkick[idx], beat)
+        self._decay_tail_kick(n, dt)
+        kick = self.p_tkick[idx]
+
+        fc = max(float(self.flap_rate), 0.05)
+        drag = float(self.glide_drag)
+        lin = drag * TAIL_DRAG_LINEAR_SHARE
+        quad = drag - lin
+        k_thrust = drag / (fc * fc)
+        v = prev[idx] / cruise
+        effort = np.maximum(want_tail[idx] / cruise, 0.0)
+        below = float(self.glide_below)
+        if below > 0.0:
+            band = TAIL_GLIDE_BAND * np.clip(1.0 - effort / below, 0.0, 1.0)
+        else:
+            band = np.zeros_like(effort)
+
+        # stroke or glide: start below the band (or on a beat); stop above it,
+        # never before half a stroke and never while a beat is up
+        stroking = self.p_tst[idx] > 0.5
+        phase = self.p_flap[idx]
+        half_done = ((phase - self.p_tph0[idx]) % (2 * np.pi * 64)) >= np.pi
+        start = ~stroking & ((v < effort * (1.0 - band)) | (kick > TAIL_BEAT_ON))
+        stop = (
+            stroking & (band > 0.02) & (v > effort * (1.0 + band))
+            & half_done & (kick <= TAIL_BEAT_ON)
+        )
+        stroking = (stroking | start) & ~stop
+        self.p_tph0[idx] = np.where(start, phase, self.p_tph0[idx])
+        self.p_tst[idx] = stroking.astype(np.float32)
+
+        # the stroke this effort asks for: continuous above glide_below, a
+        # harder bout below it
+        e_s = np.where(
+            effort >= below, effort,
+            np.clip(TAIL_BOUT_GAIN * effort, effort, below),
+        )
+        f_s = fc * (0.4 + 0.6 * e_s)
+        a_s = (
+            np.sqrt(np.maximum(quad * e_s * e_s + lin * e_s, 0.0) / drag)
+            * fc / np.maximum(f_s, 1e-3)
+        )
+        capped = a_s > TAIL_AMP_MAX
+        f_s = np.where(capped, f_s * a_s / TAIL_AMP_MAX, f_s)
+        a_s = np.minimum(a_s, TAIL_AMP_MAX)
+        a_cmd = np.where(stroking, a_s, TAIL_AMP_GLIDE)
+        f_cmd = np.where(stroking, f_s, fc * TAIL_FREQ_GLIDE)
+        amp = self.p_tamp[idx]
+        tau_a = np.where(a_cmd > amp, TAIL_AMP_UP_S, TAIL_AMP_DOWN_S)
+        amp = amp + (a_cmd - amp) * np.minimum(1.0, dt / tau_a)
+        freq = self.p_tf[idx]
+        freq = np.where(freq <= 0.0, f_cmd, freq)
+        freq = freq + (f_cmd - freq) * min(1.0, dt / TAIL_FREQ_S)
+        self.p_tamp[idx] = amp.astype(np.float32)
+        self.p_tf[idx] = freq.astype(np.float32)
+
+        # the push, from the tail's CURRENT motion: it peaks mid-sweep, where
+        # the tail tip moves fastest
+        tip = phase - SPINE_WAVE * 2.0 * np.pi
+        quick = tau[idx] < tau_ordinary[idx]
+        # ... except in a quick moment, whose strokes come too fast to tell
+        # apart: it pushes with their mean, so a dash starts on its trigger
+        push = np.where(quick, 1.0, 2.0 * np.cos(tip) ** 2)
+        thrust = k_thrust * (amp * freq) ** 2 * push
+        stiff = np.where(
+            quick,
+            np.clip(
+                1.0 / (2.0 * quad * np.abs(v) + lin)
+                / np.maximum(tau[idx], 1e-3),
+                1.0, TAIL_STIFF_MAX,
+            ),
+            1.0,
+        )
+        v = (v + stiff * thrust * dt) / (
+            1.0 + stiff * (quad * np.abs(v) + lin) * dt
+        )
+        v_tail = np.maximum(v, 0.0) * cruise
+        if weight >= 1.0:
+            self.p_spd[idx] = v_tail.astype(np.float32)
+        else:
+            self.p_spd[idx] = (
+                (1.0 - weight) * self.p_spd[idx] + weight * v_tail
+            ).astype(np.float32)
+
+    def _tail_drive_flap(self, eligible, flap_amp, flap_freq, half_w, weight):
+        """The drawn flap for every tail-driven fish: the tail drive's own
+        size and stroke rate (the numbers its thrust came from), blended by
+        `weight` with the flap read off the speed."""
+        base = self.flap_amount * half_w * self.body_aspect
+        n = eligible.size
+        amp_t = base * self.p_tamp[:n]
+        freq_t = np.where(self.p_tf[:n] > 0.0, self.p_tf[:n], flap_freq)
+        if weight < 1.0:
+            amp_t = (1.0 - weight) * flap_amp + weight * amp_t
+            freq_t = (1.0 - weight) * flap_freq + weight * freq_t
+        return (np.where(eligible, amp_t, flap_amp),
+                np.where(eligible, freq_t, flap_freq))
 
     def _solo_burst_step(self, n, dt, mode):
         """THE SOLO BURST (see the block at the top of the module): advance
@@ -5220,6 +5470,21 @@ class Fish2d(Twod, GradientEffect):
             want_full * MOTION_FLOOR_FRAC,
         )
         want = np.where(pulse_eligible, pulsed_want, want_full)
+        # THE TAIL DRIVE (the block of that name at the top of the module):
+        # its effort is the target WITHOUT the pulse (the tail makes the
+        # pushes now), carried through every multiplier below. At
+        # tail_drive 0 none of it exists and nothing below changes.
+        tail_w = float(self.tail_drive) if pulse_eligible.any() else 0.0
+        want_tail = (
+            np.where(pulse_eligible, want_full, want) if tail_w > 0.0
+            else None
+        )
+        if want_tail is None and self.tail_drive > 0.0:
+            # no fish is eligible this frame (a formed school) — the beat
+            # envelope still ages, or a kick armed just before the charge
+            # would resume ordinary swimming after the drop still above
+            # TAIL_BEAT_ON and force an extra stroke
+            self._decay_tail_kick(n, dt)
         # The ease is per fish (the pulse split makes `tau` an array even
         # for ordinary swimming). At stroke_speed_cap=0 (with
         # min_drift_speed at its max of 1) `want` above is `want_full`
@@ -5228,6 +5493,7 @@ class Fish2d(Twod, GradientEffect):
         pulse_engage = min(max(self.stroke_speed_cap, 0.0), 1.0)
         fast_tau = SPEED_TAU * (1.0 - pulse_engage) + THRUST_TAU * pulse_engage
         tau = np.where(pulse_eligible, fast_tau, SPEED_TAU)
+        tau_ordinary = tau
         if dispersing.any():
             want = np.where(
                 swirling,
@@ -5242,14 +5508,23 @@ class Fish2d(Twod, GradientEffect):
             tau = np.where(keeping, KEEP_SPEED_TAU, tau)
         if big_urg is not None:
             # a startled fish darts out of the big fish's way
-            want = want * (1.0 + (BIG_FLEE_X - 1.0) * big_urg)
+            flee = 1.0 + (BIG_FLEE_X - 1.0) * big_urg
+            want = want * flee
+            if want_tail is not None:
+                want_tail = want_tail * flee
             tau = np.where(big_urg > 0.0, np.minimum(tau, BIG_FLEE_TAU), tau)
         if self._burst > 0.0:
-            want = want * (1.0 + SWIM_BURST_SPEED_X * self._burst)
+            dash = 1.0 + SWIM_BURST_SPEED_X * self._burst
+            want = want * dash
+            if want_tail is not None:
+                want_tail = want_tail * dash
         self._solo_burst_step(n, dt, mode)
         solo = self.p_sb[:n]
         if solo.any():
-            want = want * (1.0 + (self.solo_burst_speed - 1.0) * solo)
+            sprint = 1.0 + (self.solo_burst_speed - 1.0) * solo
+            want = want * sprint
+            if want_tail is not None:
+                want_tail = want_tail * sprint
             tau = np.where(
                 self.p_sb_t[:n] > 0.0, np.minimum(tau, SOLO_SPEED_TAU), tau
             )
@@ -5264,6 +5539,11 @@ class Fish2d(Twod, GradientEffect):
         self.p_spd[:n] = np.where(
             steered, prev + (want - prev) * ease, prev
         )
+        if want_tail is not None:
+            self._tail_drive_step(
+                pulse_eligible, want_tail, prev, dt, cruise, spike, jump_eff,
+                tail_w, tau, tau_ordinary,
+            )
         inst_acc = (self.p_spd[:n] - prev) / max(dt, 1e-4)
         a_ease = min(1.0, dt / max(ACCEL_TAU, 1e-3))
         self.p_acc[:n] += (inst_acc - self.p_acc[:n]) * a_ease
@@ -5827,6 +6107,12 @@ class Fish2d(Twod, GradientEffect):
         flap_freq = self.flap_rate * (0.4 + 0.6 * speed_norm) * (
             1.0 + FLAP_BURST_X * self._burst
         ) * (1.0 + SOLO_FLAP_X * self.p_sb[:n])
+        if want_tail is not None:
+            # what is drawn IS what pushes: the tail drive's own size and
+            # rate are the flap for every tail-driven fish
+            flap_amp, flap_freq = self._tail_drive_flap(
+                pulse_eligible, flap_amp, flap_freq, half_w, tail_w
+            )
         self.p_flap[:n] = (
             self.p_flap[:n] + 2 * np.pi * flap_freq * dt
         ) % (2 * np.pi * 64)
