@@ -128,6 +128,7 @@ _HouseEnergyKeyEnum = Literal[tuple(house_console.ENERGY_KEYS)]
 _VoiceStateEnum = Literal[tuple(house_console.VOICE_STATES)]
 _DropHandleEnum = Literal["lull", "charge"]
 _DropReviewChoiceEnum = Literal["keep", "take"]
+_DropPartEnum = Literal[tuple(drop_console.PART_CHOICES)]
 _LockKeyEnum = Literal[tuple(lock_console.KEYS)]
 _AbsorbKeyEnum = Literal[tuple(absorb_console.SETTING_KEYS)]
 
@@ -871,6 +872,34 @@ async def explain_drop_switch(sequence: Optional[int] = None,
     """Why a drop sequence did -- or did not -- change the scene this play
     (the drop-led scene switch); omit sequence for every decision so far."""
     return await _call("explain_drop_switch", sequence=sequence, uri=uri)
+
+
+@mcp.tool()
+async def approve_drop_sequence(sequence: int, uri: Optional[str] = None) -> dict:
+    """Approve a drop sequence by its number -- the Drops panel's double
+    tick: every part that is not off approved."""
+    return await _call("approve_drop_sequence", sequence=sequence, uri=uri)
+
+
+@mcp.tool()
+async def set_drop_part(part: _DropPartEnum, on: bool, sequence: Optional[int] = None,
+                        your_drop_s: Optional[float] = None, uri: Optional[str] = None,
+                        confirm_id: Optional[str] = None) -> dict:
+    """Approve or switch off one part of a drop (charge, lull or the drop
+    itself); on one of his own drops, switching off asks first."""
+    return await _call("set_drop_part", part=part, on=on, sequence=sequence,
+                       your_drop_s=your_drop_s, uri=uri, confirm_id=confirm_id)
+
+
+@mcp.tool()
+async def remove_drop_sequence(sequence: Optional[int] = None,
+                               your_drop_s: Optional[float] = None,
+                               uri: Optional[str] = None,
+                               confirm_id: Optional[str] = None) -> dict:
+    """Remove a drop completely (the Drops panel's Remove) -- always asks
+    first; call again with confirm_id after he says yes."""
+    return await _call("remove_drop_sequence", sequence=sequence, your_drop_s=your_drop_s,
+                       uri=uri, confirm_id=confirm_id)
 
 
 @mcp.tool()

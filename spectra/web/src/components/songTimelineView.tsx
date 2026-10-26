@@ -114,6 +114,12 @@ export interface SongTimelineView {
   canRedo: boolean;
   /** Register/unregister a listener — see `useSongTimelineShape`. */
   addShapeOwner: () => () => void;
+  /** THE DROPS PANEL'S TIE-IN (home/HomeDrops.tsx): a tap on a drop pill on
+   * this timeline, or on a sequence on Home's audio shape, asks the panel to
+   * select the drop nearest `ms` on song `uri` and scroll it into view.
+   * `seq` counts the asks, so tapping the same drop twice still asks. */
+  selectedDrop: { uri: string | null; ms: number; seq: number } | null;
+  selectDrop: (uri: string | null, ms: number) => void;
 }
 
 const Ctx = createContext<SongTimelineView | null>(null);
@@ -139,6 +145,8 @@ function useFallback(): SongTimelineView {
     canUndo: false,
     canRedo: false,
     addShapeOwner: () => () => {},
+    selectedDrop: null,
+    selectDrop: () => {},
   }), [win]);
 }
 
@@ -199,6 +207,12 @@ export function SongTimelineViewProvider({ children }: { children: ReactNode }) 
     return () => setOwners((n) => Math.max(0, n - 1));
   }, []);
 
+  const [selectedDrop, setSelectedDrop] =
+    useState<{ uri: string | null; ms: number; seq: number } | null>(null);
+  const selectDrop = useCallback((uri: string | null, ms: number) => {
+    setSelectedDrop((prev) => ({ uri, ms, seq: (prev?.seq ?? 0) + 1 }));
+  }, []);
+
   const [past, setPast] = useState<Snapshot[]>([]);
   const [future, setFuture] = useState<Snapshot[]>([]);
   const snapshot = useCallback((): Snapshot => {
@@ -247,8 +261,10 @@ export function SongTimelineViewProvider({ children }: { children: ReactNode }) 
     canUndo: past.length > 0,
     canRedo: future.length > 0,
     addShapeOwner,
+    selectedDrop,
+    selectDrop,
   }), [win, track, showingLast, durationMs, filters, toggleFilter, owners, pushHistory,
-       undo, redo, past.length, future.length, addShapeOwner]);
+       undo, redo, past.length, future.length, addShapeOwner, selectedDrop, selectDrop]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

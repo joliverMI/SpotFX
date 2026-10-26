@@ -740,6 +740,18 @@ class RoomControlState(BaseModel):
     drop_shock_enabled: bool = True
     drop_shock_min_energy: float = Field(default=0.7, ge=0.0, le=1.0)
 
+    # DROP TESTING (2026-10-26, predrop plan step 1 — the Home Drops panel's
+    # icon-only Testing toggle; the Admiral: "a toggle button for 'testing'
+    # where all generated drops run, even if they aren't approved ... Don't
+    # play ones that have been 'removed' or disabled, even in testing").
+    # While on, a SUGGESTED detection (and a waiting part of any detection)
+    # fires exactly where a confident one would — drop_firing.py's own
+    # rule, so Testing lifts the approval, never the room's mode. A
+    # dismissed detection, a part switched off and a drop switched off
+    # never fire, on or off. Room-wide; stays on until he switches it off.
+    # Sonic-tellable.
+    drop_testing: bool = False
+
     # THE PULSE FLASH'S ENERGY FLOOR (2026-10-12, the Admiral: "The flash
     # flare on pulse should only happen on high energy, .8 or higher"): a
     # pulse_flash flare writes nothing unless the top bar's Energy

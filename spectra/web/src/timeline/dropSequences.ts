@@ -63,6 +63,12 @@ export type DropServerState =
 export type Handle = 'charge' | 'lull' | 'drop';
 export const HANDLES: Handle[] = ['charge', 'lull', 'drop'];
 
+/** A drop's parts, in the order they play — the pre-drop is one (absent on
+ * every drop until pre-drop detection lands). */
+export type PartKey = 'charge' | 'lull' | 'pre_drop' | 'drop';
+export const PARTS: PartKey[] = ['charge', 'lull', 'pre_drop', 'drop'];
+export type PartView = 'on' | 'waiting' | 'off' | 'absent';
+
 /** One of his own enabled authored triggers, at the moment it fires. */
 export interface HisMark {
   id: string;
@@ -103,7 +109,13 @@ export interface DropSequenceView {
    * older server. */
   fires?: boolean;
   fires_reason?: 'his' | 'analysed_show' | 'analysed_show_off' | 'transitions_only'
-    | 'matches_yours' | 'waits_for_confirm' | 'dismissed';
+    | 'matches_yours' | 'waits_for_confirm' | 'dismissed' | 'switched_off' | 'testing';
+  /** THE HOME DROPS PANEL's per-part states (drop_sequences.py's PARTS):
+   * on = approved, waiting = follows its tier, off = never plays, absent =
+   * no such part. Absent from an older server. */
+  parts?: Partial<Record<PartKey, PartView>>;
+  /** the members that actually fire here, when it fires (drop_firing.annotate) */
+  playing?: Handle[];
   /** members left out because one of his own triggers of that class fires
    * within two beats of it: handle -> his trigger id */
   stood_down?: Partial<Record<Handle, string>>;
@@ -162,6 +174,8 @@ export interface DropFiring {
   has_authored: boolean;
   analysed_applies: boolean;
   his_applies: boolean;
+  /** drop Testing (RoomControlState.drop_testing): every detected drop plays */
+  testing?: boolean;
 }
 
 /** A protected window: no analysed scene change inside it, no analysed
@@ -181,6 +195,27 @@ export interface AuthoredGroup {
   drop: HisMark;
 }
 
+/** One of his phase triggers in a `yours` row, enabled or switched off. */
+export interface YoursMember extends HisMark {
+  enabled: boolean;
+  /** the trigger's own trigger_offset_ms: `timestamp_ms` is the moment it
+   * fires (its stored time plus this) */
+  offset_ms?: number;
+}
+
+/** HIS OWN DROP, enabled or switched off (drop_sequences.yours_rows): his
+ * charge/lull/drop triggers grouped the way `authored` groups the enabled
+ * ones, and the detections it stands in for. */
+export interface YoursRow {
+  key: string;
+  charge: YoursMember | null;
+  lull: YoursMember | null;
+  drop: YoursMember;
+  enabled: boolean;
+  detections: string[];
+  detection: string | null;
+}
+
 export interface DropSequencesResponse {
   uri: string;
   status: 'ok' | 'not_detected' | 'unavailable' | 'error';
@@ -198,6 +233,8 @@ export interface DropSequencesResponse {
   counts: Record<string, number>;
   authored: AuthoredGroup[];
   authored_lone: HisMark[];
+  /** his own drops, enabled or switched off (the Home Drops panel) */
+  yours?: YoursRow[];
   firing?: DropFiring;
   windows?: DropWindow[];
 }
@@ -296,9 +333,14 @@ function fromView(v: DropSequenceView, analysedApplies: boolean): DisplaySeq {
     charge: v.charge_ms, lull: v.lull_ms, drop: v.drop_ms,
     analysisHad: analysisHad(v),
     off: { charge: !!v.charge_off, lull: !!v.lull_off },
-    // an added sequence on one of his own phase triggers stands down too
+    // an added sequence on one of his own phase triggers stands down too;
+    // a drop he switched off (the Home Drops panel) is listed but silent
     fire: v.fires === false && v.fires_reason === 'matches_yours' && look !== 'dismissed'
-      ? 'stands_down' : fireOf(look, analysedApplies, v.fires),
+      ? 'stands_down'
+      : v.fires_reason === 'switched_off' ? 'muted'
+        // a suggestion drop Testing plays fires like a confident one
+        : v.fires === true && v.fires_reason === 'testing' ? 'fires'
+          : fireOf(look, analysedApplies, v.fires),
     number: null, badge: '', view: v, his: null,
   };
 }

@@ -285,23 +285,37 @@ def test_every_apply_edit_op_has_a_sonic_operation_or_is_acknowledged():
     """Build item B8: every op name drop_sequences.apply_edit accepts must
     be reachable from a Sonic operation, or named here as a deliberate
     gap — never silently missing."""
-    from spectra.services import drop_console as dc
+    import inspect
+    import re
 
-    APPLY_EDIT_OPS = {"confirm", "dismiss", "revert", "handles", "member",
-                      "review", "fill", "add", "confirm_all", "restore"}
+    from spectra.services import drop_console as dc
+    from spectra.services import drop_sequences as dseq
+
+    # READ, never re-typed: every op name `_apply_edit` dispatches on (a
+    # hand-typed list here went stale the day the Drops panel added six)
+    APPLY_EDIT_OPS = set(re.findall(r'if op == "(\w+)"', inspect.getsource(dseq._apply_edit)))
+    assert {"confirm", "parts", "approve", "remove"} <= APPLY_EDIT_OPS
     # restore is reached only through undo_drop_edit (never a raw
     # arbitrary-edits-dict pass-through — that stays the Timeline's own
     # undo/redo, which can replay any prior state; Sonic only ever
-    # restores its OWN last tracked edit).
-    ACKNOWLEDGED_INDIRECT = {"restore"}
+    # restores its OWN last tracked edit). dismiss_for / undismiss_for /
+    # multi are the Drops panel's own steps for one of HIS rows
+    # (spectra/services/drop_panel.py): Sonic reaches them through
+    # set_drop_part and remove_drop_sequence on one of his drops, never as
+    # raw ops.
+    ACKNOWLEDGED_INDIRECT = {"restore", "dismiss_for", "undismiss_for", "multi"}
     reachable_ops = {
         "confirm", "dismiss", "handles", "member", "review", "fill", "add",
         "confirm_all", "revert",
+        # the Home Drops panel's three (predrop plan step 1)
+        "parts", "approve", "remove",
     }
-    assert APPLY_EDIT_OPS - ACKNOWLEDGED_INDIRECT <= reachable_ops
+    assert APPLY_EDIT_OPS - ACKNOWLEDGED_INDIRECT <= reachable_ops, (
+        APPLY_EDIT_OPS - ACKNOWLEDGED_INDIRECT - reachable_ops)
     # and every Sonic drops write op actually exists
     for name in ("add_drop_sequence", "set_drop_member", "revert_drop_sequence",
-                "resolve_drop_review", "undo_drop_edit", "redetect_drop_sequences"):
+                "resolve_drop_review", "undo_drop_edit", "redetect_drop_sequences",
+                "approve_drop_sequence", "set_drop_part", "remove_drop_sequence"):
         assert name in dc.OPERATIONS
 
 

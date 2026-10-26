@@ -5,10 +5,11 @@ description: >
   phases 1-5): spectra/services/drop_detector.py (the detector),
   drop_sequences.py (the stored overrides/additions a song carries and
   the merged view the Timeline draws), drop_console.py (Sonic's own
-  reach), and drop_firing.py (what actually fires). Load before touching
-  any of these modules, the drop-sequence Timeline UI, or a report shaped
-  like "a drop isn't firing / fired twice / won't confirm / Sonic can't
-  edit it."
+  reach), drop_firing.py (what actually fires) and drop_panel.py (Home's
+  Drops panel: per-part approval, Testing, his own drops). Load before
+  touching any of these modules, the drop-sequence Timeline UI, Home's
+  Drops panel, or a report shaped like "a drop isn't firing / fired twice
+  / won't confirm / Sonic can't edit it / removed one came back."
 ---
 
 # Drop detection
@@ -24,10 +25,12 @@ statement for the whole mechanism; read it before touching any of this.
 
 `drop_sequences.apply_edit(uri, op, **kw)` is THE edit entry point —
 every edit (confirm, dismiss, revert, handles, member, fill, review, add,
-confirm_all, restore) goes through it, from three callers: the Timeline's
-own buttons (`spectra/api/drop_sequences.py`), Sonic's drop operations
-(`drop_console.py`), and nothing else. A new write path here is the thing
-to avoid — route through `apply_edit`.
+confirm_all, restore, and since the Drops panel parts, approve, remove,
+dismiss_for, undismiss_for, multi) goes through it, from three callers:
+the Timeline's own buttons (`spectra/api/drop_sequences.py`), Sonic's drop
+operations (`drop_console.py`), and Home's Drops panel through
+`drop_panel.py`. A new write path here is the thing to avoid — route
+through `apply_edit`.
 
 - **`member`** switches a lull/charge OFF (keeping its time) or back ON;
   **`fill`** ADDS one that was never there, placed by the detector's own
@@ -45,6 +48,55 @@ to avoid — route through `apply_edit`.
   is a fact about proximity to his marks, not about whether those marks
   can currently fire) — see "Firing" below for what a `matches_yours`
   sequence actually does under the room's scene-change mode.
+
+## Home's Drops panel — parts, Testing, his own drops (2026-10-26)
+
+Predrop plan step 1 (`/home/javi/fleet-spotfx/data/predrop-plan/
+report.md` 3.6). Four things not visible cold:
+
+- **PARTS HAVE TWO MODES.** Every view sequence carries `parts` (on /
+  waiting / off / absent for charge, lull, pre_drop, drop). An override
+  WITHOUT a `parts` dict is the legacy shape — confirmed or edited means
+  the whole sequence is his — so nothing he did before changed meaning.
+  The first part edit seeds the dict from that reading (`_ensure_parts`);
+  from then on approval is explicit per part, and only an approved DROP
+  makes it his (`_view_state`). The Timeline's legacy `member` op still
+  makes a sequence "edited" (his) in legacy mode — the panel's part toggle
+  never does. The pre-drop is absent on every drop until pre-drop
+  detection (plan step 3).
+- **WHAT FIRES reads parts and Testing** (`drop_firing._member_ms`,
+  `_candidates(view, testing)`): a drop part off → never fires (listed,
+  silent); a waiting part fires with its tier (confident) or in Testing; a
+  view without `parts` fires every member, as before. Testing
+  (`RoomControlState.drop_testing`) is in the trigger clock's memo key and
+  read once a tick; it protects what it fires AT FIRE TIME only — the
+  planner's `protected_windows` never includes it, so a toggle never
+  re-plans stored cues.
+- **HIS OWN DROPS ARE TWO STORES.** The view's `yours` rows group ALL his
+  phase triggers, enabled or switched off (`authored` stays enabled-only
+  — it feeds `matches_yours` and the firing). Their writes go through the
+  root process's narrow route (`routers/profiles.py` POST
+  `/api/profiles/triggers/edit`, `services/profile_trigger_edit.py`: the
+  hand-placed → delete / imported → switch-off rule lives there, beside the
+  profile) and ALSO dismiss the detection standing in for his drop
+  (`dismissed_for` + `prior`, put back when his drop is switched on) —
+  under "analysed" that detection is what plays. One undo step covers both
+  stores (`drop_panel.restore`). The route's sync is the whole-song one a
+  Timeline save runs, so it also lands any earlier profile edit that never
+  reached the fired copy (his real Pop Off data has one); a sync that did
+  not land marks each changed row `unsynced` and the panel's words say so —
+  the automatic catch-up is upsert-only, so a deletion waits for his next
+  Timeline save of that song. A trigger BORN ON
+  SPECTRA'S TRIGGER CARD (not in the sync ledger, not held by the profile)
+  has no profile row: `drop_panel._fired_edit` writes the fired copy
+  directly (deleted — placed by hand), and its undo record carries `store:
+  "fired"` all the way through the frontend's undo stack. His rows'
+  members carry `offset_ms`: a handle sits where the trigger FIRES, so a
+  drag stores the moment less the trigger's own `trigger_offset_ms`.
+- **A STALE TIMELINE** is told by the root's `profile_triggers_changed`
+  broadcast: a clean tab reloads (and starts a fresh undo history), one
+  with an unsaved edit HOLDS its save until he chooses
+  (`timeline/store.ts` `changedElsewhere`).
 
 ## Detection is cheap to re-run and never touches his edits
 
@@ -283,14 +335,29 @@ disarm on each phase plus a docstring regression). The enum and the
 validation are generated from `TRIGGERS`; the wrapper prose is
 hand-maintained and is not — check both on any future widening.
 
+The Drops panel's three (2026-10-26): `approve_drop_sequence` (the double
+tick), `set_drop_part` (one part on/off, the drop itself included) and
+`remove_drop_sequence`. His OWN drops are named by `your_drop_s` or by the
+number of the detection standing in for one; because a removal (or a part
+switched off on one of his drops) can DELETE triggers he placed by hand,
+those ASK FIRST — `needs_confirmation` with the question and a single-use
+`confirm_id` bound to the op, its arguments and his row's triggers as they
+were (absorb_console's two-call protocol). `undo_drop_edit` puts back his
+song-profile rows too. Testing is the ordinary `drop_testing` setting.
+
 Every new `apply_edit` op name needs either a Sonic operation or a named
 exclusion — `tests/test_drop_console.py::
 test_every_apply_edit_op_has_a_sonic_operation_or_is_acknowledged` holds
-that.
+that, reading the op names out of `_apply_edit`'s own source.
 
 ## Proofs
 
 `tests/test_drop_detector.py`, `tests/test_drop_sequences.py`,
 `tests/test_drop_console.py`, `tests/test_drop_firing.py`,
 `tests/test_drop_floor.py`, `scripts/check_drop_detector.py`,
-`scripts/check_drop_firing.py`.
+`scripts/check_drop_firing.py`; the Drops panel's: `tests/
+test_drop_parts.py` (parts, Testing, and the show-side sweep on 100
+Millones' real detection), `tests/test_drop_panel_his_rows.py` (his own
+drops across both stores, on copies of his real Pop Off and Dopamine),
+`scripts/check_home_drops_panel.mjs`, `scripts/
+check_timeline_changed_elsewhere.mjs`, `scripts/check_home_drops_layout.py`.

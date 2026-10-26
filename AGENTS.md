@@ -11922,6 +11922,57 @@ the Timeline edited the same song since), re-detecting now
 for the cold-start detail and `tests/test_drop_console.py::
 test_every_apply_edit_op_has_a_sonic_operation_or_is_acknowledged`.
 
+**HOME'S DROPS PANEL (2026-10-26, predrop plan step 1 — `/home/javi/
+fleet-spotfx/data/predrop-plan/report.md` 3.6).** A third Home card: per
+drop, ONE bar of toggles — the double tick, one button per part (charge,
+lull, pre-drop, drop), remove, edit-in-place — plus an icon-only Testing
+toggle. `spectra/services/drop_panel.py` (writes), `drop_sequences.py`'s
+PARTS section (the model) and `services/profile_trigger_edit.py` (his
+own triggers) are the binding statements; the `drop-detection` skill has
+the cold-start detail. Five things:
+
+- **PARTS HAVE TWO MODES.** An override with no `parts` dict reads the
+  legacy way (confirmed/edited = every part his); the first part edit
+  seeds the dict and from then on approval is per part, with only an
+  approved DROP making the sequence his. Pre-existing confirms and edits
+  are unchanged by construction.
+- **TESTING (`RoomControlState.drop_testing`) is a fire-time gate only**:
+  `drop_firing.firing_sequences(view, testing)`, read once per tick and in
+  the trigger clock's memo key. The PLANNER's `protected_windows` never
+  includes it, so toggling it never re-plans stored cues — a cue planned
+  into a suggestion Testing fires is held at fire time instead. Removed and
+  switched-off never fire, Testing or not. A fired drop pushes
+  `{"type": "drop_played", uri, key, at_ms}` (engine status
+  `triggers.last_drop` is the backstop).
+- **HIS OWN DROPS LIVE IN TWO STORES, and a write must reach both.** His
+  charge/lull/drop triggers are in his song profile; the panel writes them
+  through the root's narrow `POST /api/profiles/triggers/edit` (raw-dict
+  patch, phase triggers only, refuses unknown ids; placed by hand →
+  DELETE, imported → switch OFF, the rule living beside the profile), which
+  runs the whole-song sync — so it also lands any older profile edit that
+  never reached the fired copy, as a Timeline save would. Because under
+  "analysed" the DETECTION standing in for his drop is what plays, removing
+  or switching off his drop also dismisses it (`dismissed_for` + `prior`,
+  put back when his drop comes back on). One undo restores both stores. A
+  trigger the sync ledger never saw in a profile (and the profile does not
+  hold) was BORN ON SPECTRA'S TRIGGER CARD: it is written in the fired copy
+  directly (deleted — placed by hand), its undo record marked `store:
+  "fired"`. A row's handles sit at the moment a trigger FIRES (stored time
+  + its own `trigger_offset_ms`), so a drag stores the moment less that
+  offset.
+- **A STALE TIMELINE WOULD SAVE A REMOVED TRIGGER BACK** (every save posts
+  the whole profile): the root broadcasts `profile_triggers_changed`; a
+  clean tab reloads with a fresh undo history, one with an unsaved edit
+  HOLDS the save until he chooses (`timeline/store.ts` `changedElsewhere`).
+  The frozen `web/src/builder/` twin does not listen — a known limit.
+- **Sonic** (`approve_drop_sequence`, `set_drop_part`,
+  `remove_drop_sequence`) ASKS FIRST wherever a write could delete his
+  hand-placed triggers. Proofs: `tests/test_drop_parts.py` (incl. the
+  show-side sweep), `tests/test_drop_panel_his_rows.py` (copies of his real
+  Pop Off/Dopamine), `scripts/check_home_drops_panel.mjs`,
+  `scripts/check_timeline_changed_elsewhere.mjs`,
+  `scripts/check_home_drops_layout.py`; help `drops-panel`, `drop-testing`.
+
 ## Touch panning + Light Show flag touch precision (2026-10-08)
 
 The Admiral: "i want to be able to drag the audio shape graph somehow on a

@@ -241,6 +241,24 @@ export interface DropEdits {
   added: unknown[];
 }
 
+/** One row of his triggers a Drops-panel write changed (the root route's
+ * undo record, services/profile_trigger_edit.py — or, for a trigger born on
+ * SPECTRA's own trigger card, the fired copy's, `store: 'fired'`): the
+ * trigger as it was (`before`), as it is (`after`), and where it sat. */
+export interface ProfileChange {
+  id: string;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  index: number | null;
+  did?: string;
+  store?: 'fired';
+}
+
+/** One restore record: a row from `from` back to `to` (its store kept). */
+function restoreRecord(c: ProfileChange, from: ProfileChange['before'], to: ProfileChange['before']) {
+  return { id: c.id, from, to, index: c.index, ...(c.store ? { store: c.store } : {}) };
+}
+
 export interface UndoEntry {
   label: string;
   before: DropEdits;
@@ -249,6 +267,10 @@ export interface UndoEntry {
   revAfter: string;
   /** the sequence to select again when this step is undone/redone */
   key: string | null;
+  /** HIS OWN DROP's half of the step (the Home Drops panel): the song-
+   * profile rows the write changed, put back with the drop store's pair
+   * (spectra/services/drop_panel.py's ONE UNDO STEP). */
+  profile?: ProfileChange[];
 }
 
 export interface UndoStacks {
@@ -258,10 +280,17 @@ export interface UndoStacks {
 
 export const EMPTY_STACKS: UndoStacks = { undo: [], redo: [] };
 
+/** Whether an edit changed anything: his drop-store edits moved, or (one
+ * of his own drops) his song profile did. A property of the edit alone, so
+ * it can be read before any state update has run. */
+export function editChanged(e: UndoEntry): boolean {
+  return e.revBefore !== e.revAfter || !!(e.profile && e.profile.length);
+}
+
 /** A new edit: on the undo stack (capped), and the redo stack cleared. A
  * save that changed nothing adds no step. */
 export function pushEdit(st: UndoStacks, e: UndoEntry, depth = UNDO_DEPTH): UndoStacks {
-  if (e.revBefore === e.revAfter) return st;
+  if (!editChanged(e)) return st;
   return { undo: [...st.undo, e].slice(-depth), redo: [] };
 }
 
@@ -289,13 +318,25 @@ export function afterRedo(st: UndoStacks): UndoStacks {
   return { undo: [...st.undo, e], redo: st.redo.slice(0, -1) };
 }
 
-/** What an undo sends: put `before` back, only if his edits are still `after`. */
+/** What an undo sends: put `before` back, only if his edits are still
+ * `after` — and, for one of his own drops, every profile row back from
+ * what the write left to what it was. */
 export function undoRequest(e: UndoEntry) {
-  return { edits: e.before, expect: e.revAfter };
+  const out: { edits: DropEdits; expect: string; profile?: unknown[] } =
+    { edits: e.before, expect: e.revAfter };
+  if (e.profile && e.profile.length) {
+    out.profile = e.profile.map((c) => restoreRecord(c, c.after, c.before));
+  }
+  return out;
 }
 
 export function redoRequest(e: UndoEntry) {
-  return { edits: e.after, expect: e.revBefore };
+  const out: { edits: DropEdits; expect: string; profile?: unknown[] } =
+    { edits: e.after, expect: e.revBefore };
+  if (e.profile && e.profile.length) {
+    out.profile = e.profile.map((c) => restoreRecord(c, c.before, c.after));
+  }
+  return out;
 }
 
 // ── the keyboard ──────────────────────────────────────────────────────────

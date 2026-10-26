@@ -657,7 +657,8 @@ def test_the_annotated_view_says_what_fires_here():
     reasons = {s["fires_reason"] for s in off["sequences"]}
     assert reasons <= {"analysed_show_off", "matches_yours", "waits_for_confirm"}
     assert off["firing"] == {"effective_mode": "triggers_only", "has_authored": True,
-                             "analysed_applies": False, "his_applies": True}
+                             "analysed_applies": False, "his_applies": True,
+                             "testing": False}
     assert on["windows"] and on["windows"][0]["end_ms"] > on["windows"][0]["drop_ms"]
 
 

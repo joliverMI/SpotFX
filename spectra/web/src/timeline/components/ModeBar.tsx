@@ -2,6 +2,7 @@
  * toggles (Capture / Analyze / Genre Blend — states mirrored from the WS
  * state message), Verified flag, setlist slot select, track info. */
 import { useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiPost } from '../../api/spotfx';
 import { useToast } from '../../components/Toast';
 import { useSticky } from '../../lib/useSticky';
@@ -28,6 +29,9 @@ export default function ModeBar() {
   const profile = useBuilderStore((s) => s.profile);
   const dirty = useBuilderStore((s) => s.dirty);
   const spectraSync = useBuilderStore((s) => s.spectraSync);
+  const changedElsewhere = useBuilderStore((s) => s.changedElsewhere);
+  const resolveChangedElsewhere = useBuilderStore((s) => s.resolveChangedElsewhere);
+  const qc = useQueryClient();
   const modes = useBuilderStore((s) => s.modes);
   const slotId = useBuilderStore((s) => s.slotId);
   const setSlot = useBuilderStore((s) => s.setSlot);
@@ -157,6 +161,19 @@ export default function ModeBar() {
           <HelpLink topic="builder-save-syncs-to-spectra" title="Where your Timeline edits land" />
           {profile?.verified && <span title="Verified" style={{ marginLeft: 6 }}>✓</span>}
         </div>
+        {changedElsewhere && (
+          // HELD (store.ts `changedElsewhere`): saving this copy whole would
+          // put back what Home's Drops panel just removed
+          <div role="alert" className="builder-changed-elsewhere">
+            This song changed elsewhere — your last edit is held.
+            <button type="button" onClick={() => {
+              resolveChangedElsewhere('reload');
+              void qc.invalidateQueries({ queryKey: ['profile', profile?.spotify_uri] });
+            }}>Reload</button>
+            <button type="button" title="Save your copy: it puts back anything the other change removed"
+              onClick={() => resolveChangedElsewhere('save')}>Save mine anyway</button>
+          </div>
+        )}
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
           {shownArtist ?? (liveMode ? 'waiting for playback…' : manualUri ? '' : 'search a song')}
         </div>

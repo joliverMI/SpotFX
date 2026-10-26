@@ -23,8 +23,20 @@ I/O, the view is handed in):
                          fallback: confirming one drop must not silence the
                          rest of a song's analysed show (the reason the plan
                          kept sequences out of triggers.json at all).
-    suggested            never — it waits for his confirm.
-    dismissed            never.
+    suggested            never — it waits for his confirm. DROP TESTING
+                         (RoomControlState.drop_testing, the Home Drops
+                         panel's icon-only toggle) lifts that wait: while
+                         it is on a suggestion fires exactly where a
+                         confident one would (the analysed show's rule) —
+                         Testing lifts the approval, never the mode.
+    dismissed            never — and never in Testing either.
+    PARTS (drop_sequences.py's PARTS): a sequence whose DROP part is off
+                         never fires (listed, silent), in Testing too; a
+                         charge or lull part that is off never fires; one
+                         still WAITING fires with its sequence's tier (a
+                         confident detection, or Testing) and only when its
+                         drop fires. A view without `parts` (an older
+                         caller) fires every member, as before.
     matches yours        stands down ONLY when his own trigger can actually
                          fire there — `his_applies(effective_mode)`, true
                          under "full"/"triggers_only" (the view's rule: one
@@ -317,14 +329,40 @@ def _recovered_state(s: dict) -> Optional[str]:
     return None
 
 
-def _candidates(view: dict) -> list[FiringSequence]:
+def _member_ms(s: dict, cls: str, testing: bool) -> Optional[int]:
+    """`cls`'s time when that part may play (module docstring's PARTS):
+    present, not off, and approved — or still waiting on a sequence whose
+    tier plays on its own, or in Testing. A view without `parts` plays
+    every member it has, as before parts existed."""
+    ms = s.get(f"{cls}_ms")
+    if ms is None:
+        return None
+    part = (s.get("parts") or {}).get(cls)
+    if part == drop_sequences.PART_OFF:
+        return None
+    if part == drop_sequences.PART_WAITING and not (
+            testing or s.get("tier") == drop_detector.TIER_CONFIDENT):
+        return None
+    return int(ms)
+
+
+def _candidates(view: dict, testing: bool = False) -> list[FiringSequence]:
     beat = beat_ms_of(view)
     out = []
     for s in (view or {}).get("sequences") or []:
         state = s.get("state")
+        if state == drop_sequences.STATE_DISMISSED:
+            continue
+        if (s.get("parts") or {}).get("drop") == drop_sequences.PART_OFF:
+            continue                     # listed, silent — in Testing too
         if state == drop_sequences.STATE_MATCHES_YOURS:
             state = _recovered_state(s)
             if state is None:
+                if not testing:
+                    continue
+                state = drop_sequences.STATE_SUGGESTED
+        elif state == drop_sequences.STATE_SUGGESTED:
+            if not testing:
                 continue
         elif state not in PROTECTED_STATES:
             continue
@@ -332,15 +370,15 @@ def _candidates(view: dict) -> list[FiringSequence]:
             out.append(FiringSequence(
                 key=str(s["key"]), state=state, origin=str(s.get("origin")),
                 his=state in HIS_STATES, drop_ms=int(s["drop_ms"]),
-                lull_ms=None if s.get("lull_ms") is None else int(s["lull_ms"]),
-                charge_ms=None if s.get("charge_ms") is None else int(s["charge_ms"]),
+                lull_ms=_member_ms(s, "lull", testing),
+                charge_ms=_member_ms(s, "charge", testing),
                 intensity=sequence_intensity(s.get("step")), beat_ms=beat))
         except (KeyError, TypeError, ValueError):
             continue
     return out
 
 
-def firing_sequences(view: dict) -> list[FiringSequence]:
+def firing_sequences(view: dict, testing: bool = False) -> list[FiringSequence]:
     """Every sequence in the view that may fire on its own terms (module
     docstring's WHAT FIRES, before the room's mode), flagged for the
     stand-down rules, in drop order. The mode gate is `fires_here`;
@@ -364,12 +402,15 @@ def firing_sequences(view: dict) -> list[FiringSequence]:
     authored mark only decides which of them wins when his sort already
     put it first (`kept` never holds two near one drop); it is not a
     license to let two independently-kept sequences fire on top of each
-    other because they happen to both sit near the same mark."""
+    other because they happen to both sit near the same mark.
+
+    `testing` is RoomControlState.drop_testing (module docstring): it adds
+    the suggestions, and the waiting parts of any detection."""
     reach = MATCH_BEATS * beat_ms_of(view)
     marks = _his_phase_marks(view)
     kept: list[FiringSequence] = []
     # his first, so a detection on the same drop yields to his
-    for seq in sorted(_candidates(view), key=lambda s: (not s.his, s.drop_ms)):
+    for seq in sorted(_candidates(view, testing), key=lambda s: (not s.his, s.drop_ms)):
         if any(abs(seq.drop_ms - k.drop_ms) <= reach for k in kept):
             continue                     # another firing sequence owns this drop
         matches_his = any(abs(seq.drop_ms - ms) <= reach for _cls, ms, _id in marks)
@@ -410,13 +451,17 @@ def fires_here(seq: FiringSequence, effective_mode: str, song_has_authored: bool
     return analysed
 
 
-def windows_from_view(view: dict) -> list[Window]:
+def windows_from_view(view: dict, testing: bool = False) -> list[Window]:
     """The protected windows for one song (module docstring), in time
-    order. Mode-independent."""
+    order. Mode-independent. `testing` protects the suggestions Testing
+    fires too — the trigger clock passes it at fire time; the planner
+    (`protected_windows`) never does, so switching Testing on or off never
+    re-plans a song's stored cues: a cue planned into a suggestion's window
+    is held back at fire time instead, the existing safety net."""
     beat = beat_ms_of(view)
     tail = int(round(TAIL_BEATS * beat))
     out: list[Window] = []
-    for s in _candidates(view):
+    for s in _candidates(view, testing):
         start = s.charge_ms if s.charge_ms is not None else (
             s.lull_ms if s.lull_ms is not None else s.drop_ms)
         out.append(Window(s.key, "sequence", int(start), s.lull_ms, s.drop_ms,
@@ -454,7 +499,7 @@ class PhaseMoment:
     key: str
 
 
-def phase_moments(view: dict) -> list[PhaseMoment]:
+def phase_moments(view: dict, testing: bool = False) -> list[PhaseMoment]:
     """Every moment this song plays a charge / lull / drop, in time order —
     the same shapes the Timeline draws as phases, MODE-INDEPENDENTLY.
 
@@ -491,7 +536,7 @@ def phase_moments(view: dict) -> list[PhaseMoment]:
         if cls in PHASE_CLASSES:
             cands.append(PhaseMoment(cls=cls, ms=int(ms), source="yours",
                                      key=f"his:{tid}"))
-    for seq in firing_sequences(view):
+    for seq in firing_sequences(view, testing):
         for cls, ms in seq.members():
             cands.append(PhaseMoment(cls=cls, ms=int(ms), source="sequence",
                                      key=seq.key))
@@ -528,7 +573,8 @@ def protected_windows(uri: str, triggers: Optional[list] = None) -> list[Window]
         return []
 
 
-def annotate(view: dict, effective_mode: str, song_has_authored: bool) -> dict:
+def annotate(view: dict, effective_mode: str, song_has_authored: bool,
+             testing: bool = False) -> dict:
     """The view with what fires HERE, for the Timeline: each sequence gains
     `fires` (bool) and `fires_reason`; the body gains `firing` (the room's
     gate for the two kinds) and `windows`. Returns a new dict.
@@ -540,8 +586,13 @@ def annotate(view: dict, effective_mode: str, song_has_authored: bool) -> dict:
     `matches_yours` sequence `firing_sequences` could not recover (a bare,
     unconfirmed, unedited SUGGESTED one — `f is None`) or one `fires_here`
     stood down because his trigger genuinely fires there this mode
-    (`f.matches_his` and not firing) still reports `"matches_yours"`."""
-    seqs = {s.key: s for s in firing_sequences(view)}
+    (`f.matches_his` and not firing) still reports `"matches_yours"`.
+
+    PARTS AND TESTING: a sequence whose drop part is off reports
+    `"switched_off"`; a suggestion fires only with `testing` (reason
+    `"testing"`); a firing sequence's `playing` names the members that
+    actually fire here (an off or still-waiting part left out)."""
+    seqs = {s.key: s for s in firing_sequences(view, testing)}
     # THE DROP-LED SWITCH's decisions this play (spectra/services/
     # drop_switch.py) — what each sequence did or will do to the scene,
     # named on the Timeline's drop strip. Absent until the clock decides.
@@ -557,14 +608,19 @@ def annotate(view: dict, effective_mode: str, song_has_authored: bool) -> dict:
         state = s.get("state")
         if state == drop_sequences.STATE_DISMISSED:
             fires, why = False, "dismissed"
-        elif state == drop_sequences.STATE_SUGGESTED:
+        elif (s.get("parts") or {}).get("drop") == drop_sequences.PART_OFF:
+            fires, why = False, "switched_off"
+        elif state == drop_sequences.STATE_SUGGESTED and not testing:
             fires, why = False, "waits_for_confirm"
         elif f is None:
             fires, why = False, "matches_yours"
         elif fires_here(f, effective_mode, song_has_authored):
-            fires, why = True, "his" if f.his else "analysed_show"
+            fires = True
+            why = ("his" if f.his else
+                   "testing" if f.state == drop_sequences.STATE_SUGGESTED else "analysed_show")
             s["stood_down"] = f.resolved_stood_down(effective_mode)
             s["intensity"] = f.intensity
+            s["playing"] = [cls for cls, _ms in f.members(effective_mode)]
         elif f.matches_his:
             fires, why = False, "matches_yours"
         else:
@@ -578,20 +634,21 @@ def annotate(view: dict, effective_mode: str, song_has_authored: bool) -> dict:
     out = dict(view or {})
     out["sequences"] = out_seqs
     out["firing"] = {"effective_mode": effective_mode, "has_authored": song_has_authored,
-                     "analysed_applies": analysed, "his_applies": his}
+                     "analysed_applies": analysed, "his_applies": his,
+                     "testing": bool(testing)}
     out["windows"] = [{"key": w.key, "source": w.source, "start_ms": w.start_ms,
                        "lull_ms": w.lull_ms, "drop_ms": w.drop_ms, "end_ms": w.end_ms}
-                      for w in windows_from_view(view)]
+                      for w in windows_from_view(view, testing)]
     return out
 
 
 def annotated_view(uri: str, view: Optional[dict] = None,
                    triggers: Optional[list] = None) -> dict:
     """`annotate` against the room as it is now: this song's stored
-    triggers and the room's scene-change setting, resolved per song
-    exactly as the trigger clock does (trigger_engine._effective_mode_for_
-    song). Reads the trigger store and room controls — call it off the
-    event loop."""
+    triggers, the room's scene-change setting, resolved per song exactly
+    as the trigger clock does (trigger_engine._effective_mode_for_song),
+    and drop Testing. Reads the trigger store and room controls — call it
+    off the event loop."""
     if triggers is None:
         from spectra.services import trigger_store
         triggers = trigger_store.list_for_song(uri)
@@ -599,7 +656,7 @@ def annotated_view(uri: str, view: Optional[dict] = None,
         view = drop_sequences.view(uri, triggers=triggers)
     from spectra.services.room_controls import load_room_controls
     from spectra.services.trigger_engine import TriggerEngine
-    mode = TriggerEngine._effective_mode_for_song(
-        load_room_controls().scene_change_mode, triggers)
+    controls = load_room_controls()
+    mode = TriggerEngine._effective_mode_for_song(controls.scene_change_mode, triggers)
     has_authored = any(getattr(t, "source", None) == "authored" for t in triggers)
-    return annotate(view, mode, has_authored)
+    return annotate(view, mode, has_authored, testing=bool(controls.drop_testing))

@@ -1,0 +1,4200 @@
+{
+ "captured_from": "temp copies of his stores, 2026-10-25 (predrop plan scratch copies)",
+ "songs": {
+  "spotify:track:4PolqZLqReEqc3yURJtzc4": {
+   "name": "Pop Off",
+   "profile_filename": "GRiZ, Levity - Pop Off.json",
+   "profile": {
+    "spotify_uri": "spotify:track:4PolqZLqReEqc3yURJtzc4",
+    "title": "Pop Off",
+    "artist": "GRiZ, Levity",
+    "artist_genre": [
+     "dubstep",
+     "edm"
+    ],
+    "duration_ms": 196056,
+    "labels": [],
+    "verified": false,
+    "notes": "",
+    "intensity_scale": 1.218,
+    "intensity_scale_source": "auto",
+    "triggers": [
+     {
+      "id": "7663fb8e-715b-4583-b6f4-d94bdd7671dd",
+      "timestamp_ms": 0,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.18,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "ee17a61e-4494-45d2-a1fb-ff2b5f81e9d7",
+      "timestamp_ms": 18202,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.8,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "8139b46a-6418-47c3-a870-f3a26a0a4aac",
+      "timestamp_ms": 30060,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.673,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "d15cc732-7c2c-4d53-98ec-588480ee72fe",
+      "timestamp_ms": 32610,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.673,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "d7166b47-03c5-481b-8008-28f97107b296",
+      "timestamp_ms": 33632,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.762,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "de90356e-22a5-4a6d-8cbe-69ba3ee7f006",
+      "timestamp_ms": 35129,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.762,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "0767b897-206f-4147-baf3-8a4137ce700d",
+      "timestamp_ms": 36383,
+      "event_id": "fixed-shape-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.762,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "bcaddd66-f26e-4086-adfc-423db1b2a0b3",
+      "timestamp_ms": 37625,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.837,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "9885267d-3c26-4e83-9788-3acdfd3de429",
+      "timestamp_ms": 38891,
+      "event_id": "fixed-shape-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.837,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "790eecdc-bcf9-474b-9fc2-767ca921aa5d",
+      "timestamp_ms": 40806,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.837,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "4727c8fc-0099-4b96-b206-401e7862493e",
+      "timestamp_ms": 43620,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.837,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "19685787-16f0-4a23-a2b3-47579bca4eb6",
+      "timestamp_ms": 45253,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.837,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "2aac6747-d601-4d47-a3cc-795ccaa7db2c",
+      "timestamp_ms": 46937,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.837,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "9feb4b18-2466-4d66-8ff3-cfd0579c492c",
+      "timestamp_ms": 48214,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.837,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "0c27446f-cb98-40ce-863b-a0300d28985d",
+      "timestamp_ms": 49874,
+      "event_id": "fixed-charge",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.914,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "b8f3ae1e-54f0-4333-bff0-ed72f0b35fc5",
+      "timestamp_ms": 56400,
+      "event_id": "fixed-lull",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.26,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "1af110cd-32ae-4d13-967e-d06dedc996d3",
+      "timestamp_ms": 59603,
+      "event_id": "fixed-drop",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.934,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "dc5379f9-8d7c-4d80-9aeb-d9546d7fdf4e",
+      "timestamp_ms": 61286,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.934,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "0a3dfdfd-4479-4c02-b5e7-51fc62752633",
+      "timestamp_ms": 62982,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.923,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "a04e5c4f-2631-47dc-a0c0-ccbc25f44eb2",
+      "timestamp_ms": 64688,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.923,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "22ad0e44-abea-4d9f-88c3-808bc98b4b39",
+      "timestamp_ms": 65954,
+      "event_id": "fixed-charge",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.923,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "80972c2c-6349-4bf6-9eaf-e2f06d40d189",
+      "timestamp_ms": 66999,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.847,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "c6a8e06d-ec1f-45c2-b129-20cf084697f1",
+      "timestamp_ms": 68473,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.847,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "2bda343d-1aa0-479c-a2aa-f954d78791c1",
+      "timestamp_ms": 70598,
+      "event_id": "fixed-shape-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.847,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "66c94c38-7721-4721-82c7-977ee3aed3a6",
+      "timestamp_ms": 71852,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.66,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "2ec52c52-b299-4f86-bf87-9f1bd475ef1d",
+      "timestamp_ms": 73976,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.66,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "7ce8ff0f-7da1-4787-95a4-d8930221ce25",
+      "timestamp_ms": 75253,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.66,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "a80d2327-d340-467c-93cb-6d0633506026",
+      "timestamp_ms": 76635,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.767,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "f88ba03c-7df6-459f-9121-3ccc3f88462d",
+      "timestamp_ms": 78191,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.767,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "8aba1444-4c7f-4bbe-b24f-621949949d05",
+      "timestamp_ms": 80304,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.767,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "4d08bb0b-d72d-47f2-9936-65c064812a69",
+      "timestamp_ms": 81592,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.767,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "cb0c77ce-0751-4417-a014-ac2b78e98d50",
+      "timestamp_ms": 82869,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.865,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "07378240-bc0f-4289-9c0a-025343aa48f5",
+      "timestamp_ms": 87640,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.41,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "7e1d659d-bf90-4ef7-b9bf-910c93ab257a",
+      "timestamp_ms": 89185,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.895,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "b2194fee-949e-4e2e-b5ee-4293f67abbbb",
+      "timestamp_ms": 90869,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.895,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "8e23d8a8-c35b-4e7a-8da8-bd3c2e6f2d2c",
+      "timestamp_ms": 92982,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.89,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "22456aa2-0e80-419b-8a73-69aa8a9ef08e",
+      "timestamp_ms": 94247,
+      "event_id": "fixed-charge",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.89,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "55e49082-a4a3-44ba-87f9-e2c15db08f0d",
+      "timestamp_ms": 101020,
+      "event_id": "fixed-drop",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.859,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "0457e1be-b5c9-4788-bf0c-eebca4261f7c",
+      "timestamp_ms": 102537,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.859,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "22af13f6-be54-496f-a380-7e740340601b",
+      "timestamp_ms": 104058,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.859,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "ce32ceab-5d0b-497d-beea-74998230b9d5",
+      "timestamp_ms": 105230,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.909,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "a8e7ab54-4a86-47e7-82cf-9833885fc44f",
+      "timestamp_ms": 107366,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.909,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "60d6835b-a699-4301-8bb3-cb432817b437",
+      "timestamp_ms": 108632,
+      "event_id": "fixed-update-scene",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.589,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "8f23cfd7-506d-40a5-81d2-e386a621ea5f",
+      "timestamp_ms": 109897,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.589,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "b8702851-79a4-4e45-9d29-53b6155440c7",
+      "timestamp_ms": 111163,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.589,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "a5d9df86-7ee9-417f-9bdf-001673643960",
+      "timestamp_ms": 112428,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.383,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "79147145-1373-482c-be9d-b38f78bb4b7f",
+      "timestamp_ms": 113706,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.383,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "31654b39-6582-4c90-a180-e7c857491f73",
+      "timestamp_ms": 114540,
+      "event_id": "fixed-update-scene",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.383,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "d26ae983-e7b9-4733-a633-e72bbfce092e",
+      "timestamp_ms": 116190,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.383,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "21b7b08d-3fb3-46bd-ad6b-d231529aafe7",
+      "timestamp_ms": 118000,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.383,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "50656110-5cad-47c0-8051-a87e00d7a650",
+      "timestamp_ms": 118756,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.383,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "ec3629a8-842c-4db5-87aa-30f2370f5c42",
+      "timestamp_ms": 120033,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.383,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "42dd83fd-3350-4838-9279-8bc09273aa18",
+      "timestamp_ms": 122160,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "4c0b875f-d627-44d9-8d59-9cb5aaf1fa5c",
+      "timestamp_ms": 124294,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.383,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "a80f4b4a-077b-45ee-ab0b-dbdd1d607ef7",
+      "timestamp_ms": 127208,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.35,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "3effdff1-c5e6-4f70-80c9-a95923565a63",
+      "timestamp_ms": 126802,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.495,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "263a8dc2-ae8e-400e-b72a-4faaf6ee442b",
+      "timestamp_ms": 128055,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.495,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "0f60f498-6fde-4289-bde1-936db0e2ecec",
+      "timestamp_ms": 131504,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.576,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "22fc0682-df4a-40ef-8d13-d8239e1bf158",
+      "timestamp_ms": 133535,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.576,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "2463a1b7-b4c2-452f-8025-5d2ae93b83a8",
+      "timestamp_ms": 138203,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.73,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "b87135c4-dc5f-4be9-9906-d0833d25bdb8",
+      "timestamp_ms": 139364,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.73,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "351a962a-e1b2-4731-8dc0-08fe392018c6",
+      "timestamp_ms": 140710,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.73,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "ef42e5a4-226d-41c7-bdc0-3b5334e49770",
+      "timestamp_ms": 142429,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.73,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "258f29e8-4636-406b-a625-b2ef949d7df7",
+      "timestamp_ms": 143532,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.749,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "cf5825ea-c12c-4964-834a-2f431f392687",
+      "timestamp_ms": 144960,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.749,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "3fe44f0d-8699-4e0c-8696-653d32dee5d1",
+      "timestamp_ms": 148338,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.749,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "517805de-a42c-41e9-a6d4-6a68b4ed3078",
+      "timestamp_ms": 150040,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.57,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "a84a1b44-d749-4736-9f45-0ea583536179",
+      "timestamp_ms": 151740,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.57,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "e7e7df4e-2801-4c5e-87ac-3ee705ce11e8",
+      "timestamp_ms": 153423,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.57,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "4c6ea546-ea66-4610-9b94-5b9726820d6f",
+      "timestamp_ms": 155118,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.57,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "1bcbe18c-9927-462c-b2ab-db8c9c8eef8b",
+      "timestamp_ms": 156163,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.711,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "5452c3d8-01e4-4c6a-803f-b4765b4f83a1",
+      "timestamp_ms": 157661,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.711,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "7dc9a792-ce80-4358-897f-45e9665cbba2",
+      "timestamp_ms": 159333,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.711,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "f23e631a-95c5-4b51-806b-c2ed762089b5",
+      "timestamp_ms": 161028,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.935,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "e910e51c-8f42-4785-a3bb-ce5d50e08eaa",
+      "timestamp_ms": 162800,
+      "event_id": "fixed-charge",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.935,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "4f539c1c-c5f6-4a69-a186-bc9a28a71de2",
+      "timestamp_ms": 168621,
+      "event_id": "fixed-lull",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.964,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "1ca77630-2ea2-4d6c-ab85-c205c14c1b20",
+      "timestamp_ms": 172011,
+      "event_id": "fixed-drop",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.964,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "478d9ac2-4e65-4f39-be9e-85806438dd5a",
+      "timestamp_ms": 177140,
+      "event_id": "fixed-lull",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.35,
+      "override_blend": true,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "c059fbe7-c16d-43ae-af2b-2f5a624781da",
+      "timestamp_ms": 178740,
+      "event_id": "fixed-drop",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.897,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "2323c13a-44fc-45ca-a630-9d0bf7394e2d",
+      "timestamp_ms": 180033,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "0a75ee9a-273c-4b99-a023-31cad6b180c7",
+      "timestamp_ms": 181728,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "410ead27-a0a1-4a34-b57b-aae751a28acd",
+      "timestamp_ms": 182971,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "1625d692-d69f-4570-846c-dd8d52005fbc",
+      "timestamp_ms": 184259,
+      "event_id": "fixed-update-scene",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "e482b93a-4186-4c9a-bbb8-35eb2dc3834f",
+      "timestamp_ms": 185536,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "0f569f1a-005e-4365-9a92-dfdcf7fb8efd",
+      "timestamp_ms": 186790,
+      "event_id": "fixed-update-scene",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "de96601d-7b44-495b-b94c-2e8b32d4382d",
+      "timestamp_ms": 188892,
+      "event_id": "fixed-drop",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "0e29be3b-2cde-45af-a3e5-a853c4c7bbb8",
+      "timestamp_ms": 190169,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "333d2a09-7e12-488f-a93c-a86eeb5071a8",
+      "timestamp_ms": 192282,
+      "event_id": "fixed-drop",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "c39c0974-4bf3-4b69-a731-8ec91a17bc2e",
+      "timestamp_ms": 194383,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "f13b8fb7-3048-49f5-a571-c50c442082d1",
+      "timestamp_ms": 195649,
+      "event_id": "fixed-color-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "ceb8cc95-3b60-46b8-83f4-cbdd90ee0106",
+      "timestamp_ms": 197112,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "01a65b1a-f89b-40f6-8927-057f17156389",
+      "timestamp_ms": 99948,
+      "event_id": "fixed-lull",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.86,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "5256449f-dbf3-4c43-aa7e-bc9997a72ab6",
+      "timestamp_ms": 121368,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.86,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "61273d04-300d-46d9-9326-dca32462df6a",
+      "timestamp_ms": 125942,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.91,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "f149ed44-324c-43dd-a019-abac43ec2aca",
+      "timestamp_ms": 175100,
+      "event_id": "fixed-charge",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.96,
+      "override_blend": true,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "e78695ba-ab99-434a-8e3f-1a0537547c19",
+      "timestamp_ms": 173741,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.96,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     }
+    ],
+    "setlist_triggers": {},
+    "audio_shape_file": null,
+    "ai_generated": false,
+    "ai_training_profile_id": "",
+    "ai_generated_date": "",
+    "ai_model": "",
+    "embedded_generated": false
+   },
+   "fired_authored": [
+    {
+     "id": "7663fb8e-715b-4583-b6f4-d94bdd7671dd",
+     "timestamp_ms": 0,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.18,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "ee17a61e-4494-45d2-a1fb-ff2b5f81e9d7",
+     "timestamp_ms": 18202,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.8,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "d15cc732-7c2c-4d53-98ec-588480ee72fe",
+     "timestamp_ms": 32610,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.673
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "d7166b47-03c5-481b-8008-28f97107b296",
+     "timestamp_ms": 33632,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.762
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "de90356e-22a5-4a6d-8cbe-69ba3ee7f006",
+     "timestamp_ms": 35129,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.762
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "0767b897-206f-4147-baf3-8a4137ce700d",
+     "timestamp_ms": 36383,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.762
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "bcaddd66-f26e-4086-adfc-423db1b2a0b3",
+     "timestamp_ms": 37625,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.837
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "9885267d-3c26-4e83-9788-3acdfd3de429",
+     "timestamp_ms": 38891,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.837
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "790eecdc-bcf9-474b-9fc2-767ca921aa5d",
+     "timestamp_ms": 40806,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.837
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "19685787-16f0-4a23-a2b3-47579bca4eb6",
+     "timestamp_ms": 45253,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.837
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "2aac6747-d601-4d47-a3cc-795ccaa7db2c",
+     "timestamp_ms": 46937,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.837
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "9feb4b18-2466-4d66-8ff3-cfd0579c492c",
+     "timestamp_ms": 48214,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.837
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "0c27446f-cb98-40ce-863b-a0300d28985d",
+     "timestamp_ms": 49874,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "charge",
+      "intensity": 0.914
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "1af110cd-32ae-4d13-967e-d06dedc996d3",
+     "timestamp_ms": 59603,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "drop",
+      "intensity": 0.934
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "dc5379f9-8d7c-4d80-9aeb-d9546d7fdf4e",
+     "timestamp_ms": 61286,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.934
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "0a3dfdfd-4479-4c02-b5e7-51fc62752633",
+     "timestamp_ms": 62982,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.923
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "a04e5c4f-2631-47dc-a0c0-ccbc25f44eb2",
+     "timestamp_ms": 64688,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.923
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "22ad0e44-abea-4d9f-88c3-808bc98b4b39",
+     "timestamp_ms": 65954,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "charge",
+      "intensity": 0.923
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "80972c2c-6349-4bf6-9eaf-e2f06d40d189",
+     "timestamp_ms": 66999,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.847
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "c6a8e06d-ec1f-45c2-b129-20cf084697f1",
+     "timestamp_ms": 68473,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.847
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "2bda343d-1aa0-479c-a2aa-f954d78791c1",
+     "timestamp_ms": 70598,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.847
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "66c94c38-7721-4721-82c7-977ee3aed3a6",
+     "timestamp_ms": 71852,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.66
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "7ce8ff0f-7da1-4787-95a4-d8930221ce25",
+     "timestamp_ms": 75253,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.66
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "a80d2327-d340-467c-93cb-6d0633506026",
+     "timestamp_ms": 76635,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.767
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "f88ba03c-7df6-459f-9121-3ccc3f88462d",
+     "timestamp_ms": 78191,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.767
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "8aba1444-4c7f-4bbe-b24f-621949949d05",
+     "timestamp_ms": 80304,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.767
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "4d08bb0b-d72d-47f2-9936-65c064812a69",
+     "timestamp_ms": 81592,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.767
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "cb0c77ce-0751-4417-a014-ac2b78e98d50",
+     "timestamp_ms": 82869,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.865
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "7e1d659d-bf90-4ef7-b9bf-910c93ab257a",
+     "timestamp_ms": 89185,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.895
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "b2194fee-949e-4e2e-b5ee-4293f67abbbb",
+     "timestamp_ms": 90869,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.895
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "8e23d8a8-c35b-4e7a-8da8-bd3c2e6f2d2c",
+     "timestamp_ms": 92982,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.89
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "0457e1be-b5c9-4788-bf0c-eebca4261f7c",
+     "timestamp_ms": 102537,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.859
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "22af13f6-be54-496f-a380-7e740340601b",
+     "timestamp_ms": 104058,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.859
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "ce32ceab-5d0b-497d-beea-74998230b9d5",
+     "timestamp_ms": 105230,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.909
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "a8e7ab54-4a86-47e7-82cf-9833885fc44f",
+     "timestamp_ms": 107366,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.909
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "8f23cfd7-506d-40a5-81d2-e386a621ea5f",
+     "timestamp_ms": 109897,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.589
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "b8702851-79a4-4e45-9d29-53b6155440c7",
+     "timestamp_ms": 111163,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.589
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "a5d9df86-7ee9-417f-9bdf-001673643960",
+     "timestamp_ms": 112428,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.383
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "79147145-1373-482c-be9d-b38f78bb4b7f",
+     "timestamp_ms": 113706,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.383,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "d26ae983-e7b9-4733-a633-e72bbfce092e",
+     "timestamp_ms": 116190,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.383
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "50656110-5cad-47c0-8051-a87e00d7a650",
+     "timestamp_ms": 118756,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.383
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "ec3629a8-842c-4db5-87aa-30f2370f5c42",
+     "timestamp_ms": 120033,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.383
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "4c0b875f-d627-44d9-8d59-9cb5aaf1fa5c",
+     "timestamp_ms": 124294,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.383
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "3effdff1-c5e6-4f70-80c9-a95923565a63",
+     "timestamp_ms": 126802,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.495
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "263a8dc2-ae8e-400e-b72a-4faaf6ee442b",
+     "timestamp_ms": 128055,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.495
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "0f60f498-6fde-4289-bde1-936db0e2ecec",
+     "timestamp_ms": 131504,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.576
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "22fc0682-df4a-40ef-8d13-d8239e1bf158",
+     "timestamp_ms": 133535,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.576
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "2463a1b7-b4c2-452f-8025-5d2ae93b83a8",
+     "timestamp_ms": 138203,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.73
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "b87135c4-dc5f-4be9-9906-d0833d25bdb8",
+     "timestamp_ms": 139364,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.73
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "351a962a-e1b2-4731-8dc0-08fe392018c6",
+     "timestamp_ms": 140710,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.73,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "ef42e5a4-226d-41c7-bdc0-3b5334e49770",
+     "timestamp_ms": 142429,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.73
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "258f29e8-4636-406b-a625-b2ef949d7df7",
+     "timestamp_ms": 143532,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.749
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "cf5825ea-c12c-4964-834a-2f431f392687",
+     "timestamp_ms": 144960,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.749
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "a84a1b44-d749-4736-9f45-0ea583536179",
+     "timestamp_ms": 151740,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.57
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "e7e7df4e-2801-4c5e-87ac-3ee705ce11e8",
+     "timestamp_ms": 153423,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.57
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "4c6ea546-ea66-4610-9b94-5b9726820d6f",
+     "timestamp_ms": 155118,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.57
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "1bcbe18c-9927-462c-b2ab-db8c9c8eef8b",
+     "timestamp_ms": 156163,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.711
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "5452c3d8-01e4-4c6a-803f-b4765b4f83a1",
+     "timestamp_ms": 157661,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.711
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "7dc9a792-ce80-4358-897f-45e9665cbba2",
+     "timestamp_ms": 159333,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.711
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "f23e631a-95c5-4b51-806b-c2ed762089b5",
+     "timestamp_ms": 161028,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.935
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "2323c13a-44fc-45ca-a630-9d0bf7394e2d",
+     "timestamp_ms": 180033,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "0a75ee9a-273c-4b99-a023-31cad6b180c7",
+     "timestamp_ms": 181728,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "410ead27-a0a1-4a34-b57b-aae751a28acd",
+     "timestamp_ms": 182971,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "e482b93a-4186-4c9a-bbb8-35eb2dc3834f",
+     "timestamp_ms": 185536,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "de96601d-7b44-495b-b94c-2e8b32d4382d",
+     "timestamp_ms": 188892,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "drop",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "0e29be3b-2cde-45af-a3e5-a853c4c7bbb8",
+     "timestamp_ms": 190169,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "333d2a09-7e12-488f-a93c-a86eeb5071a8",
+     "timestamp_ms": 192282,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "drop",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "c39c0974-4bf3-4b69-a731-8ec91a17bc2e",
+     "timestamp_ms": 194383,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "f13b8fb7-3048-49f5-a571-c50c442082d1",
+     "timestamp_ms": 195649,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "ceb8cc95-3b60-46b8-83f4-cbdd90ee0106",
+     "timestamp_ms": 197112,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 1.0,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "c059fbe7-c16d-43ae-af2b-2f5a624781da",
+     "timestamp_ms": 178740,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "drop",
+      "intensity": 0.897
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "8139b46a-6418-47c3-a870-f3a26a0a4aac",
+     "timestamp_ms": 30060,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.673,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "4727c8fc-0099-4b96-b206-401e7862493e",
+     "timestamp_ms": 43620,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.837,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "b8f3ae1e-54f0-4333-bff0-ed72f0b35fc5",
+     "timestamp_ms": 56400,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "lull",
+      "intensity": 0.26
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "2ec52c52-b299-4f86-bf87-9f1bd475ef1d",
+     "timestamp_ms": 73976,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.66,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "01a65b1a-f89b-40f6-8927-057f17156389",
+     "timestamp_ms": 99948,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "lull",
+      "intensity": 0.86
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "55e49082-a4a3-44ba-87f9-e2c15db08f0d",
+     "timestamp_ms": 101020,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "drop",
+      "intensity": 0.859
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "22456aa2-0e80-419b-8a73-69aa8a9ef08e",
+     "timestamp_ms": 94247,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "charge",
+      "intensity": 0.89
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "60d6835b-a699-4301-8bb3-cb432817b437",
+     "timestamp_ms": 108632,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene_update",
+      "intensity": 0.589
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "31654b39-6582-4c90-a180-e7c857491f73",
+     "timestamp_ms": 114540,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene_update",
+      "intensity": 0.383
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "21b7b08d-3fb3-46bd-ad6b-d231529aafe7",
+     "timestamp_ms": 118000,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.383
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "5256449f-dbf3-4c43-aa7e-bc9997a72ab6",
+     "timestamp_ms": 121368,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.86
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "42dd83fd-3350-4838-9279-8bc09273aa18",
+     "timestamp_ms": 122160,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "a80f4b4a-077b-45ee-ab0b-dbdd1d607ef7",
+     "timestamp_ms": 127208,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.35,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "61273d04-300d-46d9-9326-dca32462df6a",
+     "timestamp_ms": 125942,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.91
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "517805de-a42c-41e9-a6d4-6a68b4ed3078",
+     "timestamp_ms": 150040,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.57
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "0f569f1a-005e-4365-9a92-dfdcf7fb8efd",
+     "timestamp_ms": 186790,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene_update",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "1625d692-d69f-4570-846c-dd8d52005fbc",
+     "timestamp_ms": 184259,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene_update",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "e910e51c-8f42-4785-a3bb-ce5d50e08eaa",
+     "timestamp_ms": 162800,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "charge",
+      "intensity": 0.935
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "4f539c1c-c5f6-4a69-a186-bc9a28a71de2",
+     "timestamp_ms": 168621,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "lull",
+      "intensity": 0.964
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "1ca77630-2ea2-4d6c-ab85-c205c14c1b20",
+     "timestamp_ms": 172011,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "drop",
+      "intensity": 0.964
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "e78695ba-ab99-434a-8e3f-1a0537547c19",
+     "timestamp_ms": 173741,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.96,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "f149ed44-324c-43dd-a019-abac43ec2aca",
+     "timestamp_ms": 175100,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "charge",
+      "intensity": 0.96
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "478d9ac2-4e65-4f39-be9e-85806438dd5a",
+     "timestamp_ms": 177140,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "lull",
+      "intensity": 0.35
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "07378240-bc0f-4289-9c0a-025343aa48f5",
+     "timestamp_ms": 87640,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.41,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "3fe44f0d-8699-4e0c-8696-653d32dee5d1",
+     "timestamp_ms": 147240,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.749
+     },
+     "trigger_offset_ms": 0,
+     "snap_grid": null,
+     "snap_moved_ms": null,
+     "generator_stamp": null
+    }
+   ],
+   "ledger": {
+    "7663fb8e-715b-4583-b6f4-d94bdd7671dd": "37b62a98-3544-4157-a444-ac605b146039",
+    "ee17a61e-4494-45d2-a1fb-ff2b5f81e9d7": "37b62a98-3544-4157-a444-ac605b146039",
+    "8139b46a-6418-47c3-a870-f3a26a0a4aac": "37b62a98-3544-4157-a444-ac605b146039",
+    "d15cc732-7c2c-4d53-98ec-588480ee72fe": "fixed-color-flare",
+    "d7166b47-03c5-481b-8008-28f97107b296": "fixed-color-flare",
+    "de90356e-22a5-4a6d-8cbe-69ba3ee7f006": "fixed-color-flare",
+    "0767b897-206f-4147-baf3-8a4137ce700d": "fixed-shape-flare",
+    "bcaddd66-f26e-4086-adfc-423db1b2a0b3": "fixed-color-flare",
+    "9885267d-3c26-4e83-9788-3acdfd3de429": "fixed-shape-flare",
+    "790eecdc-bcf9-474b-9fc2-767ca921aa5d": "fixed-color-flare",
+    "4727c8fc-0099-4b96-b206-401e7862493e": "37b62a98-3544-4157-a444-ac605b146039",
+    "19685787-16f0-4a23-a2b3-47579bca4eb6": "fixed-color-flare",
+    "2aac6747-d601-4d47-a3cc-795ccaa7db2c": "fixed-color-flare",
+    "9feb4b18-2466-4d66-8ff3-cfd0579c492c": "fixed-color-flare",
+    "0c27446f-cb98-40ce-863b-a0300d28985d": "fixed-charge",
+    "b8f3ae1e-54f0-4333-bff0-ed72f0b35fc5": "fixed-lull",
+    "1af110cd-32ae-4d13-967e-d06dedc996d3": "fixed-drop",
+    "dc5379f9-8d7c-4d80-9aeb-d9546d7fdf4e": "fixed-color-flare",
+    "0a3dfdfd-4479-4c02-b5e7-51fc62752633": "fixed-color-flare",
+    "a04e5c4f-2631-47dc-a0c0-ccbc25f44eb2": "fixed-color-flare",
+    "22ad0e44-abea-4d9f-88c3-808bc98b4b39": "fixed-charge",
+    "80972c2c-6349-4bf6-9eaf-e2f06d40d189": "fixed-color-flare",
+    "c6a8e06d-ec1f-45c2-b129-20cf084697f1": "fixed-color-flare",
+    "2bda343d-1aa0-479c-a2aa-f954d78791c1": "fixed-shape-flare",
+    "66c94c38-7721-4721-82c7-977ee3aed3a6": "fixed-color-flare",
+    "2ec52c52-b299-4f86-bf87-9f1bd475ef1d": "37b62a98-3544-4157-a444-ac605b146039",
+    "7ce8ff0f-7da1-4787-95a4-d8930221ce25": "fixed-color-flare",
+    "a80d2327-d340-467c-93cb-6d0633506026": "fixed-color-flare",
+    "f88ba03c-7df6-459f-9121-3ccc3f88462d": "fixed-color-flare",
+    "8aba1444-4c7f-4bbe-b24f-621949949d05": "fixed-color-flare",
+    "4d08bb0b-d72d-47f2-9936-65c064812a69": "fixed-color-flare",
+    "cb0c77ce-0751-4417-a014-ac2b78e98d50": "fixed-color-flare",
+    "07378240-bc0f-4289-9c0a-025343aa48f5": "37b62a98-3544-4157-a444-ac605b146039",
+    "7e1d659d-bf90-4ef7-b9bf-910c93ab257a": "fixed-color-flare",
+    "b2194fee-949e-4e2e-b5ee-4293f67abbbb": "fixed-color-flare",
+    "8e23d8a8-c35b-4e7a-8da8-bd3c2e6f2d2c": "fixed-color-flare",
+    "22456aa2-0e80-419b-8a73-69aa8a9ef08e": "fixed-charge",
+    "55e49082-a4a3-44ba-87f9-e2c15db08f0d": "fixed-drop",
+    "0457e1be-b5c9-4788-bf0c-eebca4261f7c": "fixed-color-flare",
+    "22af13f6-be54-496f-a380-7e740340601b": "fixed-color-flare",
+    "ce32ceab-5d0b-497d-beea-74998230b9d5": "fixed-color-flare",
+    "a8e7ab54-4a86-47e7-82cf-9833885fc44f": "fixed-color-flare",
+    "60d6835b-a699-4301-8bb3-cb432817b437": "fixed-update-scene",
+    "8f23cfd7-506d-40a5-81d2-e386a621ea5f": "fixed-color-flare",
+    "b8702851-79a4-4e45-9d29-53b6155440c7": "fixed-color-flare",
+    "a5d9df86-7ee9-417f-9bdf-001673643960": "fixed-color-flare",
+    "79147145-1373-482c-be9d-b38f78bb4b7f": "37b62a98-3544-4157-a444-ac605b146039",
+    "31654b39-6582-4c90-a180-e7c857491f73": "fixed-update-scene",
+    "d26ae983-e7b9-4733-a633-e72bbfce092e": "fixed-color-flare",
+    "21b7b08d-3fb3-46bd-ad6b-d231529aafe7": "fixed-combo-flare",
+    "50656110-5cad-47c0-8051-a87e00d7a650": "fixed-combo-flare",
+    "ec3629a8-842c-4db5-87aa-30f2370f5c42": "fixed-color-flare",
+    "42dd83fd-3350-4838-9279-8bc09273aa18": "fixed-combo-flare",
+    "4c0b875f-d627-44d9-8d59-9cb5aaf1fa5c": "fixed-color-flare",
+    "a80f4b4a-077b-45ee-ab0b-dbdd1d607ef7": "37b62a98-3544-4157-a444-ac605b146039",
+    "3effdff1-c5e6-4f70-80c9-a95923565a63": "fixed-color-flare",
+    "263a8dc2-ae8e-400e-b72a-4faaf6ee442b": "fixed-color-flare",
+    "0f60f498-6fde-4289-bde1-936db0e2ecec": "fixed-color-flare",
+    "22fc0682-df4a-40ef-8d13-d8239e1bf158": "fixed-color-flare",
+    "2463a1b7-b4c2-452f-8025-5d2ae93b83a8": "fixed-color-flare",
+    "b87135c4-dc5f-4be9-9906-d0833d25bdb8": "fixed-color-flare",
+    "351a962a-e1b2-4731-8dc0-08fe392018c6": "37b62a98-3544-4157-a444-ac605b146039",
+    "ef42e5a4-226d-41c7-bdc0-3b5334e49770": "fixed-color-flare",
+    "258f29e8-4636-406b-a625-b2ef949d7df7": "fixed-color-flare",
+    "cf5825ea-c12c-4964-834a-2f431f392687": "fixed-color-flare",
+    "3fe44f0d-8699-4e0c-8696-653d32dee5d1": "fixed-color-flare",
+    "517805de-a42c-41e9-a6d4-6a68b4ed3078": "fixed-color-flare",
+    "a84a1b44-d749-4736-9f45-0ea583536179": "fixed-color-flare",
+    "e7e7df4e-2801-4c5e-87ac-3ee705ce11e8": "fixed-color-flare",
+    "4c6ea546-ea66-4610-9b94-5b9726820d6f": "fixed-color-flare",
+    "1bcbe18c-9927-462c-b2ab-db8c9c8eef8b": "fixed-color-flare",
+    "5452c3d8-01e4-4c6a-803f-b4765b4f83a1": "fixed-color-flare",
+    "7dc9a792-ce80-4358-897f-45e9665cbba2": "fixed-color-flare",
+    "f23e631a-95c5-4b51-806b-c2ed762089b5": "fixed-color-flare",
+    "e910e51c-8f42-4785-a3bb-ce5d50e08eaa": "fixed-charge",
+    "4f539c1c-c5f6-4a69-a186-bc9a28a71de2": "fixed-lull",
+    "1ca77630-2ea2-4d6c-ab85-c205c14c1b20": "fixed-drop",
+    "478d9ac2-4e65-4f39-be9e-85806438dd5a": "fixed-lull",
+    "c059fbe7-c16d-43ae-af2b-2f5a624781da": "fixed-drop",
+    "2323c13a-44fc-45ca-a630-9d0bf7394e2d": "fixed-color-flare",
+    "0a75ee9a-273c-4b99-a023-31cad6b180c7": "fixed-color-flare",
+    "410ead27-a0a1-4a34-b57b-aae751a28acd": "fixed-color-flare",
+    "1625d692-d69f-4570-846c-dd8d52005fbc": "fixed-update-scene",
+    "e482b93a-4186-4c9a-bbb8-35eb2dc3834f": "fixed-color-flare",
+    "0f569f1a-005e-4365-9a92-dfdcf7fb8efd": "fixed-update-scene",
+    "de96601d-7b44-495b-b94c-2e8b32d4382d": "fixed-drop",
+    "0e29be3b-2cde-45af-a3e5-a853c4c7bbb8": "fixed-color-flare",
+    "333d2a09-7e12-488f-a93c-a86eeb5071a8": "fixed-drop",
+    "c39c0974-4bf3-4b69-a731-8ec91a17bc2e": "fixed-color-flare",
+    "f13b8fb7-3048-49f5-a571-c50c442082d1": "fixed-color-flare",
+    "ceb8cc95-3b60-46b8-83f4-cbdd90ee0106": "37b62a98-3544-4157-a444-ac605b146039",
+    "01a65b1a-f89b-40f6-8927-057f17156389": "fixed-lull",
+    "5256449f-dbf3-4c43-aa7e-bc9997a72ab6": "fixed-combo-flare",
+    "61273d04-300d-46d9-9326-dca32462df6a": "fixed-combo-flare",
+    "f149ed44-324c-43dd-a019-abac43ec2aca": "fixed-charge",
+    "e78695ba-ab99-434a-8e3f-1a0537547c19": "37b62a98-3544-4157-a444-ac605b146039"
+   },
+   "drop_sequences": {
+    "detected": {
+     "uri": "spotify:track:4PolqZLqReEqc3yURJtzc4",
+     "detector_version": "1",
+     "confident_score": 1.0,
+     "suggested_score": 0.7,
+     "drop_floor": 0.1,
+     "tempo_bpm": 143.55,
+     "beat_ms": 417.973,
+     "captured_from_ms": 18005,
+     "captured_to_ms": 195630,
+     "duration_ms": 196056,
+     "sequences": [
+      {
+       "key": "drop:59570",
+       "drop_ms": 59570,
+       "lull_ms": 57248,
+       "charge_ms": 53474,
+       "score": 1.211,
+       "tier": "confident",
+       "break_beats": 5.56,
+       "step": 0.891,
+       "rise": 0.306,
+       "path": "step",
+       "loud_before": true,
+       "capped": false,
+       "notes": []
+      },
+      {
+       "key": "drop:100983",
+       "drop_ms": 100983,
+       "lull_ms": 100228,
+       "charge_ms": 94446,
+       "score": 0.8,
+       "tier": "suggested",
+       "break_beats": 1.81,
+       "step": 0.656,
+       "rise": 0.8,
+       "path": "step",
+       "loud_before": true,
+       "capped": false,
+       "notes": []
+      },
+      {
+       "key": "drop:171983",
+       "drop_ms": 171983,
+       "lull_ms": 169302,
+       "charge_ms": 165226,
+       "score": 1.077,
+       "tier": "confident",
+       "break_beats": 6.41,
+       "step": 0.757,
+       "rise": 0.506,
+       "path": "step",
+       "loud_before": true,
+       "capped": false,
+       "notes": []
+      },
+      {
+       "key": "drop:178753",
+       "drop_ms": 178753,
+       "lull_ms": 177196,
+       "charge_ms": 175378,
+       "score": 1.309,
+       "tier": "confident",
+       "break_beats": 3.81,
+       "step": 1.004,
+       "rise": 0.703,
+       "path": "step",
+       "loud_before": true,
+       "capped": false,
+       "notes": [
+        "charge moved from 171152 ms to 175378 ms: it started inside the previous drop's two bars"
+       ]
+      }
+     ],
+     "excluded": [],
+     "stamp": "c0427479e49ef4d1",
+     "detected_at": 1791420079588
+    }
+   }
+  },
+  "spotify:track:7vFKcXQ39f74XNrZmXADIT": {
+   "name": "Dopamine",
+   "profile_filename": "Wooli, Tape B - Dopamine.json",
+   "profile": {
+    "spotify_uri": "spotify:track:7vFKcXQ39f74XNrZmXADIT",
+    "title": "Dopamine",
+    "artist": "Wooli, Tape B",
+    "artist_genre": [
+     "dubstep",
+     "melodic bass",
+     "riddim",
+     "edm",
+     "deathstep",
+     "future bass",
+     "bass music"
+    ],
+    "duration_ms": 158896,
+    "labels": [],
+    "verified": false,
+    "notes": "",
+    "intensity_scale": 1.2,
+    "intensity_scale_source": "user",
+    "triggers": [
+     {
+      "id": "8c598c0e-2167-412c-99ae-75b95ebd0dd2",
+      "timestamp_ms": 867,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.0699,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "ad976dfc-31c0-4da5-b849-4c838d05cfca",
+      "timestamp_ms": 14810,
+      "event_id": "fixed-update-scene",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.0699,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "ddf9a584-dbd7-499e-b692-3683b8dac188",
+      "timestamp_ms": 28145,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.4034,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "d2dfa0b6-7674-4695-9a2f-e0f734c2e287",
+      "timestamp_ms": 41850,
+      "event_id": "fixed-lull",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.6341,
+      "override_blend": true,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "6533f1e1-0b66-4947-90fa-4bee64aa5d96",
+      "timestamp_ms": 47850,
+      "event_id": "fixed-drop",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": "9724389b-d340-4b49-b519-590db4daf945",
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "371fd3d3-c8ca-4a2a-9fbf-0bbd66f2146c",
+      "timestamp_ms": 52950,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.9281,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "41b6330b-0b33-481c-9e22-24a2a16070fb",
+      "timestamp_ms": 57924,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.9581,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "07c16e23-4100-4920-bc57-b7c582b43bfd",
+      "timestamp_ms": 59573,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.9951,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "a1b54802-c143-4b50-b4a6-008279cd644c",
+      "timestamp_ms": 67850,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "75a75cf4-f8a0-4e56-8d07-06c7cbf90d46",
+      "timestamp_ms": 71996,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.6267,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "64ef42a5-232f-4e32-a5f9-41eb13ae192e",
+      "timestamp_ms": 74469,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.23,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "3ff332d2-fff4-4df5-bc69-bc9ba96d3389",
+      "timestamp_ms": 87750,
+      "event_id": "fixed-update-scene",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.504,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "549dbd08-8974-4c5d-947f-f45d78c0d587",
+      "timestamp_ms": 102139,
+      "event_id": "fixed-combo-flare",
+      "labels": [
+       "equalizer"
+      ],
+      "enabled": true,
+      "intensity": 0.755,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "5a3f6527-03f2-4ce9-8e5e-767e3bb1397b",
+      "timestamp_ms": 107767,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.755,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "d68e2498-a15c-480f-b60d-76bd9b983bbc",
+      "timestamp_ms": 114198,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.7283,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "416af787-ddd9-4378-8349-9d3bcaabf9d9",
+      "timestamp_ms": 117518,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.7194,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "07523fc9-1977-4a18-95dc-713a8b8f2780",
+      "timestamp_ms": 122058,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.7177,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "5de67fa0-8e10-4ef9-8f3e-413006630f2d",
+      "timestamp_ms": 124960,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.4797,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "15b59c71-82c9-4f26-b9ee-c273bf5dd3e7",
+      "timestamp_ms": 127547,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.3701,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "f68a552c-053a-47d1-a36a-a6daff5cbfb7",
+      "timestamp_ms": 131578,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.37,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "f01c116f-9f09-41d6-ac2e-4a3a394b0f0a",
+      "timestamp_ms": 138196,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.3701,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "3ab79435-1851-4e42-9d6a-184b3388c347",
+      "timestamp_ms": 145550,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.3701,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "6e3278ce-8c99-406a-8463-3dcaed8495bb",
+      "timestamp_ms": 97590,
+      "event_id": "fixed-charge",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.6549,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "023d243c-6b34-4742-aeb9-ae36c20a71f5",
+      "timestamp_ms": 115450,
+      "event_id": "37b62a98-3544-4157-a444-ac605b146039",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.7194,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "47d668b5-030c-4e0a-9bbb-e3cb62a76377",
+      "timestamp_ms": 99630,
+      "event_id": "fixed-lull",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.11,
+      "override_blend": true,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "53e94616-6671-4580-8c66-a9a56e530555",
+      "timestamp_ms": 84430,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.504,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "c4e786f8-17fd-4b01-bd7a-6969e91008e8",
+      "timestamp_ms": 64554,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "43c0e939-6f36-4979-b193-e59642ac4867",
+      "timestamp_ms": 77766,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.05,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "700bef7a-18d4-46ae-a7aa-53f9c78cc655",
+      "timestamp_ms": 91048,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.4474,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "c6f1b993-c806-49a1-a0df-b36759173e34",
+      "timestamp_ms": 153960,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.3701,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "658934a4-73f3-45e9-8571-9b2135b7957f",
+      "timestamp_ms": 100950,
+      "event_id": "fixed-drop",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "bd52aec7-0a1f-4d97-9bcb-88594a1ed117",
+      "timestamp_ms": 103422,
+      "event_id": "fixed-shape-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.755,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "03fc15a5-1917-429c-8150-4a1f1cd772f2",
+      "timestamp_ms": 105868,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.755,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "fa8e2062-b278-46b1-ae80-6d3c0e24ce84",
+      "timestamp_ms": 109178,
+      "event_id": "fixed-shape-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.7283,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "36e21cd3-3f83-48c7-b207-c5db906043cc",
+      "timestamp_ms": 112867,
+      "event_id": "fixed-shape-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.7283,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "f82b34f3-c4dd-4ed7-adf4-b8411291eb9f",
+      "timestamp_ms": 37976,
+      "event_id": "fixed-charge",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.6341,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "c9cfbf13-a801-4299-92db-de22cd4a2add",
+      "timestamp_ms": 48959,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.95,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "b63408ae-c4bf-4291-a57d-c63c8b782dc7",
+      "timestamp_ms": 51218,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.95,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "8c959d13-eb88-40cf-8170-908a65dfff60",
+      "timestamp_ms": 54538,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.9281,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "13b039a6-2779-45de-bfe9-0247ffd9739b",
+      "timestamp_ms": 56187,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.9581,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "cc72b81b-34a6-4ccb-8932-f6522e644630",
+      "timestamp_ms": 71071,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.6267,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "064cbd68-74d5-405f-b7c9-3af23b14739b",
+      "timestamp_ms": 61144,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.9951,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "8e275963-dd4c-404c-9908-22ca16ce9ed4",
+      "timestamp_ms": 119066,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.7194,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "585d5bbd-54b5-4d78-bc90-5120663bd985",
+      "timestamp_ms": 130653,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.37,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "64d6e688-3905-4205-87d3-1bc916d1b3a3",
+      "timestamp_ms": 132302,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.37,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "a8e85b42-50ac-4e60-9577-fe368870d62b",
+      "timestamp_ms": 133962,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.3701,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "81b776c1-8a98-4bbb-9aa1-92e1021ba07c",
+      "timestamp_ms": 62930,
+      "event_id": "fixed-shape-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.97,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "459c9916-06e4-419c-b47e-144601e50e45",
+      "timestamp_ms": 61968,
+      "event_id": "fixed-shape-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.97,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "0a8a52d7-d709-47aa-a80b-9a463ec582e4",
+      "timestamp_ms": 66113,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 1.0,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "5bd1f787-17ca-48ce-b9c1-09157965a2e9",
+      "timestamp_ms": 104182,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.76,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "a53bea97-ebf4-4950-82e1-6c4dc8071bde",
+      "timestamp_ms": 31376,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.58,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "a4895a65-3641-4deb-a28d-69a7b30d566d",
+      "timestamp_ms": 34476,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.66,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "dca77279-0c86-4fd2-9fb2-5f64384a902f",
+      "timestamp_ms": 21770,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.35,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "6f0e5fdc-db0d-4632-b600-55307eddedf0",
+      "timestamp_ms": 152166,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.37,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "6fddb4a8-58a6-48c1-bb3e-3db1b12a892b",
+      "timestamp_ms": 147197,
+      "event_id": "fixed-combo-flare",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.37,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     },
+     {
+      "id": "1f00cc2e-5dff-4972-9483-7868aceffa84",
+      "timestamp_ms": 140580,
+      "event_id": "fixed-update-scene",
+      "labels": [],
+      "enabled": true,
+      "intensity": 0.37,
+      "override_blend": false,
+      "color_group_override": null,
+      "display_mode": "default",
+      "drop_scene_group_override": null
+     }
+    ],
+    "setlist_triggers": {
+     "b203c291-ae6f-47ea-a9ab-f8f91a229272": []
+    },
+    "audio_shape_file": null,
+    "ai_generated": true,
+    "ai_training_profile_id": "4192846d-5080-4817-a9d5-5451cf6d0d1a",
+    "ai_generated_date": "2026-03-07",
+    "ai_model": "",
+    "embedded_generated": false
+   },
+   "fired_authored": [
+    {
+     "id": "8c598c0e-2167-412c-99ae-75b95ebd0dd2",
+     "timestamp_ms": 867,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.0699,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "ad976dfc-31c0-4da5-b849-4c838d05cfca",
+     "timestamp_ms": 14810,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene_update",
+      "intensity": 0.0699
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "ddf9a584-dbd7-499e-b692-3683b8dac188",
+     "timestamp_ms": 28145,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.4034,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "d2dfa0b6-7674-4695-9a2f-e0f734c2e287",
+     "timestamp_ms": 41850,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "lull",
+      "intensity": 0.6341
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "6533f1e1-0b66-4947-90fa-4bee64aa5d96",
+     "timestamp_ms": 47850,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "drop",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "371fd3d3-c8ca-4a2a-9fbf-0bbd66f2146c",
+     "timestamp_ms": 52950,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.9281
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "41b6330b-0b33-481c-9e22-24a2a16070fb",
+     "timestamp_ms": 57924,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.9581
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "07c16e23-4100-4920-bc57-b7c582b43bfd",
+     "timestamp_ms": 59573,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.9951,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "a1b54802-c143-4b50-b4a6-008279cd644c",
+     "timestamp_ms": 67850,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 1.0,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "75a75cf4-f8a0-4e56-8d07-06c7cbf90d46",
+     "timestamp_ms": 71996,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.6267
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "64ef42a5-232f-4e32-a5f9-41eb13ae192e",
+     "timestamp_ms": 74469,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.23,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "3ff332d2-fff4-4df5-bc69-bc9ba96d3389",
+     "timestamp_ms": 87750,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene_update",
+      "intensity": 0.504
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "549dbd08-8974-4c5d-947f-f45d78c0d587",
+     "timestamp_ms": 102139,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.755
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "5a3f6527-03f2-4ce9-8e5e-767e3bb1397b",
+     "timestamp_ms": 107767,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.755
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "d68e2498-a15c-480f-b60d-76bd9b983bbc",
+     "timestamp_ms": 114198,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.7283
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "416af787-ddd9-4378-8349-9d3bcaabf9d9",
+     "timestamp_ms": 117518,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.7194
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "07523fc9-1977-4a18-95dc-713a8b8f2780",
+     "timestamp_ms": 122058,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.7177
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "5de67fa0-8e10-4ef9-8f3e-413006630f2d",
+     "timestamp_ms": 124960,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.4797
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "15b59c71-82c9-4f26-b9ee-c273bf5dd3e7",
+     "timestamp_ms": 127547,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.3701,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "f68a552c-053a-47d1-a36a-a6daff5cbfb7",
+     "timestamp_ms": 131578,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.37
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "f01c116f-9f09-41d6-ac2e-4a3a394b0f0a",
+     "timestamp_ms": 138196,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.3701
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "3ab79435-1851-4e42-9d6a-184b3388c347",
+     "timestamp_ms": 145550,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.3701,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "6e3278ce-8c99-406a-8463-3dcaed8495bb",
+     "timestamp_ms": 97590,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "charge",
+      "intensity": 0.6549
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "023d243c-6b34-4742-aeb9-ae36c20a71f5",
+     "timestamp_ms": 115450,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene",
+      "scene_id": null,
+      "intensity": 0.7194,
+      "color_set_id": null,
+      "scene_pool": null
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "47d668b5-030c-4e0a-9bbb-e3cb62a76377",
+     "timestamp_ms": 99630,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "lull",
+      "intensity": 0.11
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "53e94616-6671-4580-8c66-a9a56e530555",
+     "timestamp_ms": 84430,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.504
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "c4e786f8-17fd-4b01-bd7a-6969e91008e8",
+     "timestamp_ms": 64554,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "43c0e939-6f36-4979-b193-e59642ac4867",
+     "timestamp_ms": 77766,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.05
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "700bef7a-18d4-46ae-a7aa-53f9c78cc655",
+     "timestamp_ms": 91048,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.4474
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "c6f1b993-c806-49a1-a0df-b36759173e34",
+     "timestamp_ms": 153960,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.3701
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "658934a4-73f3-45e9-8571-9b2135b7957f",
+     "timestamp_ms": 100950,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "drop",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "bd52aec7-0a1f-4d97-9bcb-88594a1ed117",
+     "timestamp_ms": 103422,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.755
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "03fc15a5-1917-429c-8150-4a1f1cd772f2",
+     "timestamp_ms": 105868,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.755
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "fa8e2062-b278-46b1-ae80-6d3c0e24ce84",
+     "timestamp_ms": 109178,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.7283
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "36e21cd3-3f83-48c7-b207-c5db906043cc",
+     "timestamp_ms": 112867,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.7283
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "f82b34f3-c4dd-4ed7-adf4-b8411291eb9f",
+     "timestamp_ms": 37976,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "charge",
+      "intensity": 0.6341
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "c9cfbf13-a801-4299-92db-de22cd4a2add",
+     "timestamp_ms": 48959,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.95
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "b63408ae-c4bf-4291-a57d-c63c8b782dc7",
+     "timestamp_ms": 51218,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.95
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "8c959d13-eb88-40cf-8170-908a65dfff60",
+     "timestamp_ms": 54538,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.9281
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "13b039a6-2779-45de-bfe9-0247ffd9739b",
+     "timestamp_ms": 56187,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.9581
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "cc72b81b-34a6-4ccb-8932-f6522e644630",
+     "timestamp_ms": 71071,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.6267
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "064cbd68-74d5-405f-b7c9-3af23b14739b",
+     "timestamp_ms": 61144,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.9951
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "8e275963-dd4c-404c-9908-22ca16ce9ed4",
+     "timestamp_ms": 119066,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.7194
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "585d5bbd-54b5-4d78-bc90-5120663bd985",
+     "timestamp_ms": 130653,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.37
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "64d6e688-3905-4205-87d3-1bc916d1b3a3",
+     "timestamp_ms": 132302,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.37
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "a8e85b42-50ac-4e60-9577-fe368870d62b",
+     "timestamp_ms": 133962,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.3701
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "81b776c1-8a98-4bbb-9aa1-92e1021ba07c",
+     "timestamp_ms": 62930,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.97
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "459c9916-06e4-419c-b47e-144601e50e45",
+     "timestamp_ms": 61968,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.97
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "0a8a52d7-d709-47aa-a80b-9a463ec582e4",
+     "timestamp_ms": 66113,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 1.0
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "5bd1f787-17ca-48ce-b9c1-09157965a2e9",
+     "timestamp_ms": 104182,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.76
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "a53bea97-ebf4-4950-82e1-6c4dc8071bde",
+     "timestamp_ms": 31376,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.58
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "a4895a65-3641-4deb-a28d-69a7b30d566d",
+     "timestamp_ms": 34476,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.66
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "dca77279-0c86-4fd2-9fb2-5f64384a902f",
+     "timestamp_ms": 21770,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.35
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "6f0e5fdc-db0d-4632-b600-55307eddedf0",
+     "timestamp_ms": 152166,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.37
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "6fddb4a8-58a6-48c1-bb3e-3db1b12a892b",
+     "timestamp_ms": 147197,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_response",
+      "event_class": "flare",
+      "intensity": 0.37
+     },
+     "trigger_offset_ms": 0
+    },
+    {
+     "id": "1f00cc2e-5dff-4972-9483-7868aceffa84",
+     "timestamp_ms": 140580,
+     "enabled": true,
+     "source": "authored",
+     "generator_key": null,
+     "action": {
+      "kind": "fire_scene_update",
+      "intensity": 0.37
+     },
+     "trigger_offset_ms": 0
+    }
+   ],
+   "ledger": {
+    "8c598c0e-2167-412c-99ae-75b95ebd0dd2": "37b62a98-3544-4157-a444-ac605b146039",
+    "ad976dfc-31c0-4da5-b849-4c838d05cfca": "fixed-update-scene",
+    "ddf9a584-dbd7-499e-b692-3683b8dac188": "37b62a98-3544-4157-a444-ac605b146039",
+    "d2dfa0b6-7674-4695-9a2f-e0f734c2e287": "fixed-lull",
+    "6533f1e1-0b66-4947-90fa-4bee64aa5d96": "fixed-drop",
+    "371fd3d3-c8ca-4a2a-9fbf-0bbd66f2146c": "fixed-combo-flare",
+    "41b6330b-0b33-481c-9e22-24a2a16070fb": "fixed-combo-flare",
+    "07c16e23-4100-4920-bc57-b7c582b43bfd": "37b62a98-3544-4157-a444-ac605b146039",
+    "a1b54802-c143-4b50-b4a6-008279cd644c": "37b62a98-3544-4157-a444-ac605b146039",
+    "75a75cf4-f8a0-4e56-8d07-06c7cbf90d46": "fixed-combo-flare",
+    "64ef42a5-232f-4e32-a5f9-41eb13ae192e": "37b62a98-3544-4157-a444-ac605b146039",
+    "3ff332d2-fff4-4df5-bc69-bc9ba96d3389": "fixed-update-scene",
+    "549dbd08-8974-4c5d-947f-f45d78c0d587": "fixed-combo-flare",
+    "5a3f6527-03f2-4ce9-8e5e-767e3bb1397b": "fixed-combo-flare",
+    "d68e2498-a15c-480f-b60d-76bd9b983bbc": "fixed-combo-flare",
+    "416af787-ddd9-4378-8349-9d3bcaabf9d9": "fixed-combo-flare",
+    "07523fc9-1977-4a18-95dc-713a8b8f2780": "fixed-combo-flare",
+    "5de67fa0-8e10-4ef9-8f3e-413006630f2d": "fixed-combo-flare",
+    "15b59c71-82c9-4f26-b9ee-c273bf5dd3e7": "37b62a98-3544-4157-a444-ac605b146039",
+    "f68a552c-053a-47d1-a36a-a6daff5cbfb7": "fixed-combo-flare",
+    "f01c116f-9f09-41d6-ac2e-4a3a394b0f0a": "fixed-combo-flare",
+    "3ab79435-1851-4e42-9d6a-184b3388c347": "37b62a98-3544-4157-a444-ac605b146039",
+    "6e3278ce-8c99-406a-8463-3dcaed8495bb": "fixed-charge",
+    "023d243c-6b34-4742-aeb9-ae36c20a71f5": "37b62a98-3544-4157-a444-ac605b146039",
+    "47d668b5-030c-4e0a-9bbb-e3cb62a76377": "fixed-lull",
+    "53e94616-6671-4580-8c66-a9a56e530555": "fixed-combo-flare",
+    "c4e786f8-17fd-4b01-bd7a-6969e91008e8": "fixed-combo-flare",
+    "43c0e939-6f36-4979-b193-e59642ac4867": "fixed-combo-flare",
+    "700bef7a-18d4-46ae-a7aa-53f9c78cc655": "fixed-combo-flare",
+    "c6f1b993-c806-49a1-a0df-b36759173e34": "fixed-combo-flare",
+    "658934a4-73f3-45e9-8571-9b2135b7957f": "fixed-drop",
+    "bd52aec7-0a1f-4d97-9bcb-88594a1ed117": "fixed-shape-flare",
+    "03fc15a5-1917-429c-8150-4a1f1cd772f2": "fixed-combo-flare",
+    "fa8e2062-b278-46b1-ae80-6d3c0e24ce84": "fixed-shape-flare",
+    "36e21cd3-3f83-48c7-b207-c5db906043cc": "fixed-shape-flare",
+    "f82b34f3-c4dd-4ed7-adf4-b8411291eb9f": "fixed-charge",
+    "c9cfbf13-a801-4299-92db-de22cd4a2add": "fixed-combo-flare",
+    "b63408ae-c4bf-4291-a57d-c63c8b782dc7": "fixed-combo-flare",
+    "8c959d13-eb88-40cf-8170-908a65dfff60": "fixed-combo-flare",
+    "13b039a6-2779-45de-bfe9-0247ffd9739b": "fixed-combo-flare",
+    "cc72b81b-34a6-4ccb-8932-f6522e644630": "fixed-combo-flare",
+    "064cbd68-74d5-405f-b7c9-3af23b14739b": "fixed-combo-flare",
+    "8e275963-dd4c-404c-9908-22ca16ce9ed4": "fixed-combo-flare",
+    "585d5bbd-54b5-4d78-bc90-5120663bd985": "fixed-combo-flare",
+    "64d6e688-3905-4205-87d3-1bc916d1b3a3": "fixed-combo-flare",
+    "a8e85b42-50ac-4e60-9577-fe368870d62b": "fixed-combo-flare",
+    "81b776c1-8a98-4bbb-9aa1-92e1021ba07c": "fixed-shape-flare",
+    "459c9916-06e4-419c-b47e-144601e50e45": "fixed-shape-flare",
+    "0a8a52d7-d709-47aa-a80b-9a463ec582e4": "fixed-combo-flare",
+    "5bd1f787-17ca-48ce-b9c1-09157965a2e9": "fixed-combo-flare",
+    "a53bea97-ebf4-4950-82e1-6c4dc8071bde": "fixed-combo-flare",
+    "a4895a65-3641-4deb-a28d-69a7b30d566d": "fixed-combo-flare",
+    "dca77279-0c86-4fd2-9fb2-5f64384a902f": "fixed-combo-flare",
+    "6f0e5fdc-db0d-4632-b600-55307eddedf0": "fixed-combo-flare",
+    "6fddb4a8-58a6-48c1-bb3e-3db1b12a892b": "fixed-combo-flare",
+    "1f00cc2e-5dff-4972-9483-7868aceffa84": "fixed-update-scene"
+   },
+   "drop_sequences": {
+    "detected": {
+     "uri": "spotify:track:7vFKcXQ39f74XNrZmXADIT",
+     "detector_version": "1",
+     "confident_score": 1.0,
+     "suggested_score": 0.7,
+     "drop_floor": 0.7,
+     "tempo_bpm": 143.55,
+     "beat_ms": 417.973,
+     "captured_from_ms": 0,
+     "captured_to_ms": 159668,
+     "duration_ms": 158896,
+     "sequences": [
+      {
+       "key": "drop:47853",
+       "drop_ms": 47853,
+       "lull_ms": 41827,
+       "charge_ms": 35047,
+       "score": 1.532,
+       "tier": "confident",
+       "break_beats": 12.72,
+       "step": 1.212,
+       "rise": 0.662,
+       "path": "step",
+       "loud_before": true,
+       "capped": false,
+       "notes": []
+      },
+      {
+       "key": "drop:100829",
+       "drop_ms": 100829,
+       "lull_ms": 100028,
+       "charge_ms": 97520,
+       "score": 0.974,
+       "tier": "suggested",
+       "break_beats": 1.92,
+       "step": 0.186,
+       "rise": 0.847,
+       "path": "roll",
+       "loud_before": true,
+       "capped": false,
+       "notes": []
+      }
+     ],
+     "excluded": [
+      {
+       "drop_ms": 87582,
+       "score": 0.918,
+       "reason": "post-drop energy 0.65 is below the drop floor 0.70"
+      }
+     ],
+     "stamp": "b31dbb8d0e8df301",
+     "detected_at": 1791411760478
+    }
+   }
+  }
+ }
+}

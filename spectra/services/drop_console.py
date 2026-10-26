@@ -14,17 +14,39 @@ song's sequences that are not dismissed (#1 is the earliest), the same
 order the Timeline's review list shows — never by a key he cannot see. A
 number that names nothing is REJECTED with the list, never guessed. A
 sequence that stands down on his own triggers ("matches yours") is listed
-but not edited here: his triggers are edited on the SPECTRA triggers strip.
+but not edited by the older operations: his triggers are edited on the
+SPECTRA triggers strip.
+
+THE HOME DROPS PANEL'S OWN REACH (2026-10-26, predrop plan step 1 —
+spectra/services/drop_panel.py is the binding statement): "approve drop
+2" (approve_drop_sequence, the double tick), "turn off the lull on drop 3"
+(set_drop_part, a part's toggle — the drop itself included), "remove drop
+1" (remove_drop_sequence), and "turn drop testing on" (the ordinary
+`drop_testing` setting, set_setting). His OWN drops are reached either
+through the detection that stands in for one (its number) or by the time
+of his drop (`your_drop_s`, the listing's `yours`). Because those writes
+can DELETE triggers he placed by hand (the Admiral's answer 6: placed by
+hand → deleted, imported → switched off), every one that could ASKS FIRST:
+the first call writes nothing and answers `needs_confirmation`, what would
+happen in words and a single-use `confirm_id` (absorb_console.py's two-call
+protocol); only a second call with that id, made after he says yes, acts.
+The id is bound to the operation, its arguments and the row's triggers as
+they were when he was asked, so a yes never covers a request that changed.
 """
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Literal, Optional
+import json as _json
+import time
+import uuid
+from dataclasses import dataclass
+from typing import Any, Callable, Literal, Optional
 
-from spectra.services import drop_firing, drop_sequences as ds
+from spectra.services import drop_firing, drop_panel, drop_sequences as ds
 from spectra.services.sonic_ops import SonicOperation
 
 HANDLE_CHOICES = ("charge", "lull", "drop")
+PART_CHOICES = ("charge", "lull", "drop")
 
 
 def _current_uri() -> Optional[str]:
@@ -75,6 +97,10 @@ def _describe(n: int, s: dict) -> dict:
     if "fires" in s:
         out["fires"] = bool(s.get("fires"))
         out["fires_reason"] = s.get("fires_reason")
+    # the Drops panel's per-part states (drop_sequences.py's PARTS):
+    # on / waiting / off / absent for charge, lull, pre_drop and drop
+    if s.get("parts"):
+        out["parts"] = dict(s["parts"])
     return out
 
 
@@ -109,8 +135,25 @@ def _edit(uri: str, op: str, **kw) -> dict:
         res = ds.apply_edit(uri, op, **kw)
     except (ds.SequenceNotFound, ds.InvalidEdit, ds.EditConflict) as exc:
         return {"status": "rejected", "reason": str(exc)}
-    _LAST_SONIC_EDIT[uri] = {"before": res.before, "rev_after": ds.edits_rev(res.after)}
+    _LAST_SONIC_EDIT[uri] = {"before": res.before, "rev_after": ds.edits_rev(res.after),
+                             "profile": []}
     return {"status": "applied", "result": res.result}
+
+
+async def _panel(uri: str, write) -> dict:
+    """One drop_panel write, remembered for undo_drop_edit (its profile rows
+    too)."""
+    try:
+        res = await write
+    except (ds.SequenceNotFound, ds.InvalidEdit, ds.EditConflict) as exc:
+        return {"status": "rejected", "reason": str(exc)}
+    except drop_panel.ProfileRefused as exc:
+        return {"status": "rejected", "reason": exc.detail}
+    except drop_panel.ProfileUnavailable as exc:
+        return {"status": "rejected", "reason": str(exc)}
+    _LAST_SONIC_EDIT[uri] = {"before": res.before, "rev_after": ds.edits_rev(res.after),
+                             "profile": list(res.profile)}
+    return {"status": "applied", "result": res.result, "said": res.said}
 
 
 async def _op_list(uri: Optional[str] = None) -> dict:
@@ -123,10 +166,261 @@ async def _op_list(uri: Optional[str] = None) -> dict:
     # _pick, which only ever needs the key/times/state fields, not firing.
     view = await asyncio.to_thread(drop_firing.annotated_view, uri)
     seqs = _numbered(view)
+    number_of = {s["key"]: i + 1 for i, s in enumerate(seqs)}
+    yours = [{"drop_s": _secs(r["drop"]["timestamp_ms"]),
+              "lull_s": _secs((r.get("lull") or {}).get("timestamp_ms")),
+              "charge_s": _secs((r.get("charge") or {}).get("timestamp_ms")),
+              "enabled": bool(r.get("enabled")),
+              "switched_off": [h for h in HANDLE_CHOICES
+                               if r.get(h) and not r[h].get("enabled")],
+              "stands_for": [number_of[k] for k in r.get("detections") or []
+                             if k in number_of]}
+             for r in view.get("yours") or []]
     return {"status": "ok", "uri": uri, "detection": view.get("status"),
             "beat_s": _secs((view.get("song") or {}).get("beat_ms")),
+            "testing": bool((view.get("firing") or {}).get("testing")),
             "sequences": [_describe(i + 1, s) for i, s in enumerate(seqs)],
-            "summary": f"{len(seqs)} drop sequence{'s' if len(seqs) != 1 else ''} on this song"}
+            "yours": yours,
+            "summary": f"{len(seqs)} drop sequence{'s' if len(seqs) != 1 else ''} on this song"
+                       + (f", {len(yours)} drop{'s' if len(yours) != 1 else ''} of yours"
+                          if yours else "")}
+
+
+# ── the Home Drops panel's reach (module docstring) ─────────────────────────
+
+CONFIRM_TTL_S = 300.0
+_PENDING_MAX = 50
+
+
+@dataclass
+class _Ask:
+    op: str
+    fingerprint: str
+    expires: float
+
+
+_PENDING: dict[str, _Ask] = {}
+#: injectable for tests
+_clock: Callable[[], float] = time.monotonic
+
+
+def _ask(op: str, fingerprint: str, question: str, **extra: Any) -> dict:
+    now = _clock()
+    for k in [k for k, a in _PENDING.items() if a.expires <= now]:
+        del _PENDING[k]
+    while len(_PENDING) >= _PENDING_MAX:
+        del _PENDING[next(iter(_PENDING))]
+    cid = uuid.uuid4().hex[:12]
+    _PENDING[cid] = _Ask(op, fingerprint, now + CONFIRM_TTL_S)
+    return {"status": "needs_confirmation", "op": op, "confirm_id": cid,
+            "question": question,
+            "reason": f"Not done yet — this needs his yes first. {question}",
+            "expires_in_s": int(CONFIRM_TTL_S), **extra}
+
+
+def _redeem(op: str, fingerprint: str, confirm_id: Any) -> Optional[dict]:
+    """None when `confirm_id` is the live answer to exactly this question;
+    otherwise the rejection. Used up either way."""
+    a = _PENDING.pop(confirm_id, None) if isinstance(confirm_id, str) else None
+    if a is None or a.op != op:
+        return {"status": "rejected",
+                "reason": "that confirm_id is not one this operation handed out, or it was "
+                          "already used — call it again without one and ask him"}
+    if a.expires <= _clock():
+        return {"status": "rejected",
+                "reason": "that confirmation expired — call it again without a confirm_id "
+                          "and ask him again"}
+    if a.fingerprint != fingerprint:
+        return {"status": "rejected",
+                "reason": "something changed since he was asked (the request, or his "
+                          "triggers on this drop), so his yes no longer covers it — ask him "
+                          "again"}
+    return None
+
+
+def _pick_any(view: dict, number: Any) -> tuple[Optional[dict], Optional[dict]]:
+    """`_pick`, but a sequence standing in for one of his drops is allowed:
+    the caller reaches his drop through it."""
+    seqs = _numbered(view)
+    if not isinstance(number, int) or isinstance(number, bool) or not 1 <= number <= len(seqs):
+        return None, {"status": "rejected",
+                      "reason": f"there is no drop sequence #{number} on this song "
+                                f"(it has {len(seqs)})",
+                      "sequences": [_describe(i + 1, s) for i, s in enumerate(seqs)]}
+    return seqs[number - 1], None
+
+
+def _target(view: dict, sequence: Any, your_drop_s: Any
+            ) -> tuple[Optional[str], Optional[dict], Optional[dict], Optional[dict]]:
+    """(key, sequence view or None, his row or None, rejection)."""
+    rows = view.get("yours") or []
+    if your_drop_s is not None:
+        try:
+            at = float(your_drop_s) * 1000.0
+        except (TypeError, ValueError):
+            return None, None, None, {"status": "rejected",
+                                      "reason": "your_drop_s must be a number of seconds"}
+        near = sorted((abs(r["drop"]["timestamp_ms"] - at), i) for i, r in enumerate(rows))
+        if not near or near[0][0] > 1000:
+            return None, None, None, {
+                "status": "rejected",
+                "reason": f"none of your own drops is within a second of {your_drop_s} s",
+                "yours": [_secs(r["drop"]["timestamp_ms"]) for r in rows]}
+        row = rows[near[0][1]]
+        return row["key"], None, row, None
+    if sequence is None:
+        return None, None, None, {"status": "rejected",
+                                  "reason": "name the drop: its sequence number from "
+                                            "list_drop_sequences, or your_drop_s for one "
+                                            "of your own drops"}
+    s, rej = _pick_any(view, sequence)
+    if rej:
+        return None, None, None, rej
+    if s["state"] == ds.STATE_MATCHES_YOURS:
+        row = next((r for r in rows if s["key"] in (r.get("detections") or [])), None)
+        if row is None:
+            return None, None, None, {
+                "status": "rejected",
+                "reason": f"#{sequence} sits on your own triggers, but they are not "
+                          "grouped into a drop of yours — edit them on the SPECTRA "
+                          "triggers strip"}
+        return row["key"], s, row, None
+    return s["key"], s, None, None
+
+
+def _row_fp(op: str, args: dict, row: dict) -> str:
+    members = {h: (row.get(h) or {}).get("id") and
+               [row[h]["id"], bool(row[h].get("enabled"))] for h in HANDLE_CHOICES}
+    return _json.dumps({"op": op, "args": args, "row": members}, sort_keys=True, default=str)
+
+
+def _what_happens(row: dict, prov: dict, parts: tuple[str, ...]) -> list[str]:
+    by_id = {t.get("id"): t for t in prov.get("triggers") or []}
+    words = []
+    for h in parts:
+        m = row.get(h)
+        if not m or not m.get("enabled"):
+            continue
+        t = by_id.get(m["id"]) or {}
+        at = _secs(m["timestamp_ms"])
+        if t.get("remove_would") == "delete":
+            words.append(f"delete your {h} at {at} s (you placed it by hand)")
+        elif t.get("remove_would") == "disable":
+            words.append(f"switch off your {h} at {at} s (imported, so it stays in "
+                         "your song, off)")
+        else:                              # not named: never guessed either way
+            words.append(f"take out your {h} at {at} s (deleted if you placed it by "
+                         "hand, switched off if it was imported)")
+    return words
+
+
+async def _provenance(uri: str) -> tuple[Optional[dict], Optional[dict]]:
+    """(the merged provenance, None) or (None, a rejection): Sonic asks
+    first, so a question it cannot answer truthfully is refused."""
+    try:
+        prov = await drop_panel.panel_provenance(uri)
+    except drop_panel.ProfileRefused as exc:
+        return None, {"status": "rejected", "reason": f"cannot say what would happen: {exc}"}
+    if prov.get("status") == "unknown":
+        return None, {"status": "rejected",
+                      "reason": f"cannot say what would happen: {prov.get('reason')}"}
+    return prov, None
+
+
+async def _op_approve(sequence: Any, uri: Optional[str] = None) -> dict:
+    uri, rej = _song(uri)
+    if rej:
+        return rej
+    view = await asyncio.to_thread(ds.view, uri)
+    s, rej = _pick(view, sequence)
+    if rej:
+        return rej
+    out = await _panel(uri, drop_panel.approve(uri, s["key"]))
+    if out["status"] == "applied":
+        out["summary"] = (f"approved drop sequence #{sequence} (drop at "
+                          f"{_secs(s['drop_ms'])} s): every part that is not off now plays")
+    return out
+
+
+async def _op_set_part(part: Literal["charge", "lull", "drop"], on: bool,
+                       sequence: Any = None, your_drop_s: Any = None,
+                       uri: Optional[str] = None, confirm_id: Optional[str] = None) -> dict:
+    if part not in PART_CHOICES:
+        return {"status": "rejected", "reason": "part must be charge, lull or drop"}
+    if not isinstance(on, bool):
+        return {"status": "rejected", "reason": "on must be true or false"}
+    uri, rej = _song(uri)
+    if rej:
+        return rej
+    view = await asyncio.to_thread(ds.view, uri)
+    key, s, row, rej = _target(view, sequence, your_drop_s)
+    if rej:
+        return rej
+    value = ds.PART_ON if on else ds.PART_OFF
+    if row is not None and not on:
+        member = row.get(part)
+        if not member or not member.get("enabled"):
+            return {"status": "rejected", "reason": f"that drop of yours has no {part} "
+                                                    "switched on"}
+        prov, rej = await _provenance(uri)
+        if rej:
+            return rej
+        fp = _row_fp("set_drop_part", {"key": key, "part": part, "on": on}, row)
+        if confirm_id is None:
+            words = _what_happens(row, prov, (part,))
+            return _ask("set_drop_part", fp,
+                        f"This would {words[0] if words else 'change your ' + part}"
+                        + (" and stop the detection standing in for it from playing"
+                           if row.get("detections") else "") + ". Go ahead?")
+        refusal = _redeem("set_drop_part", fp, confirm_id)
+        if refusal:
+            return refusal
+    out = await _panel(uri, drop_panel.set_parts(uri, key, {part: value}))
+    if out["status"] == "applied":
+        where = (f"your drop at {_secs(row['drop']['timestamp_ms'])} s" if row is not None
+                 else f"drop sequence #{sequence}")
+        out["summary"] = (f"{part} {'approved' if on else 'switched off'} on {where}"
+                          + (f" — {out['said']}" if out.get("said") else ""))
+    return out
+
+
+async def _op_remove(sequence: Any = None, your_drop_s: Any = None,
+                     uri: Optional[str] = None, confirm_id: Optional[str] = None) -> dict:
+    uri, rej = _song(uri)
+    if rej:
+        return rej
+    view = await asyncio.to_thread(ds.view, uri)
+    key, s, row, rej = _target(view, sequence, your_drop_s)
+    if rej:
+        return rej
+    if row is not None:
+        prov, rej = await _provenance(uri)
+        if rej:
+            return rej
+        words = _what_happens(row, prov, HANDLE_CHOICES)
+        if row.get("detections"):
+            words.append(f"dismiss the detection{'s' if len(row['detections']) != 1 else ''} "
+                         "standing in for it")
+        fp = _row_fp("remove_drop_sequence", {"key": key}, row)
+        question = ("Removing your drop at "
+                    f"{_secs(row['drop']['timestamp_ms'])} s would "
+                    + ("; ".join(words) if words else "change nothing") + ". Go ahead?")
+    else:
+        what = ("delete the drop you added" if s["origin"] == "added"
+                else "dismiss it as not a drop (it is never offered again there)")
+        fp = _json.dumps({"op": "remove_drop_sequence", "key": key,
+                          "state": s["state"]}, sort_keys=True)
+        question = (f"Removing drop sequence #{sequence} at {_secs(s['drop_ms'])} s would "
+                    f"{what}. Go ahead?")
+    if confirm_id is None:
+        return _ask("remove_drop_sequence", fp, question)
+    refusal = _redeem("remove_drop_sequence", fp, confirm_id)
+    if refusal:
+        return refusal
+    out = await _panel(uri, drop_panel.remove(uri, key))
+    if out["status"] == "applied":
+        out["summary"] = f"removed it — {out.get('said') or 'done'}"
+    return out
 
 
 async def _op_confirm(sequence: Any, uri: Optional[str] = None) -> dict:
@@ -290,9 +584,20 @@ async def _op_undo(uri: Optional[str] = None) -> dict:
                 "reason": "nothing to undo for this song — Sonic hasn't edited its "
                          "drop sequences yet"}
     try:
-        res = await asyncio.to_thread(
-            ds.apply_edit, uri, "restore", edits=tracked["before"], expect=tracked["rev_after"])
+        if tracked.get("profile"):
+            # one of his own drops: its song-profile rows go back too, in
+            # the same step (drop_panel.py's ONE UNDO STEP)
+            res = await drop_panel.restore(uri, tracked["before"], tracked["rev_after"],
+                                           drop_panel._reverse(tracked["profile"]))
+        else:
+            res = await asyncio.to_thread(
+                ds.apply_edit, uri, "restore", edits=tracked["before"],
+                expect=tracked["rev_after"])
     except (ds.SequenceNotFound, ds.InvalidEdit, ds.EditConflict) as exc:
+        return {"status": "rejected", "reason": str(exc)}
+    except drop_panel.ProfileRefused as exc:
+        return {"status": "rejected", "reason": exc.detail}
+    except drop_panel.ProfileUnavailable as exc:
         return {"status": "rejected", "reason": str(exc)}
     _LAST_SONIC_EDIT.pop(uri, None)
     return {"status": "applied", "result": res.result,
@@ -394,8 +699,12 @@ OPERATIONS: dict[str, SonicOperation] = {
             "never placed at all) — check these before set_drop_member. fires/fires_reason "
             "say whether this sequence actually fires under the room's current scene-change "
             "setting (e.g. dismissed, waits_for_confirm, matches_yours, transitions_only, "
-            "analysed_show_off, his, analysed_show) — a sequence can be confirmed/edited here "
-            "and still not fire if the room's tier doesn't reach it."),
+            "analysed_show_off, his, analysed_show, switched_off, testing) — a sequence can "
+            "be confirmed/edited here and still not fire if the room's tier doesn't reach it. "
+            "parts gives each part's state (on / waiting / off / absent); `yours` lists his "
+            "OWN drops (by time, with the numbers of any detection standing in for each); "
+            "testing says whether drop testing is on (every detected drop plays, approved "
+            "or not — the setting drop_testing)."),
         input_schema={"type": "object", "properties": {"uri": _URI}, "additionalProperties": False},
         handler=_op_list),
     "confirm_drop_sequence": SonicOperation(
@@ -540,6 +849,62 @@ OPERATIONS: dict[str, SonicOperation] = {
         input_schema={"type": "object", "properties": {"sequence": _SEQ, "uri": _URI},
                       "additionalProperties": False},
         handler=_op_explain_switch),
+    "approve_drop_sequence": SonicOperation(
+        name="approve_drop_sequence", domain="drops", kind="write",
+        summary="Approve a drop sequence by its number — the Drops panel's double tick: "
+                "its charge, lull, pre-drop and drop all approved (every part not off).",
+        instructions=(
+            "'Approve drop 2' = sequence=2. A part he switched off stays off (tap it with "
+            "set_drop_part to bring it back). A drop of his own needs no approval. "
+            "undo_drop_edit puts it back."),
+        input_schema={"type": "object", "properties": {"sequence": _SEQ, "uri": _URI},
+                      "required": ["sequence"], "additionalProperties": False},
+        handler=_op_approve),
+    "set_drop_part": SonicOperation(
+        name="set_drop_part", domain="drops", kind="write",
+        summary="Approve or switch off one part of a drop — its charge, its lull or the "
+                "drop itself (the Drops panel's toggles).",
+        instructions=(
+            "on=true approves the part (it plays, with its drop); on=false switches it off "
+            "(never plays, not even with drop testing on). Switching the DROP off keeps "
+            "the sequence listed but silent — that is not removing it. Name a detection by "
+            "its number (list_drop_sequences), or one of HIS OWN drops by your_drop_s (its "
+            "time, from the listing's `yours`) or by the number of the detection standing "
+            "in for it. On his own drop, on=false DELETES a trigger he placed by hand and "
+            "switches off an imported one, so it asks first: tell him the question it "
+            "answers, and only after he says yes call it again with the same arguments "
+            "plus confirm_id. To add a lull or charge that was never there, use "
+            "set_drop_member."),
+        input_schema={"type": "object", "properties": {
+            "part": {"type": "string", "enum": list(PART_CHOICES)},
+            "on": {"type": "boolean"},
+            "sequence": _SEQ,
+            "your_drop_s": {"type": "number", "minimum": 0,
+                            "description": "the time of one of his own drops, in seconds"},
+            "uri": _URI,
+            "confirm_id": {"type": "string"}},
+            "required": ["part", "on"], "additionalProperties": False},
+        handler=_op_set_part),
+    "remove_drop_sequence": SonicOperation(
+        name="remove_drop_sequence", domain="drops", kind="write",
+        summary="Remove a drop completely (the Drops panel's Remove) — always asks first.",
+        instructions=(
+            "A detection is dismissed (never offered there again), a drop he added is "
+            "deleted, and one of HIS OWN drops (your_drop_s, or the number of the detection "
+            "standing in for it) has its charge/lull/drop triggers DELETED when he placed "
+            "them by hand and switched off when they were imported, and the detection "
+            "standing in for it dismissed. The first call changes nothing and answers "
+            "needs_confirmation with the question: put it to him, and only after he says "
+            "yes call again with the same arguments plus confirm_id. undo_drop_edit puts "
+            "everything back, his song-profile triggers included."),
+        input_schema={"type": "object", "properties": {
+            "sequence": _SEQ,
+            "your_drop_s": {"type": "number", "minimum": 0,
+                            "description": "the time of one of his own drops, in seconds"},
+            "uri": _URI,
+            "confirm_id": {"type": "string"}},
+            "additionalProperties": False},
+        handler=_op_remove),
     "drop_detection_summary": SonicOperation(
         name="drop_detection_summary", domain="drops", kind="read",
         summary="How many songs have drop detection, and how many of his "

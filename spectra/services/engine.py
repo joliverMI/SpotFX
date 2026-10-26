@@ -172,6 +172,20 @@ trigger_engine._show_cue_plan = _show_cue_plan
 trigger_engine._show_cue = _show_cue
 
 
+def _push_drop_played(record: dict) -> None:
+    """A drop just fired (trigger_engine's DROP TESTING): tell every open
+    page, fire-and-forget — the Home Drops panel moves that drop to the top
+    while Testing is on. Never awaited on the fire path; the engine status
+    poll's `triggers.last_drop` is the backstop."""
+    try:
+        asyncio.ensure_future(ws_manager.broadcast({"type": "drop_played", **record}))
+    except Exception:                                    # noqa: BLE001
+        logger.exception("drop played: could not schedule the push")
+
+
+trigger_engine._drop_played = _push_drop_played
+
+
 async def fire_analysed_color_event(selection_intensity: float,
                                     render_intensity: float,
                                     scene_id: Optional[str]) -> dict:

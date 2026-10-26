@@ -11,8 +11,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { apiPost } from '../../api/client';
 import type { DropSequencesResponse, Handle } from '../dropSequences';
 import {
-  EMPTY_STACKS, afterRedo, afterUndo, editErrorText, guardInFlight, pushEdit, pushEditChanged,
-  redoRequest, undoRequest, type DropEdits, type UndoEntry, type UndoStacks,
+  EMPTY_STACKS, afterRedo, afterUndo, editChanged, editErrorText, guardInFlight, pushEdit,
+  redoRequest, undoRequest, type DropEdits, type ProfileChange, type UndoEntry, type UndoStacks,
 } from '../dropEdit';
 
 interface EditAnswer {
@@ -22,7 +22,15 @@ interface EditAnswer {
   after: DropEdits;
   rev_before: string;
   rev_after: string;
+  /** the Home Drops panel's writes (spectra/services/drop_panel.py): the
+   * song-profile rows one of his own drops' write changed, and what it
+   * did in words */
+  profile?: ProfileChange[];
+  said?: string;
 }
+
+export type PartState = 'on' | 'off';
+export type PartName = 'charge' | 'lull' | 'pre_drop' | 'drop';
 
 export interface DropEditor {
   canUndo: boolean;
@@ -42,6 +50,13 @@ export interface DropEditor {
   fill: (key: string, handle: 'lull' | 'charge') => Promise<string | null>;
   review: (key: string, choice: 'keep' | 'take') => Promise<string | null>;
   add: (dropMs: number) => Promise<string | null>;
+  /** THE HOME DROPS PANEL's writes: a part's toggle, the double tick,
+   * Remove, and one of his drops switched back on. Each is one undo step
+   * across both stores; `said` is what it did, in words. */
+  parts: (key: string, parts: Partial<Record<PartName, PartState>>, what?: string) => Promise<string | null>;
+  approve: (key: string, what?: string) => Promise<string | null>;
+  remove: (key: string, what?: string) => Promise<string | null>;
+  switchOn: (key: string, what?: string) => Promise<string | null>;
   confirmAll: () => Promise<string[] | null>;
   redetect: () => Promise<boolean>;
   /** resolves to the key of the sequence the step was about (to select it) */
@@ -115,19 +130,19 @@ export function useDropEditor(uri: string | null): DropEditor {
       const key = keyOf(a);
       if (uriRef.current === u) {
         const entry: UndoEntry = {
-          label, before: a.before, after: a.after,
+          label: a.said ? `${label} — ${a.said}` : label, before: a.before, after: a.after,
           revBefore: a.rev_before, revAfter: a.rev_after, key,
+          ...(a.profile && a.profile.length ? { profile: a.profile } : {}),
         };
-        // pushEditChanged is the one place that decides whether anything
-        // actually changed; a note is shown only when it did, or a no-op
-        // edit would claim a success that never happened
-        let changed = false;
-        setStacks((st) => {
-          const [next, did] = pushEditChanged(st, entry);
-          changed = did;
-          return next;
-        });
-        if (changed) setNote(label);
+        // editChanged is the one place that decides whether anything
+        // actually changed (pushEdit asks it too); a note is shown only when
+        // it did, or a no-op edit would claim a success that never happened.
+        // Read off the edit itself, never out of the setStacks updater: React
+        // may not have run that updater yet when the line after it runs (a
+        // pending busy/error update on this hook defers it), which silently
+        // dropped every note.
+        setStacks((st) => pushEdit(st, entry));
+        if (editChanged(entry)) setNote(entry.label);
       }
       return key;
     }), [run]);
@@ -154,6 +169,16 @@ export function useDropEditor(uri: string | null): DropEditor {
       asKey(key)), [edit]);
   const add = useCallback((dropMs: number) =>
     edit('add', { drop_ms: Math.round(dropMs) }, 'added a drop', asKey('')), [edit]);
+  const parts = useCallback((key: string, p: Partial<Record<PartName, PartState>>, what = '') =>
+    edit('parts', { key, parts: p }, what || Object.entries(p)
+      .map(([k, v]) => `${k.replace('_', '-')} ${v === 'on' ? 'approved' : 'off'}`).join(', '),
+    () => key), [edit]);
+  const approve = useCallback((key: string, what = '') =>
+    edit('approve', { key }, `approved${what ? ` ${what}` : ''}`, () => key), [edit]);
+  const remove = useCallback((key: string, what = '') =>
+    edit('remove', { key }, `removed${what ? ` ${what}` : ''}`, () => key), [edit]);
+  const switchOn = useCallback((key: string, what = '') =>
+    edit('switch-on', { key }, `switched back on${what ? ` ${what}` : ''}`, () => key), [edit]);
   const confirmAll = useCallback(() =>
     run('confirm-all', {}, (a, u) => {
       const keys = Array.isArray(a.result) ? (a.result as string[]) : [];
@@ -218,6 +243,7 @@ export function useDropEditor(uri: string | null): DropEditor {
     canUndo: !!u, canRedo: !!r, undoLabel: u?.label ?? null, redoLabel: r?.label ?? null,
     busy, error, clearError: () => setError(null), note,
     confirm, dismiss, revert, moveHandles, member, fill, review, add, confirmAll, redetect,
+    parts, approve, remove, switchOn,
     undo, redo,
   };
 }

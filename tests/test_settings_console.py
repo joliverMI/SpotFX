@@ -107,6 +107,9 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         "transition_burst_px", "transition_burst_ms", "transition_land_at",
         "transition_graft_ms", "transition_count_hold_ms",
         "transition_match_count",
+        # 2026-10-26, the Home Drops panel's Testing toggle (predrop plan
+        # step 1): every detected drop plays, approved or not
+        "drop_testing",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring
     assert "force_scene_enabled" not in sc.SETTINGS_REGISTRY

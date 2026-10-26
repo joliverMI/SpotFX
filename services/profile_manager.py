@@ -106,6 +106,53 @@ def save_profile(profile: SongProfile) -> Path:
     return path
 
 
+def profile_path_for_uri(spotify_uri: str) -> Optional[Path]:
+    """The profile file for a Spotify URI, or None — the same index (and the
+    same one-rescan-on-miss) load_profile_by_uri uses, for a caller that
+    patches the RAW file (services/profile_trigger_edit.py)."""
+    if not _index_built:
+        _build_index()
+    filename = _uri_to_filename.get(spotify_uri)
+    if filename is None:
+        _build_index()
+        filename = _uri_to_filename.get(spotify_uri)
+    if filename is None:
+        return None
+    path = PROFILES_DIR / f"{filename}.json"
+    return path if path.exists() else None
+
+
+def write_profile_raw(path: Path, data: dict, *, ensure_ascii: bool) -> None:
+    """Write a RAW profile dict back to its own file, atomically (tmp +
+    os.replace), keeping the file's own escaping convention — `ensure_ascii`
+    is True for a file that held no raw non-ASCII bytes. The raw-dict
+    discipline (AGENTS.md): no model round-trip, so no field the caller did
+    not touch is rewritten. Marked for the fired-copy sync like every
+    profile write (save_profile)."""
+    import os
+    import tempfile
+    PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.stem}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(data, indent=2, ensure_ascii=ensure_ascii))
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    uri = data.get("spotify_uri") or ""
+    if uri:
+        _uri_to_filename[uri] = path.stem
+    try:
+        from services import profile_trigger_sync_queue
+        profile_trigger_sync_queue.mark_dirty(uri)
+    except Exception:       # bookkeeping must never take the write down
+        logger.debug("trigger-sync mark failed for %s", uri, exc_info=True)
+
+
 def load_profile_by_uri(spotify_uri: str) -> Optional[SongProfile]:
     """Find and load a profile by Spotify URI (primary key)."""
     if not _index_built:

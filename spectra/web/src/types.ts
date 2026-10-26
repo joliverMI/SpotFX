@@ -535,6 +535,11 @@ export interface RoomControlState {
    * bar's Energy (bridge.intensity) at the drop is at least this. Default
    * 0.7; 0 = every drop; an unknown energy is never gated. */
   drop_shock_min_energy: number;
+  /** DROP TESTING (the Home Drops panel's icon-only toggle,
+   * drop_firing.py): every detected drop plays where a confident one
+   * would, approved or not; removed and switched-off ones never. Default
+   * off; stays on until switched off. Optional for an older server. */
+  drop_testing?: boolean;
   /** THE PULSE FLASH'S ENERGY FLOOR (scene_response.pulse_flash_allowed):
    * the Pulse flash flare fires only when the top bar's Energy is at least
    * this. Default 0.8; 0 = never gated; an unknown energy is never gated. */
@@ -1269,6 +1274,20 @@ export interface EngineStatus {
     counts: Record<string, number>;
   };
   ambient: AmbientGateStatus;
+  /** the trigger clock (spectra/services/trigger_engine.py status()):
+   * `last_drop` is the drop that fired last — the Home Drops panel's "just
+   * played" row, the `drop_played` push's backstop */
+  triggers?: { track_uri: string | null; position_ms: number | null; last_drop?: LastDrop | null };
+}
+
+/** A drop that just fired (trigger_engine._note_drop_played): its song,
+ * its sequence key (or "his:<trigger id>" for one of his own drops) and
+ * when. Pushed as {"type": "drop_played", ...} on the SPECTRA websocket. */
+export interface LastDrop {
+  uri: string | null;
+  key: string;
+  at_ms: number;
+  position_ms: number | null;
 }
 
 /** TS mirrors for spectra/models/trigger.py — THE KEYSTONE: a per-song

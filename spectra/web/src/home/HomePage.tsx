@@ -1,8 +1,8 @@
 /** Home (`/`) — song-layout-plan, data/ui-layout-plan/report.md §5, §13
  * decision 10 ("/" opens Home instead of Scenes): the tuned audio shape
  * aligned under the chrome's own song timeline, full width on desktop,
- * plus Quick sequences / Quick actions cards side by side (never full
- * width).
+ * plus Quick sequences / Quick actions / Drops cards side by side (never
+ * full width; the Drops panel is predrop plan step 1, ./HomeDrops.tsx).
  *
  * THE TIMELINE IS NOT HERE ANY MORE (the Admiral, 2026-10-15). Home used
  * to draw its own editable copy of it directly above the shape, which is
@@ -13,6 +13,7 @@
 import { useSongTimelineView } from '../components/songTimelineView';
 import HomeTimeline from './HomeTimeline';
 import HomeQuickRuns from './HomeQuickRuns';
+import HomeDrops from './HomeDrops';
 
 export default function HomePage({ showAudioShape = true }: { showAudioShape?: boolean }) {
   // THE LAST SONG COUNTS (the Admiral's Q2 answer, 2026-10-15): with
@@ -33,7 +34,9 @@ export default function HomePage({ showAudioShape = true }: { showAudioShape?: b
           Nothing has played yet this session — the timeline above is waiting for a song.
         </div>
       )}
-      <HomeQuickRuns />
+      {/* THE DROPS PANEL (predrop plan step 1): a third card beside Quick
+        * sequences and Quick actions — ./HomeDrops.tsx */}
+      <HomeQuickRuns><HomeDrops /></HomeQuickRuns>
     </div>
   );
 }

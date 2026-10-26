@@ -373,6 +373,17 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "instead decides whether its own bands snap back out of the core "
         "on the drop (off: the plain bloom). Takes effect on the very "
         "next drop."),
+    "drop_testing": _spec(
+        "drop_testing", "Drop testing (play every detected drop)",
+        "Off (default): a suggested drop waits for his approval on Home's "
+        "Drops panel (or the Timeline) before it plays; a confident one "
+        "plays on its own. On: every detected drop plays where a confident "
+        "one would, approved or not, so he can watch them in the room and "
+        "approve the good ones; the drop that just played moves to the top "
+        "of the Drops panel, highlighted. A drop he removed, a part he "
+        "switched off and a drop he switched off never play, even with "
+        "testing on. The room's 'Scene changes' setting still decides "
+        "whether analysed drops play at all. Stays on until switched off."),
     "drop_shock_min_energy": _spec(
         "drop_shock_min_energy", "Shockwave minimum energy (top-bar Energy)",
         "The drop Shockwave (on the crystal and on the strips), and Star's "

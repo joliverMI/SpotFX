@@ -23,6 +23,21 @@ interface BuilderState {
 
   profile: SongProfile | null;
   dirty: boolean;
+  /** THIS SONG CHANGED ELSEWHERE (2026-10-26, predrop plan step 1): Home's
+   * Drops panel (or Sonic) wrote his charge/lull/drop triggers in this
+   * song's profile (routers/profiles.py's narrow edit, which broadcasts
+   * `profile_triggers_changed`). Every save posts the WHOLE profile, so a
+   * tab still holding the old copy would put a removed trigger back. With
+   * no unsaved edit the page just reloads the song (and starts a fresh
+   * undo history — an old snapshot would resurrect it too); with one,
+   * this is set and the save is HELD until he chooses: reload, or save
+   * his copy anyway (`resolveChangedElsewhere`). */
+  changedElsewhere: boolean;
+  /** set by `markChangedElsewhere` when the song is reloaded clean: the
+   * next loadProfile starts a fresh undo history */
+  reloadClearsHistory: boolean;
+  markChangedElsewhere: () => void;
+  resolveChangedElsewhere: (choice: 'reload' | 'save') => void;
   /** Outcome of the last save's SPECTRA trigger sync (POST /api/profiles ->
    * services/spectra_trigger_sync_client.py). A save writes the profile AND
    * lands its triggers in the copy SPECTRA fires from; when SPECTRA is down
@@ -93,6 +108,26 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
   autoWait: false,
   profile: null,
   dirty: false,
+  changedElsewhere: false,
+  reloadClearsHistory: false,
+  markChangedElsewhere: () => {
+    if (get().dirty) set({ changedElsewhere: true });
+    else set({ reloadClearsHistory: true });
+  },
+  resolveChangedElsewhere: (choice) => {
+    if (choice === 'save') {
+      set({ changedElsewhere: false });
+      void get().flushSave();
+    } else {
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+      // his unsaved edit is dropped; the caller refetches the song, which
+      // loadProfile takes clean (and with a fresh history)
+      set({ changedElsewhere: false, dirty: false, reloadClearsHistory: true });
+    }
+  },
   spectraSync: null,
   slotId: '',
   editingTriggerId: null,
@@ -157,10 +192,13 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
     // History survives post-save refetches of the same song; a song change
     // starts clean.
     const sameSong = get().profile?.spotify_uri === p.spotify_uri;
+    const fresh = !sameSong || get().reloadClearsHistory;
     set({
       profile: snapshot(p),
       dirty: false,
-      ...(sameSong ? {} : { undoStack: [], redoStack: [] }),
+      changedElsewhere: false,
+      reloadClearsHistory: false,
+      ...(fresh ? { undoStack: [], redoStack: [] } : {}),
     });
   },
 
@@ -205,8 +243,11 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
   },
 
   flushSave: async () => {
-    const { profile, dirty } = get();
+    const { profile, dirty, changedElsewhere } = get();
     if (!profile || !dirty) return;
+    // HELD: this copy predates a change made elsewhere — saving it whole
+    // would put back what was removed (`changedElsewhere`)
+    if (changedElsewhere) return;
     if (saveTimer) {
       clearTimeout(saveTimer);
       saveTimer = null;
