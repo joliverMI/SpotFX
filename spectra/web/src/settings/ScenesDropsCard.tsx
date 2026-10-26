@@ -3,8 +3,8 @@
  * button's own popover — transition times, lull darkness, strip phase
  * strength, breath-hold, drop timing, drop Shockwave + its energy floor,
  * Pulse flash floor, the drop colour change, stale-drop rules, thematic
- * transitions, music
- * devices, the transition placement rule, and the analysed-action rates.
+ * transitions, music devices, the transition placement rule, and the
+ * analysed-action rates.
  * The Scenes popover itself (RoomControlsBar.tsx) now keeps only Force
  * Scene (moved to the TOP, his edited ask), the scene-change tier, and
  * recent picks — this card is everything else.
