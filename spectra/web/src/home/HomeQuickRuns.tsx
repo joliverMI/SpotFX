@@ -11,7 +11,7 @@
  * later pass can extract the two shared components properly, which would
  * let the Light Show page's own Run view and this one share one
  * implementation. */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { apiDel, apiGet, apiPost } from '../api/client';
 import Icon from '../components/Icon';
 import { cycleActions, phaseButtonLook } from '../lightshow/phaseArmCycle';
@@ -35,7 +35,10 @@ const triggerLabel = (t: ArmTrigger | string): string => (
   TRIGGER_LABEL[t as ArmTrigger] ?? String(t)
 );
 
-export default function HomeQuickRuns() {
+/** `children` land as more cards in the same grid — Home's Drops panel
+ * (./HomeDrops.tsx, predrop plan step 1), "beside Quick actions with the
+ * same shape". */
+export default function HomeQuickRuns({ children }: { children?: ReactNode }) {
   const [sequences, setSequences] = useState<ShowSequence[]>([]);
   const [recent, setRecent] = useState<RecentSequenceRun[]>([]);
   const [sets, setSets] = useState<ShowSet[]>([]);
@@ -233,6 +236,7 @@ export default function HomeQuickRuns() {
           })}
         </ul>
       </div>
+      {children}
     </div>
   );
 }

@@ -39,8 +39,28 @@ side of it — the pair the Timeline's undo/redo puts back through
                                                     and charge are placed by the rules
   POST /confirm-all   {uri}                         every confident detection
   POST /redetect      {uri}                         detect again now
-  POST /restore       {uri, edits, expect}          undo/redo
+  POST /restore       {uri, edits, expect, profile?} undo/redo (with `profile`,
+                                                    his song-profile rows too)
   GET  /edits?uri=                                  his edits and their rev
+
+THE HOME DROPS PANEL (2026-10-26, predrop plan step 1 —
+spectra/services/drop_panel.py is the binding statement). Keys are the
+view's, plus "his:<drop trigger id>" for one of his own drops (the view's
+`yours` rows). Each answers the edit shape above plus `profile` (the song-
+profile rows his own drop's write changed, the other half of one undo
+step) and `said` (what it did, in words).
+
+  POST /parts         {uri, key, parts}             {part: "on"|"off"}; the
+                                                    drop "on" confirms it
+  POST /approve       {uri, key}                    the double tick
+  POST /remove        {uri, key}                    remove completely
+  POST /switch-on     {uri, key}                    one of his drops back on
+  GET  /provenance?uri=                             his phase triggers: placed
+                                                    by hand or imported (or
+                                                    born on SPECTRA's card)
+
+503 when the root process (his song profiles) does not answer — nothing is
+changed; the root route's own refusals pass through (404/422/409).
 
 Errors: 404 no such sequence, 422 an edit that would break charge < lull
 < drop (or a bad body), 409 a stale undo.
@@ -62,7 +82,7 @@ from typing import Any, Literal, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from spectra.services import drop_firing, drop_sequences
+from spectra.services import drop_firing, drop_panel, drop_sequences
 
 router = APIRouter(prefix="/api/drop-sequences", tags=["spectra-drop-sequences"])
 
@@ -125,6 +145,13 @@ class _Add(_Song):
 class _Restore(_Song):
     edits: dict[str, Any]
     expect: Optional[str] = None
+    # the profile half of a panel write's undo: restore records
+    # {id, from, to, index}, oriented by the caller (drop_panel.restore)
+    profile: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class _Parts(_Seq):
+    parts: dict[Literal["charge", "lull", "pre_drop", "drop"], Literal["on", "off"]]
 
 
 def _edit(uri: str, op: str, **kw) -> dict:
@@ -174,6 +201,10 @@ async def post_revert(body: _Seq):
 
 @router.post("/handles")
 async def post_handles(body: _Handles):
+    if drop_panel.is_his(body.key):
+        # one of his own drops: its trigger moves in his song profile
+        return await _panel(body.uri, drop_panel.move_handles(body.uri, body.key,
+                                                              dict(body.handles)))
     return await _run(body.uri, "handles", key=body.key, handles=dict(body.handles))
 
 
@@ -205,7 +236,69 @@ async def post_confirm_all(body: _Song):
 
 @router.post("/restore")
 async def post_restore(body: _Restore):
+    if body.profile:
+        return await _panel(body.uri, drop_panel.restore(body.uri, body.edits, body.expect,
+                                                         list(body.profile)))
     return await _run(body.uri, "restore", edits=body.edits, expect=body.expect)
+
+
+# ── the Home Drops panel (spectra/services/drop_panel.py) ─────────────────
+
+async def _panel(uri: str, write) -> dict:
+    try:
+        res = await write
+    except drop_sequences.SequenceNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except drop_sequences.InvalidEdit as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except drop_sequences.EditConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except drop_panel.ProfileRefused as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    except drop_panel.ProfileUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {
+        "result": res.result,
+        "view": await asyncio.to_thread(drop_firing.annotated_view, uri),
+        "before": res.before,
+        "after": res.after,
+        "rev_before": drop_sequences.edits_rev(res.before),
+        "rev_after": drop_sequences.edits_rev(res.after),
+        "profile": res.profile,
+        "said": res.said,
+    }
+
+
+@router.post("/parts")
+async def post_parts(body: _Parts):
+    return await _panel(body.uri, drop_panel.set_parts(body.uri, body.key, dict(body.parts)))
+
+
+@router.post("/approve")
+async def post_approve(body: _Seq):
+    return await _panel(body.uri, drop_panel.approve(body.uri, body.key))
+
+
+@router.post("/remove")
+async def post_remove(body: _Seq):
+    return await _panel(body.uri, drop_panel.remove(body.uri, body.key))
+
+
+@router.post("/switch-on")
+async def post_switch_on(body: _Seq):
+    return await _panel(body.uri, drop_panel.switch_on(body.uri, body.key))
+
+
+@router.get("/provenance")
+async def get_provenance(uri: str = Query(..., min_length=1)):
+    """His charge/lull/drop triggers: each one placed by hand or imported,
+    read from his song profile by the root process, plus any born on
+    SPECTRA's own trigger card (placed by hand; drop_panel.card_born_rows).
+    A root that does not answer is a stated "unknown", never a guess."""
+    try:
+        return await drop_panel.panel_provenance(uri)
+    except drop_panel.ProfileRefused as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
 
 
 def _redetect(uri: str) -> dict:

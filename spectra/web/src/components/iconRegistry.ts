@@ -186,6 +186,30 @@ export const ICONS = {
    * /absorb): a linked playlist played silently so every song's audio
    * shape is captured into the library. */
   absorb: 'M3 14h5l1.5 3h5l1.5-3h5v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z M13 2v7 M13 2l4 2 M11 11a2 2 0 1 0 0-4a2 2 0 0 0 0 4Z',
+  /* ── THE HOME DROPS PANEL's toggle bar (predrop plan step 1, home/
+   * HomeDrops.tsx): one icon per part of a drop, the double tick, remove,
+   * edit and Testing. The part glyphs are tinted by the Timeline's own
+   * phase colours (home/dropsPanel.ts PART_COLOR). */
+  /** Two ticks — approve the whole drop (charge, lull, pre-drop, drop). */
+  checkAll: 'M1.5 12.5l4.5 4.5 9-10 M10.5 16.5l1 1 10.5-11.5',
+  /** A cross — remove the drop completely. */
+  xMark: 'M18 6L6 18 M6 6l12 12',
+  /** A pencil — open the drop's editor in place. */
+  edit: 'M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z M14.5 5.5l3 3',
+  /** A rising line with an arrowhead — the charge (a build). */
+  phaseCharge: 'M3 19L20 6 M20 6h-6 M20 6v6',
+  /** A dip — the lull. */
+  phaseLull: 'M2 7c4 0 5 10 10 10s6-10 10-10',
+  /** A small spike before a tall one — a pre-drop hit (a spike). */
+  preDrop: 'M2 20h3l2-5 2 5h3l3-16 3 16h4',
+  /** A short waveform before a tall spike — a pre-drop that is a vocal
+   * intro. */
+  preDropVoice: 'M3 14v-2 M6 16v-6 M9 15v-4 M12 20l3-16 3 16h3',
+  /** A down arrow landing in a splash — the drop. */
+  phaseDrop: 'M12 3v11 M7.5 9.5L12 14l4.5-4.5 M3 20c1.5-2 4-2 5.5 0 M15.5 20c1.5-2 4-2 5.5 0',
+  /** A flask with a play triangle — drop Testing: every detected drop
+   * plays (NOT `flask`, the Test Bed's own glyph). */
+  testDrops: 'M9 3h6 M10 3v6L5 19a1.5 1.5 0 0 0 1.3 2h11.4A1.5 1.5 0 0 0 19 19l-5-10V3 M10.5 13l4 2.25-4 2.25Z',
 } satisfies Record<string, string>;
 
 export type IconName = keyof typeof ICONS;

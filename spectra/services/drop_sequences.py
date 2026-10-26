@@ -85,6 +85,45 @@ confirmed > confident | suggested; and added. This module only says what
 each sequence IS; what fires, and the protected window around each, is
 spectra/services/drop_firing.py (phase 5).
 
+PARTS (2026-10-26, predrop plan step 1 — the Home Drops panel's per-drop
+toggle bar; the Admiral: "tap the double checkmark button to approve the
+lull, charge, drop, and predrop. Or, an icon for each individual one, to
+toggle them"). Every view sequence carries `parts`, one state per part:
+  on       approved: it plays (with its drop);
+  waiting  not approved yet: it follows the sequence's tier — a confident
+           detection plays on its own, a suggested one waits (or plays
+           while drop Testing is on, drop_firing.py);
+  off      never plays, not even in Testing;
+  absent   the drop has no such part (the pre-drop, until pre-drop
+           detection exists, on every drop).
+A charge, lull or pre-drop leads into its drop, so it plays only when its
+drop plays (drop_firing.py); a drop switched off keeps the sequence listed
+but silent, which is not a dismissal. Stored as `overrides[key].parts`
+({part: "on" | "off"}, absent = waiting; the lull's and charge's "off" stay
+the existing `lull_off`/`charge_off` flags), and on an added sequence as
+its own `parts` (only "drop": "off" — everything he placed is on).
+
+TWO MODES, so nothing he already did changes meaning. An override WITHOUT
+a `parts` dict is the legacy shape: confirmed or edited means the whole
+sequence is his (every part on), exactly as before parts existed. The
+first part edit on a sequence creates the dict, seeded from that legacy
+reading (`_ensure_parts`), and from then on every part's approval is
+explicit: approving the drop alone confirms it and leaves the charge and
+lull waiting. The drop part "on" and the override's confirmed state move
+together. The Timeline's Confirm in parts mode approves every part that is
+not off, the same as the panel's double tick.
+
+HIS OWN ROWS. `yours` in the view groups ALL his charge/lull/drop triggers
+(enabled or switched off, unlike `authored`, which feeds the firing and
+the "matches yours" rule and stays enabled-only) into drop-anchored rows,
+each member carrying `enabled` and its own `offset_ms` (its time is the
+moment it fires: stored time plus that offset), and names the detection
+the row stands in for. What Remove does to them (delete if placed by hand, switch off if
+imported, answer 6) is spectra/services/drop_panel.py; when a removal
+dismisses the detection a row stood in for, that dismissal is recorded
+`dismissed_for` his drop trigger with the override as it was before
+(`prior`), so switching his drop back on puts the detection back.
+
 EVERY TIME IS SONG TIME, the frame his triggers are in.
 """
 from __future__ import annotations
@@ -135,6 +174,14 @@ STATE_DISMISSED = "dismissed"
 
 HANDLES = ("charge", "lull", "drop")
 PHASE_CLASSES = ("charge", "lull", "drop")
+
+PARTS = ("charge", "lull", "pre_drop", "drop")
+"""The parts of a drop, in the order they play (module docstring's PARTS).
+The pre-drop is one, absent on every drop until pre-drop detection lands."""
+PART_ON = "on"
+PART_WAITING = "waiting"
+PART_OFF = "off"
+PART_ABSENT = "absent"
 
 
 # ── the file ───────────────────────────────────────────────────────────────
@@ -478,10 +525,174 @@ def _op_confirm(entry: dict, key: str) -> str:
     if _is_added(key):
         _find_added(entry, key)
         return key                      # an added sequence is his already
-    okey, _det, ov = _override(entry, key)
+    okey, det, ov = _override(entry, key)
     ov["state"] = STATE_CONFIRMED
+    if isinstance(ov.get("parts"), dict):
+        # PARTS MODE (module docstring): a confirm approves every part that
+        # is not off, and the drop itself — "this is a drop, play it".
+        _approve_parts(ov, det)
+        ov["parts"]["drop"] = PART_ON
     ov["at"] = _now_ms()
     return okey
+
+
+def _legacy_his(ov: dict) -> bool:
+    """The legacy reading of an override without a `parts` dict: confirmed
+    or edited means the whole sequence is his."""
+    moved = any(ov.get(f"{h}_ms") is not None for h in HANDLES)
+    edited = moved or bool(ov.get("lull_off")) or bool(ov.get("charge_off"))
+    return ov.get("state") == STATE_CONFIRMED or edited
+
+
+def _ensure_parts(entry: dict, key: str) -> tuple[str, Optional[dict], dict]:
+    """The override a part edit lands in, switched to PARTS MODE: the first
+    part edit seeds `parts` from the legacy reading, so a sequence he had
+    already confirmed or edited stays wholly approved (module docstring)."""
+    okey, det, ov = _override(entry, key)
+    if not isinstance(ov.get("parts"), dict):
+        parts: dict = {}
+        if ov.get("state") != STATE_DISMISSED and _legacy_his(ov):
+            eff = _effective(det or ov.get("detected") or {}, ov)
+            for h in ("charge", "lull"):
+                if eff.get(h) is not None:
+                    parts[h] = PART_ON
+            parts["drop"] = PART_ON
+            ov["state"] = STATE_CONFIRMED
+        ov["parts"] = parts
+    return okey, det, ov
+
+
+def _approve_parts(ov: dict, det: Optional[dict]) -> None:
+    """Every charge/lull part that exists and is not off → on."""
+    eff = _effective(det or ov.get("detected") or {}, ov)
+    parts = ov.setdefault("parts", {})
+    for h in ("charge", "lull"):
+        if eff.get(h) is not None and not ov.get(f"{h}_off"):
+            parts[h] = PART_ON
+
+
+def _refuse_dismissed(ov: dict) -> None:
+    if ov.get("state") == STATE_DISMISSED:
+        raise InvalidEdit("this drop was removed — undo it, or bring it back on the Timeline")
+
+
+def _op_part(entry: dict, key: str, part: str, value: str) -> str:
+    """One part's toggle (the panel's charge/lull/pre-drop/drop buttons):
+    `value` "on" approves it, "off" switches it off. The drop part "on"
+    confirms the sequence; "off" keeps it listed but silent."""
+    if part not in PARTS:
+        raise InvalidEdit(f"part must be one of {PARTS}")
+    if value not in (PART_ON, PART_OFF):
+        raise InvalidEdit("a part is switched on or off")
+    if part == "pre_drop":
+        raise InvalidEdit("this drop has no pre-drop")
+    if _is_added(key):
+        if part in ("lull", "charge"):
+            return _op_member_off(entry, key, part, value == PART_OFF)
+        rec = _find_added(entry, key)
+        parts = rec.setdefault("parts", {})
+        if value == PART_OFF:
+            parts["drop"] = PART_OFF
+        else:
+            parts.pop("drop", None)
+        if not parts:
+            rec.pop("parts", None)
+        rec["at"] = _now_ms()
+        return key
+    okey, det, ov = _ensure_parts(entry, key)
+    _refuse_dismissed(ov)
+    parts = ov["parts"]
+    if part in ("lull", "charge"):
+        if value == PART_OFF:
+            _op_member_off(entry, key, part, True)
+            parts.pop(part, None)
+        else:
+            if ov.get(f"{part}_off"):
+                _op_member_off(entry, key, part, False)
+            elif _effective(det or ov.get("detected") or {}, ov).get(part) is None:
+                raise InvalidEdit(f"this drop has no {part} — add one in its editor")
+            parts[part] = PART_ON
+    elif value == PART_ON:
+        parts["drop"] = PART_ON
+        ov["state"] = STATE_CONFIRMED
+    else:
+        parts["drop"] = PART_OFF
+        if ov.get("state") == STATE_CONFIRMED:
+            ov.pop("state")
+    ov["at"] = _now_ms()
+    return okey
+
+
+def _op_approve(entry: dict, key: str) -> str:
+    """The double tick: approve every part that is not off — the charge,
+    the lull, the pre-drop and the drop. A drop he switched off stays off
+    (an off part is his explicit "never"); tap the drop itself to bring
+    it back."""
+    if _is_added(key):
+        _find_added(entry, key)
+        return key                      # everything he placed is on already
+    okey, det, ov = _ensure_parts(entry, key)
+    _refuse_dismissed(ov)
+    _approve_parts(ov, det)
+    if ov["parts"].get("drop") != PART_OFF:
+        ov["parts"]["drop"] = PART_ON
+        ov["state"] = STATE_CONFIRMED
+    ov["at"] = _now_ms()
+    return okey
+
+
+def _op_remove(entry: dict, key: str) -> str:
+    """Remove a detected or added sequence completely: a detection is
+    dismissed, a sequence he added is deleted. (His own rows go through
+    spectra/services/drop_panel.py, which also writes his song profile.)"""
+    if _is_added(key):
+        if not _op_remove_added(entry, key):
+            raise SequenceNotFound(f"no added sequence {key!r} on this song")
+        return key
+    return _op_dismiss(entry, key)
+
+
+def _op_dismiss_for(entry: dict, key: str, his_id: str) -> Optional[str]:
+    """Dismiss the detection one of his own rows stood in for, remembering
+    the override as it was (`prior`) so `_op_undismiss_for` can put it
+    back when his drop is switched on again. A detection he had dismissed
+    himself is left exactly as it is. None when no detection answers."""
+    try:
+        okey, det = _resolve_detected_key(entry, key)
+    except SequenceNotFound:
+        return None
+    ovs = entry.setdefault("overrides", {})
+    current = ovs.get(okey)
+    if isinstance(current, dict) and current.get("state") == STATE_DISMISSED:
+        if not current.get("dismissed_for"):
+            return okey
+    prior = copy.deepcopy(current) if isinstance(current, dict) else None
+    if isinstance(prior, dict) and prior.get("dismissed_for"):
+        prior = prior.get("prior")
+    ov = {"detected": (_snapshot(det) if det else (prior or {}).get("detected")),
+          "state": STATE_DISMISSED, "dismissed_for": str(his_id), "prior": prior,
+          "at": _now_ms()}
+    ovs[okey] = ov
+    return okey
+
+
+def _op_undismiss_for(entry: dict, his_id: str) -> list[str]:
+    """Put back every detection dismissed on behalf of his drop `his_id`."""
+    ovs = entry.get("overrides") or {}
+    back = []
+    for okey in list(ovs):
+        ov = ovs.get(okey)
+        if not isinstance(ov, dict) or ov.get("dismissed_for") != str(his_id):
+            continue
+        prior = ov.get("prior")
+        if isinstance(prior, dict):
+            ovs[okey] = prior
+        else:
+            ovs.pop(okey)
+        back.append(okey)
+    if not ovs:
+        entry.pop("overrides", None)
+    return back
 
 
 def _op_dismiss(entry: dict, key: str) -> str:
@@ -933,6 +1144,48 @@ def _apply_edit(uri: str, op: str, **kw) -> EditResult:
         return _mutate_tracked(uri, fn)
     if op == "restore":
         return _mutate_tracked(uri, lambda e: _op_restore(e, kw["edits"], kw.get("expect")))
+    if op == "parts":
+        parts = kw["parts"]
+        if not isinstance(parts, dict) or not parts:
+            raise InvalidEdit("name at least one part to switch")
+
+        def fn(entry):
+            done = key
+            for part, value in parts.items():
+                done = _op_part(entry, key, part, value)
+            return done
+        return _mutate_tracked(uri, fn)
+    if op == "approve":
+        return _mutate_tracked(uri, lambda e: _op_approve(e, key))
+    if op == "remove":
+        return _mutate_tracked(uri, lambda e: _op_remove(e, key))
+    if op == "dismiss_for":
+        keys = list(kw["keys"])
+        his_id = str(kw["his_id"])
+        return _mutate_tracked(uri, lambda e: [k for k in (_op_dismiss_for(e, x, his_id)
+                                                           for x in keys) if k])
+    if op == "undismiss_for":
+        return _mutate_tracked(uri, lambda e: _op_undismiss_for(e, str(kw["his_id"])))
+    if op == "multi":
+        # several of the edits above in ONE locked write, so they share one
+        # before/after pair — one undo step (drop_panel.py's own rows)
+        steps = list(kw.get("ops") or [])
+
+        def fn(entry):
+            out = []
+            for st in steps:
+                kind = st.get("op")
+                if kind == "part":
+                    out.append(_op_part(entry, st["key"], st["part"], st["value"]))
+                elif kind == "dismiss_for":
+                    out.extend(k for k in (_op_dismiss_for(entry, x, str(st["his_id"]))
+                                           for x in st["keys"]) if k)
+                elif kind == "undismiss_for":
+                    out.extend(_op_undismiss_for(entry, str(st["his_id"])))
+                else:
+                    raise InvalidEdit(f"unknown step {kind!r}")
+            return out
+        return _mutate_tracked(uri, fn)
     raise InvalidEdit(f"unknown edit {op!r}")
 
 
@@ -1013,9 +1266,58 @@ class SequenceView:
     detection_lost: bool = False
     matches: list[dict] = field(default_factory=list)
     his_marks_near: list[dict] = field(default_factory=list)
+    # one state per part (module docstring's PARTS): on | waiting | off | absent
+    parts: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return asdict(self)
+
+
+def _part_states(v: SequenceView, stored: Optional[dict], legacy_his: bool,
+                 *, added: bool = False) -> dict:
+    """The view's `parts` (module docstring's PARTS and TWO MODES).
+    `stored` is the override's (or added record's) `parts` dict, None in
+    the legacy shape."""
+    out: dict[str, str] = {}
+    for h in ("charge", "lull"):
+        if getattr(v, f"{h}_off"):
+            out[h] = PART_OFF
+        elif getattr(v, f"{h}_ms") is None:
+            out[h] = PART_ABSENT
+        elif added:
+            out[h] = PART_ON
+        elif stored is not None:
+            out[h] = PART_ON if stored.get(h) == PART_ON else PART_WAITING
+        else:
+            out[h] = PART_ON if legacy_his else PART_WAITING
+    out["pre_drop"] = PART_ABSENT
+    if stored is not None and stored.get("drop") == PART_OFF:
+        out["drop"] = PART_OFF
+    elif added:
+        out["drop"] = PART_ON
+    elif stored is not None:
+        out["drop"] = PART_ON if stored.get("drop") == PART_ON else PART_WAITING
+    else:
+        out["drop"] = PART_ON if legacy_his else PART_WAITING
+    return {p: out[p] for p in PARTS}
+
+
+def _view_state(ov: dict, edited: bool, tier: Optional[str]) -> Optional[str]:
+    """The sequence's state from its override (STATES; PARTS MODE: only an
+    approved drop makes it his — confirmed, or edited when a handle moved).
+    None when nothing of his makes it anything but its tier."""
+    if ov.get("state") == STATE_DISMISSED:
+        return STATE_DISMISSED
+    parts = ov.get("parts")
+    if isinstance(parts, dict):
+        if parts.get("drop") == PART_ON:
+            return STATE_EDITED if edited else STATE_CONFIRMED
+        return tier
+    if edited:
+        return STATE_EDITED
+    if ov.get("state") == STATE_CONFIRMED:
+        return STATE_CONFIRMED
+    return tier
 
 
 def _near(marks: list[HisMark], at_ms: int, reach: float,
@@ -1032,14 +1334,7 @@ def _detected_view(seq: dict, ov: Optional[dict], okey: Optional[str],
             "drop_ms": seq.get("drop_ms")}
     moved = {h: ov.get(f"{h}_ms") is not None for h in HANDLES}
     edited = any(moved.values()) or bool(ov.get("lull_off")) or bool(ov.get("charge_off"))
-    if ov.get("state") == STATE_DISMISSED:
-        state = STATE_DISMISSED
-    elif edited:
-        state = STATE_EDITED
-    elif ov.get("state") == STATE_CONFIRMED:
-        state = STATE_CONFIRMED
-    else:
-        state = seq.get("tier") or STATE_SUGGESTED
+    state = _view_state(ov, edited, seq.get("tier") or STATE_SUGGESTED)
     v = SequenceView(
         key=okey or seq["key"], origin="detected", state=state,
         charge_ms=eff["charge"], lull_ms=eff["lull"], drop_ms=int(eff["drop"]),
@@ -1058,6 +1353,8 @@ def _detected_view(seq: dict, ov: Optional[dict], okey: Optional[str],
             v.notes.append(f"the analysis now finds this drop at {seq['drop_ms']} ms, "
                            f"not {was} ms: keep yours, or take the new place")
     _drop_automatic_out_of_order(v)
+    stored_parts = ov.get("parts") if isinstance(ov.get("parts"), dict) else None
+    v.parts = _part_states(v, stored_parts, _legacy_his(ov))
     return v
 
 
@@ -1070,13 +1367,8 @@ def _orphan_view(okey: str, ov: dict) -> Optional[SequenceView]:
     eff = _effective(base, ov)
     moved = {h: ov.get(f"{h}_ms") is not None for h in HANDLES}
     edited = any(moved.values()) or bool(ov.get("lull_off")) or bool(ov.get("charge_off"))
-    if ov.get("state") == STATE_DISMISSED:
-        state = STATE_DISMISSED
-    elif edited:
-        state = STATE_EDITED
-    elif ov.get("state") == STATE_CONFIRMED:
-        state = STATE_CONFIRMED
-    else:
+    state = _view_state(ov, edited, None)
+    if state is None:
         return None
     v = SequenceView(
         key=okey, origin="detected", state=state, charge_ms=eff["charge"],
@@ -1089,6 +1381,8 @@ def _orphan_view(okey: str, ov: dict) -> Optional[SequenceView]:
         v.notes.append("the analysis no longer finds this drop; it stays yours "
                        "as you left it")
     _drop_automatic_out_of_order(v)
+    stored_parts = ov.get("parts") if isinstance(ov.get("parts"), dict) else None
+    v.parts = _part_states(v, stored_parts, _legacy_his(ov))
     return v
 
 
@@ -1127,6 +1421,7 @@ def view(uri: str, *, triggers: Optional[list] = None) -> dict:
                     "counts": {}})
         _add_added(out, entry, marks, 500.0)
         out["counts"] = _counts(out["sequences"])
+        out["yours"] = yours_rows(triggers, out["sequences"], entry.get("overrides"))
         return out
     beat = _beat_ms(entry)
     reach = MATCH_BEATS * beat
@@ -1185,6 +1480,7 @@ def view(uri: str, *, triggers: Optional[list] = None) -> dict:
     _add_added(out, entry, marks, beat)
     out["sequences"].sort(key=lambda s: s["drop_ms"])
     out["counts"] = _counts(out["sequences"])
+    out["yours"] = yours_rows(triggers, out["sequences"], overrides)
     return out
 
 
@@ -1205,7 +1501,73 @@ def _add_added(out: dict, entry: dict, marks: list[HisMark], beat: float) -> Non
         except (KeyError, TypeError, ValueError):
             continue
         v.his_marks_near = _near(marks, v.drop_ms, NEAR_BEATS * beat)
+        stored_parts = rec.get("parts") if isinstance(rec.get("parts"), dict) else None
+        v.parts = _part_states(v, stored_parts, True, added=True)
         out["sequences"].append(v.as_dict())
+
+
+def _all_phase_marks(triggers: list) -> tuple[list[HisMark], dict[str, bool], dict[str, int]]:
+    """Every authored charge/lull/drop trigger of his, enabled OR switched
+    off, by the moment it fires — and each one's enabled flag and its own
+    `trigger_offset_ms` (the moment it fires is its stored time plus that
+    offset, so a drag to a moment moves the stored time by the offset
+    less — drop_panel.py's `move_handles`)."""
+    marks: list[HisMark] = []
+    enabled: dict[str, bool] = {}
+    offsets: dict[str, int] = {}
+    for t in triggers:
+        if getattr(t, "source", "authored") != "authored":
+            continue
+        a = t.action
+        if a.kind != "fire_response":
+            continue
+        cls = str(getattr(a, "event_class", None))
+        if cls not in PHASE_CLASSES:
+            continue
+        offset = int(getattr(t, "trigger_offset_ms", 0) or 0)
+        marks.append(HisMark(id=t.id, kind=cls, timestamp_ms=int(t.timestamp_ms + offset)))
+        enabled[t.id] = bool(getattr(t, "enabled", True))
+        offsets[t.id] = offset
+    return sorted(marks, key=lambda m: m.timestamp_ms), enabled, offsets
+
+
+def yours_rows(triggers: list, sequences: list[dict], overrides: Optional[dict] = None) -> list[dict]:
+    """HIS OWN ROWS (module docstring): his charge/lull/drop triggers,
+    enabled or switched off, grouped into drop-anchored rows the way
+    `group_authored` groups the enabled ones. Each row: `key`
+    ("his:<drop trigger id>", the Timeline's own key for his sequence),
+    `charge`/`lull`/`drop` (each {id, kind, timestamp_ms — the moment it
+    fires — enabled, offset_ms} or None),
+    `enabled` (his drop is on), `detections` — every detection the row
+    stands in for: standing down on a member of this row, or dismissed on
+    behalf of his drop (`dismissed_for`) — and `detection`, the first."""
+    marks, enabled, offsets = _all_phase_marks(triggers)
+    groups, _lone = group_authored(marks)
+    standing = [s for s in sequences
+                if s.get("origin") == "detected" and s.get("state") == STATE_MATCHES_YOURS]
+    held_for: dict[str, list[str]] = {}
+    for okey, ov in (overrides or {}).items():
+        if isinstance(ov, dict) and ov.get("dismissed_for"):
+            held_for.setdefault(str(ov["dismissed_for"]), []).append(okey)
+    rows = []
+    for g in groups:
+        members = {}
+        for h in PHASE_CLASSES:
+            m = g.get(h)
+            members[h] = None if m is None else {**m, "enabled": enabled.get(m["id"], True),
+                                                 "offset_ms": offsets.get(m["id"], 0)}
+        drop = members["drop"]
+        if drop is None:
+            continue
+        ids = {m["id"] for m in members.values() if m is not None}
+        dets = [s["key"] for s in standing
+                if any(x.get("id") in ids for x in s.get("matches") or [])]
+        dets += [k for k in held_for.get(str(drop["id"]), []) if k not in dets]
+        rows.append({"key": f"his:{drop['id']}", "charge": members["charge"],
+                     "lull": members["lull"], "drop": drop,
+                     "enabled": bool(drop["enabled"]), "detections": dets,
+                     "detection": dets[0] if dets else None})
+    return rows
 
 
 def _counts(seqs: list[dict]) -> dict:

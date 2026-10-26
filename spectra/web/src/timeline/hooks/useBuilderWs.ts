@@ -47,6 +47,21 @@ export function useBuilderWs(uri: string | null) {
         const off = Number(msg.offset_ms ?? 0);
         toast(`Auto-offset updated: ${off >= 0 ? '+' : ''}${off}ms`, 'info');
       }),
+      // HOME'S DROPS PANEL (or Sonic) changed his charge/lull/drop
+      // triggers in this song's profile — the store's `changedElsewhere`
+      // docstring: reload a clean copy, or hold an unsaved one's save
+      onMessage('profile_triggers_changed', (msg) => {
+        if (!isMine(msg)) return;
+        const store = useBuilderStore.getState();
+        store.markChangedElsewhere();
+        if (useBuilderStore.getState().changedElsewhere) {
+          toast('This song\'s triggers were just changed elsewhere (Home\'s Drops panel) — '
+            + 'your unsaved edit is held: reload, or save yours anyway', 'error');
+        } else {
+          qc.invalidateQueries({ queryKey: ['profile', uriRef.current] });
+          toast('This song\'s triggers were changed elsewhere (Home\'s Drops panel) — reloaded', 'info');
+        }
+      }),
       onMessage('shape_offset_updated', (msg) => {
         if (!isMine(msg)) return;
         refreshMeta();

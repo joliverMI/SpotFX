@@ -38,7 +38,7 @@
  * clock (lib/showClock.ts) — the exact moment the trigger poll fires
  * against, not raw Spotify progress. */
 import { useEffect, useMemo, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   fmtMMSS, MARKER_CY, PLAYED_TINT, pickNext, ringCy, TRACK_HEIGHT, TRACK_PAD, trackX,
 } from './songStrip';
@@ -60,8 +60,11 @@ export default function SongStrip() {
   // song's timeline, dimmed and labelled, rather than an empty panel.
   // One resolved track for both surfaces, so Home's shape below is
   // always showing the same song this row is.
-  const { filters, editable, win, pushHistory, track, showingLast } = useSongTimelineView();
+  const { filters, editable, win, pushHistory, track, showingLast, selectDrop } =
+    useSongTimelineView();
   const uri = track?.uri ?? null;
+  const navigate = useNavigate();
+  const location = useLocation();
   const { data: upcoming } = useUpcoming(uri);
   // The terrain's own source: librosa's per-section energy (approved idea
   // 4). Shares react-query's cache with the Timeline/debug pages, so a
@@ -210,6 +213,27 @@ export default function SongStrip() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events, durationMs, editable]);
 
+  /** A TAP ON A DROP PILL (predrop plan step 1's tie-in): the drop it
+   * names is selected in Home's Drops panel and scrolled into view — and
+   * from any other page, Home opens on it. True when a drop was hit. */
+  const tapDrop = (clientX: number): boolean => {
+    const svg = svgRef.current;
+    if (!svg || durationMs <= 0) return false;
+    const r = svg.getBoundingClientRect();
+    const x = clientX - r.left;
+    let best: number | null = null;
+    let bestD = 12;                        // px: a finger on a 12 px pill
+    for (const e of events) {
+      if (e.kind !== 'drop') continue;
+      const d = Math.abs(trackX(e.ms, durationMs, r.width) - x);
+      if (d <= bestD) { best = e.ms; bestD = d; }
+    }
+    if (best == null) return false;
+    selectDrop(uri, best);
+    if (location.pathname !== '/') navigate('/');
+    return true;
+  };
+
   /** THE WINDOW DRAG — TimelineBar's own `dragEdge` shape (BuilderPage's
    * `onAdjustFollow` convention), moved here from Home's retired copy of
    * the strip: in follow mode an EDGE drag resizes the look-behind /
@@ -221,11 +245,19 @@ export default function SongStrip() {
     ev.stopPropagation();
     const svg = svgRef.current;
     if (!svg || durationMs <= 0) return;
-    pushHistory();
     const target = ev.target as HTMLElement;
     target.setPointerCapture(ev.pointerId);
     let lastX = ev.clientX;
+    const startX = ev.clientX;
+    // ONE history step per drag, pushed when it really moves — a tap on
+    // the window (a drop pill under it) is not a drag and leaves no step
+    let moved = false;
     const move = (e: PointerEvent) => {
+      if (!moved) {
+        if (Math.abs(e.clientX - startX) < 4) return;
+        moved = true;
+        pushHistory();
+      }
       // The drag's own px→ms scale is the TRACK's, inset included, so a
       // pointer moving over a marker moves the window to that marker.
       const rect = svg.getBoundingClientRect();
@@ -251,6 +283,7 @@ export default function SongStrip() {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
+      if (!moved && e.type === 'pointerup') tapDrop(e.clientX);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -301,7 +334,8 @@ export default function SongStrip() {
         </Link>
       </InfoTip>
 
-      <div ref={trackRef} className="song-strip-track" style={{ height: TRACK_HEIGHT }}>
+      <div ref={trackRef} className="song-strip-track" style={{ height: TRACK_HEIGHT }}
+          onClick={(e) => { tapDrop(e.clientX); }}>
         {/* The viewBox is REWRITTEN to the measured pixel size on every
           * build (and on resize) — see songStrip.ts's `trackX` docstring.
           * `preserveAspectRatio="none"` is kept so a sub-pixel rounding
@@ -328,6 +362,8 @@ export default function SongStrip() {
           * a drag, and this element has a pointer capture on it. */}
         <div ref={windowOverlayRef} className="song-strip-window"
             style={{ display: 'none' }} onPointerDown={dragWin('center')}
+            // the drag's own pointerup already handled a tap on a pill
+            onClick={(e) => e.stopPropagation()}
             title="Drag to choose what the audio shape below shows">
           <div className="song-strip-window-edge left" onPointerDown={dragWin('start')} />
           <div className="song-strip-window-edge right" onPointerDown={dragWin('end')} />

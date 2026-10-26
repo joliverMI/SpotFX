@@ -137,7 +137,7 @@ export default function HomeTimeline({
   // marker filters, the view history) — this card's control row is where
   // he sets it, and registering as its listener is what turns the row's
   // own window overlay on.
-  const { win, filters, toggleFilter, pushHistory, undo, redo, canUndo, canRedo } =
+  const { win, filters, toggleFilter, pushHistory, undo, redo, canUndo, canRedo, selectDrop } =
     useSongTimelineView();
   useSongTimelineShape(showAudioShape);
 
@@ -280,7 +280,20 @@ export default function HomeTimeline({
       {/* ONE element carries the measured alignment, so the shape and its
         * control row move together and there is one geometry writer. */}
       <div ref={alignedRef} className="home-timeline-aligned">
-        <div ref={canvasBoxRef} className="home-timeline-shape">
+        {/* A TAP ON A SEQUENCE selects it in the Drops panel (predrop plan
+          * step 1's tie-in): anywhere from its first handle to its drop. */}
+        <div ref={canvasBoxRef} className="home-timeline-shape"
+          onClick={(e) => {
+            const box = canvasBoxRef.current?.getBoundingClientRect();
+            if (!box || box.width <= 0 || dropSeqs.length === 0) return;
+            const w = win.getWin();
+            const span = Math.max(1, w.endMs - w.startMs);
+            const ms = w.startMs + ((e.clientX - box.left) / box.width) * span;
+            const tol = span * 0.015;
+            const hit = dropSeqs.find((d) =>
+              ms >= (d.charge ?? d.lull ?? d.drop) - tol && ms <= d.drop + tol);
+            if (hit) selectDrop(uri, hit.drop);
+          }}>
           <TimelineCanvas
             layers={BUILDER_LAYERS}
             data={data}

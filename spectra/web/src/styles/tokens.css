@@ -180,7 +180,7 @@ nav a:hover, nav a.active {
 main { flex: 1; padding: 16px; max-width: 1200px; margin: 0 auto; width: 100%; }
 /* Home's own timeline/audio-shape run edge to edge on desktop (song-layout-
    plan §9 idea 8); its quick-run cards stay capped via .home-quick-runs's
-   own minmax(0, 560px) columns. */
+   own rule below, not repeated here. */
 main.home-route { max-width: none; }
 /* Phone portrait: the nav keeps one row (icons + "?") and content padding
  * narrows so cards use the width — labels hide, only icons/carets show. */
@@ -3296,7 +3296,15 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .home-timeline-controls-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
 /* ── the quick-run cards ──────────────────────────────────────────────── */
-.home-quick-runs { display: grid; grid-template-columns: repeat(2, minmax(0, 560px)); gap: 16px; justify-content: start; }
+/* THREE CARDS since the Drops panel (predrop plan step 1, home/HomeDrops.tsx):
+ * three in a row where there is room (each capped, never full width), two
+ * below 1100px with the Drops card on its own full row (its toggle bar needs
+ * ~280px), and one column on a phone. */
+.home-quick-runs { display: grid; grid-template-columns: repeat(3, minmax(0, 520px)); gap: 16px; justify-content: start; }
+@media (max-width: 1100px) {
+  .home-quick-runs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .home-quick-runs > .home-drops-card { grid-column: 1 / -1; }
+}
 @media (max-width: 700px) { .home-quick-runs { grid-template-columns: minmax(0, 1fr); } }
 .home-quick-card { display: flex; flex-direction: column; gap: 6px; }
 /* Small-caps card title with its own glyph (the mockup's `.ptitle`). */
@@ -3396,6 +3404,124 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   background: rgba(0, 0, 0, 0.85); color: #fff;
   padding: 6px 14px; border-radius: 6px; z-index: 50;
 }
+
+/* ── the Drops panel (home/HomeDrops.tsx, home/HomeDropEditor.tsx) ───── */
+.home-drops-card.testing { border-color: rgba(232, 121, 249, 0.55); }
+.home-drops-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.home-drops-title-tip { min-width: 0; }
+.home-drops-head-tools { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; }
+/* Testing glows while on — an icon-only toggle (his "make an icon for
+ * testing, don't use text") */
+.home-drops-testing.on {
+  background: rgba(168, 85, 247, 0.35); border-color: var(--accent2); color: #fff;
+  box-shadow: 0 0 10px rgba(232, 121, 249, 0.55);
+}
+.home-drops-note { font-size: 12px; color: var(--text-muted); }
+.home-drops-note.error { color: var(--danger); }
+.home-drops-row {
+  background: var(--surface2); border: 1px solid transparent; border-radius: var(--radius);
+  padding: 7px 8px; display: grid; gap: 6px; min-width: 0;
+}
+.home-drops-row.sel { border-color: var(--accent); }
+.home-drops-row.dim { opacity: 0.6; }
+.home-drops-row.justplayed {
+  border-color: var(--accent2); background: rgba(232, 121, 249, 0.13);
+  box-shadow: 0 0 0 1px rgba(232, 121, 249, 0.35);
+}
+.home-drops-r1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.home-drops-time {
+  font-weight: 800; font-variant-numeric: tabular-nums; font-size: 13.5px;
+  background: none; border: 0; color: var(--text); padding: 0; cursor: pointer; flex: none;
+}
+.home-drops-state {
+  font-size: 12px; color: var(--text-muted); flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.home-drops-state.off { font-style: italic; }
+.home-drops-jp {
+  font-size: 10.5px; font-weight: 800; color: #14061f; background: var(--accent2);
+  border-radius: 999px; padding: 0 7px; white-space: nowrap; flex: none;
+}
+.home-drops-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.home-drops-dot.yes { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.home-drops-dot.no { background: #4b3f5e; }
+/* ONE LINE OF TOGGLES, never wrapped: seven 34x32 buttons (the quick
+ * actions' own size) fit a 280px row. `padding: 0` — the global button
+ * padding would squeeze the glyph (AGENTS.md's design-fidelity note). */
+.home-drops-bar { display: flex; gap: 4px; flex-wrap: nowrap; min-width: 0; }
+.home-drops-btn {
+  width: 34px; height: 32px; flex: none; padding: 0;
+  border-radius: 7px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-muted);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; touch-action: manipulation;
+}
+.home-drops-btn:disabled { opacity: 0.3; cursor: default; }
+.home-drops-btn.approve { color: var(--ok); border-color: rgba(74, 222, 128, 0.6); }
+.home-drops-btn.remove { color: var(--danger); border-color: rgba(248, 113, 113, 0.55); }
+.home-drops-btn.power { color: var(--ok); border-color: rgba(74, 222, 128, 0.6); }
+.home-drops-btn.edit.on { background: rgba(168, 85, 247, 0.25); border-color: var(--accent); color: #fff; }
+/* each part in its own phase colour (--part): filled = on, dashed = waiting,
+ * striped = off, faint = this drop has no such part */
+.home-drops-btn.part.on { background: var(--part); border-color: var(--part); color: #14061f; }
+.home-drops-btn.part.waiting { color: var(--part); border: 1.5px dashed var(--part); }
+.home-drops-btn.part.off {
+  color: #6b5a85;
+  background: repeating-linear-gradient(135deg, transparent 0 5px, rgba(149, 133, 181, 0.16) 5px 7px);
+}
+.home-drops-btn.part.absent:disabled { opacity: 0.22; }
+@media (max-width: 520px), (pointer: coarse) {
+  /* a phone, or a finger at any width (a tablet, the wall kiosk): the bar
+   * fills its row, every button a full finger tall — capped, so a wide
+   * row does not stretch seven buttons into bars */
+  .home-drops-btn { flex: 1 1 0; width: auto; min-width: 36px; max-width: 56px; height: 44px; }
+}
+/* the Timeline's "this song changed elsewhere" hold (timeline/store.ts) */
+.builder-changed-elsewhere {
+  display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px;
+  font-size: 12px; color: var(--warning); margin-top: 4px;
+}
+.builder-changed-elsewhere button { font-size: 12px; padding: 2px 8px; }
+/* the editor in place */
+.home-drop-editor { display: grid; gap: 6px; padding-top: 4px; min-width: 0; }
+.home-drop-editor-strip {
+  position: relative; background: #000; border: 1px solid var(--border);
+  border-radius: 8px; touch-action: none; margin-bottom: 22px;
+}
+.home-drop-editor-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.home-drop-editor-shape {
+  fill: rgba(168, 85, 247, 0.28); stroke: rgba(168, 85, 247, 0.6);
+  stroke-width: 1; vector-effect: non-scaling-stroke;
+}
+.home-drop-editor-beat { stroke: rgba(255, 255, 255, 0.14); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.home-drop-editor-downbeat { stroke: rgba(255, 255, 255, 0.3); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.home-drop-editor-spike { stroke: rgba(236, 72, 153, 0.5); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+/* a 44px touch target per handle, hanging under the strip's bottom edge
+ * so a finger never covers the shape it is placing against */
+.home-drop-editor-handle {
+  position: absolute; bottom: -22px; width: 44px; height: 44px; margin-left: -22px;
+  padding: 0; border: 0; background: transparent; touch-action: none; cursor: ew-resize;
+  display: flex; align-items: center; justify-content: center;
+}
+.home-drop-editor-grip {
+  width: 22px; height: 22px; border-radius: 50%; background: var(--part);
+  border: 2px solid #fff; box-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
+}
+.home-drop-editor-handle:focus-visible .home-drop-editor-grip { outline: 2px solid var(--accent2); outline-offset: 2px; }
+.home-drop-editor-guide { font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.home-drop-editor-steps { display: flex; flex-wrap: wrap; gap: 8px; }
+.home-drop-editor-step { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--part); }
+.home-drop-editor-stepbtn {
+  width: 32px; height: 32px; padding: 0; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer;
+}
+.home-drop-editor-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.home-drop-editor-act {
+  display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px;
+  font-size: 12px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); cursor: pointer; text-decoration: none;
+}
+.home-drop-editor-act:disabled { opacity: 0.45; cursor: default; }
 
 @media (min-width: 1200px) {
   .home-page { max-width: none; }

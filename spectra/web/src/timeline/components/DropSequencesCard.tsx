@@ -14,7 +14,9 @@
  * What fires is the server's answer per sequence (phase 5, spectra/
  * services/drop_firing.py). ../dropSequences.ts holds every word and
  * number shown here. */
+import { useNavigate } from 'react-router-dom';
 import HelpLink from '../../help/HelpLink';
+import { useSongTimelineView } from '../../components/songTimelineView';
 import { fmtAgo } from '../../lib/time';
 import {
   PHASE_COLOR, fireLine, fmtHundredths, fmtTenths, handleRows, reviewStatus, roomLines,
@@ -55,7 +57,8 @@ function title(s: DisplaySeq): string {
   return 'Suggestion';
 }
 
-function Detail({ s, confidentScore, onJump, onClose, editor, selHandle, onSelectHandle, onStep }: {
+function Detail({ s, uri, confidentScore, onJump, onClose, editor, selHandle, onSelectHandle, onStep }: {
+  uri: string | null;
   s: DisplaySeq;
   confidentScore: number | null;
   onJump: () => void;
@@ -157,6 +160,7 @@ function Detail({ s, confidentScore, onJump, onClose, editor, selHandle, onSelec
         <b>What the room does</b>
         {roomLines(s).map((l) => <div key={l}>{l}</div>)}
       </div>
+      <OpenInHome uri={uri} dropMs={s.drop} />
       {(detNotes.length > 0 || s.view?.needs_review) && (
         <ul className={`drop-detail-notes${s.view?.needs_review ? ' review' : ''}`}>
           {detNotes.map((n) => <li key={n}>{n}</li>)}
@@ -222,6 +226,22 @@ function Detail({ s, confidentScore, onJump, onClose, editor, selHandle, onSelec
       </p>
       </>)}
     </div>
+  );
+}
+
+/** "Open in Home" (predrop plan step 1's tie-in): this drop, selected in
+ * Home's Drops panel — the one-tap approve bar. */
+function OpenInHome({ uri, dropMs }: { uri: string | null; dropMs: number }) {
+  const navigate = useNavigate();
+  const { selectDrop } = useSongTimelineView();
+  return (
+    <p className="drop-detail-p">
+      <button type="button" title="Open Home's Drops panel on this drop: approve, switch parts off or remove it in one tap"
+        onClick={() => { selectDrop(uri, dropMs); navigate('/'); }}>
+        Open in Home
+      </button>
+      {' '}<HelpLink topic="drops-panel" title="Home's Drops panel" />
+    </p>
   );
 }
 
@@ -360,7 +380,7 @@ export default function DropSequencesCard({
         </div>
         <div>
           {selected ? (
-            <Detail s={selected} confidentScore={det?.confident_score ?? null}
+            <Detail s={selected} uri={resp?.uri ?? null} confidentScore={det?.confident_score ?? null}
               onJump={() => onJump(selected.key)} onClose={() => onSelect(null)}
               editor={editor} selHandle={selHandle} onSelectHandle={onSelectHandle} onStep={onStep} />
           ) : (

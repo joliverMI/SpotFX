@@ -500,6 +500,8 @@ class TriggerEngine:
         drop_view: Callable[[str, list], dict] | None = None,
         drop_revision: Callable[[], Any] | None = None,
         fire_sequence: Callable[[str, float, Optional[int]], Awaitable[Any]] | None = None,
+        drop_testing: Callable[[], bool] | None = None,
+        drop_played: Callable[[dict], None] | None = None,
         switch_showing: Callable[[], Optional[drop_switch.Showing]] | None = None,
         switch_settings: Callable[[], drop_switch.SwitchSettings] | None = None,
         switch_blocker: Callable[[], Optional[str]] | None = None,
@@ -629,6 +631,18 @@ class TriggerEngine:
         self._drop_view = drop_view or self._default_drop_view
         self._drop_revision = drop_revision or drop_sequences.revision
         self._fire_sequence = fire_sequence or self._default_fire_sequence
+        # DROP TESTING (2026-10-26, RoomControlState.drop_testing — the Home
+        # Drops panel's Testing toggle): read once per tick and folded into
+        # the memo key below, so a suggestion starts or stops firing on the
+        # first tick after he flips it. `drop_played` is told {"uri", "key",
+        # "at_ms", "position_ms"} each time a drop fires (a sequence's, or
+        # one of his own authored drop triggers, key "his:<id>") — the
+        # panel's "just played" row; a no-op unless engine.py wires it to
+        # the SPECTRA websocket. `last_drop` is the same record, read by
+        # status() as the push's backstop.
+        self._drop_testing = drop_testing or self._default_drop_testing
+        self._drop_played = drop_played or (lambda _record: None)
+        self.last_drop: Optional[dict] = None
         self._drop_memo: Optional[tuple[tuple, tuple[list, list, list]]] = None
         self._seq_meta: dict[str, tuple[drop_firing.FiringSequence, str, str]] = {}
         self._drop_windows: list[drop_firing.Window] = []
@@ -1169,8 +1183,8 @@ class TriggerEngine:
 
     # ── drop sequences (drop_firing.py) ──────────────────────────────────
 
-    def _drop_state(self, uri: str, triggers: list[SpectraTrigger]
-                    ) -> tuple[list, list, list]:
+    def _drop_state(self, uri: str, triggers: list[SpectraTrigger],
+                    testing: bool = False) -> tuple[list, list, list]:
         """(firing sequences, protected windows, phase moments) for `uri` —
         mode-independent, memoised on the store's revision and his own
         phase triggers (the two things the view reads). A view that cannot
@@ -1190,14 +1204,14 @@ class TriggerEngine:
             rev = self._drop_revision()
         except Exception:
             rev = None
-        key = (uri, rev, marks)
+        key = (uri, rev, marks, bool(testing))
         if self._drop_memo is not None and self._drop_memo[0] == key:
             return self._drop_memo[1]
         try:
             view = self._drop_view(uri, triggers)
-            state = (drop_firing.firing_sequences(view),
-                     drop_firing.windows_from_view(view),
-                     drop_firing.phase_moments(view))
+            state = (drop_firing.firing_sequences(view, testing),
+                     drop_firing.windows_from_view(view, testing),
+                     drop_firing.phase_moments(view, testing))
         except Exception:
             logger.exception("drop sequences: view unreadable for %s — none "
                              "fire and none protect on this song for now", uri)
@@ -1213,7 +1227,11 @@ class TriggerEngine:
         which members stand down alone (seq.members(mode) — a member
         within reach of a same-class authored mark that fires in THIS
         mode). Also refreshes `_seq_meta` and `_drop_windows`."""
-        seqs, windows, moments = self._drop_state(uri, triggers)
+        try:
+            testing = bool(self._drop_testing())
+        except Exception:                                # noqa: BLE001
+            testing = False
+        seqs, windows, moments = self._drop_state(uri, triggers, testing)
         self._drop_windows = windows
         # Published for show_arms.cue_plan (the Light Show's phase arms) —
         # keyed by uri so a stale list can never be read as this song's.
@@ -1604,6 +1622,7 @@ class TriggerEngine:
                 if cls == "drop":
                     self._note_drop(seq, plan)
                     self._arm_late_switch(seq)
+                    self._note_drop_played(seq.key)
             elif a.kind == "fire_response":
                 # OVERRIDE BLEND's dynamic half (2026-08-20, "fix the lull
                 # ramp"): only charge/lull stretch a ramp to the real gap
@@ -1615,6 +1634,8 @@ class TriggerEngine:
                 await self._fire_response(a.event_class,
                                           self._render_intensity(a.intensity),
                                           gap_ms)
+                if a.event_class == "drop" and trig.source == "authored":
+                    self._note_drop_played(f"his:{trig.id}")
             elif a.kind == "fire_scene_update":
                 await self._fire_scene_update(self._render_intensity(a.intensity))
             else:
@@ -2013,7 +2034,20 @@ class TriggerEngine:
             "track_uri": self._uri,
             "position_ms": self._last_position_ms,
             "last_fire": self.last_fire,
+            "last_drop": self.last_drop,
         }
+
+    def _note_drop_played(self, key: str) -> None:
+        """A drop just fired (DROP TESTING in __init__): remember it and
+        tell `drop_played`. Never raises into the fire path."""
+        import time as _time
+        self.last_drop = {"uri": self._uri, "key": key,
+                          "at_ms": int(_time.time() * 1000),
+                          "position_ms": self._last_position_ms}
+        try:
+            self._drop_played(dict(self.last_drop))
+        except Exception:                                # noqa: BLE001
+            logger.exception("drop played: the push failed for %s", key)
 
     # ── production defaults (lazy imports; the spec injects fakes) ──────────
 
@@ -2089,6 +2123,10 @@ class TriggerEngine:
     def _default_scene_change_mode(self) -> str:
         from spectra.services.room_controls import load_room_controls
         return load_room_controls().scene_change_mode
+
+    def _default_drop_testing(self) -> bool:
+        from spectra.services.room_controls import load_room_controls
+        return bool(load_room_controls().drop_testing)
 
     def _default_transition_intensity(self) -> float:
         # Same bridge feed + 0.5 neutral fallback as scene_sequencer's own
