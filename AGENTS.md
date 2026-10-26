@@ -12171,9 +12171,10 @@ menu, the one consolidated bar, Settings cards) built in the parallel
   Follow controls moved onto Home's own thin control row beneath the
   shape (see "THE DESIGN-FIDELITY GATE"'s later entries for the full
   current split). Home's card today is that tuned audio-shape trace,
-  aligned under the strip's track, plus the control row and two
-  capped-width (`minmax(0, 560px)`) Quick sequences / Quick actions
-  cards. The audio shape's own samples are WAV-time; each is shifted by
+  aligned under the strip's track, plus the control row and the
+  capped-width `.home-quick-runs` cards (Quick sequences / Quick actions,
+  plus a third Drops card since the predrop plan — see "HOME'S DROPS
+  PANEL" below). The audio shape's own samples are WAV-time; each is shifted by
   the song's stored `timestamp_offset_ms` to land on the SAME song-time
   axis the strip's markers use — deliberately a NARROWER reconciliation
   than the Timeline page's own `audio_latency_ms`-involving math (Home's

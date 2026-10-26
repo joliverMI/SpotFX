@@ -180,7 +180,7 @@ nav a:hover, nav a.active {
 main { flex: 1; padding: 16px; max-width: 1200px; margin: 0 auto; width: 100%; }
 /* Home's own timeline/audio-shape run edge to edge on desktop (song-layout-
    plan §9 idea 8); its quick-run cards stay capped via .home-quick-runs's
-   own minmax(0, 560px) columns. */
+   own rule below, not repeated here. */
 main.home-route { max-width: none; }
 /* Phone portrait: the nav keeps one row (icons + "?") and content padding
  * narrows so cards use the width — labels hide, only icons/carets show. */
