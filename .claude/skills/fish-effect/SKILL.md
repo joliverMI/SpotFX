@@ -121,8 +121,12 @@ the wake." The module's WAKE COLOUR block is the binding statement
   fish's own colour at `WAKE_SOLID_DIM`. `wake_blend` (`lighten` default /
   `under` / `add`) is read by `_composite`, the ONE writer of
   `self.matrix`: the draw, `_fade_only` and `_draw_collapse` all call it,
-  and `tests/test_fish_wake_blend.py` holds that by AST. A new compositing
-  path calls `_composite`, never paints the matrix itself.
+  each proven by driving a real swum fish through that exact path and
+  checking what reached `_composite` against the blend's own formula
+  (`tests/test_fish_wake_blend.py`, not an AST walk). A new compositing
+  path calls `_composite`, never paints the matrix itself. The help topic
+  is checked the same way — `scripts/check_fish_wake_help_topic.mjs`
+  parses the real `helpContent.ts` tree, not a substring match.
 - **The WATER is the wake plus the big fish**, summed, then through
   `_hue_clip` (an over-bright pixel scaled down whole) before it meets
   the bodies. Lighten is per channel: it never makes a channel brighter
@@ -563,6 +567,8 @@ Sonic-reachable once it is registered there.
 `check_fish_burst_bounds.py`, `check_fish_disperse.py`,
 `check_fish_wake_blend.py` (the wake's colour and blend on two real-audio
 arcs, with `test_fish_wake_blend.py`),
+`check_fish_wake_help_topic.mjs` (the help topic is a real `helpContent.ts`
+entry, not a substring match),
 `check_fish_wall.py` (`--gifs DIR` writes old-edge / PR 361 / new GIFs and
 track plots on his real crystal shape), `tests/test_fish.py`, `test_fish_camera.py`,
 `test_fish_disperse.py`, `test_fish_wall.py`,

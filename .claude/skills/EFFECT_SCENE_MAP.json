@@ -119,6 +119,7 @@
         "tests/test_fish_big_fish_avoid.py",
         "scripts/check_fish_big_fish_avoid.py",
         "scripts/check_fish_wake_blend.py",
+        "scripts/check_fish_wake_help_topic.mjs",
         "tests/test_fish_wake_blend.py"
       ]
     },
