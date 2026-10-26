@@ -32,6 +32,11 @@ PIXELS, ROWS = 72 * 37, 37
 WARM = "linear-gradient(90deg, #ff2000 0%, #ffb000 50%, #ff00a0 100%)"
 WARM_UP = {"squiggles": {"spawn_rate": 4.0}, "fireworks": {"spawn_rate": 6.0}}
 WARM_FRAMES = 120
+# The fish's wake is held at its old colour and blend (fx/effects/fish.py's
+# WAKE COLOUR block): these proofs are about the programs, not the wake, and
+# the merge-base tree may predate both settings (an effect's schema allows
+# keys it has never heard of, so an older tree simply ignores them).
+HOLD = {"fish": {"wake_hue": "opposite", "wake_blend": "add"}}
 
 
 def _released(prog):
@@ -102,10 +107,12 @@ async def main(out_type, in_type, seed, req=None):
         with headless.fake_clock() as clk:
             headless.attach_effect(
                 host, v, out_type,
-                {"gradient": WARM, **WARM_UP.get(out_type, {})})
+                {"gradient": WARM, **WARM_UP.get(out_type, {}),
+                 **HOLD.get(out_type, {})})
             headless.render_frames(v, WARM_FRAMES, clock=clk)
-            new = host.effects.create(ledfx=host, type=in_type,
-                                      config={"gradient": WARM})
+            new = host.effects.create(
+                ledfx=host, type=in_type,
+                config={"gradient": WARM, **HOLD.get(in_type, {})})
             prog = tp.build(out_type, in_type, {"seed": seed, **(req or {})})
             assert prog is not None, (out_type, in_type)
             v.set_effect(new, activate=False, program=prog)

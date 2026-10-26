@@ -9160,10 +9160,16 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      by exactly the displacement the world->screen mapping moved, with the
      sub-pixel remainder carried; what rolls off an edge is dropped, never
      wrapped. **Its colour rule is stated in the module and read off the
-     RESOLVED gradient curve, never the config string** — a real gradient
-     gives the wake a different colour (`WAKE_GRAD_OFFSET`, a half turn); a
-     solid palette gives it substantially less brightness
-     (`WAKE_SOLID_DIM`). Measured proof: `scripts/check_fish_wake.py`.
+     RESOLVED gradient curve, never the config string** — a solid palette
+     gives it substantially less brightness (`WAKE_SOLID_DIM`); a real
+     gradient gives it `wake_hue`'s colour. **His 2026-10-26 option A
+     reversed the gradient half** (the opposite colour ADDED onto the
+     bodies was what washed rainbow scenes out to white): the default is
+     the fish's own colour, met by `wake_blend = lighten` in `_composite`,
+     the matrix's ONE writer; `opposite` + `add` is the old render bit for
+     bit, and a pinned PIXEL proof must hold it there. Measured proofs:
+     `scripts/check_fish_wake.py`, `scripts/check_fish_wake_blend.py`; the
+     fish-effect skill has the rest.
    * **The charge spreads.** An even (low-discrepancy) spawn plus an
      omnidirectional separation steer (`SCHOOL_SPACING_W`), weighted well
      under `SCHOOL_W` so the shared heading still governs the unison

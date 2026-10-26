@@ -100,6 +100,60 @@ directly — no generic live effects-config HTTP route exists) plus a
 `spectra.service` restart to pick the new values up; a defaults change
 alone only reaches the NEXT fresh Fish instance.
 
+## The WAKE's colour and blend (2026-10-26) — his option A reversed the
+   2026-08-28 colour rule
+
+His report: "the fish scene gains a lot of white color, especially in
+rainbow effects when there is a lot going on. My guess is that the
+trails/ripples overlap and add to white." Measured (data/fish-swim-plan,
+part 1): the 2026-08-28 rule ("a different color from the fish if there is
+a gradient") put the OPPOSITE colour under every fish on a rainbow, and the
+final mix ADDED the wake onto the bodies — complementary light summed is
+white, worst in the busiest music, since rainbow sets are only picked above
+`rainbow_select_limit` 0.9. His answer, verbatim: "I approve option A for
+the wake." The module's WAKE COLOUR block is the binding statement
+(`fx/VENDOR.md` #83); what is not visible cold:
+
+- **Two settings, both registered** (help topic `fish-wake-colour`):
+  `wake_hue` (`own` default / `neighbour` = an eighth along the gradient /
+  `opposite` = the 2026-08-28 half turn) is read by `_wake_palette`
+  through `WAKE_HUE_OFFSETS`; a SOLID palette ignores it and keeps the
+  fish's own colour at `WAKE_SOLID_DIM`. `wake_blend` (`lighten` default /
+  `under` / `add`) is read by `_composite`, the ONE writer of
+  `self.matrix`: the draw, `_fade_only` and `_draw_collapse` all call it,
+  and `tests/test_fish_wake_blend.py` holds that by AST. A new compositing
+  path calls `_composite`, never paints the matrix itself.
+- **The WATER is the wake plus the big fish**, summed, then through
+  `_hue_clip` (an over-bright pixel scaled down whole) before it meets
+  the bodies. Lighten is per channel: it never makes a channel brighter
+  than the brighter layer, and a fish over its own-colour wake shows
+  exactly the fish. It does NOT stop two different hues meeting per
+  channel — the own colour is what removes most of the white (own + add
+  alone measured 12.5%; opposite + lighten alone 25.7%).
+- **`opposite` + `add` is the pre-2026-10-26 render bit for bit**, proven
+  over two real-audio arcs against the pinned `WAKE_BASELINE_REF`
+  (`scripts/check_fish_wake_blend.py`). **A proof that compares fish
+  PIXELS against a pinned pre-change module must hold the wake there**,
+  the way the wall's proofs hold `wall_lookahead = 0`: today
+  `test_fish_big_fish.py` (PR 381), `test_fish_big_fish_avoid.py`'s
+  `_frames`, `test_fish_lull_searcher.py`'s bit-for-bit test and
+  `tests/shoal_tier_b_driver.py`'s `HOLD` do. A pinned KINEMATICS proof
+  needs nothing — the wake never steers a fish.
+- **Measured** (his crystal's 976 real cells, his real audio,
+  `tests/fixtures/fish_wake/`): busy rainbow arc white light 27.6% ->
+  12.2%, near-white cells in the drop (p90) 30 -> 4, 90.6% of today's lit
+  cells; calm arc 26.5% -> 8.0%; the mix costs +0.004 ms a frame.
+  `_channel_peak` exists because numpy's `max(axis=-1)` over a 3-wide axis
+  cost ~0.1 ms by itself.
+- **Re-recording the fixtures** (`--write-fixtures`) runs one song per
+  interpreter: the analysis carries process-wide state, and a song
+  analysed after another does not reproduce itself.
+- **Deploy**: both keys are new, so no stored config carries them and a
+  restarted live Fish instance fills them from the schema defaults — the
+  `trim_fish_trails_25.py` problem (a changed default never reaches a
+  stored key) does not arise here. House Fish gets the change too; its
+  wake is faint, so it moves less (15.5% -> 13.4% on a rainbow set).
+
 ## Fish never fade — they DISPERSE (steer off-panel), full brightness the
    whole way, on a DEADLINE
 
@@ -495,7 +549,8 @@ arc divisor) and the solo burst's three included —
 and the scaled drop's `drop_scale_min` — and the big fish's
 `big_fish_brightness`/`big_fish_size`/`big_fish_cross_slow_s`/
 `big_fish_cross_fast_s`/`big_fish_ripple`/`big_fish_ripple_size` and the
-avoidance's `big_fish_avoid`/`big_fish_avoid_margin` —
+avoidance's `big_fish_avoid`/`big_fish_avoid_margin` — and the wake's
+`wake_hue`/`wake_blend` (enums, refused outside their options) —
 is reachable per scene entry through `get_scene_entry_params` /
 `set_scene_entry_param` (e.g. scene "House Fish", target "Matrix"),
 validated against the registry's own range. A new fish param is only
@@ -506,6 +561,8 @@ Sonic-reachable once it is registered there.
 `scripts/check_fish.py`, `check_fish_avoidance.py`, `check_fish_lunge.py`,
 `check_fish_camera.py`, `check_fish_wake.py`, `check_fish_charge_spread.py`,
 `check_fish_burst_bounds.py`, `check_fish_disperse.py`,
+`check_fish_wake_blend.py` (the wake's colour and blend on two real-audio
+arcs, with `test_fish_wake_blend.py`),
 `check_fish_wall.py` (`--gifs DIR` writes old-edge / PR 361 / new GIFs and
 track plots on his real crystal shape), `tests/test_fish.py`, `test_fish_camera.py`,
 `test_fish_disperse.py`, `test_fish_wall.py`,

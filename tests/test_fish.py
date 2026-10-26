@@ -380,10 +380,13 @@ def test_a_deposit_is_a_filled_smear_never_a_ring(tmp_path):
     _run(main())
 
 
-def test_wake_colour_is_distinct_from_the_fish_both_ways(tmp_path):
-    """The stated rule (fx/effects/fish.py, WAKE_SOLID_* / WAKE_GRAD_OFFSET):
-    a real gradient gives the wake a DIFFERENT COLOUR; a solid palette gives
-    it substantially LESS BRIGHTNESS. Measured on the two real buffers."""
+def test_wake_colour_follows_wake_hue_and_a_solid_is_dimmer(tmp_path):
+    """The stated rule (fx/effects/fish.py's WAKE COLOUR block): on a real
+    gradient the wake samples WAKE_HUE_OFFSETS[wake_hue] further along —
+    the fish's OWN colour by default (his 2026-10-26 option A), a DIFFERENT
+    colour at `opposite` (the 2026-08-28 rule, one setting away) and in
+    between at `neighbour`; a solid palette gives the wake substantially
+    LESS BRIGHTNESS whichever is picked. Measured on the two real buffers."""
     SOLID = "linear-gradient(90deg, #22aaff 0.00%,#22aaff 100.00%)"
 
     def unit(rgb):
@@ -400,44 +403,38 @@ def test_wake_colour_is_distinct_from_the_fish_both_ways(tmp_path):
     async def main():
         one = dict(HIS_MATRIX, particle_count=1, horizon_scale=0.0,
                    spin=0.0, jiggle=0.0)
-        # GRADIENT: his default rainbow
-        room = await _room(tmp_path, "wake-grad", one)
-        room.step(600)
-        f, w = split(room.effect)
-        dist = float(np.linalg.norm(
-            unit(f).mean(axis=0) - unit(w).mean(axis=0)
-        ))
-        await _close(room)
-        # the negative control: with the offset removed the wake wears the
-        # fish's own colour, so the distance must collapse
-        orig = FX.WAKE_GRAD_OFFSET
-        FX.WAKE_GRAD_OFFSET = 0.0
-        try:
-            room = await _room(tmp_path, "wake-grad-ctl", one)
+        dist = {}
+        for hue in (None, *FX.WAKE_HUE_OFFSETS):
+            cfg = one if hue is None else dict(one, wake_hue=hue)
+            room = await _room(tmp_path, f"wake-grad-{hue}", cfg)
+            if hue is None:
+                assert room.effect.wake_hue == "own", "the default is own"
             room.step(600)
-            f0, w0 = split(room.effect)
-            dist0 = float(np.linalg.norm(
-                unit(f0).mean(axis=0) - unit(w0).mean(axis=0)
+            f, w = split(room.effect)
+            dist[hue] = float(np.linalg.norm(
+                unit(f).mean(axis=0) - unit(w).mean(axis=0)
             ))
             await _close(room)
-        finally:
-            FX.WAKE_GRAD_OFFSET = orig
-        assert dist > 0.5, ("the gradient wake must be a different colour",
-                            dist)
-        assert dist > dist0 * 3.0, ("... and the offset is what does it",
-                                    dist, dist0)
+        assert dist[None] == dist["own"], dist
+        assert dist["opposite"] > 0.5, (
+            "at opposite the gradient wake must be a different colour", dist)
+        assert dist["opposite"] > dist["own"] * 3.0, (
+            "... and the offset is what does it", dist)
+        assert dist["own"] < dist["neighbour"] < dist["opposite"], dist
 
-        # SOLID: same colour, substantially dimmer
-        room = await _room(tmp_path, "wake-solid", dict(one, gradient=SOLID))
-        room.step(600)
-        ratio = float(room.effect.wake.max()) / max(
-            float(room.effect.trail.max()), 1e-6
-        )
-        await _close(room)
-        assert 0.0 < ratio < 0.45, (
-            "a solid palette must render the wake substantially dimmer than "
-            "the fish, but still visible", ratio,
-        )
+        # SOLID: same colour, substantially dimmer, whatever wake_hue says
+        for hue in FX.WAKE_HUE_OFFSETS:
+            room = await _room(tmp_path, f"wake-solid-{hue}",
+                               dict(one, gradient=SOLID, wake_hue=hue))
+            room.step(600)
+            ratio = float(room.effect.wake.max()) / max(
+                float(room.effect.trail.max()), 1e-6
+            )
+            await _close(room)
+            assert 0.0 < ratio < 0.45, (
+                "a solid palette must render the wake substantially dimmer "
+                "than the fish, but still visible", hue, ratio,
+            )
     _run(main())
 
 

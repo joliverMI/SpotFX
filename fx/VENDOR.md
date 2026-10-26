@@ -2484,3 +2484,27 @@ against that commit.
     merge-base as the before, a control run with the switch removed as the
     ground truth for what the parent was doing). Unverified against his
     live room.
+83. `effects/fish.py` (SpotFX-authored, #21): THE WAKE'S COLOUR AND BLEND
+    (2026-10-26; his report, "the fish scene gains a lot of white color,
+    especially in rainbow effects when there is a lot going on. My guess is
+    that the trails/ripples overlap and add to white. Perhaps add options
+    to mix differently", and his answer to the plan, "I approve option A
+    for the wake"; `/home/javi/fleet-spotfx/data/fish-swim-plan/
+    report.md`, part 1). Two new registered schema keys. `wake_hue`
+    (`own` default / `neighbour` / `opposite`, `WAKE_HUE_OFFSETS`) is how
+    far along the gradient `_wake_palette` samples a real gradient's wake —
+    the 2026-08-28 rule was always the half turn (`opposite`), which on a
+    rainbow put the complementary colour under every fish; a solid palette
+    is unchanged (own colour at `WAKE_SOLID_DIM`). `wake_blend` (`lighten`
+    default / `under` / `add`, `WAKE_BLENDS`) is how the water (the wake
+    plus the big fish) meets the bodies in the new `_composite`, now the
+    ONE writer of `self.matrix` for the draw, `_fade_only` and
+    `_draw_collapse`; the water goes in through `_hue_clip` for lighten
+    and under. `opposite` + `add` is the old render bit for bit. Measured
+    on his crystal's real cells with his real audio: busy rainbow arc white
+    light 27.6% -> 12.2%, near-white drop cells (p90) 30 -> 4, 90.6% of the
+    lit cells kept; calm arc 26.5% -> 8.0%; +0.004 ms a frame. Evidence:
+    `scripts/check_fish_wake_blend.py` (the byte-identity against the
+    pinned pre-change module over both arcs, and the acceptance bars) +
+    `tests/test_fish_wake_blend.py`, `tests/fixtures/fish_wake/`.
+    Unverified against his live room.

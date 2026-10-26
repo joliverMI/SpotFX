@@ -81,10 +81,13 @@ async def _frames(tmp_path, effect_type, cfg, script, seed=5, poke=None):
     cm = headless.fake_clock()
     clock = cm.__enter__()
     try:
-        # the drop Shockwave (fx/effects/phase_grammar.py) is held off: these
-        # proofs compare against modules that predate it
-        eff = headless.attach_effect(host, virtual, effect_type,
-                                     dict(cfg, drop_shock=0.0))
+        # the drop Shockwave (fx/effects/phase_grammar.py) is held off and the
+        # wake at its old colour and blend (fx/effects/fish.py's WAKE COLOUR
+        # block): these proofs compare against modules that predate both
+        eff = headless.attach_effect(
+            host, virtual, effect_type,
+            dict(cfg, drop_shock=0.0, wake_hue="opposite", wake_blend="add"),
+        )
         eff._rng = np.random.default_rng(seed)
         out = []
         for step, (phase, n) in enumerate(script):
