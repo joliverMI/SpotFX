@@ -1696,6 +1696,23 @@ export const HELP_SECTIONS: HelpSection[] = [
             kbd: false,
           },
           {
+            id: 'drop-colour-change',
+            title: 'Every drop arrives in a new colour set',
+            keywords: 'drop colour color change new set opposite 180 degrees wheel big jump vary spread 150 210 rainbow pre-drop fade instant force colour house mode gradient preview accept list incoming scene switch journey show log review',
+            body: [
+              'Every drop that plays — a detected drop sequence\'s, or one of your own drop triggers — arrives in a new colour set, about opposite the one showing on the colour wheel: anywhere 150-210° away at the default spread, the sets nearest 180° likeliest, so it is a big change that still varies from drop to drop.',
+              'It changes instantly, in one frame, on the drop. Once pre-drops play, a drop with a pre-drop fades instead: the change starts on the pre-drop and glides round the wheel, landing on the drop.',
+              'The new set comes from the sets the scene accepts — the incoming scene\'s, when the drop switches the scene, so the cut arrives in it — never a disabled one, through your own colour-set curves and the rainbow limit. A rainbow counts as a big change; a rainbow to another rainbow only when nothing else is allowed. When no set sits 150-210° away the drop takes the farthest one it can, and with no other set at all it keeps its colours; the log says which. After the drop the colour journey carries on from the new set.',
+              'Still wins over it: a preview or other room hold (nothing moves), Force Colour (a pinned set stays; a pinned group moves to its next member), a house mode that keeps its own look, and a 2D drift gradient, whose own drop kick is the drop\'s colour change. A scene whose drop band carries its own colour jump skips it when the drop already changed colour, so a drop makes one change.',
+              'Where to see it: the Review page names it on the drop — from which set to which, how far round the wheel, and why that set — and counts it in the colour sets.',
+            ],
+            table: [
+              ['Drops change colour', 'On by default. Off: drops change no colour, as before.'],
+              ['Drop colour spread ±', '30° by default: the new set sits within 30° of exactly opposite (150-210° away). 5-90.'],
+            ],
+            kbd: false,
+          },
+          {
             id: 'fireworks-melds',
             title: 'Fireworks drops: the melds',
             keywords: 'fireworks meld keepers three fish orbits burst drop swallow black hole implode next big bass hit flare deadline loud switch scene',

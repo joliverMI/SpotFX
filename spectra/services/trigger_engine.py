@@ -454,6 +454,31 @@ def _phase_class(trig: SpectraTrigger) -> Optional[str]:
     return None
 
 
+def _colour_landed(record: Optional[dict]) -> bool:
+    """A drop's colour change is on the lights: it landed now, or its
+    pre-drop's fade landed on this drop."""
+    return bool(record) and record.get("result") in ("jumped", "faded_at_pre_drop")
+
+
+def drop_colour_brief(record: dict) -> dict:
+    """The drop colour change's outcome as a drop's show-log entry carries it
+    (the Review page names it): what happened, from which set to which, how
+    far round the wheel, why that set, and any hold — each key only when the
+    record has it."""
+    jump = record.get("color_jump") or {}
+    out: dict[str, Any] = {"result": record.get("result")}
+    for k in ("held_for", "reason", "moment", "ramp_ms", "rung",
+              "distance_deg", "from_set_id", "forced_color", "pool_scene"):
+        if record.get(k) is not None:
+            out[k] = record[k]
+    if jump.get("result") == "jumped":
+        out["to_set_id"] = jump.get("picked_id")
+        out["to_set_name"] = jump.get("set_name")
+    if record.get("pre_drop") is not None:
+        out["pre_drop"] = record["pre_drop"]
+    return out
+
+
 @dataclass(frozen=True)
 class NextCue:
     """The next colour/scene cue on the show clock (next_colour_cue).
@@ -502,6 +527,7 @@ class TriggerEngine:
         fire_sequence: Callable[[str, float, Optional[int]], Awaitable[Any]] | None = None,
         drop_testing: Callable[[], bool] | None = None,
         drop_played: Callable[[dict], None] | None = None,
+        drop_colour: Callable[..., Awaitable[Any]] | None = None,
         switch_showing: Callable[[], Optional[drop_switch.Showing]] | None = None,
         switch_settings: Callable[[], drop_switch.SwitchSettings] | None = None,
         switch_blocker: Callable[[], Optional[str]] | None = None,
@@ -572,6 +598,10 @@ class TriggerEngine:
         # default, wired in services/engine.py — same reasoning as the two
         # hooks above.
         self._colour_cue = colour_cue or (lambda: None)
+        # How many times the journey has been told (_notify_colour_cue) —
+        # lets one fire tell it at most once (a drop whose colour change and
+        # cut land together: each would otherwise run its own journey leg).
+        self._colour_cues_told = 0
         self._clock = clock or time.monotonic
         # When _last_position_ms was last fed (clock time) — next_colour_cue
         # refuses a stale show clock rather than time a walk against it.
@@ -643,6 +673,22 @@ class TriggerEngine:
         self._drop_testing = drop_testing or self._default_drop_testing
         self._drop_played = drop_played or (lambda _record: None)
         self.last_drop: Optional[dict] = None
+        # THE DROP COLOUR CHANGE (2026-10-26, predrop plan step 2 —
+        # spectra/services/drop_colour.py is the pick, scene_response.
+        # ResponseEngine.drop_color_change the precedence): every drop that
+        # fires lands a colour set about opposite the one showing — on the
+        # drop, before its drop-led cut and its own response
+        # (_drop_colour_on_drop), or faded across its pre-drop when one plays
+        # (_tick_drop_colour_fades — dormant until drop_firing.PRE_DROPS_PLAY).
+        # `drop_colour(selection_intensity, pool_scene_id, ramp_ms, moment,
+        # analysed)` returns the outcome record; a safe no-op default wired to
+        # engine.fire_drop_colour_event in services/engine.py (the
+        # _analysed_color reasoning above). `_drop_colour_faded` maps a
+        # sequence key to its pre-drop fade's record once that fade LANDED, so
+        # its drop never changes colour twice; cleared with the fired-keys
+        # memory (song change, rewind).
+        self._drop_colour = drop_colour or self._no_drop_colour
+        self._drop_colour_faded: dict[str, dict] = {}
         self._drop_memo: Optional[tuple[tuple, tuple[list, list, list]]] = None
         self._seq_meta: dict[str, tuple[drop_firing.FiringSequence, str, str]] = {}
         self._drop_windows: list[drop_firing.Window] = []
@@ -795,6 +841,7 @@ class TriggerEngine:
             self._plan_ranks = {}
             self._seq_meta = {}
             self._drop_windows = []
+            self._drop_colour_faded = {}
             self._forget_switches()
             self._drop_history = drop_switch.DropHistory()
         if uri is None or uri == self._last_transition_uri:
@@ -963,6 +1010,7 @@ class TriggerEngine:
             # moment again fires it again" (module docstring).
             self._pins.clear()
             self._fired.clear()
+            self._drop_colour_faded.clear()
             # a sequence approached again is decided again
             self._forget_switches()
             return []  # rewind/seek back: silently rearmed via the line above
@@ -999,6 +1047,9 @@ class TriggerEngine:
         # crosses cuts before anything else fires on it
         if self._late_pending:
             await self._tick_late_switches(last, position_ms)
+        # THE DROP COLOUR CHANGE across a pre-drop (dormant until pre-drops
+        # play): a fade whose pre-drop this tick crosses starts now.
+        await self._tick_drop_colour_fades(last, position_ms)
         fired: list[SpectraTrigger] = []
         for trig in candidates:
             if not trig.enabled:
@@ -1442,6 +1493,7 @@ class TriggerEngine:
         """A cue that changes colour or scene just fired: tell the colour
         journey, which picks its next horizon (next_colour_cue). Best-effort
         like _notify_intensity_event — never breaks the fire itself."""
+        self._colour_cues_told += 1
         try:
             self._colour_cue()
         except Exception:
@@ -1539,6 +1591,7 @@ class TriggerEngine:
 
     async def _fire(self, trig: SpectraTrigger) -> None:
         a = trig.action
+        drop_colour: Optional[dict] = None
         self._notify_intensity_event()
         if trig.id in self._ride_ids:
             # THE DROP-LED SWITCH riding a flare inside the charge: cut to
@@ -1607,11 +1660,24 @@ class TriggerEngine:
                 # OWN partner in the sequence (the phase-partner rule).
                 seq, cls, fire_mode = self._seq_meta[trig.id]
                 render = self._render_intensity(a.intensity)
+                if cls == "drop":
+                    # THE DROP COLOUR CHANGE: before the drop-led cut (so the
+                    # cut wears the new set) and before the drop's own phase
+                    # arm (so the drop lands in it) — decided switch first,
+                    # so the set comes from the scene the drop will show.
+                    plan = await self._ensure_switch_plan(seq, cls, fire_mode)
+                    drop_colour = await self._drop_colour_on_drop(seq, plan,
+                                                                  a.intensity)
                 # THE DROP-LED SWITCH (drop_switch.py): decided at the first
                 # member, cut before the planned member (the drop, or the
                 # charge) in this same call, so the member's own phase arm
                 # lands on the NEW scene.
+                told = self._colour_cues_told
                 plan = await self._switch_before_member(seq, cls, fire_mode, render)
+                if _colour_landed(drop_colour) and self._colour_cues_told == told:
+                    # the new set is on the lights: the colour journey picks
+                    # its next horizon from it — once (a cut just now told it)
+                    self._notify_colour_cue()
                 gap = (seq.gap_ms(cls, fire_mode, self._live_drop_offset_ms())
                        if cls in phase_partner.BUILD_CLASSES else None)
                 if cls == "lull":
@@ -1631,6 +1697,14 @@ class TriggerEngine:
                 # for the full mechanism).
                 gap_ms = (self._phase_partner_gap_ms(trig)
                          if a.event_class in ("charge", "lull") else None)
+                if a.event_class == "drop":
+                    # THE DROP COLOUR CHANGE on one of his own drop triggers
+                    # (no pre-drop, no drop-led switch): the showing scene's
+                    # pool, instant, before the drop's own response.
+                    drop_colour = await self._run_drop_colour(
+                        a.intensity, None, 0, "drop", analysed=False)
+                    if _colour_landed(drop_colour):
+                        self._notify_colour_cue()
                 await self._fire_response(a.event_class,
                                           self._render_intensity(a.intensity),
                                           gap_ms)
@@ -1673,6 +1747,8 @@ class TriggerEngine:
                     "to": plan.to_scene_name, "moment": plan.moment,
                     "result": (plan.outcome or {}).get("result")}
             key = f"drop_sequence:{cls}"
+        if drop_colour is not None:
+            detail["drop_colour"] = drop_colour_brief(drop_colour)
         if trig.snap_grid is not None:
             # Phase 2 (spectra/services/beat_snap.py) — which grid this
             # generated cue was snapped to and how far, so the Review
@@ -1731,9 +1807,12 @@ class TriggerEngine:
         logger.info("drop sequence %s: %s", seq.key, plan.sentence)
         return plan
 
-    async def _switch_before_member(self, seq: drop_firing.FiringSequence,
-                                    cls: str, fire_mode: str,
-                                    intensity: float) -> drop_switch.SwitchPlan:
+    async def _ensure_switch_plan(self, seq: drop_firing.FiringSequence,
+                                  cls: str, fire_mode: str) -> drop_switch.SwitchPlan:
+        """This sequence's switch plan, decided now if it has not been (at
+        the first member the clock fires) — WITHOUT executing its cut, so
+        the drop colour change can pick from the scene the drop will show
+        before the cut lands."""
         plan = self._switch_plans.get(seq.key)
         if plan is None:
             # a Fireworks meld still pending from an EARLIER sequence cuts
@@ -1741,6 +1820,12 @@ class TriggerEngine:
             for key in [k for k in self._late_pending if k != seq.key]:
                 await self._release_late(key, "before_next_sequence", loud=False)
             plan = self._decide_switch(seq, cls, fire_mode)
+        return plan
+
+    async def _switch_before_member(self, seq: drop_firing.FiringSequence,
+                                    cls: str, fire_mode: str,
+                                    intensity: float) -> drop_switch.SwitchPlan:
+        plan = await self._ensure_switch_plan(seq, cls, fire_mode)
         if not plan.switch or seq.key in self._switch_done:
             return self._switch_plans.get(seq.key, plan)
         at = None
@@ -1907,6 +1992,117 @@ class TriggerEngine:
         self._drop_history.note_drop(
             seq.key, showing.stint if showing is not None else None, arrived)
 
+    # ── the drop colour change (drop_colour.py) ──────────────────────────
+
+    def _incoming_scene_id(self, seq: drop_firing.FiringSequence,
+                           plan: Optional[drop_switch.SwitchPlan]) -> Optional[str]:
+        """The scene whose pool the drop's new set comes from: the INCOMING
+        one while a drop-led switch is planned and has not cut yet, else
+        None (the scene showing)."""
+        if plan is not None and plan.switch and seq.key not in self._switch_done:
+            return plan.to_scene_id
+        return None
+
+    async def _drop_colour_on_drop(self, seq: drop_firing.FiringSequence,
+                                   plan: Optional[drop_switch.SwitchPlan],
+                                   intensity: float) -> Optional[dict]:
+        """A drop sequence's drop: its instant colour change — unless its
+        pre-drop's fade already landed it (one change per drop)."""
+        faded = self._drop_colour_faded.get(seq.key)
+        if faded is not None:
+            return {"result": "faded_at_pre_drop", "moment": "drop",
+                    "pre_drop": faded}
+        return await self._run_drop_colour(
+            intensity, self._incoming_scene_id(seq, plan), 0, "drop",
+            analysed=True)
+
+    async def _run_drop_colour(self, selection_intensity: float,
+                               pool_scene_id: Optional[str], ramp_ms: int,
+                               moment: str, *, analysed: bool) -> Optional[dict]:
+        """One drop colour change through the hook (None when the hook is
+        the unwired default). Never raises into the fire: a failure is a
+        named outcome and the drop fires regardless."""
+        try:
+            record = await self._drop_colour(selection_intensity, pool_scene_id,
+                                             int(ramp_ms), moment, analysed)
+        except Exception:
+            logger.exception("drop colour change failed (%s) — the drop fires "
+                             "in the colours it has", moment)
+            return {"result": "error", "moment": moment}
+        return record if isinstance(record, dict) else None
+
+    async def _tick_drop_colour_fades(self, last: int, position_ms: int) -> None:
+        """THE DROP COLOUR CHANGE across a pre-drop (predrop plan 2.2 and
+        2.3; his approval: "if we have a pre-drop, fade the color throught
+        the predrop, not an instant change"). A firing sequence whose drop
+        fires here and which has a pre-drop starts its colour change ON the
+        pre-drop — moved with its drop: the drop's own fire shift (its
+        band's anchor plus the drop timing offset, _drop_fire_shift_ms)
+        applies to both — and glides round the wheel over the time left
+        from the tick that actually fires it to the drop's target, so a late
+        tick still lands on the drop, never after it. A LANDED fade is
+        remembered (`_drop_colour_faded`) and its drop does not change
+        again; a held one leaves the drop its own instant try. Exactly once
+        per approach (the fired-keys memory). Dormant while no sequence
+        carries a pre-drop (drop_firing.PRE_DROPS_PLAY)."""
+        for seq, cls, fire_mode in list(self._seq_meta.values()):
+            if cls != "drop" or seq.pre_drop_ms is None:
+                continue
+            key = (f"drop-colour:{seq.key}", int(seq.pre_drop_ms))
+            if key in self._fired or seq.key in self._drop_colour_faded:
+                continue
+            if abs(seq.pre_drop_ms - last) > RESPONSE_OFFSET_HORIZON_MS:
+                continue          # far away: no live band peek this tick
+            shift = self._drop_fire_shift_ms(seq, fire_mode)
+            pre_target = seq.pre_drop_ms + shift
+            drop_target = seq.drop_ms + shift
+            if pre_target >= drop_target or not (last < pre_target <= position_ms):
+                continue
+            self._fired.add(key)
+            ramp_ms = max(0, drop_target - position_ms)
+            try:
+                plan = await self._ensure_switch_plan(seq, "drop", fire_mode)
+                record = await self._run_drop_colour(
+                    seq.intensity, self._incoming_scene_id(seq, plan), ramp_ms,
+                    "pre_drop", analysed=True)
+            except Exception:
+                logger.exception("drop sequence %s: the pre-drop colour fade "
+                                 "failed — its drop changes colour instead",
+                                 seq.key)
+                continue
+            if record is None:
+                continue
+            brief = drop_colour_brief(record)
+            if record.get("result") == "jumped":
+                self._drop_colour_faded[seq.key] = brief
+            logger.info("drop sequence %s: colour change at its pre-drop (%s), "
+                        "landing on the drop in %d ms", seq.key,
+                        brief.get("result") or brief.get("held_for"), ramp_ms)
+            from spectra.services import fire_history
+            fire_history.record_fire(
+                "triggers", "drop_sequence:pre_drop_colour",
+                {"drop_sequence": seq.key, "member": "pre_drop",
+                 "pre_drop_ms": seq.pre_drop_ms, "drop_ms": seq.drop_ms,
+                 "drop_colour": brief},
+                uri=self._uri, position_ms=position_ms)
+
+    def _drop_fire_shift_ms(self, seq: drop_firing.FiringSequence,
+                            fire_mode: str) -> int:
+        """How far this sequence's drop fires off its mark: its band's anchor
+        (the live peek tick() makes for the drop member) plus the drop timing
+        offset as drop_timing clamps it against the build — the same two
+        terms tick() sums into the drop member's target."""
+        try:
+            band = int(self._response_offset_ms(
+                FireResponseAction(event_class="drop", intensity=seq.intensity)))
+        except Exception:
+            logger.exception("drop colour: the drop band's offset is unreadable "
+                             "— the fade is timed to the unshifted drop")
+            band = 0
+        offset = self._tick_drop_offset_ms()
+        return band + drop_timing.applied_offset_ms(
+            seq.drop_ms, offset, seq.build_start_ms(fire_mode))
+
     def switch_plans(self, uri: Optional[str]) -> list[drop_switch.SwitchPlan]:
         """This play's drop-switch decisions for `uri` (the Timeline, Sonic)."""
         return drop_switch.plans_for(uri)
@@ -1944,15 +2140,7 @@ class TriggerEngine:
         within drop_timing.MIN_BUILD_MS of the lull/charge its build starts
         from. Remembered in `_drop_applied`. Never raises — an unreadable
         offset is 0 (the drop on its mark), named in the log."""
-        if self._tick_drop_offset is None:
-            # read once per tick, however many drops sit in the horizon
-            try:
-                self._tick_drop_offset = int(self._drop_offset_ms())
-            except Exception:
-                logger.exception("drop timing: offset unreadable — the drop "
-                                 "fires on its mark")
-                self._tick_drop_offset = 0
-        offset = self._tick_drop_offset
+        offset = self._tick_drop_offset_ms()
         meta = self._seq_meta.get(trig.id)
         if meta is not None:
             seq, _cls, fire_mode = meta
@@ -1966,6 +2154,18 @@ class TriggerEngine:
         applied = drop_timing.applied_offset_ms(trig.timestamp_ms, offset, start)
         self._drop_applied[trig.id] = applied
         return applied
+
+    def _tick_drop_offset_ms(self) -> int:
+        """The live drop timing offset, read once per tick however many drops
+        sit in the horizon (0 when unreadable — the drop on its mark)."""
+        if self._tick_drop_offset is None:
+            try:
+                self._tick_drop_offset = int(self._drop_offset_ms())
+            except Exception:
+                logger.exception("drop timing: offset unreadable — the drop "
+                                 "fires on its mark")
+                self._tick_drop_offset = 0
+        return self._tick_drop_offset
 
     def _live_drop_offset_ms(self) -> int:
         """The offset a build ending on a drop is told about (never
@@ -2069,6 +2269,12 @@ class TriggerEngine:
     async def _no_analysed_color(selection_intensity: float,
                                  render_intensity: float,
                                  scene_id: Optional[str]) -> None:
+        return None
+
+    @staticmethod
+    async def _no_drop_colour(selection_intensity: float,
+                              pool_scene_id: Optional[str], ramp_ms: int,
+                              moment: str, analysed: bool) -> None:
         return None
 
     def _default_select_scene(self, intensity: float) -> Optional[str]:

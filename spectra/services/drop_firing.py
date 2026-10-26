@@ -208,6 +208,11 @@ class FiringSequence:
     # mode his trigger actually fires under — see the class docstring.
     stood_down: dict = field(default_factory=dict)
     matches_his: bool = False
+    # Where this sequence's PRE-DROP plays, when it has one that may play
+    # (PRE_DROPS_PLAY) — the moment the drop colour change starts its fade
+    # (trigger_engine's THE DROP COLOUR CHANGE). Never a member: nothing
+    # but the colour fade reads it yet.
+    pre_drop_ms: Optional[int] = None
 
     def members(self, effective_mode: Optional[str] = None) -> list[tuple[str, int]]:
         exclude = (set(self.stood_down)
@@ -346,6 +351,16 @@ def _member_ms(s: dict, cls: str, testing: bool) -> Optional[int]:
     return int(ms)
 
 
+# THE PRE-DROP HAS NO ENGINE YET (predrop plan, steps 3-5): a sequence's
+# pre-drop time is read into FiringSequence.pre_drop_ms only while this is
+# True, and the step that builds the pre-drop engine (plan step 5) turns it
+# on. Until then the view may carry pre-drop times (steps 3-4 detect, draw
+# and edit them) and nothing plays from them: the drop colour change stays
+# instant on every drop, its fade across the pre-drop built and tested but
+# dormant (tests/test_drop_colour.py switches this on to prove it).
+PRE_DROPS_PLAY = False
+
+
 def _candidates(view: dict, testing: bool = False) -> list[FiringSequence]:
     beat = beat_ms_of(view)
     out = []
@@ -372,7 +387,9 @@ def _candidates(view: dict, testing: bool = False) -> list[FiringSequence]:
                 his=state in HIS_STATES, drop_ms=int(s["drop_ms"]),
                 lull_ms=_member_ms(s, "lull", testing),
                 charge_ms=_member_ms(s, "charge", testing),
-                intensity=sequence_intensity(s.get("step")), beat_ms=beat))
+                intensity=sequence_intensity(s.get("step")), beat_ms=beat,
+                pre_drop_ms=(_member_ms(s, "pre_drop", testing)
+                             if PRE_DROPS_PLAY else None)))
         except (KeyError, TypeError, ValueError):
             continue
     return out

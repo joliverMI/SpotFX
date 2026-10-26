@@ -256,6 +256,53 @@ Proofs: `tests/test_drop_switch.py` (FINA + 100 MILLONES real stores),
 `tests/test_preview_programs_live.py`, `tests/test_fireworks_melds.py`
 (the three melds: decision, effects, FINA trigger clock).
 
+## Every drop arrives in a new colour set — the drop colour change (2026-10-26)
+
+Predrop plan step 2. `spectra/services/drop_colour.py` is the pick and its
+binding statement; `ResponseEngine.drop_color_change` the precedence;
+`engine.fire_drop_colour_event` the choke point (the drop's OWN response
+gate first, then `house.scene_deferral`). Five things:
+
+- **Where it fires**: `TriggerEngine._fire` for a drop sequence's DROP —
+  after `_ensure_switch_plan` (the switch decided, NOT yet cut) and BEFORE
+  `_switch_before_member` cuts, so the set comes from the scene the drop
+  will show (`_incoming_scene_id`: the incoming one while a switch is
+  planned and not yet cut) and the cut compiles in it — and for one of his
+  own stored drop triggers, before `_fire_response`. Do not move it after
+  the cut, or the cut wears the old set (a mutation-tested RED in
+  `tests/test_drop_colour.py`).
+- **The pick**: the automatic pool (`scene_sequencer.automatic_pool_cards`
+  — the sequencer's own gate chain, factored out so both read ONE), his
+  selector weight x closeness to 180 degrees, `drop_colour_spread_deg`
+  either side (30 = 150-210). Rainbows count as big; nothing in the band
+  takes the farthest; no other set keeps the colours. All named (the
+  rung) on the drop's show-log entry (`detail.drop_colour`,
+  `trigger_engine.drop_colour_brief`) and counted in fire_history's
+  colour sets (`via: "drop_colour"`).
+- **The landing** is `_color_jump`'s `picked_id` path, `flare=False`; a
+  ramp of 0 now lands as a JUMP (never a zero-length glide).
+- **One change per drop**: a landed change CLAIMS the drop
+  (`_claim_drop_colour`, ramp + `DROP_COLOUR_CLAIM_S`); `on_event("drop")`
+  takes it and the band's own colour-jump kind skips, named (the
+  `_DROP_COLOUR_DONE` ContextVar, carried on a `PendingKindBatch`).
+- **The fade across a pre-drop is built, tested and DORMANT**:
+  `FiringSequence.pre_drop_ms` is filled only while
+  `drop_firing.PRE_DROPS_PLAY` is True (the pre-drop engine's step, plan
+  step 5, turns it on). `_tick_drop_colour_fades` starts the change on the
+  pre-drop (moved with its drop: `_drop_fire_shift_ms`) as a glide over the
+  time left to the drop's target, so a late tick still lands on the drop;
+  a LANDED fade is remembered (`_drop_colour_faded`) and its drop does not
+  change again; a held one leaves the drop its own instant try.
+
+Holds, each named: the setting off, a room hold (`conductor._deferral`),
+Force Colour (a set pin stays; a group pin rolls its next member), a 2D
+gradient (its own `on_drop_event` kick is the drop's change), a house mode
+that keeps its look, and every gate the drop's own response has. Known
+limit: Star's drop pieces keep the colours they sampled at the lull's start
+(the plan's step 7 re-samples them). Help topic `drop-colour-change`.
+Proofs: `tests/test_drop_colour.py` (the pick over his 46 single-hue sets,
+the precedence, and the show-side sweep with a red control).
+
 ## A LIGHT SHOW SET CAN BE ARMED ON A PHASE (2026-10-19)
 
 The Admiral: "add a button for next drop, lull, and charge. make it one
@@ -345,6 +392,10 @@ those ASK FIRST — `needs_confirmation` with the question and a single-use
 were (absorb_console's two-call protocol). `undo_drop_edit` puts back his
 song-profile rows too. Testing is the ordinary `drop_testing` setting.
 
+The drop colour change (2026-10-26) is two ordinary settings-registry keys,
+`drop_colour_change` and `drop_colour_spread_deg`; the change itself (a
+light-driving act) has no write op, the same boundary every fire keeps.
+
 Every new `apply_edit` op name needs either a Sonic operation or a named
 exclusion — `tests/test_drop_console.py::
 test_every_apply_edit_op_has_a_sonic_operation_or_is_acknowledged` holds
@@ -361,3 +412,4 @@ Millones' real detection), `tests/test_drop_panel_his_rows.py` (his own
 drops across both stores, on copies of his real Pop Off and Dopamine),
 `scripts/check_home_drops_panel.mjs`, `scripts/
 check_timeline_changed_elsewhere.mjs`, `scripts/check_home_drops_layout.py`.
+The drop colour change's: `tests/test_drop_colour.py`.

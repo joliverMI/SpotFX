@@ -11979,6 +11979,35 @@ the cold-start detail. Five things:
   `scripts/check_timeline_changed_elsewhere.mjs`,
   `scripts/check_home_drops_layout.py`; help `drops-panel`, `drop-testing`.
 
+**EVERY DROP ARRIVES IN A NEW COLOUR SET (2026-10-26, predrop plan step 2
+— the Admiral: "It should be a big color change, but it can vary, just
+close to 180 degrees").** `spectra/services/drop_colour.py` is the pick
+(pure) and the binding statement; `ResponseEngine.drop_color_change` the
+precedence; `engine.fire_drop_colour_event` the choke point. Four things:
+
+- **IT FIRES INSIDE THE DROP'S OWN `_fire`, AFTER THE SWITCH IS DECIDED AND
+  BEFORE IT CUTS** (`_ensure_switch_plan` then the change then
+  `_switch_before_member`), so the set comes from the scene the drop will
+  show and the cut compiles in it; his own stored drop triggers take it
+  before `_fire_response`. A drop that would not fire (the drop's own
+  `_response_gate`) changes no colour.
+- **THE POOL IS THE AUTOMATIC ONE, ONE DEFINITION**:
+  `scene_sequencer.automatic_pool_cards` (factored out of the sequencer's
+  `_default_eligible_sets`, byte-identical) — so his rainbow limit means a
+  drop louder than 0.9 lands a rainbow. Holds, each named: the room
+  setting (`drop_colour_change`), a room hold, Force Colour (a set pin
+  stays, a group pin rolls), a 2D gradient (its own drop kick), a house
+  mode that keeps its look.
+- **ONE CHANGE PER DROP**: a landed change claims the drop; the drop band's
+  own colour-jump kind then skips, named (`_DROP_COLOUR_DONE`, carried on a
+  `PendingKindBatch`). `_color_jump` with a ramp of 0 now lands as a JUMP.
+- **THE FADE ACROSS A PRE-DROP IS DORMANT**: `FiringSequence.pre_drop_ms`
+  is filled only while `drop_firing.PRE_DROPS_PLAY` is True — the pre-drop
+  engine's step turns it on; until then a view carrying pre-drop times
+  changes nothing. Spec: `tests/test_drop_colour.py` (his 46 single-hue
+  sets, the precedence, the show-side sweep with a red control); help
+  `drop-colour-change`.
+
 ## Touch panning + Light Show flag touch precision (2026-10-08)
 
 The Admiral: "i want to be able to drag the audio shape graph somehow on a
