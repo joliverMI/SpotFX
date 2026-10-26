@@ -38,6 +38,54 @@ regression exactly like the one caught live 2026-09-17 (a rebase surfaced
 a 23% slowdown from defaults that hadn't been re-solved). See the THRUST
 comment block in `fish.py` itself before touching either number.
 
+## THE TAIL DRIVE (2026-10-26) — the tail is the engine; `tail_drive = 0`
+   is the old motion bit for bit
+
+His ask: "a slow moving fish, or barely moving fish, would show it's tail
+swimming and that motion would visually propel the fish ... so we still get
+the good reactive movement"; the plan he approved: "tail-driven swimming
+with beats as strong as today". The module's TAIL DRIVE block is the
+binding statement (`fx/VENDOR.md` #84); what is not visible cold:
+
+- **The music sets an EFFORT, the tail makes the speed.** The effort is
+  the target the speed section always computed, WITHOUT the thrust pulse
+  (`want_tail`), carried through the same big-fish flee / swim burst /
+  solo burst multipliers. `_tail_drive_step` decides stroke or glide,
+  eases the tail toward the stroke that effort asks for, then pushes with
+  the tail's CURRENT motion (thrust `K (A f)^2 2cos^2(tail tip)`, drag
+  `d v^2 + l v`, `K flap_rate^2 = d + l`). `_tail_drive_flap` draws exactly
+  that A and f: what is drawn IS what pushes.
+- **The escape hatch is structural**: at `tail_drive = 0` neither method
+  is entered (`want_tail` is None), so nothing it computes reaches a fish;
+  `scripts/check_fish_tail_drive.py` §1 proves kinematics AND frames bit
+  for bit against the pinned `TAIL_BASELINE_REF` over two real-audio
+  arcs. Values between 0 and 1 blend the speed and the drawn flap; the
+  thrust dial above fades out as it rises. **A proof that compares fish
+  motion against a pinned pre-change module must hold `tail_drive = 0`**
+  (the default, so only a config copied from his live music Fish entry,
+  which the scene script turns on, needs it said).
+- **Burst and glide only engages below `glide_below`** (an effort, x
+  cruise). The ordinary target never asks for less than cruise, so in
+  ordinary music the tail strokes continuously and the visible change is
+  the speed rising and falling with each stroke, the tail moving first
+  at a beat. The pond rest (the plan's PR 3) is what will ask for less.
+- **The QUICK MOMENTS stay quick** (`TAIL_STIFF_MAX`'s block). The swim
+  burst, a solo burst and a big-fish flee each shorten the old speed ease
+  (`BURST_SPEED_TAU`, `SOLO_SPEED_TAU`, `BIG_FLEE_TAU`); the water's own
+  response, 1/(2 d v + l), is far slower near cruise. Without this the
+  dash covered a third less in its 300 ms, started 50 ms late, and one fish
+  failed to get out of the big fish's way. While a moment has shortened the
+  ease, thrust and drag scale together to answer within it (same speed),
+  and the push is the stroke's cycle mean (the next mid-sweep can be
+  ~50 ms away). A beat does not shorten the ease.
+- **Scope = the thrust pulse's**: mode < 2, not cap-exempt, no school. The
+  beat envelope `p_tkick` arms where the lunge arms and forces a stroke;
+  it decays for every fish so one rejoining after a school carries none.
+  No random numbers are drawn, so the shared generator is untouched.
+- **Registered first guesses**: `glide_drag` (d + l, 1.6/s; cruise is held
+  at any value) and `glide_below` (0.75); help topic `fish-tail-drive`.
+  On for the music Fish scene only (the fish-scene skill's script).
+
 ## The "Fish Swim Burst" flare kind ships at `trigger_offset_ms = 0` —
    his own ruling, and per-kind timing has since made a pre-fire SAFE
 
@@ -125,7 +173,7 @@ the wake." The module's WAKE COLOUR block is the binding statement
   checking what reached `_composite` against the blend's own formula
   (`tests/test_fish_wake_blend.py`, not an AST walk). A new compositing
   path calls `_composite`, never paints the matrix itself. The help topic
-  is checked the same way — `scripts/check_fish_wake_help_topic.mjs`
+  is checked the same way — `scripts/check_fish_help_topics.mjs`
   parses the real `helpContent.ts` tree, not a substring match.
 - **The WATER is the wake plus the big fish**, summed, then through
   `_hue_clip` (an over-bright pixel scaled down whole) before it meets
@@ -567,8 +615,10 @@ Sonic-reachable once it is registered there.
 `check_fish_burst_bounds.py`, `check_fish_disperse.py`,
 `check_fish_wake_blend.py` (the wake's colour and blend on two real-audio
 arcs, with `test_fish_wake_blend.py`),
-`check_fish_wake_help_topic.mjs` (the help topic is a real `helpContent.ts`
-entry, not a substring match),
+`check_fish_help_topics.mjs` (every help topic a fish param links is a
+real `helpContent.ts` entry, not a substring match),
+`check_fish_tail_drive.py` (the tail drive's acceptance list, with
+`test_fish_tail_drive.py`),
 `check_fish_wall.py` (`--gifs DIR` writes old-edge / PR 361 / new GIFs and
 track plots on his real crystal shape), `tests/test_fish.py`, `test_fish_camera.py`,
 `test_fish_disperse.py`, `test_fish_wall.py`,

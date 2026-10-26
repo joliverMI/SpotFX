@@ -361,7 +361,7 @@ def test_the_two_settings_are_registered_for_the_editor_and_sonic():
 
 
 ESBUILD = REPO / "spectra" / "web" / "node_modules" / ".bin" / "esbuild"
-HELP_TOPIC_SCRIPT = REPO / "scripts" / "check_fish_wake_help_topic.mjs"
+HELP_TOPIC_SCRIPT = REPO / "scripts" / "check_fish_help_topics.mjs"
 
 
 @pytest.mark.skipif(
@@ -371,7 +371,7 @@ HELP_TOPIC_SCRIPT = REPO / "scripts" / "check_fish_wake_help_topic.mjs"
 def test_the_help_topic_is_a_real_help_sections_entry():
     """`fish-wake-colour` must be a real id inside helpContent.ts's own
     HELP_SECTIONS tree, evaluated by transpiling the real module with
-    esbuild (scripts/check_fish_wake_help_topic.mjs) — never a raw
+    esbuild (scripts/check_fish_help_topics.mjs) — never a raw
     substring match over the file, which a commented-out or differently
     formatted id would still satisfy."""
     result = subprocess.run(
@@ -379,7 +379,7 @@ def test_the_help_topic_is_a_real_help_sections_entry():
         cwd=REPO, capture_output=True, text=True, timeout=120,
     )
     assert result.returncode == 0, (
-        f"check_fish_wake_help_topic.mjs failed:\n{result.stdout}\n"
+        f"check_fish_help_topics.mjs failed:\n{result.stdout}\n"
         f"{result.stderr}"
     )
     assert "ALL OK" in result.stdout

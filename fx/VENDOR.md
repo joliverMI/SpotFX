@@ -2508,3 +2508,33 @@ against that commit.
     pinned pre-change module over both arcs, and the acceptance bars) +
     `tests/test_fish_wake_blend.py`, `tests/fixtures/fish_wake/`.
     Unverified against his live room.
+84. `effects/fish.py` (SpotFX-authored, #21): THE TAIL DRIVE (2026-10-26;
+    his ask, "the fish could get more realism if their velocity bursts were
+    more directly tied to their swimming motion, so a slow moving fish, or
+    barely moving fish, would show it's tail swimming and that motion would
+    visually propel the fish ... so we still get the good reactive
+    movement, but also a more realistic swim", and the plan he approved,
+    "tail-driven swimming with beats as strong as today";
+    `/home/javi/fleet-spotfx/data/fish-swim-plan/report.md`, part 2). A new
+    registered `tail_drive` (0..1, default 0) with `glide_drag` and
+    `glide_below`, and five SoA arrays (`p_tamp`, `p_tf`, `p_tst`,
+    `p_tph0`, `p_tkick`). With it on, the speed section's target WITHOUT
+    the thrust pulse is an EFFORT; `_tail_drive_step` strokes or glides,
+    eases the tail toward the stroke that effort asks for, pushes with the
+    tail's current motion (thrust `K (A f)^2 2cos^2(tail tip)`, drag
+    `d v^2 + l v`, `K flap_rate^2 = d + l`) and `_tail_drive_flap` draws
+    that same size and rate. The swim burst, solo burst and big-fish flee
+    keep their quickness (`TAIL_STIFF_MAX`). Scope is the thrust pulse's;
+    no random numbers are drawn. `tail_drive = 0` enters none of it:
+    kinematics and frames byte-identical to the pinned pre-change module
+    over two real-audio arcs. Measured at 1: steady speed +0.04% / +0.05%
+    (normal / loud), 60 s of Contra +0.69%; a beat's next-second distance
+    +1.9% / +0.7% / +3.4% and peak +10.5-11.6% at three levels, the tail
+    reaching half its rise 83-133 ms before the speed; at an effort of 0.5
+    it glides 49.7% of the time with no speed rise starting in a glide; the
+    swim burst's 300 ms dash -9.6% and on its trigger; the wall, burst
+    bounds, avoidance and big-fish guards hold. Evidence:
+    `scripts/check_fish_tail_drive.py` + `tests/test_fish_tail_drive.py`,
+    `tests/fixtures/fish_swim/`. On for the music Fish scene only via
+    `scripts/set_fish_tail_drive.py` (a deploy step). Unverified against
+    his live room.

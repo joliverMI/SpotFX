@@ -2630,7 +2630,7 @@
           "max": 1.0,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Swim speed kept between tail strokes, as a fraction of the ordinary continuous swim target. The escape hatch: 1 with Stroke Speed Cap at 0 is the old smooth, un-pulsed motion exactly. Ordinary swimmers only; the charge's school and the drop's rush never pulse. Paired with Stroke Speed Cap's own default so the shipped pair keeps the old MEAN speed (0.85 + 0.4*0.375 = 1.0) rather than just pulsing around a slower average.",
+          "note": "Swim speed kept between tail strokes, as a fraction of the ordinary continuous swim target. The escape hatch: 1 with Stroke Speed Cap at 0 is the old smooth, un-pulsed motion exactly. Ordinary swimmers only; the charge's school and the drop's rush never pulse. Paired with Stroke Speed Cap's own default so the shipped pair keeps the old MEAN speed (0.85 + 0.4*0.375 = 1.0) rather than just pulsing around a slower average. Fades out as Tail Drive rises; no effect at Tail Drive 1.",
           "default": 0.85
         },
         "stroke_speed_cap": {
@@ -2641,8 +2641,44 @@
           "max": 2.0,
           "aspect": "reactivity",
           "distribute": false,
-          "note": "Cap on the extra speed one tail stroke adds on top of Min Drift Speed, synced to the flap. 0 = no pulse at all; quiet music strokes slower, so the pushes read further apart. Paired with Min Drift Speed's own default so the shipped pair keeps the old MEAN speed.",
+          "note": "Cap on the extra speed one tail stroke adds on top of Min Drift Speed, synced to the flap. 0 = no pulse at all; quiet music strokes slower, so the pushes read further apart. Paired with Min Drift Speed's own default so the shipped pair keeps the old MEAN speed. Fades out as Tail Drive rises; no effect at Tail Drive 1.",
           "default": 0.4
+        },
+        "tail_drive": {
+          "label": "Tail Drive",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.0,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "How much the tail itself drives the fish. 0 = the motion before 2026-10-26, exactly: the music sets the speed and the tail follows it. 1 = the tail's own strokes push the fish and the water's drag slows it, so the tail visibly moves first and the fish surges because of it; at a beat the tail strokes harder to get there. Steady speed and a beat's distance stay as they were. Ordinary swimmers only; the charge's school and the drop's rush keep their own motion.",
+          "help_topic": "fish-tail-drive",
+          "default": 0.0
+        },
+        "glide_drag": {
+          "label": "Glide Drag",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.4,
+          "max": 4.0,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Tail Drive: the water's drag at cruise, per second. Higher = a gliding fish slows sooner and the speed follows the tail more tightly; lower = longer glides and softer surges. Cruise is held either way. First guess, pending his eye.",
+          "help_topic": "fish-tail-drive",
+          "default": 1.6
+        },
+        "glide_below": {
+          "label": "Glide Below",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.0,
+          "max": 1.5,
+          "aspect": "reactivity",
+          "distribute": false,
+          "note": "Tail Drive: below this effort (a share of cruise) a fish strokes a short burst and then glides with its body straight, instead of beating steadily. 0 = never glide. Ordinary music never asks for less than cruise, so this shows when something slows the fish. First guess, pending his eye.",
+          "help_topic": "fish-tail-drive",
+          "default": 0.75
         },
         "ripple_amount": {
           "label": "Ripple Wake",
@@ -3146,6 +3182,9 @@
         "flap_accel": 1.2,
         "min_drift_speed": 0.85,
         "stroke_speed_cap": 0.4,
+        "tail_drive": 0.0,
+        "glide_drag": 1.6,
+        "glide_below": 0.75,
         "ripple_amount": 0.35,
         "ripple_spread": 0.45,
         "ripple_life": 0.675,

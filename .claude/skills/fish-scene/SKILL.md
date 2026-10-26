@@ -139,6 +139,23 @@ own switch and 0.7 energy floor (`drop_shock_enabled`,
 `drop_shock_min_energy`) govern every other scene. Help
 `drop-shockwave-switches`.
 
+## The tail drive is ON for this scene only (2026-10-26)
+
+The plan he approved: "tail-driven swimming with beats as strong as today",
+with the defaults "the pond rest is for the music Fish scene only". The
+effect's own `tail_drive` default is 0 (the fish-effect skill's TAIL DRIVE
+section), so House Fish swims exactly as before; `scripts/
+set_fish_tail_drive.py` sets `tail_drive = 1.0` on THIS scene's Matrix
+entry (`target: Matrix`, `effect_type: fish`) and nothing else — dry run
+default, `--apply` at deploy (it backs the store up first), `--revert`
+removes the param again. It is a raw single-param patch, refusing to guess
+when the scene's name or its one Matrix fish entry is not what it expects
+(`tests/test_fish_tail_drive.py`). A Fish scene already showing keeps its
+old value until it next fires. Sonic reads and sets it per entry
+(`get_scene_entry_params` / `set_scene_entry_param`, scene "Fish", target
+"Matrix"), with `glide_drag` and `glide_below` beside it. Help
+`fish-tail-drive`.
+
 ## Executable proofs
 
 Shares the fish-effect skill's proof corpus in full

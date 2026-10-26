@@ -9360,6 +9360,16 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      entries AND registered in `config/effect_params.json` (Sonic's param
      discovery reads type/range from the registry), so once deployed they
      are tunable without another deploy. Help: `fish-effect`.
+   * **THE TAIL DRIVE (2026-10-26) goes the rest of the way and fades this
+     dial out** (`tail_drive`, the module's TAIL DRIVE block, his "would
+     show it's tail swimming and that motion would visually propel the
+     fish"): the music sets an EFFORT and the tail's own drawn stroke makes
+     the thrust, so the tail moves first and the fish surges after it.
+     `tail_drive = 0` (the schema default) runs none of it — the old motion
+     bit for bit — and only the music Fish scene turns it on
+     (`scripts/set_fish_tail_drive.py`, a deploy step). Proof:
+     `scripts/check_fish_tail_drive.py`; the fish-effect skill has the
+     rest.
    * **THE WAKE NOW SITS UNDER THE SCHOOL DURING A CHARGE OR LULL — a
      visible change he did not ask for, shipped with this branch.** The
      wake buffer is SCREEN space, and the old deposit
