@@ -55,9 +55,26 @@ const DROP_COLOUR_RUNG: Record<string, string> = {
   to_rainbow: ', a rainbow',
   from_rainbow: ', from a rainbow',
   rainbow_only: ', rainbow to rainbow (nothing else allowed)',
-  widest_available: ', the farthest set allowed (none 150-210° away)',
   pinned_group: ', the pinned group\'s next set',
 };
+
+/** RoomControlState.drop_colour_spread_deg's default — only for an entry
+ * written before the brief carried the spread its pick used. */
+const DEFAULT_DROP_COLOUR_SPREAD_DEG = 30;
+
+/** The rung as a reader says it. "None in the band" names the band the pick
+ * actually used (the entry's spread_deg either side of 180), never a fixed
+ * range: the spread is his setting. */
+function dropColourWhy(c: Record<string, unknown>): string {
+  const rung = c.rung as string | undefined;
+  if (!rung) return '';
+  if (rung === 'widest_available') {
+    const spread = typeof c.spread_deg === 'number' && Number.isFinite(c.spread_deg)
+      ? c.spread_deg : DEFAULT_DROP_COLOUR_SPREAD_DEG;
+    return `, the farthest set allowed (none ${Math.round(180 - spread)}-${Math.round(180 + spread)}° away)`;
+  }
+  return DROP_COLOUR_RUNG[rung] ?? `, ${rung}`;
+}
 
 /** THE DROP COLOUR CHANGE's outcome as a drop's own entry carries it
  * (trigger_engine.drop_colour_brief): to which set, how far round the wheel
@@ -72,7 +89,7 @@ export function describeDropColour(c: Record<string, unknown> | undefined): stri
   if (result === 'jumped') {
     const to = (c.to_set_name as string | undefined) ?? (c.to_set_id as string | undefined) ?? 'a new set';
     const dist = c.distance_deg as number | undefined;
-    const why = DROP_COLOUR_RUNG[(c.rung as string | undefined) ?? ''] ?? `, ${String(c.rung)}`;
+    const why = dropColourWhy(c);
     const how = c.moment === 'pre_drop' ? ', fading to the drop' : '';
     return ` · new colours: ${to}${dist != null ? ` (${Math.round(dist)}° away)` : ''}${why}${how}`;
   }

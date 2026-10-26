@@ -403,6 +403,28 @@ def test_nothing_in_the_band_takes_the_farthest_and_no_set_keeps_the_colours(car
     assert kept["result"] == "kept_current" and not alone.executor.writes
 
 
+def test_the_record_and_its_brief_carry_the_spread_the_pick_used(card_store):
+    """The Review page words "none in the band" from the band the pick used,
+    so the record and the brief a drop's show-log entry carries name his
+    spread, not the default. From red, green and blue sit 120 away: outside
+    a 15-degree spread (165-195) and inside a 70-degree one (110-250)."""
+    from spectra.services.trigger_engine import drop_colour_brief
+    narrow = Rig(controls=RoomControlState(drop_colour_spread_deg=15.0),
+                 pool={"red", "green", "blue"})
+    narrow.fire(_scene())
+    record = _run(narrow.responses.drop_color_change(0.7))
+    assert (record["rung"], record["spread_deg"]) == (dc.RUNG_WIDEST, 15.0)
+    brief = drop_colour_brief(record)
+    assert (brief["rung"], brief["spread_deg"], brief["distance_deg"]) == \
+        (dc.RUNG_WIDEST, 15.0, 120.0)
+    wide = Rig(controls=RoomControlState(drop_colour_spread_deg=70.0),
+               pool={"red", "green", "blue"})
+    wide.fire(_scene())
+    record = _run(wide.responses.drop_color_change(0.7))
+    assert (record["rung"], drop_colour_brief(record)["spread_deg"]) == \
+        (dc.RUNG_BAND, 70.0)
+
+
 def test_from_a_rainbow_any_single_hue_is_big(card_store):
     rig = Rig(room=cj.RoomColorState(wheel_position_deg=0.0,
                                      active_set_id="rainbow"))

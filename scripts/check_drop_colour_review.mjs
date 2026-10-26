@@ -9,6 +9,8 @@
  * Asserted:
  *   1. A drop sequence's drop names the new set, how far round the wheel,
  *      and why (the rung) — and says nothing extra when the band applies.
+ *      "None in the band" names the band the pick USED (the entry's
+ *      spread_deg), never a fixed 150-210.
  *   2. A hold is named in his words (Force Colour, a house mode, the 2D
  *      gradient, a preview); an unlisted hold word is shown verbatim.
  *   3. His own drop trigger carries the same note; a drop with no
@@ -52,8 +54,22 @@ console.log('§1 a drop names its new colours');
                                      distance_deg: 166.4, rung: 'band', moment: 'drop' }));
   ok(s === 'Drop sequence: drop (detected) @ ⚡0.80 · new colours: Mid - Fire (166° away)', s);
   const w = describeEvent(seqDrop({ result: 'jumped', to_set_name: 'Orbit - Green',
-                                     distance_deg: 120, rung: 'widest_available' }));
+                                     distance_deg: 120, rung: 'widest_available', spread_deg: 30 }));
   ok(w.endsWith('new colours: Orbit - Green (120° away), the farthest set allowed (none 150-210° away)'), w);
+  // the band is the one the pick USED — his spread setting, never the default
+  const n = describeEvent(seqDrop({ result: 'jumped', to_set_name: 'Orbit - Green',
+                                     distance_deg: 120, rung: 'widest_available', spread_deg: 15 }));
+  ok(n.endsWith('the farthest set allowed (none 165-195° away)'), `a 15° spread names its own band: ${n}`);
+  const wide = describeEvent(seqDrop({ result: 'jumped', to_set_name: 'Orbit - Green',
+                                        distance_deg: 100, rung: 'widest_available', spread_deg: 75 }));
+  ok(wide.endsWith('the farthest set allowed (none 105-255° away)'), `a 75° spread names its own band: ${wide}`);
+  const old = describeEvent(seqDrop({ result: 'jumped', to_set_name: 'Orbit - Green',
+                                       distance_deg: 120, rung: 'widest_available' }));
+  ok(old.endsWith('the farthest set allowed (none 150-210° away)'),
+     `an entry from before the brief carried a spread reads at the default: ${old}`);
+  const bare = describeEvent(seqDrop({ result: 'jumped', to_set_name: 'Orbit - Green',
+                                        distance_deg: 170 }));
+  ok(bare.endsWith('new colours: Orbit - Green (170° away)'), `no rung adds no trailing words: ${bare}`);
   const r = describeEvent(seqDrop({ result: 'jumped', to_set_name: 'Hype 1', rung: 'to_rainbow' }));
   ok(r.endsWith('new colours: Hype 1, a rainbow'), r);
 }

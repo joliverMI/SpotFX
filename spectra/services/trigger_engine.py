@@ -463,12 +463,14 @@ def _colour_landed(record: Optional[dict]) -> bool:
 def drop_colour_brief(record: dict) -> dict:
     """The drop colour change's outcome as a drop's show-log entry carries it
     (the Review page names it): what happened, from which set to which, how
-    far round the wheel, why that set, and any hold — each key only when the
-    record has it."""
+    far round the wheel, why that set, the band the pick used (spread_deg —
+    the page words "none in the band" from it, never from the default), and
+    any hold — each key only when the record has it."""
     jump = record.get("color_jump") or {}
     out: dict[str, Any] = {"result": record.get("result")}
     for k in ("held_for", "reason", "moment", "ramp_ms", "rung",
-              "distance_deg", "from_set_id", "forced_color", "pool_scene"):
+              "distance_deg", "spread_deg", "from_set_id", "forced_color",
+              "pool_scene"):
         if record.get(k) is not None:
             out[k] = record[k]
     if jump.get("result") == "jumped":

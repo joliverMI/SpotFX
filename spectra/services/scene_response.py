@@ -3417,7 +3417,8 @@ class ResponseEngine:
                                       if current_deg is not None else None),
                       from_rainbow=current_rainbow, pool_size=len(options),
                       pick=pick.as_dict(), rung=pick.rung,
-                      distance_deg=pick.as_dict()["distance_deg"])
+                      distance_deg=pick.as_dict()["distance_deg"],
+                      spread_deg=pick.spread_deg)
         if pick.set_id is None:
             record["result"] = "kept_current"
             return record
