@@ -2684,6 +2684,24 @@
           "note": "Wake thickness: how wide each deposit laid at the tail is, relative to the fish.",
           "default": 0.975
         },
+        "wake_hue": {
+          "label": "Wake Colour",
+          "type": "enum",
+          "smooth": false,
+          "options": ["own", "neighbour", "opposite"],
+          "default": "own",
+          "help_topic": "fish-wake-colour",
+          "note": "The wake's colour on a gradient. own (default, his 2026-10-26 option A): the fish's own colour. neighbour: an eighth of the way along the gradient (a red fish leaves an orange wake). opposite: half way round the gradient, the look before 2026-10-26 - on a rainbow, opposite colours add up to white. A solid colour set always gets its own colour, much dimmer."
+        },
+        "wake_blend": {
+          "label": "Wake Blend",
+          "type": "enum",
+          "smooth": false,
+          "options": ["lighten", "under", "add"],
+          "default": "lighten",
+          "help_topic": "fish-wake-colour",
+          "note": "How the wake (and the big fish behind the shoal) meets the fish. lighten (default): per colour channel the brighter of the two, never their sum. under: the wake shows only where no fish is. add: the two summed, the look before 2026-10-26. Wake Colour opposite with Wake Blend add is exactly the old look."
+        },
         "avoid_strength": {
           "label": "Avoid Each Other",
           "type": "numeric",
@@ -3132,6 +3150,8 @@
         "ripple_spread": 0.45,
         "ripple_life": 0.675,
         "ripple_width": 0.975,
+        "wake_hue": "own",
+        "wake_blend": "lighten",
         "avoid_strength": 0.45,
         "roam_scale": 0.95,
         "camera_follow": 0.8,

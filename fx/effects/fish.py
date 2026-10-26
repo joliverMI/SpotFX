@@ -667,22 +667,50 @@ WAKE_R_MAX_BODY = 1.1   # … and a deposit is never wider than this many body
                         # the DIFFUSION is what opens it out past this, not
                         # the deposit)
 
-# COLOUR — the rule, stated (his ask: "a different color from the fish if
-# there is a gradient to work with, or if it's a solid/uniform color, at
-# least substantially less bright than the fish").
+# COLOUR — the rule, stated, and his reversal of half of it.
+#
+# 2026-08-28, his ask: "a different color from the fish if there is a
+# gradient to work with, or if it's a solid/uniform color, at least
+# substantially less bright than the fish". On a rainbow that put the
+# OPPOSITE colour under every fish, and the bodies and the wake were ADDED
+# together — complementary light summed is white. Measured on his crystal
+# (data/fish-swim-plan, a busy rainbow arc) that was the main source of the
+# wash-out he reported on 2026-10-26: "the fish scene gains a lot of white
+# color, especially in rainbow effects when there is a lot going on". His
+# answer the same day: "I approve option A for the wake" — the wake wears
+# the fish's OWN colour and meets the bodies by LIGHTEN, not by adding.
+# Both of the old choices stay one setting away: `wake_hue = opposite` with
+# `wake_blend = add` renders exactly as before, frame for frame.
 #
 # THE DECISION RULE, read off the RESOLVED gradient curve and not the config
 # string: sample the built curve end to end; if every channel's spread
 # across those samples is within WAKE_SOLID_TOL, the palette is SOLID.
 #   * SOLID  → the wake wears the fish's own colour at WAKE_SOLID_DIM of its
-#              amplitude. Distinctness is a BRIGHTNESS ratio.
-#   * GRADIENT → the wake samples the gradient WAKE_GRAD_OFFSET further along
-#              than the fish that made it — deterministic, and a half turn is
-#              the furthest apart two points on a wrapped gradient can be.
-#              Distinctness is a COLOUR distance.
+#              amplitude, whatever `wake_hue` says (every point along a solid
+#              is the same colour). Distinctness is a BRIGHTNESS ratio.
+#   * GRADIENT → the wake samples the gradient WAKE_HUE_OFFSETS[wake_hue]
+#              further along than the fish that made it: `own` (the default)
+#              is the fish's own colour; `neighbour` is an eighth along (a red
+#              fish leaves an orange wake); `opposite` is half a turn, the
+#              2026-08-28 rule — the furthest apart two points on a wrapped
+#              gradient can be.
 WAKE_SOLID_TOL = 8.0 / 255.0
 WAKE_SOLID_DIM = 0.35
-WAKE_GRAD_OFFSET = 0.5
+WAKE_HUE_OFFSETS = {"own": 0.0, "neighbour": 0.125, "opposite": 0.5}
+
+# THE BLEND (`wake_blend`) — how the WATER (the wake, and the big fish swimming
+# behind the shoal) meets the BODIES in the final mix (`_composite`):
+#   * lighten (default) → per channel, whichever is brighter. No channel is
+#              ever brighter than the brighter of the two layers (a sum can
+#              reach twice that), and a fish over its own-colour wake shows
+#              exactly the fish. The water goes in through a hue-preserving
+#              clip (an over-bright pixel is scaled down as a whole,
+#              `_hue_clip`).
+#   * under  → the water shows only where the fish is not: a body hides what
+#              is behind it in proportion to how lit the body is.
+#   * add    → bodies + water, clipped per channel (everything before
+#              2026-10-26).
+WAKE_BLENDS = ("lighten", "under", "add")
 
 # ── the camera window ───────────────────────────────────────────────────────
 # The panel is a WINDOW onto a larger body of water, not the whole of it.
@@ -1075,6 +1103,29 @@ def rotate_hue(rgb, degrees):
     h, s, v = colorsys.rgb_to_hsv(r, g, b)
     h = (h + float(degrees) / 360.0) % 1.0
     return np.array(colorsys.hsv_to_rgb(h, s, v), dtype=np.float32) * 255.0
+
+
+def _channel_peak(layer):
+    """Each pixel's brightest channel, (h, w, 1). Two elementwise maxima:
+    numpy's `max(axis=-1)` over a 3-wide axis costs ~100x more."""
+    return np.maximum(
+        np.maximum(layer[..., 0], layer[..., 1]), layer[..., 2]
+    )[..., None]
+
+
+def _hue_clip(layer, cap=255.0):
+    """Scale a pixel down AS A WHOLE wherever its brightest channel passes
+    `cap`, keeping its hue and saturation (the scatter's own body clip,
+    `_clip_body_layer`, is the same rule). A per-channel clip of an
+    over-bright colour pushes it toward white."""
+    if float(layer.max()) <= cap:
+        return layer
+    peak = _channel_peak(layer)
+    return np.where(
+        peak > cap,
+        layer * (np.float32(cap) / np.maximum(peak, 1e-6)),
+        layer,
+    )
 
 
 # Every per-fish SoA array, in one place so compaction and the particle
@@ -1592,6 +1643,28 @@ class Fish2d(Twod, GradientEffect):
                 # 1.3 -> 0.975.
                 default=0.975,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=4.0)),
+            # 2026-10-26, his word ("I approve option A for the wake"): the
+            # wake in the fish's own colour, lightened onto the bodies. See
+            # the WAKE COLOUR block at the top of this module.
+            vol.Optional(
+                "wake_hue",
+                description=(
+                    "Wake color on a gradient: own = the fish's own color, "
+                    "neighbour = an eighth of the way along the gradient, "
+                    "opposite = half way round it (the look before "
+                    "2026-10-26)"
+                ),
+                default="own",
+            ): vol.In(list(WAKE_HUE_OFFSETS)),
+            vol.Optional(
+                "wake_blend",
+                description=(
+                    "How the wake meets the fish: lighten = the brighter of "
+                    "the two, under = the wake only where the fish is not, "
+                    "add = the two summed (the look before 2026-10-26)"
+                ),
+                default="lighten",
+            ): vol.In(list(WAKE_BLENDS)),
             vol.Optional(
                 "avoid_strength",
                 description="How hard they avoid each other; 0 = they swim straight through",
@@ -2015,6 +2088,8 @@ class Fish2d(Twod, GradientEffect):
         self.ripple_spread = self._config["ripple_spread"]
         self.ripple_life = self._config["ripple_life"]
         self.ripple_width = self._config["ripple_width"]
+        self.wake_hue = self._config["wake_hue"]
+        self.wake_blend = self._config["wake_blend"]
         self.avoid_strength = self._config["avoid_strength"]
         self.roam_scale = self._config["roam_scale"]
         self.camera_follow = self._config["camera_follow"]
@@ -4052,7 +4127,8 @@ class Fish2d(Twod, GradientEffect):
         Returns `(is_solid, grad_offset, dim)`. The decision is read off the
         BUILT gradient curve, never the config string, so a "gradient" whose
         stops all resolve to one colour is correctly treated as solid — see
-        the WAKE_SOLID_* block at the top of this module for the rule.
+        the WAKE COLOUR block at the top of this module for the rule. A real
+        gradient's offset is `wake_hue`'s (own / neighbour / opposite).
         """
         self._assert_gradient()
         curve = self._gradient_curve
@@ -4063,7 +4139,7 @@ class Fish2d(Twod, GradientEffect):
         ) / 255.0
         if spread <= WAKE_SOLID_TOL:
             return True, 0.0, WAKE_SOLID_DIM
-        return False, WAKE_GRAD_OFFSET, 1.0
+        return False, WAKE_HUE_OFFSETS[self.wake_hue], 1.0
 
     def _step_wake(self, dt):
         """Decay, EXPAND, and carry the buffer with the water.
@@ -4207,14 +4283,9 @@ class Fish2d(Twod, GradientEffect):
             self.p_x0[:k] = x
             self.p_y0[:k] = y
 
-        out = np.asarray(self.matrix, dtype=np.float32) + self.trail
         # the collapse composites no wake, so the big fish lays none
         big = self._big_fish_layer(dt, self.trail, wake=False)
-        if big is not None:
-            out = out + big
-        self.matrix = Image.fromarray(
-            np.clip(out, 0, 255).astype(np.uint8), "RGB"
-        )
+        self._composite(self.trail, None, big)
 
     def _trail_points(self, idx, px, py, d):
         """Points walked back along each fish's recorded path, in SCREEN
@@ -5948,11 +6019,38 @@ class Fish2d(Twod, GradientEffect):
         # the big fish first: it lays its wake into self.wake, composited
         # just below
         big = self._big_fish_layer(dt, body_out)
-        out = np.asarray(self.matrix, dtype=np.float32) + body_out
-        if self.wake is not None:
-            out = out + self.wake
-        if big is not None:
-            out = out + big
+        self._composite(body_out, self.wake, big)
+
+    def _composite(self, body, wake, big):
+        """The final mix into `self.matrix`: the canvas plus the BODIES, and
+        the WATER under them (the wake, and the big fish behind the shoal)
+        met by `wake_blend` — see the WAKE COLOUR block at the top of this
+        module. Every path that writes the matrix comes through here (the
+        draw, the held-transition `_fade_only`, the outgoing
+        `_draw_collapse`), so none of them can mix the layers differently.
+        `add` is the pre-2026-10-26 mix, operation for operation."""
+        fish = np.asarray(self.matrix, dtype=np.float32) + body
+        if self.wake_blend == "add":
+            out = fish
+            if wake is not None:
+                out = out + wake
+            if big is not None:
+                out = out + big
+        else:
+            water = None
+            for layer in (wake, big):
+                if layer is not None:
+                    water = layer if water is None else water + layer
+            if water is None:
+                out = fish
+            elif self.wake_blend == "lighten":
+                out = np.maximum(fish, _hue_clip(water))
+            else:
+                # under: a body hides the water behind it in proportion to
+                # how lit the body is
+                fish = np.clip(fish, 0, 255)
+                alpha = _channel_peak(fish) / 255.0
+                out = fish + _hue_clip(water) * (1.0 - alpha)
         self.matrix = Image.fromarray(
             np.clip(out, 0, 255).astype(np.uint8), "RGB"
         )
@@ -6000,11 +6098,4 @@ class Fish2d(Twod, GradientEffect):
         self._step_wake(dt)
         self._apply_lull_dark()
         big = self._big_fish_layer(dt, self.trail)
-        out = np.asarray(self.matrix, dtype=np.float32) + self.trail
-        if self.wake is not None:
-            out = out + self.wake
-        if big is not None:
-            out = out + big
-        self.matrix = Image.fromarray(
-            np.clip(out, 0, 255).astype(np.uint8), "RGB"
-        )
+        self._composite(self.trail, self.wake, big)

@@ -481,9 +481,12 @@ def test_keep_zero_and_an_untold_drop_are_the_pre_change_fish_bit_for_bit(
     pinned pre-change module renders, frame for frame — the hook adds a
     behaviour, it never moves the old one."""
     name = _load_pre_change()
+    # the wake is held at its old colour and blend (fx/effects/fish.py's WAKE
+    # COLOUR block): the pinned module predates both settings
+    cfg = dict(HIS, wake_hue="opposite", wake_blend="add")
 
     async def run(effect_type, told):
-        room = await _room(tmp_path, f"bit{effect_type[-4:]}", seed=7,
+        room = await _room(tmp_path, f"bit{effect_type[-4:]}", cfg, seed=7,
                            effect_type=effect_type)
         frames = []
 

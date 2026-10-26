@@ -16,9 +16,13 @@ pipeline (fx.headless at his crystal-mapper's shape, audio silenced):
      while its peak falls (it must DIM). A buffer that only faded would
      shrink its footprint, not grow it.
   3. COLOUR — the stated rule, both ways. GRADIENT palette: the mean colour
-     distance between fish pixels and wake pixels, against the same distance
-     measured with the offset removed as the negative control. SOLID
-     palette: the wake's peak brightness as a fraction of the fish's.
+     distance between fish pixels and wake pixels at each `wake_hue` — his
+     2026-10-26 reversal made the fish's OWN colour the default ("I approve
+     option A for the wake"), and the 2026-08-28 different colour is
+     `opposite`, one setting away; `own` is the negative control for
+     `opposite`. SOLID palette: the wake's peak brightness as a fraction of
+     the fish's, whatever `wake_hue` says. How the wake then MEETS the fish
+     (`wake_blend`) is scripts/check_fish_wake_blend.py's.
   4. MOTION COUPLING — wake energy at cruise vs. under a real music drive,
      and the wake's own length after a strong beat (the lunge).
 
@@ -199,38 +203,27 @@ def section_three():
         # a single value: with a population every fish sits at its own point
         # on the gradient and averaging the panel washes the answer out.
         one = dict(particle_count=1)
-        # GRADIENT case: the wake samples WAKE_GRAD_OFFSET further along
-        r = await room("grad", one)
-        r.step(600)
-        f, w = _split_pixels(r.effect)
-        dist = float(np.linalg.norm(
-            _hue_unit(f).mean(axis=0) - _hue_unit(w).mean(axis=0)
-        ))
-        await close(r)
-
-        # NEGATIVE CONTROL: the same run with the offset removed — the wake
-        # then wears the fish's own colour and the distance must collapse
-        orig = FX.WAKE_GRAD_OFFSET
-        FX.WAKE_GRAD_OFFSET = 0.0
-        try:
-            r0 = await room("grad-ctl", one)
-            r0.step(600)
-            f0, w0 = _split_pixels(r0.effect)
-            dist0 = float(np.linalg.norm(
-                _hue_unit(f0).mean(axis=0) - _hue_unit(w0).mean(axis=0)
+        # GRADIENT case: the wake samples WAKE_HUE_OFFSETS[wake_hue] along
+        dist, rgb = {}, {}
+        for hue in FX.WAKE_HUE_OFFSETS:
+            r = await room(f"grad-{hue}", dict(one, wake_hue=hue))
+            r.step(600)
+            f, w = _split_pixels(r.effect)
+            dist[hue] = float(np.linalg.norm(
+                _hue_unit(f).mean(axis=0) - _hue_unit(w).mean(axis=0)
             ))
-            await close(r0)
-        finally:
-            FX.WAKE_GRAD_OFFSET = orig
+            rgb[hue] = (f.mean(axis=0).round(1), w.mean(axis=0).round(1))
+            await close(r)
 
-        print(f"   GRADIENT palette (his default rainbow):")
-        print(f"     fish mean rgb {f.mean(axis=0).round(1)}   "
-              f"wake mean rgb {w.mean(axis=0).round(1)}")
-        print(f"     colour distance (unit-rgb) = {dist:.3f}")
-        print(f"     control, offset 0.0        = {dist0:.3f}"
-              f"   -> {dist / max(dist0, 1e-6):.1f}x")
-        if dist <= dist0 * 1.5:
-            raise SystemExit("the gradient offset buys no real distinctness")
+        print("   GRADIENT palette (his default rainbow), by wake_hue:")
+        print(f"     fish mean rgb {rgb['own'][0]}")
+        for hue, d in dist.items():
+            print(f"     {hue:9s} wake mean rgb {rgb[hue][1]}   colour "
+                  f"distance (unit-rgb) = {d:.3f}")
+        if dist["opposite"] <= dist["own"] * 1.5:
+            raise SystemExit("the opposite offset buys no real distinctness")
+        if not dist["own"] < dist["neighbour"] < dist["opposite"]:
+            raise SystemExit("neighbour must sit between own and opposite")
 
         # SOLID case: same colour, substantially less bright
         rs = await room("solid", dict(one, gradient=SOLID))
