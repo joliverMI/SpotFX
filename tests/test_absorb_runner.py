@@ -91,6 +91,7 @@ def test_config_ships_off():
      "camera_run_active"),
     (lambda w: w.gw.devices.clear(), "device_unreachable"),
     (lambda w: w.gw.playlists.pop(SOURCE_ID), "playlist_unresolved"),
+    (lambda w: setattr(w.deps, "jukebox_night", lambda: True), "jukebox_night"),
 ])
 def test_each_gate_refuses_by_name_and_is_recorded(world, setup, reason):
     _twenty(world)

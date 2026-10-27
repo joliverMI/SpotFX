@@ -121,6 +121,7 @@ SENTENCES: dict[str, str] = {
     "analysis_disabled": "Audio analysis is switched off, so nothing would be captured.",
     "music_playing": "Music is already playing on Spotify — Absorb won't take over your listening.",
     "night_run_active": "A night run has the room.",
+    "jukebox_night": "A Jukebox night is running — Absorb won't take over the party.",
     "camera_run_active": "A camera run is in progress.",
     "spectra_unreadable": "Couldn't confirm that no night run or camera run is in progress.",
     "device_unreachable": "{device} isn't available as a Spotify Connect device.",
@@ -256,6 +257,10 @@ class AbsorbDeps:
     anchor_enabled: Callable[[], bool] = lambda: True
     current_track: Callable[[], Any] = lambda: None
     device_name: Callable[[], str] = lambda: "Serenity"
+    # A Jukebox night (services/jukebox/night.py) has the music: a window
+    # never opens over it. The Jukebox refuses to start under an open window
+    # in turn, so the two never share Spotify's one playback session.
+    jukebox_night: Callable[[], bool] = lambda: False
     to_thread: Callable[..., Awaitable[Any]] = _default_to_thread
     # Ask the Spotify poller to look again soon (after a play): the idle poll
     # interval is 30 s, and absorb wants to see its song arrive.
@@ -267,6 +272,11 @@ class AbsorbDeps:
     poll_ok: Callable[[], Optional[bool]] = lambda: True
     # Fast Spotify polling while the house is silent (state.absorb_fast_poll).
     set_fast_poll: Callable[[bool], None] = lambda on: None
+
+
+def _jukebox_night() -> bool:
+    from services.jukebox.night import night_running
+    return night_running()
 
 
 def production_deps() -> AbsorbDeps:
@@ -295,6 +305,7 @@ def production_deps() -> AbsorbDeps:
         anchor_enabled=lambda: bool(settings.anchor_enabled),
         current_track=lambda: state.current_track,
         device_name=device_name,
+        jukebox_night=_jukebox_night,
         request_burst=_request_burst,
         poll_ok=lambda: state.poll_ok,
         set_fast_poll=set_fast_poll,
@@ -551,6 +562,8 @@ class AbsorbRunner:
         d = self.deps
         if not cfg.source_playlist_uri.strip():
             return ("no_playlist", sentence("no_playlist"))
+        if d.jukebox_night():
+            return ("jukebox_night", sentence("jukebox_night"))
         if not d.anchor_enabled():
             return ("anchor_disabled", sentence("anchor_disabled"))
         if not d.analysis_enabled():
