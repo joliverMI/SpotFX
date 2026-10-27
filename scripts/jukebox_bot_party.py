@@ -285,8 +285,11 @@ def spotfx_app(tmp: Path):
     known = {s["uri"] for s in songs[N_SET::5]}
 
     ends = datetime.now(guests.HOUSE_TZ) + timedelta(hours=4)
+    # free play: the bots exercise phase 2.3's rules (credits mode is the
+    # default since PR 3.2, and its writes go through the ledger, off the loop)
     store.save_show(ShowConfig(night_ends=f"{ends.hour:02d}:{ends.minute:02d}", explicit="extra",
-                               max_phones=100, economy=EconomyConfig(skip_grace_s=10)))
+                               max_phones=100, play_mode="free",
+                               economy=EconomyConfig(skip_grace_s=10)))
     cfg = ProgramConfig(playlist=PLAYLIST_URI, mode="auto", every=1, run=2, run_out="again",
                         commit_lead_s=20)
     store.save_config(cfg)

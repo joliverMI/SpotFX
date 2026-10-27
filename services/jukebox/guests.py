@@ -1,9 +1,10 @@
 """
 SpotFX — the Jukebox's GUESTS (data/jukebox-plan/report.md §6, §7 and §9
-phase 2, PRs 2.1-2.3): tonight's phones, the names they picked, their votes
-on the song playing, the songs they add and bump, the free-play rules (the
-room's skip, the jail), the host's controls over all of it, and the ONE view
-the guest page draws.
+phases 2-3, PRs 2.1-2.3 and 3.2): tonight's phones, the names they picked,
+their votes on the song playing, the songs they add and bump, the free-play
+rules (the room's skip, the jail), credits mode (prices, tips, the paid skip
+and its pot, play next, the break-out, the Shop), the host's controls over
+all of it, and the ONE view the guest page draws.
 
 The guest page itself is a separate process (jukebox_guest/, on :8020): it
 serves the page, keeps each phone's cookie, rate-limits, and forwards a short
@@ -37,7 +38,8 @@ VOTES (free play, the plan's §6). One vote per phone on the song playing —
 ▲ or ▼, changeable, withdrawable — keyed by the play (the song and the moment
 it started), so a song that plays twice is voted on twice. Only while it
 plays; never on your own song ("everyone else votes"); never on a song that
-isn't part of tonight's program. Credits for votes come in phase 3.
+isn't part of tonight's program. In credits mode a vote also earns
+(`vote_reward`, once per play).
 
 FREE PLAY (report §6, PR 2.3): nothing costs anything, and counts keep it
 fair; every number is a show setting (§4's Free play card).
@@ -61,8 +63,10 @@ fair; every number is a show setting (§4's Free play card).
   keep their places but are never sent, and the guest can't add or bump
   (they can still vote). When the time-out ends — or the host pardons them
   — their count starts again at 0. The host's songs never go to jail. The
-  term is the engine's (JukeboxNight.jail, counted in songs that start); the
-  count is this book's (GuestBook.play_by, GuestPhone.jail_base).
+  term is the engine's (JukeboxNight.jail, counted in songs that start),
+  alongside its KIND (JukeboxNight.jail_kind, "timeout" here — see CREDITS
+  MODE below for the other kind and how a mode switch converts one into the
+  other); the count is this book's (GuestBook.play_by, GuestPhone.jail_base).
   PLAY NEXT is the host's only (his "Play next" on the Guests tab), or off.
 
 ADDING A SONG (report §1.5, in free play). A guest finds a song — his own
@@ -81,6 +85,43 @@ is a network call, both through `to_thread`, on a gateway of their own (so a
 party searching never queues ahead of the engine's commit). Results are
 cached by query for SEARCH_CACHE_S; a song's details (art, length, explicit)
 for META_CACHE_S.
+
+CREDITS MODE (report §1, PR 3.2; ShowConfig.play_mode == "credits", off by
+default). services/jukebox/wallet.py is the wallet (earning, the prices from
+the night as it stands, the Shop's words) and services/jukebox/ledger.py the
+truth — every grant, earning, tip, spend and refund is a ledger entry, read
+back for every number shown; nothing here stores a balance. On top of free
+play's book:
+  EARNING is checked on the phone's own polls (`_credits_tick`): the welcome
+  credits (half at "Let's go", the rest later), the top-ups while the phone
+  is here (a phone away more than PRESENT_WINDOW_MS gets none for the time
+  away), Adder credits for the ▲ on a guest's song once it has played.
+  EVERY SPEND IS PRICED BY THE SERVER AND CHECKED AGAINST THE PRICE THE PAGE
+  SHOWED (`_afford`): a price that moved is refused with the new one, never
+  charged. Adding (the add price, with its long-song, learn-first and
+  explicit extras), bumps (by places, no hourly limit), play next (once
+  per song, ≥ `next_min_away_min` away; every song it jumps past is pushed
+  back a place — the cap is per song — and it is refused when one of them
+  is already at the cap),
+  the skip (the rest of its price, or a chip-in toward its POT; a pot filled
+  makes the engine skip; a pot whose song ends first is refunded), tips (to
+  the guest whose song is playing, never the host or yourself) and the
+  break-out from jail. In credits mode a NEW jail lasts until the guest
+  breaks out (`jail_fee`) or the host pardons (night.JAIL_UNTIL_FREED,
+  stored kind "breakout") — but a jail already running keeps the kind it
+  was imposed under (`jail_kind_of`, read off the night's own stored
+  `jail_kind`, never the CURRENT `play_mode`): a mode switch converts an
+  existing "breakout" jail into an ordinary "timeout" one of
+  `free_jail_songs` songs (`night.convert_jail_mode`, run from the show's
+  one validator path on a `play_mode` edit), and a "timeout" jail switched
+  INTO credits mode keeps ending by itself, with no break-out ever offered
+  for it.
+  REFUNDS are written, never assumed: a paid song the host removed, an
+  unfilled pot, and every paid song still waiting when the night ends
+  (`_close_night`).
+  THE SKIP LOCK (§12, "the host can lock a song from skips") is the
+  engine's `no_skip` list, by song, in both modes: the room's vote, a paid
+  skip, a chip-in and a pot that fills all refuse a locked song.
 
 THE VIEW is everything one phone's screen shows, built from the engine's
 lean read (night.JukeboxRunner.guest_state — no Spotify call) and this book:
@@ -152,6 +193,11 @@ ANIMALS = ("Fox", "Otter", "Panda", "Koala", "Falcon", "Dolphin", "Tiger", "Llam
 PRIVACY = ("This page keeps a random code for your phone and the name you pick, for "
            "tonight's party only. No sign-in, no account, and nothing about you leaves "
            "the house.")
+HOW_IT_WORKS_CREDITS: tuple[dict, ...] = (
+    {"icon": "vote", "title": "Vote, earn", "text": "Tap ▲ or ▼ on the song that's playing: +1 credit each song."},
+    {"icon": "note", "title": "Add a song", "text": "Tap ＋, find a song, add it with credits — this page tells you when it plays."},
+    {"icon": "shop", "title": "Tip, bump, skip", "text": "Tip the guest whose song you love, move songs, or chip in to skip."},
+)
 HOW_IT_WORKS: tuple[dict, ...] = (
     {"icon": "vote", "title": "Vote", "text": "Tap ▲ or ▼ on the song that's playing."},
     {"icon": "note", "title": "Add a song", "text": "Tap ＋, find a song, and add it — this page tells you when it plays."},
@@ -188,6 +234,7 @@ SENTENCES: dict[str, str] = {
     "no_entry": "That song isn't in the line.",
     "no_phone": "That phone isn't at tonight's party.",
     "vote_skipped": "The room voted to skip it.",
+    "paid_skipped": "This song is being skipped.",
     "jailed": "You're in a time-out: your songs sit out {n} more song{s}. You can still vote.",
     "bad_bump": "That isn't a bump.",
     "bumps_off": "Bumps are off tonight.",
@@ -201,6 +248,29 @@ SENTENCES: dict[str, str] = {
     "pushed_max": "That song has been moved back as far as it can go tonight.",
     "on_hold": "That song is on hold, so it can't move.",
     "not_jailed": "That phone isn't in a time-out.",
+    # credits mode (PR 3.2)
+    "credits_off": "Credits are off tonight — it's free play.",
+    "skip_locked": "The host has kept this song from skips.",
+    "own_skip": "It's your song — you can't skip it.",
+    "skip_grace": "No skips in a song's first {s} seconds.",
+    "host_tip": "The host's songs take no tips.",
+    "own_tip": "You can't tip your own song.",
+    "tips_off": "Tips are off tonight.",
+    "tip_cap": "That's the most you can tip on this song ({cap}).",
+    "price_changed": "The price is now {price} — tap again to pay it.",
+    "not_enough": "That needs {need} credits — you have {have}.",
+    "nexted": "That song has had its play next.",
+    "next_too_soon": "Play next is for a song at least {m} minutes away.",
+    "not_jailed_self": "You're not in jail.",
+    "not_breakout_jail": "Your time-out ends on its own — there's nothing to break out of.",
+    "skip_none": "There's nothing to skip right now.",
+    "pot_full": "The pot is already full — the song is being skipped.",
+    "bad_amount": "That isn't an amount of credits.",
+    "at_front_next": "It's already the next song to go in.",
+    "next_pushed_max": "A song it would jump past has been moved back as far as it can go tonight.",
+    "jailed_credits": "You're in jail: your songs wait until you break out ({fee} credits). You can still vote.",
+    "chip_off": "Chipping in is off tonight.",
+    "next_own": "Play next is for your own songs.",
 }
 
 
@@ -227,6 +297,18 @@ def house_rules(show: ShowConfig) -> list[str]:
     explicit = {"no": "No explicit songs tonight.",
                 "extra": "Explicit songs are allowed tonight.",
                 "after": f"Explicit songs only after {show.explicit_after}."}[show.explicit]
+    if show.play_mode == "credits":
+        cfg = show.economy
+        rises = " (more in a big crowd)" if cfg.jail_scale else ""
+        return ["Songs for everyone: pick music the room will enjoy.",
+                "One vote per song. Vote on what's playing — not on people.",
+                "Skips cost credits: the price falls with every ▼, and you can chip in together.",
+                explicit,
+                f"If your songs get {cfg.jail_net_downs} more ▼ than ▲{rises}, they wait until "
+                f"you break out ({cfg.jail_fee} credits).",
+                "Credits are free and only for tonight: they can't be bought, sold, traded or "
+                "cashed out.",
+                "The host's word is final: they can remove any song or name."]
     rules = ["Songs for everyone: pick music the room will enjoy.",
              "One vote per song. Vote on what's playing — not on people.",
              f"{show.free_skip_downs} ▼ and {share_words(show.free_skip_share)} of the votes "
@@ -387,6 +469,16 @@ def jailed_now(gs: dict, phone_id: str) -> int:
     return max(0, until - plays) if until is not None else 0
 
 
+def jail_kind_of(gs: dict, phone_id: str) -> str:
+    """The STORED kind of this guest's time-out ("timeout" or "breakout"),
+    set by `night.jail()` at the moment it was imposed and converted (if
+    at all) by `night.convert_jail_mode()` on a later mode switch — never
+    reinterpreted here by the CURRENT `ShowConfig.play_mode`, which may
+    have changed since. "timeout" is the default for a jail that predates
+    this field."""
+    return (gs.get("jail_kind") or {}).get(phone_id, "timeout")
+
+
 def net_downs(book: GuestBook, phone_id: str) -> int:
     """▼ minus ▲ on every song this guest added tonight (before the reset)."""
     total = 0
@@ -423,39 +515,56 @@ def bumps_state(p: GuestPhone, show: ShowConfig, now_ms: int) -> dict:
 
 
 def build_view(book: GuestBook, phone_id: str, gs: dict, now_ms: int,
-               show: Optional[ShowConfig] = None, crowd: int = 1) -> dict:
+               show: Optional[ShowConfig] = None, crowd: int = 1,
+               credits: Optional[dict] = None) -> dict:
     """Everything one phone's screen shows. Pure: the book, the phone, the
-    engine's lean read (night.JukeboxRunner.guest_state), the show settings
-    and the clock."""
+    engine's lean read (night.JukeboxRunner.guest_state), the show settings,
+    the clock and — in credits mode — the few numbers read from the night's
+    ledger (`credits`: balance, whether this play's vote is paid, the tips
+    this phone put on it, the skip pot, the wait for a song at the back)."""
     show = show or ShowConfig()
     me = book.phones[phone_id]
     names = _names(book)
     line = gs.get("line") or []
     reqs = requests_state(show, int(gs.get("started_ms") or now_ms), now_ms)
     mine_waiting = len(waiting(line, phone_id))
-    from services.jukebox import economy
+    from services.jukebox import economy, wallet
+    cfg = show.economy
+    cr = credits if show.play_mode == "credits" and credits is not None else None
+    balance = int(cr["balance"]) if cr else 0
     left = jailed_now(gs, phone_id)
+    jkind = jail_kind_of(gs, phone_id)
+    is_breakout = jkind == "breakout"
     out: dict[str, Any] = {
         "state": "running", "server_ms": now_ms, "poll_ms": POLL_MS,
         "me": {"name": me.name, "joined": me.joined, "approved": me.approved,
                "name_locked": me.name_locked,
                "renames_left": max(0, show.renames_per_night - me.renames),
-               "jail": {"in": bool(left), "songs_left": left,
+               "jail": {"in": bool(left), "songs_left": left if not is_breakout else 0,
+                        "kind": jkind,
+                        "fee": cfg.jail_fee,
+                        "can_break_out": is_breakout and bool(left) and bool(cr)
+                                        and balance >= cfg.jail_fee,
                         "count": jail_count(book, phone_id, gs),
-                        "at": economy.jail_threshold(crowd, show.economy),
-                        "on": bool(show.free_jail_songs)},
+                        "at": economy.jail_threshold(crowd, cfg),
+                        "on": bool(cr) or bool(show.free_jail_songs)},
                "bumps": bumps_state(me, show, now_ms)},
-        "features": {"add": True, "board": False, "credits": False},
-        "requests": {**reqs, "max_waiting": show.economy.max_waiting,
+        "features": {"add": True, "board": False, "credits": bool(cr), "shop": bool(cr)},
+        "requests": {**reqs, "max_waiting": cfg.max_waiting,
                      "waiting": mine_waiting},
-        "house_rules": house_rules(show), "privacy": PRIVACY, "how": list(HOW_IT_WORKS),
+        "house_rules": house_rules(show), "privacy": PRIVACY,
+        "how": list(HOW_IT_WORKS_CREDITS if cr else HOW_IT_WORKS),
     }
+    if cr:
+        out["me"]["credits"] = balance
+        out["start_credits"] = cfg.start_credits
     entries = {e.id: e for e in line}
     set_items = gs.get("set_items") or []
     now = gs.get("now")
     np: Optional[dict] = None
     kind = getattr(now, "kind", "") if now is not None else ""
-    voted_off = kind == "skipping" and getattr(now, "skip_reason", "") == "votes"
+    skip_reason = getattr(now, "skip_reason", "") if now is not None else ""
+    voted_off = kind == "skipping" and skip_reason in ("votes", "paid")
     if kind in ("set", "jukebox") or voted_off:
         entry = entries.get(now.entry_id) if now.entry_id else None
         idx = now.set_index if entry is None else None
@@ -469,21 +578,63 @@ def build_view(book: GuestBook, phone_id: str, gs: dict, now_ms: int,
                    getattr(src, "title", "") or now.title, getattr(src, "artist", ""),
                    getattr(src, "image", ""), getattr(src, "thumb", ""),
                    _by(added_by, names), mine)
-        why = (sentence("vote_skipped") if voted_off else
+        why = (sentence("paid_skipped" if skip_reason == "paid" else "vote_skipped") if voted_off else
                sentence("own_song") if mine else
                sentence("not_approved") if not me.approved else "")
         votes = tally(book, key)
         played_s = (now_ms - now.started_ms) / 1000 if now.started_ms else 0.0
+        locked = now.uri in (gs.get("no_skip") or [])
+        grace_left = max(0, int((cfg.skip_grace_s - played_s) * 1000))
         np.update({"votes": votes, "my_vote": my_vote,
                    "can_vote": not voted_off and not mine and me.approved and bool(now.started_ms),
-                   "why_not": why,
-                   "skip": {"downs_at": show.free_skip_downs,
-                            "share": show.free_skip_share,
-                            "rule": f"{show.free_skip_downs} ▼ and "
-                                    f"{share_words(show.free_skip_share)} of the votes skip a song",
-                            "needed": 0 if voted_off else skip_needed(votes["down"], votes["up"], show),
-                            "skipping": voted_off,
-                            "grace_left_ms": max(0, int((show.economy.skip_grace_s - played_s) * 1000))}})
+                   "why_not": why})
+        if not cr:
+            np["skip"] = {"mode": "vote", "downs_at": show.free_skip_downs,
+                          "share": show.free_skip_share,
+                          "rule": f"{show.free_skip_downs} ▼ and "
+                                  f"{share_words(show.free_skip_share)} of the votes skip a song",
+                          "needed": 0 if voted_off else skip_needed(votes["down"], votes["up"], show),
+                          "skipping": voted_off, "locked": locked, "grace_left_ms": grace_left}
+        else:
+            np["earn"] = 0 if cr.get("vote_paid") or mine else cfg.vote_reward
+            price = wallet.skip_price(cr.get("back_wait_ms"), votes["up"], votes["down"], crowd, cfg)
+            have, mine_pot = cr.get("pot", 0), cr.get("pot_mine", 0)
+            why_skip = "" if not voted_off else why
+            if voted_off:
+                pass
+            elif locked:
+                why_skip = sentence("skip_locked")
+            elif mine:
+                why_skip = sentence("own_skip")
+            elif not me.approved:
+                why_skip = sentence("not_approved")
+            elif grace_left:
+                why_skip = sentence("skip_grace", s=int(cfg.skip_grace_s))
+            np["skip"] = {"mode": "paid", "price": price, "pot": have, "pot_mine": mine_pot,
+                          "need": max(0, price - have), "chip_in": cfg.chip_in,
+                          "per_down_pct": cfg.skip_down_pct,
+                          "skipping": voted_off, "locked": locked, "grace_left_ms": grace_left,
+                          "can": not why_skip and balance >= max(1, price - have),
+                          "can_chip": not why_skip and cfg.chip_in and balance >= 1,
+                          "why": why_skip}
+            tip: dict[str, Any] = {"can": False, "why": "", "to": "", "unit": cfg.tip_unit,
+                                   "left": 0}
+            if entry is None or added_by == "host":
+                tip["why"] = sentence("host_tip")
+            elif mine:
+                tip["why"] = sentence("own_tip")
+            elif not cfg.tips:
+                tip["why"] = sentence("tips_off")
+            else:
+                left_units = economy.tip_units_allowed(int(cr.get("tipped", 0)), cfg)
+                tip.update({"to": names.get(added_by, "a guest"), "left": left_units,
+                            "can": me.approved and left_units > 0 and balance >= cfg.tip_unit,
+                            "why": ("" if left_units > 0 else
+                                    sentence("tip_cap", cap=cfg.tip_max_per_song))})
+            np["tip"] = tip
+            if mine:
+                np["coming_in"] = {"ups": votes["up"] * cfg.adder_up_reward,
+                                   "tips": int(cr.get("tips_in", 0))}
     elif kind in ("skipping", "foreign"):
         np = _song("other", now.uri, now.title, "", "", "", {"kind": "other", "name": ""}, False)
         np.update({"votes": {"up": 0, "down": 0}, "my_vote": 0, "can_vote": False,
@@ -496,9 +647,10 @@ def build_view(book: GuestBook, phone_id: str, gs: dict, now_ms: int,
                    "is_playing": bool(gs.get("is_playing"))})
     out["now"] = np
 
-    # free play's bumps: the waiting songs that can be sent, in line order
+    # bumps: the waiting songs that can be sent, in line order
     movable = [e.id for e in line if e.state == "queued" and not e.held
                and not jailed_now(gs, e.added_by)]
+    front_eta: Optional[int] = None
     max_back = show.economy.bump_down_max_places
     upcoming: list[dict] = []
     for it in gs.get("next") or []:
@@ -514,6 +666,8 @@ def build_view(book: GuestBook, phone_id: str, gs: dict, now_ms: int,
         song.update({"committed": bool(it.committed), "starts_in_ms": it.starts_in_ms,
                      "duration_ms": it.duration_ms, "place": len(upcoming) + 1,
                      "known": bool(getattr(entry, "known", False))})
+        if entry is not None and front_eta is None and entry.id in movable:
+            front_eta = it.starts_in_ms
         if entry is not None:
             song["entry_id"] = it.entry_id
             song["bump"] = None
@@ -533,6 +687,16 @@ def build_view(book: GuestBook, phone_id: str, gs: dict, now_ms: int,
                     song["bump"] = "down" if ok else None
                     song["bump_why"] = ("" if ok else sentence("at_back") if pos >= len(movable) - 1
                                         else sentence("pushed_max"))
+                if cr and song["bump"]:
+                    up_price, down_price = wallet.bump_prices(movable, entry.id, cfg)
+                    song["bump_price"] = up_price if song["bump"] == "up" else down_price
+                if cr and added_by == phone_id:
+                    q = wallet.next_quote(it.starts_in_ms, front_eta, entry.nexted, cfg)
+                    passed = [entries.get(x) for x in movable[:pos]]
+                    if q["allowed"] and any(p is not None and p.pushed_back >= max_back
+                                            for p in passed):
+                        q.update(allowed=False, why=sentence("next_pushed_max"))
+                    song["next"] = q
         upcoming.append(song)
     out["next"] = upcoming[:NEXT_SHOWN]
 
@@ -551,6 +715,12 @@ def build_view(book: GuestBook, phone_id: str, gs: dict, now_ms: int,
                      "known": e.known,
                      "place": at["place"] if at else None,
                      "starts_in_ms": at["starts_in_ms"] if at else None})
+        if cr:
+            song["paid"] = e.paid
+            if at is not None:
+                for k in ("bump", "bump_why", "bump_price", "next"):
+                    if k in at:
+                        song[k] = at[k]
         mine_list.append(song)
     mine_list.sort(key=lambda s: (s["state"] != "playing",
                                   s["place"] if s["place"] is not None else 10_000))
@@ -559,7 +729,9 @@ def build_view(book: GuestBook, phone_id: str, gs: dict, now_ms: int,
     out["strip"] = {"tone": "jail" if left and not (lead and lead["state"] == "playing") else
                     ("playing" if lead["state"] == "playing" else
                      "next" if lead["state"] == "next" else "queued") if lead else "none",
-                    "jail_left": left,
+                    "jail_left": left if not is_breakout else 0,
+                    "jail_kind": jkind,
+                    "jail_fee": cfg.jail_fee,
                     "title": lead["title"] if lead else "",
                     "place": lead["place"] if lead else None,
                     "starts_in_ms": lead["starts_in_ms"] if lead else None,
@@ -574,21 +746,40 @@ def idle_view(now_ms: int, show: Optional[ShowConfig] = None) -> dict:
             "privacy": PRIVACY}
 
 
+EXPLICIT_EXTRA = 2            # credits mode, explicit "allowed": +2 credits (report §4)
+
+
+def add_cost(duration_ms: int, known: bool, explicit: bool, wait_ms: Optional[int],
+             show: ShowConfig) -> int:
+    """What adding a song costs in credits mode (§1 rule 5): by when it
+    would play, its length, whether the lights know it; +2 for an explicit
+    song where the show allows them at a price."""
+    from services.jukebox import wallet
+    extra = EXPLICIT_EXTRA if explicit and show.explicit == "extra" else 0
+    return wallet.add_price(wait_ms, duration_ms, known, show.economy) + extra
+
+
 def result_view(meta: dict, *, known: bool, in_line: bool, explicit_ok: bool,
-                explicit_why: str, long_over_min: float, library: bool) -> dict:
+                explicit_why: str, long_over_min: float, library: bool,
+                price: Optional[int] = None, balance: Optional[int] = None) -> dict:
     """One search result as the Add screen draws it: badges and whether the
-    Add button works (and if not, why)."""
+    Add button works (and if not, why). In credits mode, its price and
+    whether this phone can pay it."""
     duration = int(meta.get("duration_ms") or 0)
     why = ("in_line" if in_line else
            "explicit" if meta.get("explicit") and not explicit_ok else "")
-    return {"uri": meta["uri"], "title": meta.get("title") or "", "artist": meta.get("artist") or "",
-            "image": meta.get("image") or "", "thumb": meta.get("thumb") or "",
-            "duration_ms": duration, "explicit": bool(meta.get("explicit")),
-            "open_url": open_url(meta["uri"]), "known": known, "library": library,
-            "long": duration > long_over_min * 60_000, "in_line": in_line,
-            "can_add": not why,
-            "why_not": (sentence("in_line") if why == "in_line" else
-                        explicit_why if why == "explicit" else "")}
+    out = {"uri": meta["uri"], "title": meta.get("title") or "", "artist": meta.get("artist") or "",
+           "image": meta.get("image") or "", "thumb": meta.get("thumb") or "",
+           "duration_ms": duration, "explicit": bool(meta.get("explicit")),
+           "open_url": open_url(meta["uri"]), "known": known, "library": library,
+           "long": duration > long_over_min * 60_000, "in_line": in_line,
+           "can_add": not why,
+           "why_not": (sentence("in_line") if why == "in_line" else
+                       explicit_why if why == "explicit" else "")}
+    if price is not None:
+        out["price"] = price
+        out["afford"] = balance is None or balance >= price
+    return out
 
 
 # ── the book, with its store ────────────────────────────────────────────────
@@ -661,6 +852,12 @@ class Guests:
         self._seen: dict[str, int] = {}
         self._skip_armed: set[str] = set()
         self._tasks: set[asyncio.Task] = set()
+        # credits mode (PR 3.2): the night's wallet (its ledger), and a short
+        # cache of the back-of-line wait the skip price reads
+        self._wallet: Optional[Any] = None
+        self._wallet_closed: set[str] = set()
+        self._polled: dict[str, int] = {}       # a phone's last poll: "here" for top-ups
+        self._back_wait: tuple[tuple, Optional[int]] = ((), None)
 
     def _get_lock(self) -> asyncio.Lock:
         if self._lock is None:
@@ -674,6 +871,7 @@ class Guests:
             self._book = GuestBook(night_id=night_id)
             self._seen.clear()
             self._skip_armed.clear()
+            self._polled.clear()
         return self._book
 
     def _crowd(self) -> int:
@@ -703,7 +901,143 @@ class Guests:
         return None, gs, book
 
     def _view(self, book: GuestBook, pid: str, gs: dict) -> dict:
-        return build_view(book, pid, gs, self.deps.now_ms(), self.deps.show(), self._crowd())
+        show = self.deps.show()
+        credits = self._credit_info(book, pid, gs, show) if show.play_mode == "credits" else None
+        return build_view(book, pid, gs, self.deps.now_ms(), show, self._crowd(), credits)
+
+    # ── credits mode: the wallet, earning, settling (PR 3.2) ───────────────
+
+    def _wallet_for(self, night_id: str, show: ShowConfig) -> Any:
+        from services.jukebox import wallet
+        if self._wallet is None or self._wallet.night_id != night_id:
+            self._wallet = wallet.Wallet(night_id, show.economy)
+        self._wallet.led.cfg = show.economy
+        return self._wallet
+
+    def _back_wait_ms(self, gs: dict) -> Optional[int]:
+        from services.jukebox import wallet
+        key = (gs.get("night_id"), gs.get("plays"), len(gs.get("line") or []),
+               self.deps.now_ms() // 5000)
+        if self._back_wait[0] != key:
+            self._back_wait = (key, wallet.back_wait_quote(self.deps.runner()))
+        return self._back_wait[1]
+
+    def _credit_info(self, book: GuestBook, pid: str, gs: dict, show: ShowConfig) -> dict:
+        w = self._wallet_for(gs["night_id"], show)
+        now = gs.get("now")
+        key = play_key(now) if getattr(now, "kind", "") in ("set", "jukebox", "skipping") else ""
+        have, mine = w.pot(key) if key else (0, {})
+        info = {"balance": w.balance(pid), "back_wait_ms": self._back_wait_ms(gs),
+                "vote_paid": bool(key) and w.led.voted_paid(pid, key),
+                "tipped": w.led.tipped_on(pid, key) if key else 0,
+                "pot": have, "pot_mine": mine.get(pid, 0)}
+        entry = next((e for e in gs.get("line") or [] if e.id == getattr(now, "entry_id", "")), None)
+        if key and entry is not None and entry.added_by == pid:
+            info["tips_in"] = sum(e.delta for e in w.led.history(pid)
+                                  if e.ref == key and e.kind in ("tip_in", "tip_bonus"))
+        return info
+
+    async def _ledger(self, fn: Callable, *args: Any) -> Any:
+        """One ledger write, off the loop (it fsyncs)."""
+        return await self.deps.to_thread(fn, *args)
+
+    async def _credits_tick(self, book: GuestBook, pid: str, gs: dict, show: ShowConfig) -> None:
+        """The grants due to this phone (its welcome credits, its top-ups)
+        and the night's settling (Adder credits for songs that have played,
+        skip pots that weren't filled, songs the host removed). Checked on
+        the phone's own polls; written under the lock only when something is
+        due, so a poll with nothing to do never waits."""
+        if show.play_mode != "credits":
+            return
+        w = self._wallet_for(gs["night_id"], show)
+        me = book.phones.get(pid)
+        if me is None or not me.joined:
+            return
+        now_ms = self.deps.now_ms()
+        prev = self._polled.get(pid)
+        self._polled[pid] = now_ms
+        away = prev is not None and now_ms - prev > PRESENT_WINDOW_MS
+        due, tick = w.due_grants(pid, me.joined_ms, book.credit_tick.get(pid), now_ms, show.economy)
+        if not due and not away and not self._pending_settle(w, book, gs):
+            return
+        async with self._get_lock():
+            if away:                       # here again: no top-ups for the time away
+                book.credit_tick[pid] = now_ms
+            due, tick = w.due_grants(pid, me.joined_ms, book.credit_tick.get(pid), now_ms,
+                                     show.economy)
+            for kind, amount in due:
+                w.noted([await self._ledger(w.led.grant, pid, kind, amount)])
+            changed = away or bool(due)
+            if tick is not None and book.credit_tick.get(pid) != tick:
+                book.credit_tick[pid] = tick
+                changed = True
+            changed |= await self._settle(w, book, gs)
+            if changed:
+                await self._save()
+
+    def _pending_settle(self, w: Any, book: GuestBook, gs: dict) -> bool:
+        cur = play_key(gs.get("now")) if gs.get("now") is not None else ""
+        if any(k not in book.settled and k != cur for k in book.play_by):
+            return True
+        if any(k != cur and k not in book.pots and w.pot(k)[0] for k in w.pledges):
+            return True
+        return any(e.paid_seq and e.removed and not w.led.is_refunded(e.paid_seq)
+                   for e in gs.get("line") or [])
+
+    async def _settle(self, w: Any, book: GuestBook, gs: dict) -> bool:
+        """Under the lock: pay Adder credits for guests' songs that have
+        played, return the pledges of a skip pot that wasn't filled before its
+        song ended, and refund a song the host removed."""
+        from services.jukebox.ledger import LedgerError
+        cur = play_key(gs.get("now")) if gs.get("now") is not None else ""
+        changed = False
+        for key, adder in list(book.play_by.items()):
+            if key in book.settled or key == cur:
+                continue
+            ups = tally(book, key)["up"]
+            try:
+                e = await self._ledger(w.led.adder_ups, adder, key, ups, False)
+                if e is not None:
+                    w.noted([e])
+            except LedgerError:
+                pass                       # already paid (a restart replayed it)
+            book.settled.append(key)
+            changed = True
+        for key in list(w.pledges):
+            if key == cur or key in book.pots:
+                continue
+            for _phone, _amount, seq in w.pledges[key]:
+                if not w.led.is_refunded(seq):
+                    w.noted([await self._ledger(w.led.refund, seq, None, "the pot wasn't filled")])
+            book.pots[key] = "refunded"
+            changed = True
+        for e in gs.get("line") or []:
+            if e.paid_seq and e.removed and not w.led.is_refunded(e.paid_seq):
+                w.noted([await self._ledger(w.led.refund, e.paid_seq, None, "the host removed it")])
+                changed = True
+        return changed
+
+    async def _close_night(self) -> None:
+        """After a night ends: return what was paid for songs that never
+        played and pledges still in a pot (the night ended first)."""
+        w = self._wallet
+        if w is None or w.night_id in self._wallet_closed:
+            return
+        night = getattr(self.deps.runner(), "night", None)
+        if night is None or night.id != w.night_id or night.state == "running":
+            return
+        self._wallet_closed.add(w.night_id)
+        async with self._get_lock():
+            for e in night.line:
+                if e.paid_seq and e.state in ("queued", "committed", "removed") \
+                        and not w.led.is_refunded(e.paid_seq):
+                    w.noted([await self._ledger(w.led.refund, e.paid_seq, None,
+                                                "the night ended first")])
+            for key, pledges in w.pledges.items():
+                for _phone, _amount, seq in pledges:
+                    if not w.led.is_refunded(seq):
+                        w.noted([await self._ledger(w.led.refund, seq, None,
+                                                    "the night ended first")])
 
     def _ok(self, book: GuestBook, pid: str, gs: dict, **extra: Any) -> tuple[int, dict]:
         return 200, {"status": "ok", **extra, "view": self._view(book, pid, gs)}
@@ -755,7 +1089,8 @@ class Guests:
             if not me.joined:
                 me.joined, me.joined_ms = True, self.deps.now_ms()
             await self._save()
-            return self._ok(book, phone, gs)
+        await self._credits_tick(book, phone, gs, self.deps.show())     # the welcome credits
+        return self._ok(book, phone, gs)
 
     async def rename(self, phone: Any, name: Any = None, shuffle: bool = False) -> tuple[int, dict]:
         """A new name: typed, or a fresh fun one (shuffle). Free on the
@@ -824,10 +1159,22 @@ class Guests:
                 book.play_by.pop(old, None)
             if adder:
                 await self._maybe_jail(book, gs, adder)
+            show = self.deps.show()
+            earned = 0
+            if show.play_mode == "credits" and values[vote]:
+                w = self._wallet_for(gs["night_id"], show)
+                paid = await self._ledger(w.led.vote, phone, key, False)
+                if paid is not None:
+                    w.noted([paid])
+                    earned = paid.delta
             await self._save()
-            if await self._maybe_skip(book, gs, key):
+            if show.play_mode == "credits":
+                if await self._maybe_fill_pot(book, gs, key):    # a ▼ lowers the price
+                    gs = self.deps.state()
+            elif await self._maybe_skip(book, gs, key):
                 gs = self.deps.state()
-            return self._ok(book, phone, gs)
+        await self._credits_tick(book, phone, gs, self.deps.show())
+        return self._ok(book, phone, gs, earned=earned)
 
     # ── free play: the room's skip and the jail (PR 2.3) ───────────────────
 
@@ -853,11 +1200,12 @@ class Guests:
         from services.jukebox import economy
         show = self.deps.show()
         p = book.phones[pid]
-        if not show.free_jail_songs or p.jail_open or jailed_now(gs, pid):
+        credits = show.play_mode == "credits"     # credits: jailed until they break out
+        if (not credits and not show.free_jail_songs) or p.jail_open or jailed_now(gs, pid):
             return
         if not economy.jailed(net_downs(book, pid) - p.jail_base, self._crowd(), show.economy):
             return
-        out = await self.deps.runner().jail(pid, show.free_jail_songs)
+        out = await self.deps.runner().jail(pid, None if credits else show.free_jail_songs)
         if out.get("status") == "jailed":
             p.jail_open, p.jailed_ms = True, self.deps.now_ms()
             p.jails += 1
@@ -896,9 +1244,12 @@ class Guests:
             except Exception:                                      # noqa: BLE001
                 logger.exception("Jukebox: the room's skip couldn't be checked after the grace")
 
-    async def bump(self, phone: Any, entry_id: Any, direction: Any) -> tuple[int, dict]:
-        """Free play's bump: your own waiting song up one place, or someone
-        else's down one place, so many times an hour."""
+    async def bump(self, phone: Any, entry_id: Any, direction: Any,
+                   price: Any = None) -> tuple[int, dict]:
+        """A bump: your own waiting song up one place, or someone else's down
+        one place — so many times an hour in free play; at its price in
+        credits mode (`price` is what the page showed: a dearer price now is
+        refused, never charged)."""
         if direction not in ("up", "down") or not isinstance(entry_id, str):
             return refusal("bad_bump", 422)
         async with self._get_lock():
@@ -911,24 +1262,39 @@ class Guests:
             if not me.approved:
                 return refusal("not_approved", 409)
             show = self.deps.show()
+            credits = show.play_mode == "credits"
             left = jailed_now(gs, phone)
             if left:
-                return refusal("jailed", 409, n=left, s="" if left == 1 else "s")
-            if not show.free_bumps_per_hour:
-                return refusal("bumps_off", 409)
+                return self._jailed_refusal(left, jail_kind_of(gs, phone), show)
             now_ms = self.deps.now_ms()
-            me.bumps_ms = [t for t in me.bumps_ms if now_ms - t < BUMP_WINDOW_MS]
-            state = bumps_state(me, show, now_ms)
-            if not state["left"]:
-                n = show.free_bumps_per_hour
-                return refusal("bumps_used", 409, n=n, s="" if n == 1 else "s", at=state["next_at"])
-            entry = next((e for e in gs.get("line") or [] if e.id == entry_id), None)
+            if not credits:
+                if not show.free_bumps_per_hour:
+                    return refusal("bumps_off", 409)
+                me.bumps_ms = [t for t in me.bumps_ms if now_ms - t < BUMP_WINDOW_MS]
+                state = bumps_state(me, show, now_ms)
+                if not state["left"]:
+                    n = show.free_bumps_per_hour
+                    return refusal("bumps_used", 409, n=n, s="" if n == 1 else "s",
+                                   at=state["next_at"])
+            line = gs.get("line") or []
+            entry = next((e for e in line if e.id == entry_id), None)
             if entry is None or entry.state not in ("queued", "committed"):
                 return refusal("no_entry", 404)
             if direction == "up" and entry.added_by != phone:
                 return refusal("bump_own_up", 409)
             if direction == "down" and entry.added_by == phone:
                 return refusal("bump_others_down", 409)
+            cost = 0
+            if credits:
+                from services.jukebox import wallet
+                movable = [e.id for e in line if e.state == "queued" and not e.held
+                           and not jailed_now(gs, e.added_by)]
+                if entry_id in movable:
+                    up_price, down_price = wallet.bump_prices(movable, entry_id, show.economy)
+                    cost = up_price if direction == "up" else down_price
+                    stop = self._afford(gs, phone, show, cost, price)
+                    if stop:
+                        return stop
             out = await self.deps.runner().bump(entry_id, direction == "up",
                                                 max_back=show.economy.bump_down_max_places)
             if out.get("status") != "moved":
@@ -936,17 +1302,330 @@ class Guests:
                 if code in SENTENCES:
                     return refusal(code, 409)
                 return 409, {"status": "refused", "reason": code, "detail": out.get("detail", "")}
-            me.bumps_ms.append(now_ms)
+            if credits and cost:
+                await self._spend(gs, show, phone, "bump_up" if direction == "up" else "bump_down",
+                                  cost, entry_id)
+            else:
+                me.bumps_ms.append(now_ms)
             await self._save()
             gs = self.deps.state()
             return 200, {"status": "ok", "bumped": {"place": out.get("place"),
                                                     "starts_in_ms": out.get("starts_in_ms")},
                          "view": self._view(book, phone, gs)}
 
-    async def view(self, phone: Any) -> tuple[int, dict]:
+    # ── credits mode: the guest's own spends (PR 3.2) ──────────────────────
+
+    def _jailed_refusal(self, left: int, kind: str, show: ShowConfig) -> tuple[int, dict]:
+        """`kind` is the STORED jail kind (jail_kind_of), never the current
+        `play_mode` — a timeout jail reads "jailed" regardless of mode."""
+        if kind == "breakout":
+            return refusal("jailed_credits", 409, fee=show.economy.jail_fee)
+        return refusal("jailed", 409, n=left, s="" if left == 1 else "s")
+
+    def _afford(self, gs: dict, phone: str, show: ShowConfig, cost: int,
+                seen: Any) -> Optional[tuple[int, dict]]:
+        """Refuse a spend whose price rose since the page showed it (never
+        charge more than the guest saw), or that the phone can't pay."""
+        try:
+            seen_i = None if seen is None else int(seen)
+        except (TypeError, ValueError):
+            return refusal("bad_amount", 422)
+        if seen_i is not None and cost > seen_i:
+            return 409, {"status": "refused", "reason": "price_changed", "price": cost,
+                         "detail": sentence("price_changed", price=cost)}
+        have = self._wallet_for(gs["night_id"], show).balance(phone)
+        if have < cost:
+            return refusal("not_enough", 409, need=cost, have=have)
+        return None
+
+    async def _spend(self, gs: dict, show: ShowConfig, phone: str, kind: str, amount: int,
+                     ref: str, note: str = "") -> Any:
+        w = self._wallet_for(gs["night_id"], show)
+        e = await self._ledger(w.led.spend, phone, kind, amount, ref, note)
+        w.noted([e])
+        return e
+
+    def _ledger_refusal(self, err: Exception) -> tuple[int, dict]:
+        return 409, {"status": "refused", "reason": getattr(err, "code", "refused"),
+                     "detail": getattr(err, "sentence", str(err))}
+
+    async def _credits_gate(self, phone: Any) -> tuple[Optional[tuple[int, dict]], Optional[dict],
+                                                       Optional[GuestBook], ShowConfig]:
+        """Under the lock: a joined, approved phone in credits mode."""
+        show = self.deps.show()
+        gate, gs, book = self._gate(phone)
+        if gate:
+            return gate, None, None, show
+        me = book.phones[phone]
+        if not me.joined:
+            return refusal("not_joined", 409), None, None, show
+        if not me.approved:
+            return refusal("not_approved", 409), None, None, show
+        if show.play_mode != "credits":
+            return refusal("credits_off", 409), None, None, show
+        return None, gs, book, show
+
+    async def tip(self, phone: Any, units: Any = 1) -> tuple[int, dict]:
+        """Tip the guest whose song is playing (§1 rule 4): a tap at a time,
+        at most `tip_max_per_song` per song; never the host, never yourself.
+        The page holds a tap for a few seconds (its undo) before sending it."""
+        from services.jukebox.ledger import LedgerError
+        try:
+            n = int(units)
+        except (TypeError, ValueError):
+            return refusal("bad_amount", 422)
+        async with self._get_lock():
+            gate, gs, book, show = await self._credits_gate(phone)
+            if gate:
+                return gate
+            now = gs.get("now")
+            if getattr(now, "kind", "") != "jukebox":
+                return refusal("host_tip", 409)
+            entry = next((e for e in gs.get("line") or [] if e.id == now.entry_id), None)
+            if entry is None or entry.added_by not in book.phones:
+                return refusal("host_tip", 409)
+            w = self._wallet_for(gs["night_id"], show)
+            try:
+                parts = await self._ledger(w.led.tip, phone, entry.added_by, play_key(now), n, False)
+            except LedgerError as err:
+                return self._ledger_refusal(err)
+            w.noted(parts)
+            await self._save()
+            return self._ok(book, phone, gs, tipped={"to": book.phones[entry.added_by].name,
+                                                     "amount": -parts[0].delta,
+                                                     "bonus": sum(p.delta for p in parts[2:])})
+
+    async def skip(self, phone: Any, how: Any = "pay", amount: Any = None,
+                   price: Any = None) -> tuple[int, dict]:
+        """Skip the song playing (§1 rule 8): pay the rest of its price now,
+        or chip in toward it (the pledges come back if the pot isn't filled
+        before the song ends). Anyone's song but your own, the host's
+        included; never in its first seconds; never one the host kept from
+        skips."""
+        if how not in ("pay", "chip"):
+            return refusal("bad_amount", 422)
+        async with self._get_lock():
+            gate, gs, book, show = await self._credits_gate(phone)
+            if gate:
+                return gate
+            cfg = show.economy
+            now = gs.get("now")
+            if getattr(now, "kind", "") not in ("set", "jukebox") or not now.started_ms:
+                return refusal("skip_none", 409)
+            key = play_key(now)
+            if now.uri in (gs.get("no_skip") or []):
+                return refusal("skip_locked", 409)
+            if self._guest_adder(book, gs) == phone:
+                return refusal("own_skip", 409)
+            played_s = (self.deps.now_ms() - now.started_ms) / 1000
+            from services.jukebox import economy, wallet
+            if not economy.skip_allowed(played_s, cfg):
+                return refusal("skip_grace", 409, s=int(cfg.skip_grace_s))
+            if book.pots.get(key) == "filled":
+                return refusal("pot_full", 409)
+            w = self._wallet_for(gs["night_id"], show)
+            votes = tally(book, key)
+            full = wallet.skip_price(self._back_wait_ms(gs), votes["up"], votes["down"],
+                                     self._crowd(), cfg)
+            have, _ = w.pot(key)
+            need = max(1, full - have)
+            if how == "pay":
+                cost, kind = need, "skip"
+                stop = self._afford(gs, phone, show, cost, price)
+            else:
+                if not cfg.chip_in:
+                    return refusal("chip_off", 409)
+                try:
+                    cost = int(amount)
+                except (TypeError, ValueError):
+                    return refusal("bad_amount", 422)
+                if cost < 1:
+                    return refusal("bad_amount", 422)
+                cost, kind = min(cost, need), "skip_pledge"
+                stop = self._afford(gs, phone, show, cost, None)
+            if stop:
+                return stop
+            spent = await self._spend(gs, show, phone, kind, cost, key)
+            skipped = False
+            if have + cost >= full:
+                out = await self.deps.runner().skip_by_vote(now.started_ms, now.uri, reason="paid")
+                if out.get("status") == "skipped":
+                    book.pots[key] = "filled"
+                    skipped = True
+                else:          # it moved on, or was locked, in the meantime: nothing was bought
+                    w.noted([await self._ledger(w.led.refund, spent.seq, None, "the song moved on")])
+            await self._save()
+            if skipped:
+                gs = self.deps.state()
+            return self._ok(book, phone, gs, skip={"paid": cost, "skipped": skipped,
+                                                   "pot": have + cost, "price": full})
+
+    async def _maybe_fill_pot(self, book: GuestBook, gs: dict, key: str) -> bool:
+        """Under the lock, after a vote: a ▼ lowers the skip price, so a
+        chip-in pot may now be enough. True: the engine skipped it."""
+        from services.jukebox import economy, wallet
+        show = self.deps.show()
+        now = gs.get("now")
+        if (getattr(now, "kind", "") not in ("set", "jukebox") or play_key(now) != key
+                or book.pots.get(key) or now.uri in (gs.get("no_skip") or [])):
+            return False
+        w = self._wallet_for(gs["night_id"], show)
+        have, _ = w.pot(key)
+        if not have:
+            return False
+        votes = tally(book, key)
+        full = wallet.skip_price(self._back_wait_ms(gs), votes["up"], votes["down"],
+                                 self._crowd(), show.economy)
+        played_s = (self.deps.now_ms() - (now.started_ms or 0)) / 1000
+        if have < full or not economy.skip_allowed(played_s, show.economy):
+            return False
+        out = await self.deps.runner().skip_by_vote(now.started_ms, now.uri, reason="paid")
+        if out.get("status") == "skipped":
+            book.pots[key] = "filled"
+            await self._save()
+            return True
+        return False
+
+    async def play_next(self, phone: Any, entry_id: Any, price: Any = None) -> tuple[int, dict]:
+        """Play next (§1 rule 7): your own waiting song to the front of the
+        jukebox line, priced by how far it jumps; only for a song at least
+        `next_min_away_min` away, once per song."""
+        if not isinstance(entry_id, str):
+            return refusal("no_entry", 404)
+        async with self._get_lock():
+            gate, gs, book, show = await self._credits_gate(phone)
+            if gate:
+                return gate
+            left = jailed_now(gs, phone)
+            if left:
+                return self._jailed_refusal(left, jail_kind_of(gs, phone), show)
+            line = gs.get("line") or []
+            entry = next((e for e in line if e.id == entry_id), None)
+            if entry is None or entry.state not in ("queued", "committed"):
+                return refusal("no_entry", 404)
+            if entry.added_by != phone:
+                return refusal("next_own", 409)
+            if entry.state == "committed":
+                return refusal("committed_fixed", 409)
+            from services.jukebox import wallet
+            runner = self.deps.runner()
+            movable = [e.id for e in line if e.state == "queued" and not e.held
+                       and not jailed_now(gs, e.added_by)]
+            if not movable or movable[0] == entry_id:
+                return refusal("at_front_next", 409)
+            q = wallet.next_quote(runner._starts_in(entry_id), runner._starts_in(movable[0]),
+                                  entry.nexted, show.economy)
+            if not q["allowed"]:
+                if entry.nexted:
+                    return refusal("nexted", 409)
+                return refusal("next_too_soon", 409, m=int(show.economy.next_min_away_min))
+            stop = self._afford(gs, phone, show, q["price"], price)
+            if stop:
+                return stop
+            out = await runner.play_next(entry_id, max_back=show.economy.bump_down_max_places)
+            if out.get("status") != "moved":
+                code = out.get("reason", "not_running")
+                return refusal(code, 409) if code in SENTENCES else \
+                    (409, {"status": "refused", "reason": code, "detail": out.get("detail", "")})
+            await self._spend(gs, show, phone, "play_next", q["price"], entry_id)
+            await self._save()
+            gs = self.deps.state()
+            return 200, {"status": "ok", "next": {"price": q["price"],
+                                                  "starts_in_ms": out.get("starts_in_ms")},
+                         "view": self._view(book, phone, gs)}
+
+    async def break_out(self, phone: Any) -> tuple[int, dict]:
+        """Break out of jail (§1 rule 9): `jail_fee` credits, and your count
+        starts again at 0. Only a credits-imposed jail (the STORED kind,
+        "breakout") can be broken out of — a free-play time-out ends on its
+        own, whatever the CURRENT play_mode is, and is never charged for."""
+        async with self._get_lock():
+            gate, gs, book, show = await self._credits_gate(phone)
+            if gate:
+                return gate
+            if not jailed_now(gs, phone):
+                return refusal("not_jailed_self", 409)
+            if jail_kind_of(gs, phone) != "breakout":
+                return refusal("not_breakout_jail", 409)
+            fee = show.economy.jail_fee
+            stop = self._afford(gs, phone, show, fee, None)
+            if stop:
+                return stop
+            w = self._wallet_for(gs["night_id"], show)
+            spent = await self._ledger(w.led.jail_breakout, phone, "jail")
+            w.noted([spent])
+            out = await self.deps.runner().pardon(phone, broke_out=True)
+            if out.get("status") != "pardoned":
+                w.noted([await self._ledger(w.led.refund, spent.seq, None, "not in jail after all")])
+                await self._save()
+                return refusal("not_jailed_self", 409)
+            p = book.phones[phone]
+            p.jail_open, p.jail_base = False, net_downs(book, phone)
+            await self._save()
+            gs = self.deps.state()
+            return self._ok(book, phone, gs, broke_out={"paid": fee})
+
+    async def wallet_view(self, phone: Any) -> tuple[int, dict]:
+        """The Shop: the balance and how it was made, what each thing costs
+        right now, how to earn, and this phone's history in words."""
+        from services.jukebox import economy, wallet
         gate, gs, book = self._gate(phone)
         if gate:
             return gate
+        show = self.deps.show()
+        if show.play_mode != "credits":
+            return refusal("credits_off", 409)
+        await self._credits_tick(book, phone, gs, show)
+        cfg = show.economy
+        w = self._wallet_for(gs["night_id"], show)
+        entries = w.led.history(phone)
+        titles: dict[str, str] = {}
+        for e in gs.get("line") or []:
+            titles[e.uri] = e.title
+            titles[e.id] = e.title
+        for it in gs.get("set_items") or []:
+            titles.setdefault(it.uri, it.title)
+        names = {pid: p.name for pid, p in book.phones.items()}
+        line = gs.get("line") or []
+        played = sum(1 for e in line if e.added_by == phone and e.state in ("played", "playing"))
+        rnd = played + len(waiting(line, phone)) + 1
+        runner = self.deps.runner()
+        add_wait = runner.quote_wait(rnd, cfg.fair_order)
+        now = gs.get("now")
+        skip_now = None
+        if getattr(now, "kind", "") in ("set", "jukebox"):
+            votes = tally(book, play_key(now))
+            skip_now = wallet.skip_price(self._back_wait_ms(gs), votes["up"], votes["down"],
+                                         self._crowd(), cfg)
+        shop = [
+            {"id": "add", "title": "Add a song",
+             "price": wallet.add_price(add_wait, 216_000, True, cfg),
+             "note": f"{cfg.add_base} when it plays within {int(cfg.add_free_min)} min; "
+                     f"it doubles every {int(cfg.add_double_min)} min of wait"},
+            {"id": "next", "title": "Play next", "price": economy.play_next_price(10, cfg),
+             "note": f"from {cfg.next_base}: your song to the front of the line, once per song"},
+            {"id": "skip", "title": "Skip", "price": skip_now,
+             "note": "the price falls with every ▼ on the song"},
+            {"id": "chip", "title": "Chip in", "price": 1 if cfg.chip_in else None,
+             "note": "put something toward a skip; it comes back if the pot isn't filled"},
+            {"id": "bump", "title": "Bump", "price": economy.bump_up_price(0, cfg),
+             "note": f"move a song one place: up from {cfg.bump_up_base}, down from "
+                     f"{cfg.bump_down_base}"},
+            {"id": "breakout", "title": "Break out", "price": cfg.jail_fee,
+             "note": "leave jail; your count starts again"},
+        ]
+        return 200, {"status": "ok", "balance": w.balance(phone), "earned": wallet.earned(entries),
+                     "history": wallet.history_rows(entries, names, titles), "shop": shop,
+                     "how_to_earn": list(wallet.HOW_TO_EARN), "disclaimer": wallet.DISCLAIMER,
+                     "view": self._view(book, phone, gs)}
+
+    async def view(self, phone: Any) -> tuple[int, dict]:
+        gate, gs, book = self._gate(phone)
+        if gate:
+            if gs is None and self._wallet is not None:
+                await self._close_night()
+            return gate
+        await self._credits_tick(book, phone, gs, self.deps.show())
         return 200, {"status": "ok", "view": self._view(book, phone, gs)}
 
     # ── finding and adding a song ───────────────────────────────────────────
@@ -1018,19 +1697,34 @@ class Guests:
         ok, why = explicit_rule(show, int(gs.get("started_ms") or now_ms), now_ms)
         in_line = {e.uri for e in gs.get("line") or [] if e.state in ("queued", "committed")}
         lib = set(library_uris)
+        wait_ms: Optional[int] = None
+        balance: Optional[int] = None
+        credits = show.play_mode == "credits"
+        if credits:
+            line = gs.get("line") or []
+            played = sum(1 for e in line if e.added_by == phone and e.state in ("played", "playing"))
+            wait_ms = self.deps.runner().quote_wait(played + len(waiting(line, phone)) + 1,
+                                                    show.economy.fair_order)
+            balance = self._wallet_for(gs["night_id"], show).balance(phone)
         results = [result_view(m, known=bool(known.get(m["uri"])), in_line=m["uri"] in in_line,
                                explicit_ok=ok, explicit_why=why,
-                               long_over_min=show.economy.long_over_min, library=m["uri"] in lib)
+                               long_over_min=show.economy.long_over_min, library=m["uri"] in lib,
+                               price=(add_cost(int(m.get("duration_ms") or 0),
+                                               bool(known.get(m["uri"])), bool(m.get("explicit")),
+                                               wait_ms, show) if credits else None),
+                               balance=balance)
                    for m in metas]
         return 200, {"status": "ok", "query": q, "offset": off, "results": results,
                      "more": more,
                      "next_offset": off + SEARCH_PAGE,
                      "view": self._view(book, phone, gs)}
 
-    async def add(self, phone: Any, uri: Any) -> tuple[int, dict]:
-        """A guest adds a song (free play): every rule in the module
-        docstring, then fair order, then "would it start before the night
-        ends?". A refusal adds nothing."""
+    async def add(self, phone: Any, uri: Any, price: Any = None) -> tuple[int, dict]:
+        """A guest adds a song: every rule in the module docstring, then
+        fair order, then "would it start before the night ends?". In credits
+        mode it is priced by when it would play (`price` is what the page
+        showed: a dearer price now is refused, never charged) and the price
+        is locked when it goes in. A refusal adds nothing and costs nothing."""
         from services.jukebox.gateway import parse_track_uri
         gate, gs, book = self._gate(phone)
         if gate:
@@ -1040,13 +1734,13 @@ class Guests:
             return refusal("not_joined", 409)
         if not me.approved:
             return refusal("not_approved", 409)
+        show = self.deps.show()
         left = jailed_now(gs, phone)
         if left:
-            return refusal("jailed", 409, n=left, s="" if left == 1 else "s")
+            return self._jailed_refusal(left, jail_kind_of(gs, phone), show)
         track_uri = parse_track_uri(uri if isinstance(uri, str) else "")
         if not track_uri:
             return refusal("track_unknown", 422)
-        show = self.deps.show()
         now_ms = self.deps.now_ms()
         started = int(gs.get("started_ms") or now_ms)
         reqs = requests_state(show, started, now_ms)
@@ -1084,6 +1778,14 @@ class Guests:
                               image=meta.get("image") or "", thumb=meta.get("thumb") or "",
                               explicit=bool(meta.get("explicit")), known=bool(known),
                               added_ms=now_ms, added_by=phone, round=played + len(mine) + 1)
+            cost = 0
+            if show.play_mode == "credits":
+                wait_ms = self.deps.runner().quote_wait(entry.round, show.economy.fair_order,
+                                                        entry.duration_ms or 210_000)
+                cost = add_cost(entry.duration_ms, entry.known, entry.explicit, wait_ms, show)
+                stop = self._afford(gs, phone, show, cost, price)
+                if stop:
+                    return stop
             fresh_now_ms = self.deps.now_ms()
             out = await self.deps.runner().add_entry(entry, fair=show.economy.fair_order,
                                                      latest_start_ms=reqs["ends_at_ms"] - fresh_now_ms)
@@ -1092,9 +1794,13 @@ class Guests:
                     return refusal("too_late", 409)
                 return 409, {"status": "refused", "reason": out.get("reason", "not_running"),
                              "detail": out.get("detail") or sentence("not_running")}
+            if cost:
+                paid = await self._spend(gs, show, phone, "add", cost, entry.id)
+                await self.deps.runner().mark_paid(entry.id, cost, paid.seq)
             gs = self.deps.state()
             return 200, {"status": "ok", "added": {"entry_id": entry.id, "title": entry.title,
-                                                   "starts_in_ms": out.get("starts_in_ms")},
+                                                   "starts_in_ms": out.get("starts_in_ms"),
+                                                   "paid": cost},
                          "view": self._view(book, phone, gs)}
 
     # ── the host's controls (the master's own routes) ───────────────────────
@@ -1114,6 +1820,8 @@ class Guests:
         from services.jukebox import economy
         show = self.deps.show()
         at = economy.jail_threshold(self._crowd(), show.economy)
+        credits = show.play_mode == "credits"
+        w = self._wallet_for(gs["night_id"], show) if credits else None
         out = []
         for p in sorted(book.phones.values(), key=lambda p: p.created_ms):
             mine = [e for e in line if e.added_by == p.id]
@@ -1123,10 +1831,13 @@ class Guests:
                         "played": sum(1 for e in mine if e.state == "played"),
                         "votes": votes.get(p.id, 0),
                         "jail_left": jailed_now(gs, p.id),
-                        "jail_count": jail_count(book, p.id, gs), "jail_at": at})
+                        "jail_kind": jail_kind_of(gs, p.id),
+                        "jail_count": jail_count(book, p.id, gs), "jail_at": at,
+                        **({"credits": w.balance(p.id)} if credits else {})})
         return {"running": True, "phones": out,
                 "pending": sum(1 for p in book.phones.values() if not p.approved and not p.blocked),
-                "jailed": sum(1 for p in out if p["jail_left"]), "crowd": self._crowd()}
+                "jailed": sum(1 for p in out if p["jail_left"]), "crowd": self._crowd(),
+                "play_mode": show.play_mode}
 
     async def host_set(self, phone: str, *, approved: Optional[bool] = None,
                        blocked: Optional[bool] = None, name_locked: Optional[bool] = None,

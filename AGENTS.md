@@ -11147,6 +11147,56 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   Jukebox's own share of SpotFX's loop, not SpotFX whole. Specs:
   `tests/test_jukebox_free_play.py`, the guest render's skip/move/time-out
   shots, `check_jukebox_editor.mjs` §1e/§2d; help `jukebox-free-play`.
+- **CREDITS MODE (PR 3.2)** is `ShowConfig.play_mode` ("credits" by
+  default — the plan's §4 tuned default; "free" is phase 2's free play —
+  the Credits tab's Mode card, Sonic asking first). A test or script about
+  FREE PLAY must say `play_mode="free"` (the bot party and the guest render
+  do). `services/jukebox/guests.py`'s CREDITS MODE section is the binding
+  statement; `services/jukebox/wallet.py` is the wallet (earning, prices
+  from the night as it stands, the Shop's words). Four things: (1) THE
+  LEDGER IS THE TRUTH — no balance is stored anywhere; every write is a
+  ledger entry, on `to_thread` (it fsyncs), and the `Wallet` is rebuilt
+  from it on open. Earning is checked on the phone's OWN polls
+  (`_credits_tick`, no timer), and the lock is taken only when something
+  is due. (2) THE SERVER PRICES, THE PAGE ONLY SHOWS: every spend carries
+  the price the page showed and is refused with the new one if it moved
+  (`_afford`); quotes come from `JukeboxRunner.quote_wait` (a sync probe
+  insert/remove — the only way the projection says when a song WOULD
+  start). (3) REFUNDS ARE WRITTEN: a paid song the host removed
+  (`LineEntry.removed` + `paid_seq`), a skip pot whose song ended first,
+  and paid songs still waiting when the night ends (`_close_night`). THE
+  PUSH-BACK CAP IS PER SONG WHATEVER MOVED IT (firstmate's ruling on PR
+  2.3): every song a play next jumps past is `pushed_back` one place — a
+  guest's play next is refused at the cap (`next_pushed_max`, and the
+  view's quote says so first); the host's Play next (`night.move`) counts
+  the same way but is never refused. (4) THE SKIP
+  LOCK (`JukeboxNight.no_skip`, by URI, `POST /api/jukebox/skip-lock`, the
+  Guests tab's "Keep from skips") is checked in `skip_by_vote` itself, so
+  the room's vote, a paid skip and a filling pot all refuse it in either
+  mode; it is a named Sonic exclusion (a line action). Credits mode's jail
+  is `JAIL_UNTIL_FREED` — it ends on a break-out (`jail_fee`) or Pardon.
+  **(5) A JAIL'S KIND IS STORED WITH ITS TERM** (`JukeboxNight.jail_kind`,
+  "timeout"/"breakout"), set by `night.jail()` and read everywhere a jail
+  is shown or acted on (`guests.py`'s `jail_kind_of`: `build_view`'s
+  `jail`/strip, `Guests.phones()`, `_jailed_refusal`, `break_out`) —
+  **never reinterpreted by the CURRENT `play_mode`**, which can change
+  mid-night. `night.convert_jail_mode` (called from `PUT /api/jukebox/show`
+  — the one validator path, so Sonic's `set_jukebox_setting` gets it too —
+  the instant `play_mode` actually changes) converts what is RUNNING:
+  switching credits off turns a "breakout" jail into an ordinary "timeout"
+  of `free_jail_songs` songs counted from that moment (or ends it at once
+  with none, at 0); switching credits on leaves a "timeout" jail exactly as
+  it was, with no break-out ever offered for it. Found live by review:
+  before this, both the guest page and the Guests tab reinterpreted every
+  jail by whichever mode was CURRENT, so a credits jail surviving a switch
+  to free play read its `JAIL_UNTIL_FREED` term as "a billion songs to go"
+  and a free-play time-out switched to credits could be paid away with
+  `break_out()` though it was meant to end for free.
+  The guest app forwards `/g/tip`, `/g/skip`, `/g/next`, `/g/breakout`,
+  `GET /g/wallet`. Specs: `tests/test_jukebox_credits_play.py`, the guest
+  render's credits shots (14-21), `check_jukebox_guest_logic.mjs`'s credits
+  section, `check_jukebox_editor.mjs` §1e/§2b/§2d; help
+  `jukebox-credits-mode`, `jukebox-skip-lock`.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his program settings, one validator:

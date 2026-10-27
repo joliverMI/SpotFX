@@ -155,10 +155,19 @@ class LineEntry(_Model):
     # The lights already know it (its audio shape is captured): the guest
     # page's "Ready" badge. Not `ready`, which is phase 4's commit gate.
     known: bool = False
-    # Places it has been pushed back tonight (free play's bumps, PR 2.3) —
-    # whether by a down-bump of its own, or as the song an up-bump stepped
-    # past: never more than the show's `bump_down_max_places`.
+    # Places it has been pushed back tonight (free play's bumps, PR 2.3;
+    # also a play next it was jumped past, PR 3.2) — whether by a down-bump
+    # of its own, or as the song an up-bump or a play next stepped past:
+    # never more than the show's `bump_down_max_places`.
     pushed_back: int = 0
+    # CREDITS MODE (PR 3.2): what its adder paid for it (locked when added)
+    # and the ledger entry that paid it — a refund points at it; and
+    # whether it has used its one "play next".
+    paid: int = 0
+    paid_seq: Optional[int] = None
+    nexted: bool = False
+    # the HOST took it out (Remove): a paid song is refunded (§1 rule 5)
+    removed: bool = False
     ready: bool = True
     state: LineState = "queued"
     # A committed song he removed: it is already in Spotify's queue and can't
@@ -188,14 +197,15 @@ class Cursor(_Model):
 class NowItem(_Model):
     """What is playing, as the program sees it. `skip_reason` says why a
     "skipping" item is being skipped: "removed" (a committed song he took
-    out, the repair path) or "votes" (the room voted it off, PR 2.3)."""
+    out, the repair path), "votes" (the room voted it off, PR 2.3) or "paid"
+    (a guest paid for the skip, or a chip-in pot filled — credits, PR 3.2)."""
     kind: Literal["", "set", "jukebox", "skipping", "foreign"] = ""
     uri: str = ""
     title: str = ""
     set_index: Optional[int] = None
     entry_id: str = ""
     started_ms: Optional[int] = None
-    skip_reason: Literal["", "removed", "votes"] = ""
+    skip_reason: Literal["", "removed", "votes", "paid"] = ""
 
 
 class PlayedItem(_Model):
@@ -241,6 +251,17 @@ class JukeboxNight(_Model):
     # songs keep their places but are never sent (slots pass them). The
     # host's pardon removes the term.
     jail: dict[str, int] = Field(default_factory=dict)
+    # The KIND each entry in `jail` is — "timeout" (free play, ends on its
+    # own) or "breakout" (credits, ends only by paying `jail_fee` or a
+    # pardon) — stored WITH the term so a later mode switch
+    # (services/jukebox/night.py's `convert_jail_mode`, run from
+    # services/jukebox/show.py's one validator path) can convert it
+    # instead of every reader reinterpreting it by the CURRENT play_mode.
+    # Reset (popped) whenever the matching `jail` entry ends or is pardoned.
+    jail_kind: dict[str, str] = Field(default_factory=dict)
+    # Songs the host has kept from skips tonight (their URIs): neither the
+    # room's vote nor a paid skip touches them (report §12, "Skip griefing").
+    no_skip: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     log: list[str] = Field(default_factory=list)
 
@@ -331,6 +352,11 @@ Preset = Literal["small", "medium", "large"]
 # Free play's "play next" (report §4's Free play card): the host's own button
 # on the Guests tab's line, or nobody's.
 FreePlayNext = Literal["host", "off"]
+# The guest page's mode (report §6: "One switch on the Show settings page
+# (Mode: Credits · Free play) hides every price, the credits chip and the
+# Shop"). Credits ships as the default (the plan's §4 tuned values):
+# nothing about a night changes to free play until he switches.
+PlayMode = Literal["free", "credits"]
 
 # Explicit songs (report §4, "Add a song"): not allowed (the default), allowed
 # for +2 credits ("extra" — in free play simply allowed), or only after a set
@@ -368,6 +394,10 @@ class ShowConfig(_Model):
     free_bumps_per_hour: int = Field(2, ge=0, le=10)
     free_play_next: FreePlayNext = "host"
     free_jail_songs: int = Field(5, ge=0, le=15)
+    # credits or free play (the whole guest economy on or off, PR 3.2). The
+    # plan's §4 default is Credits ("defaults are the tuned values"); free play
+    # hides every price, the credits chip and the Shop (§6)
+    play_mode: PlayMode = "credits"
 
 
 # ── the guest link (N1: services/jukebox/guest_link.py) ──────────────────────
@@ -471,3 +501,10 @@ class GuestBook(_Model):
     # counts the net ▼ on a guest's songs from it. Host and set songs are
     # never here (they never go to jail).
     play_by: dict[str, str] = Field(default_factory=dict)
+    # CREDITS MODE (PR 3.2): the ledger is the truth for every credit
+    # (services/jukebox/ledger.py); the book keeps only what decides WHEN to
+    # write — the last top-up tick per phone, the plays whose Adder credits
+    # are settled, and how each skip pot ended ("filled" or "refunded").
+    credit_tick: dict[str, int] = Field(default_factory=dict)
+    settled: list[str] = Field(default_factory=list)
+    pots: dict[str, str] = Field(default_factory=dict)

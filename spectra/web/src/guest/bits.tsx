@@ -2,8 +2,8 @@
 // shown as it is — never cropped, blurred or drawn over), the Spotify mark
 // with its link back, a song row, and the bottom sheet.
 import { useEffect, type ReactNode } from 'react';
-import type { MySong, NextSong, Song } from './types';
-import { byLine, clockAt, inWords, myStatus } from './logic';
+import type { JailInfo, MySong, NextSong, Song } from './types';
+import { bumpOffer, byLine, clockAt, inWords, myStatus, nextOffer } from './logic';
 
 export function Art({ song, size, className = '' }: { song: Song; size: 'big' | 'small'; className?: string }) {
   const src = size === 'big' ? (song.image || song.thumb) : (song.thumb || song.image);
@@ -65,9 +65,15 @@ export function SongRow({ song, elapsedMs, nowMs, onMove }: {
   );
 }
 
-/** One of your own songs on the Queue, with where it stands. */
-export function MyRow({ song, elapsedMs, nowMs }: { song: MySong; elapsedMs: number; nowMs: number }) {
+/** One of your own songs on the Queue, with where it stands — and in
+ *  credits mode its prices: bump it up, play it next. */
+export function MyRow({ song, elapsedMs, nowMs, credits = false, jail, balance = 0, onMove, onNext }: {
+  song: MySong; elapsedMs: number; nowMs: number; credits?: boolean; jail?: JailInfo;
+  balance?: number; onMove?: () => void; onNext?: () => void;
+}) {
   const waiting = song.jailed || song.held;
+  const bump = credits && song.bump ? bumpOffer(song as unknown as NextSong, undefined, jail, balance) : null;
+  const next = credits ? nextOffer(song.next, balance, jail) : null;
   return (
     <li className={`g-row g-row-mine${waiting ? ' g-row-waiting' : ''}`}>
       <Art song={song} size="small" />
@@ -78,6 +84,23 @@ export function MyRow({ song, elapsedMs, nowMs }: { song: MySong; elapsedMs: num
           <span>{myStatus(song, elapsedMs, nowMs)}</span>
           {song.committed && <span className="g-chip">sent to Spotify</span>}
         </div>
+        {(bump || next) && (
+          <div className="g-row-buys">
+            {bump && onMove && (
+              <button type="button" className="g-btn g-btn-small" disabled={!bump.can} onClick={onMove}
+                      title={bump.why || undefined}>
+                Bump up · {song.bump_price}
+              </button>
+            )}
+            {next && onNext && (
+              <button type="button" className="g-btn g-btn-small" disabled={!next.can} onClick={onNext}
+                      title={next.why || undefined}>
+                {next.label}
+              </button>
+            )}
+          </div>
+        )}
+        {next && !next.can && next.why && <div className="g-row-why g-muted">{next.why}</div>}
       </div>
       <OpenSpotify song={song} label={false} />
     </li>

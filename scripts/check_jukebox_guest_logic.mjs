@@ -5,6 +5,8 @@
 // hint (iPhones and iPads, not from the Home Screen already), the tabs, and
 // the address that carries a phone's code to its Home Screen icon. The
 // mounted page is proven by scripts/render_jukebox_guest.py on four phones.
+// Credits mode (PR 3.2): the Shop tab, the paid skip and its pot, tips, play
+// next, the move prices, the jail card and its break-out, history amounts.
 //
 // Run: node scripts/check_jukebox_guest_logic.mjs (tests/test_jukebox_guest_page.py).
 import { mkdtempSync } from 'node:fs';
@@ -145,6 +147,63 @@ ok(L.myStatus(mine({ held: true }), 0, nine).startsWith('On hold'), 'your song o
 ok(L.myStatus(mine({ state: 'playing' }), 0, nine) === 'Playing now', 'your song playing');
 ok(L.myStatus(mine({ starts_in_ms: 120_000, place: 3 }), 0, nine, 'en-US') === '#3 · in 2:00 · ~9:32',
    `your song's place and time (${L.myStatus(mine({ starts_in_ms: 120_000, place: 3 }), 0, nine, 'en-US')})`);
+
+console.log('\ncredits mode (PR 3.2)');
+ok(L.credits(1) === '1 credit' && L.credits(4) === '4 credits', 'credits in words');
+ok(L.signed(3) === '+3' && L.signed(-4) === '−4' && L.signed(0) === '+0', 'a history row\'s amount, signed');
+ok(L.earnedToast(1) === '+1 credit for voting' && L.earnedToast(0) === '' && L.earnedToast(undefined) === '',
+   'a vote that paid says so; one that didn\'t says nothing');
+ok(JSON.stringify(L.tabsFor({ add: true, board: false, credits: true, shop: true })) === '["now","queue","add","shop"]',
+   'credits mode adds the Shop tab, after Add');
+ok(JSON.stringify(L.tabsFor({ add: true, board: false, credits: false, shop: false })) === '["now","queue","add"]',
+   'free play has no Shop');
+const breakout = L.stripText({ tone: 'jail', title: '', place: null, starts_in_ms: null, held: false, count: 1,
+                               jail_kind: 'breakout', jail_fee: 10 }, 0, nine, true);
+ok(breakout.label === "You're in jail" && breakout.detail.includes('break out (10 credits)'),
+   `credits jail: the strip names the way out (${breakout.detail})`);
+const paid = (o) => sk({ mode: 'paid', price: 6, pot: 0, pot_mine: 0, need: 6, chip_in: true, per_down_pct: 15,
+                         can: true, can_chip: true, why: '', ...o });
+const so = L.skipOffer(paid({}), 10);
+ok(so.label === 'Skip · 6' && so.can && so.pot.includes('15% with every net ▼') && so.pot.includes('chip in'),
+   `a paid skip: its price, and how it falls (${so.label} / ${so.pot})`);
+const sp = L.skipOffer(paid({ pot: 4, pot_mine: 2, need: 2 }), 10);
+ok(sp.label === 'Skip · 2 more' && sp.pot.startsWith('Pot 4 of 6 · 2 yours') && sp.pot.includes('comes back'),
+   `a part-filled pot: the rest, the pot and your share, and the refund (${sp.pot})`);
+const sb = L.skipOffer(paid({}), 3);
+ok(!sb.can && sb.why === 'That needs 6 credits — you have 3.', `not enough: says what it needs (${sb.why})`);
+ok(!L.skipOffer(paid({ can: false, why: 'Not your own song.' }), 10).can, 'the server\'s own refusal wins');
+ok(L.skipOffer(sk({}), 10) === null && L.skipOffer(paid({ skipping: true }), 10) === null,
+   'nothing to buy in free play, or for a song already skipping');
+ok(L.skipLine(paid({}), 0) === '' && L.skipLine(sk({ locked: true }), 0).includes('kept this song from skips'),
+   'credits: the button says it all; a kept song says so in either mode');
+const tip = (o) => ({ to: 'Ana', unit: 1, can: true, why: '', given: 0, cap: 3, ...o });
+ok(L.tipOffer(tip({}), 5).label === 'Tip Ana · 1' && L.tipOffer(tip({}), 5).can, 'tip the guest whose song it is');
+ok(!L.tipOffer(tip({}), 0).can && L.tipOffer(tip({}), 0).why.includes('needs 1 credit'), 'no credits, no tip');
+ok(L.tipOffer(tip({ to: '', can: false, why: 'Tips go to guests\' songs.' }), 5).label === '',
+   'a song with nobody to tip: no button, just why');
+ok(L.tipOffer(undefined, 5) === null, 'no tip offer, nothing shown');
+const nq = (o) => ({ price: 8, allowed: true, why: '', jump_min: 20, ...o });
+ok(L.nextOffer(nq({}), 10).label === 'Play next · 8' && L.nextOffer(nq({}), 10).can, 'play next at its price');
+ok(!L.nextOffer(nq({ allowed: false, why: 'It has had its play next.' }), 10).can
+   && L.nextOffer(nq({ allowed: false, why: 'It has had its play next.' }), 10).why === 'It has had its play next.',
+   'once per song: says why');
+ok(!L.nextOffer(nq({}), 4).can, 'not enough credits for play next');
+const cj = { in: true, songs_left: 0, count: 6, at: 5, on: true, kind: 'breakout', fee: 10, can_break_out: true };
+ok(!L.nextOffer(nq({}), 20, cj).can && L.nextOffer(nq({}), 20, cj).why.includes('break out (10 credits)'),
+   'in jail: no play next until you break out');
+const card = L.jailCard(cj);
+ok(card.fee === 10 && card.text.includes('6 more ▼ than ▲') && card.text.includes('bar at this party is 5'),
+   `the jail card: why, and the fee (${card.text})`);
+ok(L.jailCard({ ...cj, count: 2 }).text.startsWith('Your songs got too many ▼ tonight (the bar at this party is 5'),
+   'a count back under the bar (▲ since) never reads "2 more ▼" as if that were the bar');
+ok(L.jailCard({ ...cj, kind: 'timeout' }) === null && L.jailCard(undefined) === null, 'only credits mode\'s jail has a card');
+const bo = L.bumpOffer(song({ bump_price: 3 }), bumps({ left: 0 }), undefined, 5);
+ok(bo.label === 'Move it down one place · 3' && bo.can, `credits: a move at its price, no hourly count (${bo.label})`);
+ok(!L.bumpOffer(song({ bump_price: 3 }), bumps({}), undefined, 2).can, 'credits: a move you can\'t afford');
+ok(L.bumpOffer(song({ bump_price: 3 }), bumps({}), cj, 9).why.includes('break out'), 'credits jail: no moves');
+ok(L.addOffer({ price: 7, afford: true }).label === 'Add · 7' && !L.addOffer({ price: 7, afford: false }).afford
+   && L.addOffer({}).label === 'Add', 'Add shows the price in credits mode, plain in free play');
+ok(L.TIP_UNDO_MS === 3000, 'a tip waits three seconds for its undo');
 
 console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);
 process.exit(failures === 0 ? 0 : 1);

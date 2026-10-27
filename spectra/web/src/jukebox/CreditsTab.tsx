@@ -1,5 +1,6 @@
 /** THE JUKEBOX'S CREDITS TAB (phase 3 PR 3.3's settings half; the plan's §4
- * "Show settings" and §3.5 presets): the party-size presets, the price check
+ * "Show settings" and §3.5 presets): the guest page's MODE (credits or free
+ * play, PR 3.2 — report §6's "one switch"), the party-size presets, the price check
  * (the current rules on real examples, at a room size he picks) and every
  * economy setting, grouped as §4's cards.
  *
@@ -33,8 +34,32 @@ export default function CreditsTab() {
   const { show, fields, presets } = data;
   const onError = (e: unknown) => toast(errText(e), 'error');
 
+  const mode = show.play_mode ?? 'credits';
   return (
     <div className="jukebox-grid">
+      <section className="card jukebox-card" data-testid="jukebox-mode">
+        <div className="jukebox-card-head">
+          <InfoTip topic="jukebox-credits-mode"
+            text="Credits: guests earn credits by voting and spend them to add, move and skip songs, with tips and the Shop. Free play: nothing costs anything, and counts keep it fair. Switch at any time — it applies from the next thing a guest does.">
+            <span className="card-title jukebox-card-title">Mode</span>
+          </InfoTip>
+        </div>
+        <div className="jukebox-modes" role="radiogroup" aria-label="The guest page's mode">
+          {(data.play_modes ?? [{ value: 'free', label: 'Free play' }, { value: 'credits', label: 'Credits' }]).map((m) => (
+            <button key={m.value} role="radio" aria-checked={mode === m.value}
+              className={mode === m.value ? 'on' : ''}
+              onClick={() => mode !== m.value && save.mutate({ play_mode: m.value as 'free' | 'credits' }, {
+                onSuccess: () => toast(`The guest page is on ${m.label.toLowerCase()}`, 'success'), onError,
+              })}>{m.label}</button>
+          ))}
+        </div>
+        <p className="jukebox-muted">
+          {mode === 'credits'
+            ? 'Guests see prices, the Shop and their credits; skips and moves are paid, a jailed guest breaks out for credits.'
+            : 'Nothing costs anything: the room votes songs off, moves are counted, and jail is a time-out.'}
+        </p>
+      </section>
+
       <section className="card jukebox-card" data-testid="jukebox-presets">
         <div className="jukebox-card-head">
           <InfoTip topic="jukebox-presets"

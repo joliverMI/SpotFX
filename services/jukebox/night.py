@@ -51,6 +51,26 @@ stays where it is); and a jailed guest's waiting songs keep their places but
 are never sent until their time-out has run (`jail`, `pardon`) — the term is
 counted in songs that start (`JukeboxNight.plays`).
 
+CREDITS MODE (PR 3.2) reuses all three — a paid skip or a filled chip-in pot
+is `skip_by_vote(reason="paid")`, a priced bump is `bump`, a jail lasts until
+the guest breaks out (`JAIL_UNTIL_FREED`) — and adds a guest's own PLAY NEXT
+(`play_next`: to the front of the songs that can be sent, once per song;
+nothing passes the committed song). EACH JAIL'S KIND IS STORED WITH ITS TERM
+(`JukeboxNight.jail_kind`, "timeout"/"breakout"), so a later `play_mode`
+switch converts what is RUNNING instead of every reader guessing it from the
+current mode (`convert_jail_mode`, run from services/jukebox/show.py's one
+validator path): switching credits off turns a "breakout" jail into an
+ordinary "timeout" of `free_jail_songs` songs from that moment; switching
+credits on leaves a "timeout" jail exactly as it was, with no break-out ever
+offered for it. THE PUSH-BACK CAP IS PER SONG, whatever
+moved it (the firstmate's ruling on PR 2.3, "a play-next jump if it pushes
+songs back" included): every song a play next jumps past is pushed back one
+place, and a guest's play next is refused when one of them is already at the
+cap; the host's Play next (`move` to the front) counts the same way but is
+never refused — the cap keeps guests from pushing each other's songs back.
+The host's SKIP LOCK (`set_skip_lock`) keeps a song from every skip, both
+modes.
+
 A night is a record: every start, refusal and ending is in the night file
 with its reason, and `status()` answers what is playing, the next 20 program
 items with their start times, the line, and any warning.
@@ -120,7 +140,15 @@ SENTENCES: dict[str, str] = {
     "pushed_max": "That song has been moved back as far as it can go tonight.",
     "on_hold": "That song is on hold, so it can't move.",
     "not_jailed": "That guest isn't in a time-out.",
+    "skip_locked": "The host has kept this song from skips.",
+    "nexted": "That song has already had its play next.",
+    "at_front_next": "It's already the next song to go in.",
+    "next_pushed_max": "A song it would jump past has been moved back as far as it can go tonight.",
 }
+
+# A credits-mode jail lasts until the guest breaks out (or the host pardons):
+# its term is "never by songs" (report §1 rule 9).
+JAIL_UNTIL_FREED = 10 ** 9
 
 
 def sentence(code: str, detail: str = "", **fmt: Any) -> str:
@@ -387,6 +415,7 @@ class JukeboxRunner:
         for pid, until in list(n.jail.items()):
             if n.plays >= until:
                 del n.jail[pid]
+                n.jail_kind.pop(pid, None)
                 self._log("a guest's time-out is over; their songs are back in line")
 
     def _jailed(self, phone: str) -> bool:
@@ -1063,6 +1092,8 @@ class JukeboxRunner:
             if e is None:
                 return {"status": "refused", "reason": "no_entry", "detail": sentence("no_entry")}
             name = e.title or e.uri
+            if e.state in ("queued", "committed", "playing"):
+                e.removed = True
             if e.state == "queued":
                 e.state = "removed"
                 self._log(f"removed {name} from the line")
@@ -1103,9 +1134,18 @@ class JukeboxRunner:
                 return {"status": "refused", "reason": "already_played",
                         "detail": sentence("already_played")}
             line = self.night.line
-            waiting = [x for x in line if x.state == "queued" and x.id != e.id]
+            before = [x for x in line if x.state == "queued"]
+            waiting = [x for x in before if x.id != e.id]
             to = max(0, min(int(to), len(waiting)))
             waiting.insert(to, e)
+            # the push-back cap is per song (PR 2.3/3.2): every song this
+            # move jumps past is a place further back, and a song moved down
+            # is pushed back by the places it moves — counted, never refused
+            # (the host's own move)
+            old = before.index(e)
+            for x in before[to:old]:
+                x.pushed_back += 1
+            e.pushed_back += max(0, to - old)
             self.night.line = [x for x in line if x.state != "queued"] + waiting
             self._log(f"moved {e.title or e.uri} to place {to + 1} in the line")
             await self._persist()
@@ -1116,11 +1156,13 @@ class JukeboxRunner:
     def _refused(self, code: str) -> dict:
         return {"status": "refused", "reason": code, "detail": sentence(code)}
 
-    async def skip_by_vote(self, started_ms: Optional[int], uri: str) -> dict:
-        """The room voted the song playing off (services/jukebox/guests.py
-        decides when). Skipped only if it is still the same play. A jukebox
-        slot coming next is sent to Spotify first, so the skip lands on it,
-        not on the next set song."""
+    async def skip_by_vote(self, started_ms: Optional[int], uri: str,
+                           reason: str = "votes") -> dict:
+        """The room voted the song playing off, or (credits) a guest paid for
+        the skip — services/jukebox/guests.py decides when. Skipped only if
+        it is still the same play and the host hasn't kept it from skips. A
+        jukebox slot coming next is sent to Spotify first, so the skip lands
+        on it, not on the next set song."""
         async with self._get_lock():
             self._ensure_loaded()
             if not self.running:
@@ -1129,6 +1171,8 @@ class JukeboxRunner:
             if (n.now.kind not in ("set", "jukebox") or n.now.uri != uri
                     or not started_ms or n.now.started_ms != started_ms):
                 return self._refused("moved_on")
+            if uri in n.no_skip:
+                return self._refused("skip_locked")
             now = self.deps.clock()
             nxt = self._project(1)
             if (nxt and nxt[0].kind == "jukebox" and not nxt[0].committed
@@ -1141,8 +1185,10 @@ class JukeboxRunner:
                 playing.state = "skipped"
             title = n.now.title or uri
             self._played("skipped", uri, title, entry_id=playing.id if playing is not None else "")
-            n.now = n.now.model_copy(update={"kind": "skipping", "skip_reason": "votes"})
-            self._log(f"the room voted {title} off; skipping it")
+            n.now = n.now.model_copy(update={"kind": "skipping",
+                                             "skip_reason": "paid" if reason == "paid" else "votes"})
+            self._log(f"a guest paid to skip {title}; skipping it" if reason == "paid"
+                      else f"the room voted {title} off; skipping it")
             self.rt.skip_attempts = 0
             await self._skip(now)
             await self._persist()
@@ -1189,33 +1235,166 @@ class JukeboxRunner:
             await self._persist()
             return {"status": "moved", "place": j + 1, "starts_in_ms": self._starts_in(e.id)}
 
-    async def jail(self, phone: str, songs: int) -> dict:
+    async def jail(self, phone: str, songs: Optional[int]) -> dict:
         """A guest's time-out: their waiting songs keep their places but sit
-        out the next `songs` songs to start."""
+        out the next `songs` songs to start — or, with `songs` None (credits
+        mode), until they break out or the host pardons them. The KIND is
+        stored WITH the term (`jail_kind`), so a later mode switch can
+        convert it instead of a reader reinterpreting it by the current
+        `play_mode`."""
         async with self._get_lock():
             self._ensure_loaded()
             if not self.running:
                 return self._refused("not_running")
             n = self.night
-            n.jail[phone] = n.plays + max(1, int(songs))
-            self._log(f"a guest's songs got too many ▼; they sit out {songs} song"
-                      f"{'' if songs == 1 else 's'}")
+            if songs is None:
+                n.jail[phone] = n.plays + JAIL_UNTIL_FREED
+                n.jail_kind[phone] = "breakout"
+                self._log("a guest's songs got too many ▼; they sit out until they break out")
+            else:
+                n.jail[phone] = n.plays + max(1, int(songs))
+                n.jail_kind[phone] = "timeout"
+                self._log(f"a guest's songs got too many ▼; they sit out {songs} song"
+                          f"{'' if songs == 1 else 's'}")
             await self._persist()
             return {"status": "jailed", "songs_left": n.jail[phone] - n.plays}
 
-    async def pardon(self, phone: str) -> dict:
-        """The host ends a guest's time-out now."""
+    async def pardon(self, phone: str, broke_out: bool = False) -> dict:
+        """End a guest's time-out now: the host's pardon, or (credits) the
+        guest's own paid break-out."""
         async with self._get_lock():
             self._ensure_loaded()
             if not self.running:
                 return self._refused("not_running")
             if not self._jailed(phone):
                 self.night.jail.pop(phone, None)
+                self.night.jail_kind.pop(phone, None)
                 return self._refused("not_jailed")
             del self.night.jail[phone]
-            self._log("the host pardoned a guest; their songs are back in line")
+            self.night.jail_kind.pop(phone, None)
+            self._log("a guest broke out of jail; their songs are back in line" if broke_out
+                      else "the host pardoned a guest; their songs are back in line")
             await self._persist()
             return {"status": "pardoned"}
+
+    async def convert_jail_mode(self, credits: bool, free_jail_songs: int) -> None:
+        """A mode switch (services/jukebox/show.py's one validator path, the
+        PUT /api/jukebox/show route) converts jails already running — the
+        Credits tab's own promise, "it applies from the next thing a guest
+        does": switching credits OFF turns a credits-imposed jail (kind
+        "breakout", the JAIL_UNTIL_FREED sentinel) into an ordinary
+        time-out of `free_jail_songs` songs counted from NOW (or ends it at
+        once, with none set, when `free_jail_songs` is 0). Switching
+        credits ON does nothing here — a free-play time-out (kind
+        "timeout") keeps ending by itself and is never offered a
+        break-out, whatever `play_mode` reads now (guests.py's own
+        `jail_kind_of` always reads this STORED kind, never the current
+        mode)."""
+        async with self._get_lock():
+            self._ensure_loaded()
+            if not self.running or credits:
+                return
+            n = self.night
+            changed = False
+            for phone, kind in list(n.jail_kind.items()):
+                if kind != "breakout":
+                    continue
+                if free_jail_songs > 0:
+                    n.jail[phone] = n.plays + int(free_jail_songs)
+                    n.jail_kind[phone] = "timeout"
+                    self._log("a guest's jail became an ordinary time-out (credits switched off)")
+                else:
+                    n.jail.pop(phone, None)
+                    n.jail_kind.pop(phone, None)
+                    self._log("a guest's jail ended (credits switched off, no time-out set)")
+                changed = True
+            if changed:
+                await self._persist()
+
+    # ── credits mode: play next, the line's prices, what a song paid (3.2) ──
+
+    async def play_next(self, entry_id: str, max_back: Optional[int] = None) -> dict:
+        """A guest's PLAY NEXT: their waiting song to the front of the songs
+        that can be sent — once per song. Nothing passes the song already
+        sent to Spotify. Every song it jumps past is pushed back one place
+        (`pushed_back`, the per-song cap), and with `max_back` it is refused
+        when one of them is already there."""
+        async with self._get_lock():
+            self._ensure_loaded()
+            if not self.running:
+                return self._refused("not_running")
+            e = self._entry(entry_id)
+            if e is None:
+                return self._refused("no_entry")
+            if e.state == "committed":
+                return self._refused("committed_fixed")
+            if e.state != "queued":
+                return self._refused("already_played")
+            if e.nexted:
+                return self._refused("nexted")
+            movable = self._movable()
+            if e not in movable:
+                return self._refused("on_hold")
+            i = movable.index(e)
+            if i == 0:
+                return self._refused("at_front_next")
+            passed = movable[:i]
+            if max_back is not None and any(p.pushed_back >= max_back for p in passed):
+                return self._refused("next_pushed_max")
+            line = self.night.line
+            line.remove(e)
+            line.insert(line.index(movable[0]), e)
+            for p in passed:
+                p.pushed_back += 1
+            e.nexted = True
+            self._log(f"a guest played {e.title or e.uri} next")
+            await self._persist()
+            return {"status": "moved", "place": 1, "starts_in_ms": self._starts_in(e.id)}
+
+    def quote_wait(self, rnd: int, fair: bool = True, duration_ms: int = 210_000) -> Optional[int]:
+        """How long until a NEW song of round `rnd` would start, were it
+        added now (the add price is priced by it). No await between the
+        try-on and the take-off, so no other reader on the loop ever sees
+        the stand-in."""
+        self._ensure_loaded()
+        if not self.running:
+            return None
+        probe = LineEntry(id="__quote__", uri="spotify:track:quote", duration_ms=duration_ms,
+                          added_by="__quote__", round=rnd)
+        line = self.night.line
+        line.insert(self.fair_index(rnd, fair), probe)
+        try:
+            return self._starts_in(probe.id)
+        finally:
+            line.remove(probe)
+
+    async def mark_paid(self, entry_id: str, paid: int, seq: Optional[int]) -> None:
+        """Record what a song's adder paid for it (credits): the price is
+        locked when added, and a refund points at the ledger entry."""
+        async with self._get_lock():
+            e = self._entry(entry_id) if self.night else None
+            if e is not None:
+                e.paid, e.paid_seq = int(paid), seq
+                await self._persist()
+
+    async def set_skip_lock(self, uri: str, locked: bool) -> dict:
+        """The host keeps a song from every skip tonight (the room's vote
+        and a paid skip alike), or lets it be skipped again."""
+        async with self._get_lock():
+            self._ensure_loaded()
+            if not self.running:
+                return self._refused("not_running")
+            n = self.night
+            have = uri in n.no_skip
+            if locked and not have:
+                n.no_skip.append(uri)
+            elif not locked and have:
+                n.no_skip.remove(uri)
+            if locked != have:
+                self._log(f"{'kept' if locked else 'let'} a song {'from' if locked else 'be'} "
+                          f"{'skips' if locked else 'skipped again'}")
+                await self._persist()
+            return {"status": "locked" if locked else "unlocked", "no_skip": list(n.no_skip)}
 
     # ── program settings, and reads ─────────────────────────────────────────
 
@@ -1266,6 +1445,7 @@ class JukeboxRunner:
                 "lap": {"set_songs": lap.set_songs, "slots": lap.slots,
                         "unbounded": lap.unbounded, "notes": lap.notes},
                 "warnings": account + list(n.warnings), "spotify_auth": sign_in,
+                "no_skip": list(n.no_skip),
                 "log": n.log[-60:], "history": self.history[:5]}
 
     def guest_state(self, count: int = 12) -> dict:
@@ -1288,7 +1468,8 @@ class JukeboxRunner:
                 "is_playing": bool(on and getattr(track, "is_playing", False)),
                 "duration_ms": duration, "remaining_ms": remaining,
                 "next": items, "line": list(n.line), "set_items": n.set_items,
-                "plays": n.plays, "jail": dict(n.jail)}
+                "plays": n.plays, "jail": dict(n.jail), "jail_kind": dict(n.jail_kind),
+                "no_skip": list(n.no_skip)}
 
     async def read_set(self, cfg: ProgramConfig, refresh: bool = False) -> tuple[dict, list[SetItem]]:
         """The set for `cfg`: the running night's own copy when the night is

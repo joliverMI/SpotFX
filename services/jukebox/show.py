@@ -107,9 +107,11 @@ GUEST_FIELDS: list[tuple[str, str, str, str]] = [
 EXPLICIT_WORDS = {"no": "not allowed", "extra": "allowed (+2 credits with credits on)",
                   "after": "allowed after a set time"}
 PLAY_NEXT_WORDS = {"host": "host only", "off": "off"}
+# the guest page's mode (report §6): credits, or free play (nothing costs anything)
+PLAY_MODE_WORDS = {"free": "Free play", "credits": "Credits"}
 CHOICE_WORDS = {"explicit": EXPLICIT_WORDS, "free_play_next": PLAY_NEXT_WORDS}
 
-SHOW_KEYS = frozenset({"economy", "approve_new_phones"} | {k for k, *_ in GUEST_FIELDS})
+SHOW_KEYS = frozenset({"economy", "approve_new_phones", "play_mode"} | {k for k, *_ in GUEST_FIELDS})
 
 
 def fields() -> list[dict]:
@@ -245,4 +247,5 @@ def read(show: Optional[ShowConfig] = None) -> dict:
     from services.jukebox import store
     show = show or store.load_show()
     return {"show": show.model_dump(mode="json"), "fields": fields(),
-            "guest_fields": guest_fields(), "presets": presets()}
+            "guest_fields": guest_fields(), "presets": presets(),
+            "play_modes": [{"value": k, "label": v} for k, v in PLAY_MODE_WORDS.items()]}

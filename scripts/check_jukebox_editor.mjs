@@ -270,7 +270,8 @@ const PHONES = [
   ok(rows[1].by === 'Disco Ana' && rows[1].round === '2nd song' && rows[1].held && rows[1].canHold, 'a held 2nd song, by name');
   ok(rows[2].by === 'a guest', 'an unknown phone reads "a guest"');
   // free play (PR 2.3): the time-out, Pardon, Play next
-  ok(GW.phoneState(PHONES[3]) === 'jailed' && GW.phoneLine(PHONES[3]).startsWith('in a time-out (3 songs to go)'),
+  ok(GW.phoneState(PHONES[3]) === 'jailed'
+    && GW.phoneLine(PHONES[3]) === 'in a time-out (3 songs to go) · 1 in line · 1 played · 3 votes',
     `a phone in a time-out says how many songs are left (${GW.phoneLine(PHONES[3])})`);
   ok(JSON.stringify(GW.phoneActions(PHONES[3])) === '["pardon","block","lock","rename"]', 'only a phone in a time-out can be pardoned');
   ok(GW.phoneLine({ ...PHONES[0], jail_count: 2, jail_at: 5 }).includes('net ▼ 2 of 5'), 'a phone shows its ▼ count against the bar');
@@ -279,6 +280,19 @@ const PHONES = [
   ok(!jl[1].canPlayNext && jl[2].canPlayNext && jl[3].canPlayNext && !jl[0].canPlayNext,
     'Play next on every waiting song but the first (never on the one sent to Spotify)');
   ok(jl[3].jailed && !jl[1].jailed, 'a song whose guest is in a time-out says so');
+  // credits mode (PR 3.2): a phone's credits, the jail until break-out, the skip lock
+  ok(GW.phoneLine({ ...PHONES[0], credits: 7 }).includes('🎟 7'), 'a phone shows the credits it holds');
+  ok(GW.phoneLine({ ...PHONES[3], jail_kind: 'breakout' })
+    === 'in jail (until they break out) · 1 in line · 1 played · 3 votes',
+    `credits mode's jail says it lasts until they break out (${GW.phoneLine({ ...PHONES[3], jail_kind: 'breakout' })})`);
+  // jail status and the net ▼ count are never shown together; the credits
+  // balance rides alongside either one (review-3's fix)
+  ok(GW.phoneLine({ ...PHONES[3], credits: 7 })
+    === 'in a time-out (3 songs to go) · 🎟 7 · 1 in line · 1 played · 3 votes',
+    `the credits chip shows beside a time-out, never the ▼ count too (${GW.phoneLine({ ...PHONES[3], credits: 7 })})`);
+  const kl = GW.lineRows(line, PHONES, false, ['u2']);
+  ok(kl[1].skipLocked && !kl[0].skipLocked && !kl[2].skipLocked, 'a song the host kept from skips is marked, by its song');
+  ok(GW.lineRows([{ ...line[1], paid: 6 }], PHONES)[0].paid === 6, 'what a guest paid for a song rides on its row');
 }
 
 // ── 2. the page, mounted ──────────────────────────────────────────────────
@@ -319,8 +333,9 @@ function newWorld(kind) {
     show: { preset: null, approve_new_phones: false, economy: { start_credits: 8, add_base: 4, skip_down_pct: 15, tips: true },
             night_ends: '00:00', last_call_min: 20, explicit: 'no', explicit_after: '22:00', max_phones: 40,
             renames_per_night: 3, word_filter: true, free_skip_downs: 3, free_skip_share: 67,
-            free_bumps_per_hour: 2, free_play_next: 'host', free_jail_songs: 5 },
+            free_bumps_per_hour: 2, free_play_next: 'host', free_jail_songs: 5, play_mode: 'credits' },
     phones: running ? JSON.parse(JSON.stringify(PHONES)) : [],
+    noSkip: new Set(),
     requests: [],
   };
 }
@@ -354,7 +369,7 @@ function statusOf() {
            { id: 'e2', uri: 'spotify:track:k', title: 'Take On Me', artist: 'a-ha', duration_ms: 1, added_by: 'pa', state: 'queued', doomed: false, commit_check: '', round: 1 },
            { id: 'e3', uri: 'spotify:track:m', title: 'Vogue', artist: 'Madonna', duration_ms: 1, added_by: 'pd', state: 'queued', doomed: false, commit_check: '', round: 1 }],
     warnings: [sign.warning, 'Shuffle is on in Spotify, so the set won\'t play in order.'], spotify_auth: sign,
-    log: ['started'], history: [],
+    log: ['started'], history: [], no_skip: [...world.noSkip],
   };
 }
 
@@ -391,6 +406,10 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.startsWith('/api/jukebox/line/')) {
     if (u.endsWith('/move')) return json({ status: 'moved', line: [] });
     return json(method === 'DELETE' ? { status: 'removed' } : { status: body?.held ? 'held' : 'released' });
+  }
+  if (u.startsWith('/api/jukebox/skip-lock')) {
+    if (body.locked) world.noSkip.add(body.uri); else world.noSkip.delete(body.uri);
+    return json({ status: body.locked ? 'locked' : 'unlocked', uri: body.uri });
   }
   if (u.startsWith('/api/jukebox/price-check')) return json(PC);
   if (u.startsWith('/api/jukebox/simulate')) return json(SIM);
@@ -547,6 +566,16 @@ console.log('\n§2b the Credits tab, mounted — presets, the price check, each 
   const tips = c.querySelector('input[aria-label="Tips"]');
   await click(tips);
   ok(JSON.stringify(puts().at(-1)?.body) === JSON.stringify({ economy: { tips: false } }), 'a switch PUTs its new value');
+  const modeCard = $(c, '[data-testid="jukebox-mode"]');
+  const modeOn = () => [...modeCard.querySelectorAll('button[role="radio"]')].find((b) => b.getAttribute('aria-checked') === 'true');
+  ok(text(modeOn()) === 'Credits' && text(modeCard).includes('the Shop'), 'the Mode card shows the night\'s mode: credits');
+  const beforeMode = puts().length;
+  await click(buttonByText(modeCard, /^Credits$/));
+  ok(puts().length === beforeMode, 'pressing the mode already on sends nothing');
+  await click(buttonByText(modeCard, /^Free play$/));
+  ok(JSON.stringify(puts().at(-1)?.body) === '{"play_mode":"free"}', `Free play PUTs exactly {play_mode: "free"} (${JSON.stringify(puts().at(-1)?.body)})`);
+  await P.settle();
+  ok(text(modeOn()) === 'Free play' && text(modeCard).includes('Nothing costs anything'), 'the Mode card shows free play once saved');
   P.unmount();
 }
 
@@ -592,7 +621,7 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
   await P.settle();
   await click(buttonByText(c, /^Guests$/));
   await P.settle();
-  const rows = [...c.querySelectorAll('[data-testid="jukebox-guest-line"] .jukebox-item')];
+  const rows = [...c.querySelectorAll('[data-testid="jukebox-guest-line"] .jukebox-next .jukebox-item')];
   ok(rows.length === 3 && rows[1].textContent.includes('added by Disco Ana') && rows[1].textContent.includes('1st song'),
     'the line shows each song with who added it and their round');
   ok(rows[2].textContent.includes('sits out a time-out'), 'a song whose guest is in a time-out says so');
@@ -606,6 +635,22 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
   ok(holdReq?.method === 'POST' && holdReq.body.held === true, 'Hold POSTs exactly {held: true} for that song');
   await click(buttonByText(rows[0], /^Remove$/));
   ok(world.requests.some((r) => r.method === 'DELETE' && r.url === '/api/jukebox/line/e1'), 'Remove DELETEs that song');
+  // the skip lock (PR 3.2): the song playing has its own row; any waiting song too
+  const nowRow = c.querySelector('[data-testid="jukebox-now-skip"]');
+  ok(!!nowRow && text(nowRow).includes('Now: Dancing Queen') && text(nowRow).includes('can be skipped'),
+    'the song playing has its own row above the line, saying it can be skipped');
+  await click(buttonByText(nowRow, /^Keep from skips$/));
+  const lockReq = world.requests.filter((r) => r.url === '/api/jukebox/skip-lock').at(-1);
+  ok(lockReq?.method === 'POST' && JSON.stringify(lockReq.body) === JSON.stringify({ uri: SET[1].uri, locked: true }),
+    `Keep from skips POSTs exactly {uri, locked: true} for the song playing (${JSON.stringify(lockReq?.body)})`);
+  await P.settle();
+  const nowRow2 = c.querySelector('[data-testid="jukebox-now-skip"]');
+  ok(text(nowRow2).includes('kept from skips') && !!buttonByText(nowRow2, /^Let it be skipped$/),
+    'once the night reports it, the row says it is kept from skips');
+  const rowsL = [...c.querySelectorAll('[data-testid="jukebox-guest-line"] .jukebox-next .jukebox-item')];
+  await click(buttonByText(rowsL[2], /^Keep from skips$/));
+  ok(JSON.stringify(world.requests.filter((r) => r.url === '/api/jukebox/skip-lock').at(-1)?.body)
+    === JSON.stringify({ uri: 'spotify:track:m', locked: true }), 'a waiting song can be kept from skips too');
   const phones = [...c.querySelectorAll('[data-testid="jukebox-phone"]')];
   ok(phones.length === 4 && text(phones[1]).includes('waiting for your approval'), 'every phone, with how it stands');
   ok(text(phones[3]).includes('in a time-out (3 songs to go)'), 'a phone in a time-out, with the songs left');
@@ -618,6 +663,7 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
   ok(!!fp && !!fp.querySelector('input[aria-label="Skip by vote: at least"]')
     && !c.querySelector('[data-testid="jukebox-guest-rules"] input[aria-label="Skip by vote: at least"]'),
     'the free-play rules have their own card');
+  ok(!!c.querySelector('[data-testid="jukebox-free-play-off"]'), 'on credits, the Free play card says its rules wait for free play');
   await click(buttonByText(phones[1], /^Approve$/));
   const appr = world.requests.filter((r) => r.url === '/api/jukebox/guests/pb').at(-1);
   ok(appr?.method === 'POST' && JSON.stringify(appr.body) === '{"approved":true}', 'Approve POSTs {approved: true} for that phone');
@@ -646,7 +692,8 @@ console.log('\n§3 help — every topic is real and reachable from the page');
 {
   const topics = ['jukebox', 'jukebox-set-list', 'jukebox-slots', 'jukebox-live', 'jukebox-sign-in',
     'jukebox-credits', 'jukebox-presets', 'jukebox-price-check', 'jukebox-simulator', 'sonic-jukebox',
-    'jukebox-report', 'jukebox-guest-page', 'jukebox-guests', 'jukebox-free-play'];
+    'jukebox-report', 'jukebox-guest-page', 'jukebox-guests', 'jukebox-free-play', 'jukebox-credits-mode',
+    'jukebox-skip-lock'];
   const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
   const knownIds = new Set();
   for (const section of HELP_SECTIONS) {
@@ -698,7 +745,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     if (id && id !== 'sonic-scene-backups') reached.add(id);
   }
   ok(topics.every((id) => reached.has(id)) && reached.size === topics.length,
-    `the page's own controls and its 💬 Sonic open exactly the fourteen jukebox topics (${[...reached].sort().join(', ')})`);
+    `the page's own controls and its 💬 Sonic open exactly the sixteen jukebox topics (${[...reached].sort().join(', ')})`);
   P.unmount();
 }
 

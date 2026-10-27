@@ -217,6 +217,11 @@ class HoldBody(BaseModel):
     held: bool
 
 
+class SkipLockBody(BaseModel):
+    uri: str = Field(max_length=200)
+    locked: bool = True
+
+
 class PhoneBody(BaseModel):
     approved: Optional[bool] = None
     blocked: Optional[bool] = None
@@ -228,6 +233,13 @@ class PhoneBody(BaseModel):
 @router.post("/line/{entry_id}/hold")
 async def post_hold(entry_id: str, body: HoldBody) -> dict:
     return await night.runner.hold(entry_id, body.held)
+
+
+@router.post("/skip-lock")
+async def post_skip_lock(body: SkipLockBody) -> dict:
+    """Keep a song from every skip tonight — the room's vote and a paid
+    skip alike (report §12, "Skip griefing") — or let it be skipped again."""
+    return await night.runner.set_skip_lock(body.uri, body.locked)
 
 
 @router.get("/guests")
@@ -259,12 +271,15 @@ async def put_show(request: Request, dry_run: bool = False) -> dict:
         patch = await request.json()
     except Exception:
         raise HTTPException(status_code=422, detail="expected a JSON object")
+    old = store.load_show()
     try:
-        new = show.apply_patch(store.load_show(), patch)
+        new = show.apply_patch(old, patch)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     if not dry_run:
         store.save_show(new)
+        if new.play_mode != old.play_mode:
+            await night.runner.convert_jail_mode(new.play_mode == "credits", new.free_jail_songs)
     return {"dry_run": dry_run, **show.read(new)}
 
 

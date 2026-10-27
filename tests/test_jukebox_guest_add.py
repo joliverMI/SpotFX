@@ -82,9 +82,14 @@ class Lib:
         return [Song(u, u, "", u) for u in self.uris][:limit]
 
 
+def _free(**kw) -> ShowConfig:
+    """Free play: these are phase 2.2's rules for adding a song (credits mode,
+    the default since PR 3.2, prices the same adds — test_jukebox_credits_play)."""
+    return ShowConfig(**{"play_mode": "free", **kw})
+
+
 def _setup(w: World, cat: Catalog, *, library=(), known=(), show: ShowConfig | None = None):
-    if show is not None:
-        store.save_show(show)
+    store.save_show(show if show is not None else _free())
     return G.Guests(G.GuestDeps(
         state=lambda: w.runner.guest_state(count=24), token_ok=lambda t: t == TOKEN,
         now_ms=lambda: int(w.clock.t * 1000), to_thread=_inline, rng=random.Random(1),
@@ -141,7 +146,7 @@ def test_first_songs_go_before_second_songs():
 def test_fair_order_off_is_first_come():
     async def go():
         w = await _night(set_s=300)
-        g = _setup(w, Catalog(w), show=ShowConfig(economy={"fair_order": False}))
+        g = _setup(w, Catalog(w), show=_free(economy={"fair_order": False}))
         ana, ben = await _phone(g), await _phone(g)
         await g.add(ana, jb_uri(0))
         await g.add(ana, jb_uri(1))
@@ -189,7 +194,7 @@ def test_songs_in_line_follow_the_show():
         assert (await g.add(ana, jb_uri(1)))[0] == 200
         code, out = await g.add(ana, jb_uri(2))
         assert (code, out["reason"]) == (409, "too_many") and "2 songs" in out["detail"]
-        store.save_show(ShowConfig(economy={"max_waiting": 3}))
+        store.save_show(_free(economy={"max_waiting": 3}))
         assert (await g.add(ana, jb_uri(2)))[0] == 200
         code, out = await g.add(ana, jb_uri(0))
         assert out["reason"] == "in_line"                  # one copy of a song in line
@@ -202,7 +207,7 @@ def test_requests_close_at_last_call():
     async def go():
         w = await _night(set_s=300)
         cat = Catalog(w)
-        g = _setup(w, cat, show=ShowConfig(night_ends=_hhmm(w, 60), last_call_min=20))
+        g = _setup(w, cat, show=_free(night_ends=_hhmm(w, 60), last_call_min=20))
         ana = await _phone(g)
         view = (await g.view(ana))[1]["view"]
         assert view["requests"]["open"] is True
@@ -219,7 +224,7 @@ def test_a_song_that_would_start_after_the_night_ends_is_turned_away():
     async def go():
         # the night ends ~19 min in; 5-minute set songs, a 200 s slot after each
         w = await _night(set_s=300, jb_s=200, every=1)
-        g = _setup(w, Catalog(w), show=ShowConfig(night_ends=_hhmm(w, 20), last_call_min=0))
+        g = _setup(w, Catalog(w), show=_free(night_ends=_hhmm(w, 20), last_call_min=0))
         ana, ben, cy = await _phone(g), await _phone(g), await _phone(g)
         assert (await g.add(ana, jb_uri(0)))[0] == 200     # starts ~5 min in (after S0)
         assert (await g.add(ben, jb_uri(1)))[0] == 200     # ~13 min in (after S1)
@@ -241,7 +246,7 @@ def test_a_slow_track_lookup_does_not_let_a_too_late_song_through():
         # budget are left: less than the 298 s the song needs.
         w = await _night(set_s=300, jb_s=200, every=1)
         cat = Catalog(w, track_delay_s=25.0)       # a slow Spotify `track()` call
-        g = _setup(w, cat, show=ShowConfig(night_ends=_hhmm(w, 6), last_call_min=0))
+        g = _setup(w, cat, show=_free(night_ends=_hhmm(w, 6), last_call_min=0))
         cy = await _phone(g)
         before = list(_waiting_titles(w))
         code, out = await g.add(cy, jb_uri(0))
@@ -254,7 +259,7 @@ def test_a_slow_track_lookup_does_not_let_a_too_late_song_through():
 
 
 def test_the_night_end_is_the_next_one_after_the_start():
-    show = ShowConfig(night_ends="00:00", last_call_min=20)
+    show = _free(night_ends="00:00", last_call_min=20)
     start = datetime(2026, 10, 31, 20, 0, tzinfo=G.HOUSE_TZ)
     r = G.requests_state(show, int(start.timestamp() * 1000), int(start.timestamp() * 1000))
     ends = datetime.fromtimestamp(r["ends_at_ms"] / 1000, G.HOUSE_TZ)
@@ -271,13 +276,13 @@ def test_explicit_songs_follow_the_show():
         ana = await _phone(g)
         code, out = await g.add(ana, jb_uri(0))
         assert (code, out["reason"], out["detail"]) == (409, "explicit", G.sentence("explicit_no"))
-        store.save_show(ShowConfig(explicit="after", explicit_after=_hhmm(w, 30)))
+        store.save_show(_free(explicit="after", explicit_after=_hhmm(w, 30)))
         code, out = await g.add(ana, jb_uri(0))
         assert out["reason"] == "explicit" and "allowed after" in out["detail"]
         w.clock.t += 31 * 60
         assert (await g.add(ana, jb_uri(0)))[0] == 200
-        store.save_show(ShowConfig(explicit="extra"))
-        assert G.explicit_rule(ShowConfig(explicit="extra"), 0, 0) == (True, "")
+        store.save_show(_free(explicit="extra"))
+        assert G.explicit_rule(_free(explicit="extra"), 0, 0) == (True, "")
     _run(go())
 
 
@@ -379,7 +384,7 @@ def test_guests_search_on_their_own_gateway():
 def test_new_phones_wait_for_approval_when_the_show_says_so():
     async def go():
         w = await _night(set_s=300)
-        g = _setup(w, Catalog(w), show=ShowConfig(approve_new_phones=True))
+        g = _setup(w, Catalog(w), show=_free(approve_new_phones=True))
         ana = await _phone(g)
         view = (await g.view(ana))[1]["view"]
         assert view["me"]["approved"] is False and not view["now"]["can_vote"]
@@ -423,7 +428,7 @@ def test_the_host_renames_and_locks_a_name():
 def test_the_word_filter_is_the_shows():
     async def go():
         w = await _night(set_s=300)
-        g = _setup(w, Catalog(w), show=ShowConfig(word_filter=False, renames_per_night=1))
+        g = _setup(w, Catalog(w), show=_free(word_filter=False, renames_per_night=1))
         ana = await _phone(g)
         assert (await g.rename(ana, "Killer Queen"))[0] == 200
         assert (await g.rename(ana, "Another"))[1]["reason"] == "renames_used"
@@ -461,6 +466,7 @@ def test_the_hosts_routes(monkeypatch):
                              gateway=lambda: cat, library_search=Lib([]),
                              known=lambda uris: {u: False for u in uris}))
     monkeypatch.setattr(G, "book", g)
+    store.save_show(_free())
     app = FastAPI()
     app.include_router(jukebox_router.router)
     with TestClient(app) as c:

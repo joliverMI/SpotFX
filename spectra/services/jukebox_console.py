@@ -42,7 +42,8 @@ excluded" from "forgotten":
     or free the wrong guest; they are the Guests tab's buttons, where each
     phone is shown;
   * the jukebox LINE — adding, removing and moving songs (bumps, play
-    next) is the guests' turn and the host's page;
+    next), and keeping a song from skips (PR 3.2), are the guests' turn and
+    the host's page, where each song is shown;
   * reordering the SET PLAYLIST — it rewrites his playlist's order in
     Spotify; a drag on the page, where the set is shown song by song;
   * the GUEST LINK (N1, SpotFX's services/jukebox/guest_link.py) —
@@ -84,7 +85,7 @@ MODES: tuple[str, ...] = ("auto", "jukebox_first")
 RUN_OUTS: tuple[str, ...] = ("again", "jukebox_only", "end")
 PRESETS: tuple[str, ...] = ("small", "medium", "large")
 SIM_PROGRAMS: tuple[str, ...] = ("saved", "preset")
-SHOW_KEYS: tuple[str, ...] = ("approve_new_phones",)
+SHOW_KEYS: tuple[str, ...] = ("approve_new_phones", "play_mode")
 #: the guests' own rules (phase 2.2, top level in SpotFX's ShowConfig): when
 #: the night ends and requests close, explicit songs, phones, renames, the
 #: word filter — the same one validator a page edit runs
@@ -102,6 +103,7 @@ _PROGRAM_LABELS = {
     "run_out": "what happens when the set runs out",
     "commit_lead_s": "seconds before a slot that its song is sent to Spotify",
     "approve_new_phones": "new phones need his approval",
+    "play_mode": "the guest page's mode (credits, or free play)",
 }
 _RUN_OUT_WORDS = {"again": "the set plays again", "jukebox_only": "only the jukebox plays",
                   "end": "the night ends"}
@@ -332,6 +334,7 @@ async def _op_get_jukebox_settings() -> dict:
                         "manual_slot_runs": len(cfg.get("manual") or [])},
             "preset": (show.get("show") or {}).get("preset"),
             "approve_new_phones": (show.get("show") or {}).get("approve_new_phones"),
+            "play_mode": (show.get("show") or {}).get("play_mode") or "credits",
             "guest_rules": {k: (show.get("show") or {}).get(k) for k in GUEST_RULE_KEYS},
             "economy": (show.get("show") or {}).get("economy") or {},
             "economy_fields": fields,
@@ -619,7 +622,9 @@ OPERATIONS: dict[str, SonicOperation] = {
             _INSTR_COMMON + _INSTR_CONFIRM
             + "Keys: mode (auto | jukebox_first — never manual, which is placed on the page), "
             "every (1-5), run (1-3), run_out (again | jukebox_only | end), commit_lead_s "
-            "(15-90), approve_new_phones (true/false), the guest rules — night_ends and "
+            "(15-90), approve_new_phones (true/false), play_mode (credits | free — the guest "
+            "page's mode: credits turns on prices, the Shop and the credits chip), the guest "
+            "rules — night_ends and "
             "explicit_after (\"HH:MM\", house time), last_call_min (0-60), explicit (no | extra "
             "| after), max_phones (5-100), renames_per_night (0-10), word_filter (true/false) — "
             "the free-play rules — free_skip_downs (2-10 ▼ to skip a song), free_skip_share "

@@ -312,3 +312,20 @@ def test_the_night_report_is_a_read(spotfx):
     r = _run(jc._op_jukebox_night_report(guests=8))
     assert r["guests"] == 8 and all(x["yours"] is not None or x["key"] == "songs_per_lurk" for x in r["rows"])
     assert not _writes(spotfx)
+
+
+def test_the_play_mode_asks_first_and_is_validated_by_spotfx(spotfx):
+    """Credits mode (PR 3.2): the guest page's mode is a show setting like
+    approval — read back, asked first, the one validator; keeping a song
+    from skips stays the host's button on the line."""
+    assert _run(jc._op_get_jukebox_settings())["play_mode"] == "credits"   # the plan's default
+    ask = _run(jc._op_set_jukebox_setting("play_mode", "free"))
+    assert ask["status"] == "needs_confirmation" and "credits → free" in ask["question"]
+    assert "mode" in ask["question"] and not _writes(spotfx)
+    done = _run(jc._op_set_jukebox_setting("play_mode", "free", confirm_id=ask["confirm_id"]))
+    assert done["status"] == "applied" and store.load_show().play_mode == "free"
+    assert _run(jc._op_get_jukebox_settings())["play_mode"] == "free"
+    r = _run(jc._op_set_jukebox_setting("play_mode", "paid"))
+    assert r["status"] == "rejected" and "play_mode" in r["reason"]
+    assert store.load_show().play_mode == "free"
+    assert not any("skip_lock" in name or "lock" in name for name in jc.OPERATIONS)

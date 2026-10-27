@@ -28,11 +28,12 @@ def _run(coro):
 
 def _show(**kw) -> ShowConfig:
     eco = kw.pop("economy", {})
+    kw.setdefault("play_mode", "free")          # free play's own rules (credits is the default)
     return ShowConfig(economy=EconomyConfig(**eco), **kw)
 
 
 def _setup(w: World, show: ShowConfig | None = None) -> G.Guests:
-    store.save_show(show or ShowConfig())
+    store.save_show(show or _show())
 
     async def sleep(s: float) -> None:          # time passes in the world while a timer waits
         await w.run(int(s) + 1)
@@ -480,7 +481,7 @@ def test_a_held_song_stays_where_it_is_and_bumps_pass_it():
 # ═══ 4. the page's words, the settings and the doors ═══════════════════════
 
 def test_the_house_rules_say_the_free_play_rules():
-    rules = G.house_rules(ShowConfig())
+    rules = G.house_rules(_show())
     assert "3 ▼ and two-thirds of the votes skip a song." in rules
     assert any("5 more ▼ than ▲ (more in a big crowd), they sit out 5 songs" in r for r in rules)
     rules = G.house_rules(_show(free_skip_downs=4, free_skip_share=75, free_jail_songs=1,

@@ -115,6 +115,9 @@ export interface LineEntry {
   explicit?: boolean;
   /** places other guests have bumped it back tonight (free play) */
   pushed_back?: number;
+  /** credits mode: what its adder paid, and whether it has had its play next */
+  paid?: number;
+  nexted?: boolean;
 }
 
 export interface JukeboxStatus {
@@ -129,6 +132,8 @@ export interface JukeboxStatus {
   spotify_auth?: SpotifySignIn;
   log: string[];
   history: NightBrief[];
+  /** songs the host has kept from skips tonight (their URIs) */
+  no_skip?: string[];
   /** Phones on tonight's guest page (services/jukebox/guests.py): every
    *  phone that opened the party link, and those that tapped Let's go. */
   guests?: { phones: number; joined: number; pending?: number };
@@ -168,6 +173,8 @@ export interface ShowConfig {
   free_bumps_per_hour?: number;
   free_play_next?: 'host' | 'off';
   free_jail_songs?: number;
+  /** the guest page's mode (PR 3.2): credits, or free play */
+  play_mode?: 'free' | 'credits';
 }
 
 /** One of the guests' rules as the page draws it (services/jukebox/show.py
@@ -207,6 +214,9 @@ export interface GuestPhone {
   jail_count?: number;
   jail_at?: number;
   jails?: number;
+  /** credits mode: "breakout" (until they pay) instead of a song time-out */
+  jail_kind?: 'timeout' | 'breakout';
+  credits?: number;
 }
 
 export interface GuestsRead {
@@ -216,6 +226,7 @@ export interface GuestsRead {
   jailed?: number;
   /** phones seen in the last 15 minutes: the crowd the jail's bar rises with */
   crowd?: number;
+  play_mode?: 'free' | 'credits';
 }
 
 /** One economy setting as the page draws it; the range is the server's
@@ -243,6 +254,7 @@ export interface ShowRead {
   fields: EconomyField[];
   guest_fields?: GuestField[];
   presets: PresetInfo[];
+  play_modes?: { value: string; label: string }[];
 }
 
 export interface PriceCheck {

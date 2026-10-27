@@ -40,6 +40,8 @@ ROUTES: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/icon.svg"), ("GET", "/icon-180.png"), ("GET", "/icon-512.png"),
     ("POST", "/g/hello"), ("POST", "/g/join"), ("POST", "/g/name"), ("POST", "/g/vote"),
     ("POST", "/g/search"), ("POST", "/g/add"), ("POST", "/g/bump"), ("GET", "/g/view"),
+    ("POST", "/g/tip"), ("POST", "/g/skip"), ("POST", "/g/next"), ("POST", "/g/breakout"),
+    ("GET", "/g/wallet"),
 })
 FORWARDS: dict[str, tuple[str, str]] = {
     "hello": ("POST", "/api/jukebox/guest/hello"),
@@ -49,6 +51,11 @@ FORWARDS: dict[str, tuple[str, str]] = {
     "search": ("POST", "/api/jukebox/guest/search"),
     "add": ("POST", "/api/jukebox/guest/add"),
     "bump": ("POST", "/api/jukebox/guest/bump"),
+    "tip": ("POST", "/api/jukebox/guest/tip"),
+    "skip": ("POST", "/api/jukebox/guest/skip"),
+    "next": ("POST", "/api/jukebox/guest/next"),
+    "breakout": ("POST", "/api/jukebox/guest/breakout"),
+    "wallet": ("GET", "/api/jukebox/guest/wallet"),
     "view": ("GET", "/api/jukebox/guest/view"),
 }
 STATIC_FILES = {"/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
@@ -104,6 +111,10 @@ def _client(request: Request) -> str:
     if peer in ("127.0.0.1", "::1") and xff:
         return xff.split(",")[0].strip()[:64]
     return peer
+
+
+def method_of(name: str) -> str:
+    return FORWARDS[name][0]
 
 
 def create_app(*, spotfx_url: str = SPOTFX_URL, key_file: Path = guest_key.DEFAULT_FILE,
@@ -262,7 +273,7 @@ def create_app(*, spotfx_url: str = SPOTFX_URL, key_file: Path = guest_key.DEFAU
         stop = limited(request, kind, phone or _client(request))
         if stop:
             return stop
-        if name == "view":
+        if method_of(name) == "GET":
             payload: dict = {"phone": phone or ""}
         else:
             body = await body_of(request)
@@ -293,11 +304,31 @@ def create_app(*, spotfx_url: str = SPOTFX_URL, key_file: Path = guest_key.DEFAU
 
     @app.post("/g/add")
     async def add(request: Request) -> Response:
-        return await _phone_call(request, "add", "write", ("uri",))
+        return await _phone_call(request, "add", "write", ("uri", "price"))
 
     @app.post("/g/bump")
     async def bump(request: Request) -> Response:
-        return await _phone_call(request, "bump", "write", ("entry_id", "direction"))
+        return await _phone_call(request, "bump", "write", ("entry_id", "direction", "price"))
+
+    @app.post("/g/tip")
+    async def tip(request: Request) -> Response:
+        return await _phone_call(request, "tip", "write", ("units",))
+
+    @app.post("/g/skip")
+    async def skip(request: Request) -> Response:
+        return await _phone_call(request, "skip", "write", ("how", "amount", "price"))
+
+    @app.post("/g/next")
+    async def play_next(request: Request) -> Response:
+        return await _phone_call(request, "next", "write", ("entry_id", "price"))
+
+    @app.post("/g/breakout")
+    async def breakout(request: Request) -> Response:
+        return await _phone_call(request, "breakout", "write", ())
+
+    @app.get("/g/wallet")
+    async def wallet(request: Request) -> Response:
+        return await _phone_call(request, "wallet", "view", ())
 
     @app.get("/g/view")
     async def view(request: Request) -> Response:

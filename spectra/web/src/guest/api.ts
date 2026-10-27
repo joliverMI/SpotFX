@@ -2,7 +2,7 @@
 // (jukebox_guest/app.py's /g/ routes — the only ones it answers). The phone
 // is named by its cookie; a copy of its code in this phone's own storage
 // rides along so a cleared cookie doesn't make it a stranger.
-import type { Refusal, SearchResult, View } from './types';
+import type { Refusal, SearchResult, View, WalletView } from './types';
 
 const PHONE_KEY = 'jukebox.phone';
 
@@ -18,8 +18,14 @@ export interface Found { results: SearchResult[]; more: boolean; next_offset: nu
 export interface Added { entry_id: string; title: string; starts_in_ms: number | null }
 export interface Bumped { place: number | null; starts_in_ms: number | null }
 
+/** The Shop's answer, from a wallet call's data. */
+export function walletOf(data: Record<string, unknown>): WalletView | null {
+  return typeof data.balance === 'number' && Array.isArray(data.history) ? (data as unknown as WalletView) : null;
+}
+
 export type Answer =
-  | { ok: true; view: View; phone?: string; found?: Found; added?: Added; bumped?: Bumped }
+  | { ok: true; view: View; phone?: string; found?: Found; added?: Added; bumped?: Bumped;
+      earned?: number; data: Record<string, unknown> }
   | { ok: false; status: number; refusal: Refusal };
 
 const UNREACHABLE: Refusal = {
@@ -50,7 +56,7 @@ async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promi
     const added = d.added && typeof d.added === 'object' ? (d.added as Added) : undefined;
     const bumped = d.bumped && typeof d.bumped === 'object' ? (d.bumped as Bumped) : undefined;
     return { ok: true, view, phone: typeof d.phone === 'string' ? d.phone : undefined, found, added,
-             bumped };
+             bumped, earned: typeof d.earned === 'number' ? d.earned : undefined, data: d };
   }
   if (typeof d.reason === 'string' && typeof d.detail === 'string') {
     return { ok: false, status: r.status, refusal: d as unknown as Refusal };
@@ -65,7 +71,16 @@ export const api = {
     call('POST', '/g/name', shuffle ? { shuffle: true } : { name }),
   vote: (vote: 'up' | 'down' | 'none') => call('POST', '/g/vote', { vote }),
   search: (q: string, offset = 0) => call('POST', '/g/search', { q, offset }),
-  add: (uri: string) => call('POST', '/g/add', { uri }),
-  bump: (entry_id: string, direction: 'up' | 'down') => call('POST', '/g/bump', { entry_id, direction }),
+  add: (uri: string, price?: number) => call('POST', '/g/add', price === undefined ? { uri } : { uri, price }),
+  bump: (entry_id: string, direction: 'up' | 'down', price?: number) =>
+    call('POST', '/g/bump', price === undefined ? { entry_id, direction } : { entry_id, direction, price }),
+  // credits mode
+  tip: (units = 1) => call('POST', '/g/tip', { units }),
+  skip: (how: 'pay' | 'chip', amount?: number, price?: number) =>
+    call('POST', '/g/skip', { how, ...(amount === undefined ? {} : { amount }), ...(price === undefined ? {} : { price }) }),
+  playNext: (entry_id: string, price?: number) =>
+    call('POST', '/g/next', price === undefined ? { entry_id } : { entry_id, price }),
+  breakOut: () => call('POST', '/g/breakout', {}),
+  wallet: () => call('GET', '/g/wallet'),
   view: () => call('GET', '/g/view'),
 };
