@@ -104,7 +104,16 @@ def test_scene_settings_registry_bounds_are_read_from_the_real_models():
         "drop_shock_enabled",
         # 2026-10-12, the drop timing per scene (the drop mark's drag):
         "drop_timing_offset_ms",
+        # 2026-10-26, the pre-drop windows per kind (predrop step 5):
+        "pre_drop_spike_enabled", "pre_drop_spike_min_ms", "pre_drop_spike_max_ms",
+        "pre_drop_intro_enabled", "pre_drop_intro_min_ms", "pre_drop_intro_max_ms",
     }
+    from spectra.models.scene import PreDropIntroWindow, PreDropSpikeWindow
+    for key, model in (("pre_drop_spike_min_ms", PreDropSpikeWindow),
+                       ("pre_drop_intro_max_ms", PreDropIntroWindow)):
+        spec = sc.SCENE_SETTINGS_REGISTRY[key]
+        field = key.rsplit("_", 2)[-2] + "_ms"
+        assert (spec.min, spec.max) == sc._model_field_bounds(model, field)
 
     spec = sc.SCENE_SETTINGS_REGISTRY["entry_ramp_ms"]
     assert (spec.min, spec.max) == sc._model_field_bounds(SceneV2, "entry_ramp_ms") == (0.0, 20000.0)

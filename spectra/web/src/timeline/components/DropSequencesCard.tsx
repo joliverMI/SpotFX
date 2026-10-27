@@ -18,8 +18,8 @@
  * ◀ ▶ step it along its kind's rail; on / off; back to detected (or remove
  * one he placed the detector did not find); ＋ Pre-drop when the drop has
  * none. On one of HIS OWN sequences too: its pre-drop lives in the drop
- * store, edited through his "his:<drop id>" key. Nothing plays from a
- * pre-drop yet.
+ * store, edited through his "his:<drop id>" key. One that plays fades the
+ * drop's colour change across it (PRE_DROP_IN_THE_ROOM).
  * What fires is the server's answer per sequence (phase 5, spectra/
  * services/drop_firing.py). ../dropSequences.ts holds every word and
  * number shown here. */
@@ -29,7 +29,7 @@ import Icon from '../../components/Icon';
 import { useSongTimelineView } from '../../components/songTimelineView';
 import { fmtAgo } from '../../lib/time';
 import {
-  PHASE_COLOR, PRE_DROP_COLOR, PRE_DROP_KIND_NAME, PRE_DROP_NOT_YET, fireLine, fmtHundredths,
+  PHASE_COLOR, PRE_DROP_COLOR, PRE_DROP_KIND_NAME, PRE_DROP_IN_THE_ROOM, fireLine, fmtHundredths,
   fmtTenths, handleRows, preDropRow, reviewStatus, roomLines, sequenceFires, switchLine, whyFound,
   type DisplaySeq, type DropSequencesResponse, type Handle, type PreDropKind, type SeqHandle,
 } from '../dropSequences';
@@ -158,7 +158,7 @@ function PreDropDetail({ s, editor, selHandle, onSelectHandle, onStep }: {
         </div>
       )}
       <p className="drop-detail-soon">
-        {PRE_DROP_NOT_YET}{p && can ? ' Approve it in Home\'s Drops panel (its own button in the drop\'s bar).' : ''}
+        {PRE_DROP_IN_THE_ROOM}{p && can ? ' Approve it in Home\'s Drops panel (its own button in the drop\'s bar).' : ''}
         {' '}<HelpLink topic="pre-drop" title="Pre-drops" />
       </p>
     </div>

@@ -12109,15 +12109,13 @@ precedence; `engine.fire_drop_colour_event` the choke point. Four things:
 - **ONE CHANGE PER DROP**: a landed change claims the drop; the drop band's
   own colour-jump kind then skips, named (`_DROP_COLOUR_DONE`, carried on a
   `PendingKindBatch`). `_color_jump` with a ramp of 0 now lands as a JUMP.
-- **THE FADE ACROSS A PRE-DROP IS DORMANT**: `FiringSequence.pre_drop_ms`
-  is filled only while `drop_firing.PRE_DROPS_PLAY` is True — the pre-drop
-  engine's step turns it on; until then a view carrying pre-drop times
-  changes nothing. Spec: `tests/test_drop_colour.py` (his 46 single-hue
-  sets, the precedence, the show-side sweep with a red control); help
-  `drop-colour-change`.
+- **A PRE-DROP THAT PLAYS FADES IT** (live since step 5, below): the
+  change starts one tick before the pre-drop and lands on the drop; a
+  pre-drop that does not play leaves it instant. Spec:
+  `tests/test_drop_colour.py` (his 46 single-hue sets, the precedence, the
+  show-side sweep with a red control); help `drop-colour-change`.
 
-**PRE-DROPS ARE DETECTED, TWO KINDS (2026-10-26, predrop plan step 3 —
-nothing plays from them yet).** `spectra/services/predrop_detector.py` is
+**PRE-DROPS ARE DETECTED, TWO KINDS (2026-10-26, predrop plan step 3).** `spectra/services/predrop_detector.py` is
 the binding statement; the `drop-detection` skill has the cold-start
 detail. Four things:
 
@@ -12140,7 +12138,9 @@ detail. Four things:
   (`view_with_detection` → `view(compute_pre_drops=True)`), memoised per
   song, stamp and drop time; a plain `view()` — the trigger clock's — never
   analyses, and leaves `authored[].pre_drop` OUT where nothing is
-  memoised. The step that plays them must fill that memo off the loop.
+  memoised. Step 5 fills it on the song-change edge
+  (`drop_sequences.work_out_his_pre_drops`, in `on_song_played`'s worker
+  thread), and a newly memoised answer moves `revision()`.
 - **A CAPTURE'S FRAME TIMES CAN STEP BACK**, so `np.searchsorted` over a
   cut window can land a frame from where it lands over the whole song: a
   weak verdict's score may differ in a cut (never a found one). The rules
@@ -12148,8 +12148,7 @@ detail. Four things:
   test bed's Pre-drops lane, a glyph per kind). Specs:
   `tests/test_predrop_detector.py`, `tests/test_predrop_view.py`.
 
-**PRE-DROPS ARE EDITABLE (2026-10-26, predrop plan step 4 — still nothing
-plays).** `drop_sequences.py`'s "EDITING A PRE-DROP" and "HIS OWN DROPS'
+**PRE-DROPS ARE EDITABLE (2026-10-26, predrop plan step 4).** `drop_sequences.py`'s "EDITING A PRE-DROP" and "HIS OWN DROPS'
 PRE-DROPS" sections are the binding statement; the `drop-detection` skill
 has the cold-start detail. Four things:
 
@@ -12169,6 +12168,50 @@ has the cold-start detail. Four things:
   Home panel's pre-drop button and editor handle; Sonic's `set_pre_drop` /
   `switch_pre_drop`. Spec: `tests/test_predrop_edits.py` plus the
   drop-sequence view/edit and Home panel check scripts.
+
+**THE PRE-DROP ENGINE (2026-10-26, predrop plan step 5 — no effect lights a
+pre-drop yet).** `fx/effects/pre_drop.py` (the told keys, the looks,
+`phase_clock`) and `spectra/services/pre_drop_play.py` (the one rule) are
+the binding statements; times are in `docs/SPECTRA_TIMING_CONVENTIONS.md`.
+Five things:
+
+- **NOT A PHASE — FOUR KEYS ON THE LULL ARM**, told only to
+  `fx.device_model.PRE_DROP_EFFECTS` members, which ships EMPTY (step 6
+  adds Fireworks, Pulse, Orbits behind his tuning gate). With it empty
+  every arm write over his 14 real scenes is byte-identical to the
+  pre-engine golden (`tests/test_pre_drop_arm_identity.py`,
+  `tests/fixtures/pre_drop/` — recapture only with a deliberate reason).
+  A member is told every key on every lull arm (NOT_TOLD's zeros when its
+  pre-drop does not play), and its lull's ramp, dark point and breath are
+  measured to the pre-drop, the breath ending exactly on it with no
+  `BREATH_OVERRUN_S` (`phase_grammar._breath_gain`).
+- **ONE DECISION, AT THE LULL, ON THE SCENE SHOWING**: the trigger clock
+  hands the lull a `PreDropCandidate` (a sequence's from `FiringSequence.
+  pre_drop_for`; his own grouped lull's from `drop_firing.his_pre_drops`),
+  `_drive_phase` decides (kind on, gap inside the scene's
+  `pre_drop_spike`/`pre_drop_intro` window, at least 200 ms after the lull
+  fired) and `engine.fire_response_event` now RETURNS the record so the
+  clock remembers the verdict (`PreDropTold`). That verdict alone drives
+  the drop colour fade — a pre-drop the scene does not play leaves the
+  change instant. A pre-drop's PART uses its OWN tier (`pre_drop_tier`),
+  never the drop's.
+- **TIMED FROM THE LULL'S ACTUAL FIRE**: the target is the pre-drop's mark
+  plus the drop's own fire shift (moved with its drop), and
+  `pre_drop_at_s` is that target minus the tick's position, so a lull a
+  tick late still lands the pre-drop on its mark
+  (`tests/test_pre_drop_show_clock.py`). The colour fade fires one tick
+  early (`PRE_DROP_COLOUR_LEAD_MS`, LEAD family) and glides to the drop.
+- **THE WATCHDOG IS SAFE BY ARITHMETIC AND BY RENDER**: the longest hang
+  (10% of a 55.5 s approach + a 4.5 s gap) stays under
+  `particle_handoff.PHASE_GRACE_S`; `tests/test_pre_drop_watchdog.py` also
+  renders every phase effect as a stub member through the longest pre-drop.
+- **THE EDITORS**: the Phase tab's Pre-drops card (per-kind on/min/max,
+  per-entry look, help `pre-drop-scene-window`), the drop-sequence
+  preview's kind switch and gap slider (the lull step carries the same
+  candidate), Sonic's six `pre_drop_*` scene settings and
+  `get_pre_drop_looks`/`set_pre_drop_look`. Specs: `tests/
+  test_pre_drop_engine.py`, `test_pre_drop_preview.py`,
+  `test_pre_drop_sonic.py`, `scripts/check_pre_drop_phase_tab.mjs`.
 
 ## Touch panning + Light Show flag touch precision (2026-10-08)
 

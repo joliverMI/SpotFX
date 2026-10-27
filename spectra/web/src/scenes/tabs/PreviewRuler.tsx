@@ -37,6 +37,7 @@
  * The ruler still computes no time: the caller turns the pointer's seconds
  * into whatever the drag writes (dropMarkDrag.ts). */
 import { useRef, useState } from 'react';
+import { PRE_DROP_COLOR } from '../../timeline/dropSequences';
 
 export interface RulerBand {
   from_s: number;
@@ -48,7 +49,8 @@ export interface RulerBand {
 export interface RulerMark {
   at_s: number;
   label: string;
-  tone?: 'accent' | 'muted' | 'hot';
+  /** `predrop` = the pre-drop's own orange (the drop-sequence preview). */
+  tone?: 'accent' | 'muted' | 'hot' | 'predrop';
   dashed?: boolean;
 }
 
@@ -101,6 +103,7 @@ const TONE: Record<string, string> = {
   accent: 'var(--accent)',
   muted: 'var(--text-muted)',
   hot: '#ff5a3c',
+  predrop: PRE_DROP_COLOR,
 };
 
 export default function PreviewRuler({

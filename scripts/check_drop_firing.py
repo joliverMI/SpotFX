@@ -67,12 +67,17 @@ class _Rec:
         self.scenes: list[int] = []
         self.flares: list[int] = []
         self.his: list[tuple[int, str]] = []
+        self.pre_drops: list[tuple[int, str]] = []
 
-    async def fire_sequence(self, cls, intensity, gap):
+    async def fire_sequence(self, cls, intensity, gap, pre_drop=None):
         self.seq.append((self.position, cls))
+        if pre_drop is not None:
+            self.pre_drops.append((self.position, pre_drop.kind))
 
-    async def fire_response(self, cls, intensity, gap=None):
+    async def fire_response(self, cls, intensity, gap=None, pre_drop=None):
         self.his.append((self.position, cls))
+        if pre_drop is not None:
+            self.pre_drops.append((self.position, pre_drop.kind))
 
     async def fire_scene(self, scene_id, color_set_id, intensity):
         self.scenes.append(self.position)
@@ -96,6 +101,12 @@ def _sweep(uri: str, triggers: list, mode: str, duration: int) -> _Rec:
         analysed_plan=lambda u, stored: analysed_flares.plan_for_song(u, stored),
         render_intensity=lambda x: x, lead_ms=lambda t: 0,
         response_offset_ms=lambda a: 0, sequencer_enabled=lambda: False,
+        # the drop timing offset (spectra/services/drop_timing.py, -400 ms
+        # by default) held at 0 like the lead and the band anchor above, so
+        # a fired drop sits on its stored mark — the matches below compare
+        # against it within 200 ms; tests/test_drop_timing.py proves the
+        # offset itself
+        drop_offset_ms=lambda: 0,
         select_scene=lambda i: "S", transition_intensity=lambda: 0.5,
         auto_generate=_noop, auto_refresh=_noop)
 
@@ -128,7 +139,9 @@ def main() -> int:
           "| Scene changes fired |")
     print("|---|---|---|---:|---:|---:|---:|")
     notes: list[str] = []
+    pre_drop_notes: list[str] = []
     for name, uri, _is_edm in cdd.SONGS:
+        carried: dict[str, str] = {}
         drop_sequences.ensure_detected(uri)
         stored = trigger_store.list_for_song(uri)
         det = drop_sequences.stored(uri)["detected"]
@@ -146,6 +159,9 @@ def main() -> int:
             tiers = {s["drop_ms"]: s.get("tier") for s in view["sequences"]}
             for mode in MODES:
                 rec = _sweep(uri, trigs, mode, duration)
+                if mode == "analysed":
+                    carried[label] = ", ".join(
+                        f"{k} at {p} ms" for p, k in rec.pre_drops) or "none"
                 drops = [p for p, c in rec.seq if c == "drop"]
                 gen_scene = [t.timestamp_ms + t.trigger_offset_ms for t in trigs
                              if t.source == "generated" and t.action.kind == "fire_scene"]
@@ -209,9 +225,14 @@ def main() -> int:
                      f"(none inside a window, none at a drop), actions "
                      f"{len(free.kept) + len(free.unselected)} → "
                      f"{len(plan.kept) + len(plan.unselected)}.")
+        pre_drop_notes.append(f"- {name}: as stored — {carried.get('as stored', 'none')}; "
+                              f"analysed show — {carried.get('analysed show', 'none')}.")
 
     print("\nThe planner (real analysis, stored claims and settings of the copy):\n")
     print("\n".join(notes))
+    print("\nLulls that carried a pre-drop to the response engine (\"Transitions + "
+          "analysed\", predrop plan step 5):\n")
+    print("\n".join(pre_drop_notes))
     print()
     if problems:
         print("FAILED:")

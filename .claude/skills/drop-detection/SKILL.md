@@ -286,14 +286,16 @@ gate first, then `house.scene_deferral`). Five things:
   (`_claim_drop_colour`, ramp + `DROP_COLOUR_CLAIM_S`); `on_event("drop")`
   takes it and the band's own colour-jump kind skips, named (the
   `_DROP_COLOUR_DONE` ContextVar, carried on a `PendingKindBatch`).
-- **The fade across a pre-drop is built, tested and DORMANT**:
-  `FiringSequence.pre_drop_ms` is filled only while
-  `drop_firing.PRE_DROPS_PLAY` is True (the pre-drop engine's step, plan
-  step 5, turns it on). `_tick_drop_colour_fades` starts the change on the
-  pre-drop (moved with its drop: `_drop_fire_shift_ms`) as a glide over the
-  time left to the drop's target, so a late tick still lands on the drop;
-  a LANDED fade is remembered (`_drop_colour_faded`) and its drop does not
-  change again; a held one leaves the drop its own instant try.
+- **The fade across a pre-drop is LIVE since step 5** (below): only for a
+  pre-drop that PLAYS — the verdict its lull reached (`PreDropTold`), so
+  the colour and any pre-drop look agree; one the scene does not play
+  leaves the change instant. `_tick_drop_colour_fades` starts the change
+  one tick BEFORE the pre-drop's target (`PRE_DROP_COLOUR_LEAD_MS`; the
+  target moved with its drop, computed when the lull fired) as a glide over
+  the time left to the drop's target, so it lands on the drop whatever the
+  lead or a late tick; a LANDED fade is remembered (`_drop_colour_faded`,
+  keyed by the sequence or `his:<drop id>`) and its drop does not change
+  again; a held one leaves the drop its own instant try.
 
 Holds, each named: the setting off, a room hold (`conductor._deferral`),
 Force Colour (a set pin stays; a group pin rolls its next member), a 2D
@@ -306,8 +308,8 @@ the precedence, and the show-side sweep with a red control).
 
 ## Pre-drops — the spike and the vocal intro (2026-10-26)
 
-Predrop plan step 3 (detection only: nothing plays from a pre-drop yet,
-`drop_firing.PRE_DROPS_PLAY`). `spectra/services/predrop_detector.py` is
+Predrop plan step 3 (detection; what plays from one is step 5's engine,
+below). `spectra/services/predrop_detector.py` is
 the binding statement for both rules. Six things:
 
 - **TWO RULES, PORTED LINE FOR LINE FROM THE STUDY** (pd_detect3 and
@@ -370,8 +372,7 @@ committed cut cases, Eyes Cut Deeper whole), `tests/test_predrop_view.py`,
 
 ## Editing a pre-drop (2026-10-26)
 
-Predrop plan step 4 — still nothing plays (`drop_firing.PRE_DROPS_PLAY`).
-`drop_sequences.py`'s "EDITING A PRE-DROP" and "HIS OWN DROPS' PRE-DROPS"
+Predrop plan step 4. `drop_sequences.py`'s "EDITING A PRE-DROP" and "HIS OWN DROPS' PRE-DROPS"
 docstring sections are the binding statement. Six things:
 
 - **`pre_drop` IS A HANDLE, NOT A NEW MECHANISM.** It rides the existing
@@ -413,6 +414,54 @@ docstring sections are the binding statement. Six things:
   Drops panel's pre-drop button plus the editor's fourth handle
   (`home/dropsPanel.ts` holds its snap/step/lead helpers). Both send only
   the calls above.
+
+## The pre-drop engine — what a pre-drop does (2026-10-26)
+
+Predrop plan step 5. `fx/effects/pre_drop.py` (the told keys, the looks,
+`phase_clock`) and `spectra/services/pre_drop_play.py` (the one rule) are
+the binding statements. Seven things, the first one the most important:
+
+- **NOTHING LIGHTS A PRE-DROP YET.** `fx.device_model.PRE_DROP_EFFECTS` is
+  EMPTY: every arm write equals the pre-engine golden over his 14 scenes
+  (`tests/test_pre_drop_arm_identity.py`). The only visible change is the
+  drop colour fade across a pre-drop that plays. Step 6 (Fireworks, Pulse,
+  Orbits) joins the set — each behind his tuning gate — and declares
+  `pre_drop_looks` in `config/effect_params.json`.
+- **THE DECISION IS AT THE LULL, ON THE SCENE SHOWING.** Rules in order:
+  a playable part (a sequence's via `drop_firing._pre_drop_fields` — its
+  OWN `pre_drop_tier` for "waiting", never the drop's tier; his own via
+  `his_pre_drops`), a lull that fires (`FiringSequence.pre_drop_for` — a
+  lull-less sequence has none), a scene showing, that kind on, the gap in
+  its window (`SceneV2.pre_drop_spike`: 350-2000 in 250-3000; `pre_drop_
+  intro`: 350-4000 in 350-4500), and at least `MIN_AFTER_LULL_MS` (200)
+  after the lull actually fired. A drop-led switch cutting at the drop
+  leaves the lull (and its pre-drop) on the scene showing; the fade then
+  picks from the INCOMING scene's pool.
+- **THE TIMING**: target = mark + the drop's own fire shift (moved with
+  its drop; for his own drop his trigger's offset too), `pre_drop_at_s` =
+  target − the TICK's position (a late lull still lands it on its mark),
+  `pre_drop_s` = the music's gap. The colour fade fires one tick early.
+- **THE VERDICT COMES BACK**: `engine.fire_response_event` returns the
+  response record; the trigger clock reads `phase.pre_drop` into
+  `PreDropTold` (`status()["pre_drops"]`) and the show log's lull entry
+  carries it as `pre_drop`. A fake `fire_sequence`/`fire_response` in a
+  test must accept `pre_drop=` (it is passed only when there is one) and
+  return the record if the test wants the fade.
+- **A MEMBER'S LULL IS MEASURED TO THE PRE-DROP**: ramp, dark point (if a
+  LULL_DARK member) and breath (always, for a member — zeros when it is no
+  breath-hold effect and its pre-drop does not play), the breath ending on
+  `pre_drop_at_s` with no overrun. Non-members on the same arm are
+  untouched. The hand-off's `lull_s` stays the drop's gap (it is about what
+  the drop lands on); the keepers meld's `lull_keep` rides alongside.
+- **HIS OWN DROPS' PRE-DROPS** are worked out on the song-change edge
+  (`drop_sequences.work_out_his_pre_drops`, `on_song_played`'s worker
+  thread); a newly memoised answer moves `drop_sequences.revision()` so
+  the trigger clock's memo sees it.
+- **THE PREVIEW AND THE EDITORS**: the drop-sequence preview's kind switch
+  and gap slider (`phase_preview.pre_drop_for_ruler`, the live lull step
+  carrying the same candidate; drafted windows and looks travel on the
+  request), the Phase tab's Pre-drops card (`scenes/tabs/
+  PreDropControls.tsx`, help `pre-drop-scene-window`).
 
 ## A LIGHT SHOW SET CAN BE ARMED ON A PHASE (2026-10-19)
 
@@ -509,6 +558,12 @@ and `switch_pre_drop` (spike / intro), plus `set_drop_part part=pre_drop`
 — none of them asks first, because no trigger of his is touched; each is
 undone by `undo_drop_edit`. `list_drop_sequences` shows each drop's
 `pre_drop` (time, kind, off, placed by him, tier) and each of his rows'.
+Whether one PLAYS on a scene (step 5) is the scene's: six scene-domain
+settings through `set_scene_setting` (`pre_drop_spike_enabled` /
+`_min_ms` / `_max_ms` and the `pre_drop_intro_*` trio) and, per entry,
+`get_pre_drop_looks` / `set_pre_drop_look` (`spectra/services/
+scene_console.py` — "auto", "same" for the intro, or a look the entry's
+effect declares; anything else is refused with the allowed names).
 
 The drop colour change (2026-10-26) is two ordinary settings-registry keys,
 `drop_colour_change` and `drop_colour_spread_deg`; the change itself (a
@@ -536,4 +591,12 @@ The drop colour change's: `tests/test_drop_colour.py`. Pre-drops':
 test_predrop_edits.py` (every edit, the two rules, the rails, his own
 drops on his Eyes Cut Deeper shape, the routes, Sonic),
 `scripts/check_drop_sequence_view.mjs`, `scripts/
-check_drop_sequence_edit.mjs`, `scripts/check_home_drops_panel.mjs`.
+check_drop_sequence_edit.mjs`, `scripts/check_home_drops_panel.mjs`. The
+pre-drop engine's: `tests/test_pre_drop_arm_identity.py` (byte-identity
+over his scenes), `tests/test_pre_drop_engine.py` (the keys, the rule, stub
+members, the hand-off), `tests/test_pre_drop_show_clock.py` (the late
+lull, the fade, his own drops), `tests/test_pre_drop_watchdog.py`,
+`tests/test_pre_drop_preview.py`, `tests/test_pre_drop_sonic.py`,
+`scripts/check_pre_drop_phase_tab.mjs`, and `scripts/check_drop_firing.py`
+(its offline show run lists, per song, the lulls that carried a pre-drop
+to the response engine).

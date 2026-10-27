@@ -1,6 +1,7 @@
 /** TS mirrors for spectra/models — the grown scene model. */
 import type { CurvePoint } from './components/CurveEditor';
 import { uuid } from './lib/uid';
+import type { PreDropKind } from './timeline/dropSequences';
 
 export type SignalName =
   | 'rms_total' | 'rms_bass' | 'onset_score'
@@ -83,6 +84,30 @@ export interface SceneDeviceConfig {
   brightness: number | ValueBinding | null;
   background_brightness: number | ValueBinding | null;
   drift: Record<string, DriftRef>;
+  /** The PRE-DROP LOOK this entry plays, per kind (spectra/models/scene.py
+   * PreDropLooks; predrop plan step 5). Absent on an older server: both
+   * "auto". */
+  pre_drop_looks?: PreDropLooks;
+}
+
+/** A scene's PRE-DROP WINDOW for one kind (spectra/models/scene.py
+ * PreDropWindow): a pre-drop of this kind plays on the scene when `enabled`
+ * and its gap to its drop — the music's own gap, pre-drop to drop — is
+ * within [min_ms, max_ms] (min < max). Outside it, or off, the lull runs as
+ * before and the drop's colour change is instant. */
+export interface PreDropWindow {
+  enabled: boolean;
+  min_ms: number;
+  max_ms: number;
+}
+
+/** The pre-drop LOOK one device entry plays, per kind: "auto" = the
+ * effect's own recommendation for the kind; a look name the effect
+ * declares = that look; "same" (the vocal intro only) = whatever the spike
+ * resolves to. Read only by an effect that plays pre-drops (none yet). */
+export interface PreDropLooks {
+  spike: string;
+  intro: string;
 }
 
 /** One param's target expression on a momentary/permanent kind — the
@@ -290,6 +315,12 @@ export interface SceneV2 {
    * earlier. null (default) = the room's. The drag of the drop
    * mark on the drop-sequence preview writes it. */
   drop_timing_offset_ms?: number | null;
+  /** THE PRE-DROP WINDOWS (predrop plan step 5), one per kind: whether a
+   * spike / a vocal intro plays on this scene, and the gap to its drop it
+   * must sit in. Set on the Phase tab's Pre-drops card. Absent on an older
+   * server: the model's own defaults (registry `pre_drop.kinds`). */
+  pre_drop_spike?: PreDropWindow;
+  pre_drop_intro?: PreDropWindow;
 }
 
 /** His exact default dwell curve (spectra/services/dwell.py's
@@ -346,12 +377,33 @@ export interface EffectParamMeta {
   help_topic?: string;
 }
 
+/** An effect's declared PRE-DROP LOOKS (`pre_drop_looks` in
+ * config/effect_params.json, fx.device_model.pre_drop_looks): each look's
+ * label and the kinds it suits, and which look "auto" resolves to per kind.
+ * Served only for an effect that declares some — none does yet. */
+export interface PreDropLooksDecl {
+  looks: Record<string, { label: string; kinds: string[] }>;
+  auto: Record<string, string>;
+}
+
+/** One pre-drop kind's window bounds and defaults (/api/registry
+ * `pre_drop.kinds`, read off the model's own fields). */
+export interface PreDropKindMeta {
+  label: string;
+  min_bound: number;
+  max_bound: number;
+  default_min_ms: number;
+  default_max_ms: number;
+}
+
 export interface Registry {
   categories: Record<
     string,
     { id: string; parent_id: string | null; virtuals: string[]; effects: string[] }
   >;
-  effects: Record<string, { params?: Record<string, EffectParamMeta> }>;
+  effects: Record<string, { params?: Record<string, EffectParamMeta>; pre_drop_looks?: PreDropLooksDecl }>;
+  /** The pre-drop kinds (predrop plan step 5). Absent on an older server. */
+  pre_drop?: { kinds: Record<PreDropKind, PreDropKindMeta> };
 }
 
 export interface DriftProfile {

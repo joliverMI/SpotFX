@@ -163,6 +163,29 @@ class EffectStep(BaseModel):
     params:      dict[str, SceneParamValue] = Field(default_factory=dict)
 
 
+class PreDropLooks(BaseModel):
+    """THE PRE-DROP LOOK this entry plays, per kind (predrop plan 3.2; fx/
+    effects/pre_drop.py). "auto" = the effect's own recommendation for the
+    kind (its `pre_drop_looks` block in config/effect_params.json); a look
+    name the effect declares = that look; "same" (the vocal intro only) =
+    whatever the spike resolves to, which is how a scene combines the two
+    kinds. Read only by an effect in fx.device_model.PRE_DROP_EFFECTS (empty
+    until predrop step 6), resolved at the lull arm (pre_drop.resolve_look),
+    so the told `pre_drop_look` is always a concrete name."""
+    spike: str = "auto"
+    intro: str = "auto"
+
+    @model_validator(mode="after")
+    def _shape(self) -> "PreDropLooks":
+        if not self.spike or self.spike == "same":
+            raise ValueError("the spike's look is \"auto\" or a look name — "
+                             "\"same\" belongs to the vocal intro only")
+        if not self.intro:
+            raise ValueError("the vocal intro's look is \"auto\", \"same\" "
+                             "or a look name")
+        return self
+
+
 class SceneDeviceConfig(BaseModel):
     # "all" targets every imported virtual (target stays empty); category
     # targets expand to member virtuals at compile time. Narrower entries
@@ -185,6 +208,8 @@ class SceneDeviceConfig(BaseModel):
     # param name → drift declaration (creep / follow). The S2 conductor
     # executes these; S1 stores and edits them.
     drift: dict[str, DriftRef] = Field(default_factory=dict)
+    # THE PRE-DROP LOOK per kind (PreDropLooks above; predrop plan step 5).
+    pre_drop_looks: PreDropLooks = Field(default_factory=PreDropLooks)
 
     @model_validator(mode="after")
     def _validate_entry(self) -> "SceneDeviceConfig":
@@ -745,6 +770,41 @@ class SceneColorJourney(BaseModel):
         return self
 
 
+class PreDropWindow(BaseModel):
+    """THE PRE-DROP WINDOW, one per kind (predrop plan 3.2; the Admiral:
+    "Each scene will define the minimum and maximum time duration required
+    for the pre drop"): a pre-drop of this kind plays on this scene when
+    `enabled` and its gap to its drop — the music's gap, pre-drop to drop —
+    is within [min_ms, max_ms] (spectra/services/pre_drop_play.py is the
+    one rule). Outside it, or off, the lull runs as before and the drop's
+    colour change is instant. The two subclasses carry each kind's own
+    bounds and defaults (his 350 ms minimum; the vocal intro reaches 4.3 s,
+    so its window is wider)."""
+    enabled: bool = True
+    min_ms: int
+    max_ms: int
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "PreDropWindow":
+        if self.min_ms >= self.max_ms:
+            raise ValueError(f"a pre-drop window needs min < max "
+                             f"(got {self.min_ms}-{self.max_ms} ms)")
+        return self
+
+    def admits(self, gap_ms: int) -> bool:
+        return self.enabled and self.min_ms <= int(gap_ms) <= self.max_ms
+
+
+class PreDropSpikeWindow(PreDropWindow):
+    min_ms: int = Field(default=350, ge=250, le=3000)
+    max_ms: int = Field(default=2000, ge=250, le=3000)
+
+
+class PreDropIntroWindow(PreDropWindow):
+    min_ms: int = Field(default=350, ge=350, le=4500)
+    max_ms: int = Field(default=4000, ge=350, le=4500)
+
+
 class PhaseChoreography(BaseModel):
     # anchor_frac: crossfade fraction where the payoff lands; the engine
     # fires the switch early by anchor_frac × transition_ms.
@@ -1172,6 +1232,20 @@ class SceneV2(BaseModel):
     # showing when the drop fires (the same live peek the band's flare-kind
     # offset uses).
     drop_timing_offset_ms: Optional[int] = Field(default=None, ge=-2000, le=2000)
+    # THE PRE-DROP WINDOWS, PER KIND (2026-10-26, predrop plan step 5;
+    # PreDropWindow above): whether this scene plays a SPIKE / a VOCAL INTRO
+    # pre-drop, and inside what pre-drop-to-drop gap. On for every scene at
+    # ship (his answer 3) — only an effect with a pre-drop look changes, and
+    # none has one until step 6. Read once per lull arm against the scene
+    # showing (scene_response._drive_phase).
+    pre_drop_spike: PreDropSpikeWindow = Field(default_factory=PreDropSpikeWindow)
+    pre_drop_intro: PreDropIntroWindow = Field(default_factory=PreDropIntroWindow)
+
+    def pre_drop_window(self, kind: str) -> Optional[PreDropWindow]:
+        """This scene's window for a pre-drop `kind` ("spike" | "intro"),
+        None for an unknown kind."""
+        return {"spike": self.pre_drop_spike,
+                "intro": self.pre_drop_intro}.get(kind)
 
     @model_validator(mode="before")
     @classmethod

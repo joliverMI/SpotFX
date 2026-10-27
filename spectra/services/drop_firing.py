@@ -208,11 +208,14 @@ class FiringSequence:
     # mode his trigger actually fires under — see the class docstring.
     stood_down: dict = field(default_factory=dict)
     matches_his: bool = False
-    # Where this sequence's PRE-DROP plays, when it has one that may play
-    # (PRE_DROPS_PLAY) — the moment the drop colour change starts its fade
-    # (trigger_engine's THE DROP COLOUR CHANGE). Never a member: nothing
-    # but the colour fade reads it yet.
+    # Where this sequence's PRE-DROP sits, and its kind, when it has one
+    # whose part may play (_member_ms; PRE_DROPS_PLAY). Never a member: it
+    # rides its lull (pre_drop_for) — the trigger clock hands it to the
+    # lull's arm, where spectra/services/pre_drop_play.py decides against
+    # the scene showing whether it plays; when it does, the drop's colour
+    # change fades across it (trigger_engine's THE DROP COLOUR CHANGE).
     pre_drop_ms: Optional[int] = None
+    pre_drop_kind: Optional[str] = None
 
     def members(self, effective_mode: Optional[str] = None) -> list[tuple[str, int]]:
         exclude = (set(self.stood_down)
@@ -227,6 +230,21 @@ class FiringSequence:
 
     def trigger_id(self, cls: str) -> str:
         return f"{ID_PREFIX}{self.key}:{cls}"
+
+    def pre_drop_for(self, cls: str, effective_mode: Optional[str] = None
+                     ) -> Optional[tuple[int, str]]:
+        """(pre-drop mark, kind) the member `cls` carries — the LULL only,
+        and only while the lull fires in `effective_mode` (a sequence
+        without a lull plays its drop as before: no build for the pre-drop
+        to change) and the pre-drop sits before the drop. None otherwise."""
+        if (cls != "lull" or self.pre_drop_ms is None
+                or self.pre_drop_kind is None):
+            return None
+        members = dict(self.members(effective_mode))
+        lull = members.get("lull")
+        if lull is None or not (lull < self.pre_drop_ms < self.drop_ms):
+            return None
+        return int(self.pre_drop_ms), str(self.pre_drop_kind)
 
     def gap_ms(self, cls: str, effective_mode: Optional[str] = None,
                drop_offset_ms: int = 0) -> Optional[int]:
@@ -352,14 +370,14 @@ def _member_ms(s: dict, cls: str, testing: bool) -> Optional[int]:
     return int(ms)
 
 
-# THE PRE-DROP HAS NO ENGINE YET (predrop plan, steps 3-5): a sequence's
-# pre-drop time is read into FiringSequence.pre_drop_ms only while this is
-# True, and the step that builds the pre-drop engine (plan step 5) turns it
-# on. Until then the view may carry pre-drop times (steps 3-4 detect, draw
-# and edit them) and nothing plays from them: the drop colour change stays
-# instant on every drop, its fade across the pre-drop built and tested but
-# dormant (tests/test_drop_colour.py switches this on to prove it).
-PRE_DROPS_PLAY = False
+# THE PRE-DROP ENGINE IS ON (predrop plan step 5): a sequence's pre-drop
+# time and kind are read into FiringSequence while this is True (the
+# master switch the engine shipped behind in steps 2-4, kept as one line
+# to turn the whole pre-drop path off again). Whether a pre-drop then PLAYS
+# is spectra/services/pre_drop_play.py's, at its lull; with
+# fx.device_model.PRE_DROP_EFFECTS empty the only thing that changes is
+# the drop colour change fading across a pre-drop that plays.
+PRE_DROPS_PLAY = True
 
 
 def _candidates(view: dict, testing: bool = False) -> list[FiringSequence]:
@@ -389,10 +407,93 @@ def _candidates(view: dict, testing: bool = False) -> list[FiringSequence]:
                 lull_ms=_member_ms(s, "lull", testing),
                 charge_ms=_member_ms(s, "charge", testing),
                 intensity=sequence_intensity(s.get("step")), beat_ms=beat,
-                pre_drop_ms=(_member_ms(s, "pre_drop", testing)
-                             if PRE_DROPS_PLAY else None)))
+                **_pre_drop_fields(s, testing)))
         except (KeyError, TypeError, ValueError):
             continue
+    return out
+
+
+def _pre_drop_fields(s: dict, testing: bool) -> dict:
+    """The sequence's pre-drop when its PART may play — present, not off,
+    and approved, or still waiting with a PRE-DROP tier that plays on its
+    own (a confident one), or Testing. Its own tier, not the drop's: a
+    suggested pre-drop on a confirmed drop waits for his tick (his answer
+    2: "a confident pre-drop plays wherever its sequence fires, a suggested
+    one waits")."""
+    if not PRE_DROPS_PLAY:
+        return {}
+    ms, kind = s.get("pre_drop_ms"), s.get("pre_drop_kind")
+    if ms is None or kind not in PRE_DROP_KINDS or s.get("pre_drop_off"):
+        return {}
+    part = (s.get("parts") or {}).get("pre_drop")
+    if part == drop_sequences.PART_OFF:
+        return {}
+    if part != drop_sequences.PART_ON and not (
+            testing or s.get("pre_drop_tier") == drop_detector.TIER_CONFIDENT):
+        return {}
+    try:
+        return {"pre_drop_ms": int(ms), "pre_drop_kind": str(kind)}
+    except (TypeError, ValueError):
+        return {}
+
+
+PRE_DROP_KINDS = ("spike", "intro")
+
+
+@dataclass(frozen=True)
+class HisPreDrop:
+    """THE PRE-DROP OF ONE OF HIS OWN GROUPED DROPS whose part may play —
+    the view's `authored[].pre_drop` (drop_sequences' HIS OWN DROPS'
+    PRE-DROPS) under the same part rule as a sequence's (_member_ms): not
+    off, approved, or waiting with a tier that plays on its own, or
+    Testing. Keyed in `his_pre_drops` by his LULL trigger's id, which is
+    where it rides."""
+    lull_id: str
+    drop_id: str
+    lull_ms: int
+    drop_ms: int
+    pre_drop_ms: int
+    kind: str
+
+    @property
+    def key(self) -> str:
+        return f"his:{self.drop_id}"
+
+
+def his_pre_drops(view: dict, testing: bool = False) -> dict[str, HisPreDrop]:
+    """{his lull trigger id: HisPreDrop} for every one of his grouped
+    lull + drop whose pre-drop may play (HisPreDrop's docstring). A group
+    with no lull, a pre-drop not before his drop, or one whose answer is
+    not worked out yet (drop_sequences leaves `pre_drop` out until it is)
+    has none."""
+    if not PRE_DROPS_PLAY:
+        return {}
+    out: dict[str, HisPreDrop] = {}
+    for g in (view or {}).get("authored") or []:
+        lull, drop, pre = g.get("lull"), g.get("drop"), g.get("pre_drop")
+        if not lull or not drop or not isinstance(pre, dict):
+            continue
+        if pre.get("off") or pre.get("ms") is None:
+            continue
+        if pre.get("kind") not in PRE_DROP_KINDS:
+            continue
+        part = pre.get("part")
+        if part == drop_sequences.PART_OFF:
+            continue
+        if part != drop_sequences.PART_ON and not (
+                testing or pre.get("tier") == drop_detector.TIER_CONFIDENT):
+            continue
+        try:
+            lull_ms, drop_ms = int(lull["timestamp_ms"]), int(drop["timestamp_ms"])
+            pre_ms = int(pre["ms"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not lull_ms < pre_ms < drop_ms:
+            continue
+        out[str(lull.get("id"))] = HisPreDrop(
+            lull_id=str(lull.get("id")), drop_id=str(drop.get("id")),
+            lull_ms=lull_ms, drop_ms=drop_ms, pre_drop_ms=pre_ms,
+            kind=str(pre["kind"]))
     return out
 
 

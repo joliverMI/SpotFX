@@ -136,8 +136,11 @@ drop time, and worked out only on the read-through path
 (`view_with_detection`, a worker thread) — a plain `view()` is the trigger
 clock's, which must never analyse, so it shows only what is memoised and
 leaves the key out where nothing is ("not worked out yet", never "none").
-Nothing plays from a pre-drop yet (drop_firing.PRE_DROPS_PLAY), and an
-added sequence has none until he places one.
+Whether a pre-drop PLAYS is decided at its lull (spectra/services/
+pre_drop_play.py — the part rule is drop_firing's, the scene's window and
+the timing pre_drop_play's), which is also why `work_out_his_pre_drops`
+runs on the song-change edge: the trigger clock's plain view must find his
+drops' answers memoised. An added sequence has none until he places one.
 
 EDITING A PRE-DROP (predrop plan step 4: its orange handle on the Timeline
 and in the panel's editor, its panel button, Sonic's set_pre_drop /
@@ -312,8 +315,11 @@ def _now_ms() -> int:
 
 def revision() -> Optional[tuple]:
     """The store's revision (its file stat), for a reader that caches a
-    view between ticks (trigger_engine): any edit or detection changes it."""
-    return _signature()
+    view between ticks (trigger_engine): any edit or detection changes it —
+    and so does a pre-drop of one of his own drops being worked out (the
+    in-memory memo the view reads, his_pre_drop), so the trigger clock picks
+    it up on its next tick."""
+    return (_signature(), _his_pre_drops_gen)
 
 
 def all_stored() -> dict:
@@ -488,9 +494,25 @@ def on_song_played(uri: Optional[str]) -> None:
             await asyncio.to_thread(ensure_detected, uri)
         except Exception:                                # noqa: BLE001
             logger.exception("drop detection failed for %s", uri)
+        try:
+            # HIS OWN DROPS' PRE-DROPS (the module docstring): worked out
+            # here, off the loop, so the trigger clock's plain view finds
+            # them memoised — the pre-drop engine plays them (predrop step 5)
+            await asyncio.to_thread(work_out_his_pre_drops, uri)
+        except Exception:                                # noqa: BLE001
+            logger.exception("his pre-drops could not be worked out for %s",
+                             uri)
         finally:
             _in_flight.discard(uri)
     loop.create_task(run())
+
+
+def work_out_his_pre_drops(uri: str) -> int:
+    """Work out (and memoise) the pre-drop of every one of his own grouped
+    drops on `uri` that is not memoised yet — analysis I/O, call it off the
+    event loop. Returns how many of his drops it looked at."""
+    view_ = view(uri, compute_pre_drops=True)
+    return sum(1 for g in view_.get("authored") or [] if g.get("drop"))
 
 
 def reset() -> None:
@@ -1903,6 +1925,9 @@ def his_pre_drop_now(uri: str, ctx: dict) -> Optional[dict]:
 _his_pre_drops: "dict[tuple, Optional[dict]]" = {}
 _his_pre_drops_lock = threading.Lock()
 HIS_PRE_DROPS_MEMO = 512
+# Bumped whenever a new answer is memoised — part of revision(), so a
+# reader caching the view between ticks sees a newly worked-out pre-drop.
+_his_pre_drops_gen = 0
 
 
 def his_pre_drop(uri: str, stamp: str, drop_ms: int, *,
@@ -1924,8 +1949,10 @@ def his_pre_drop(uri: str, stamp: str, drop_ms: int, *,
     else:
         pre = predrop_detector.detect(analysis.shape, int(drop_ms))
         found = pre.stored() if pre is not None else None
+    global _his_pre_drops_gen
     with _his_pre_drops_lock:
         _his_pre_drops[key] = found
+        _his_pre_drops_gen += 1
         while len(_his_pre_drops) > HIS_PRE_DROPS_MEMO:
             _his_pre_drops.pop(next(iter(_his_pre_drops)))
     return True, found

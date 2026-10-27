@@ -2578,3 +2578,28 @@ against that commit.
     `tests/test_fish_pond_rest.py`, `tests/fixtures/fish_swim/`. On for the
     music Fish scene only via `scripts/set_fish_pond_rest.py` (a deploy
     step). Unverified against his live room.
+86. `effects/pre_drop.py` (NEW, SpotFX-authored) + `effects/phase_grammar.py`
+    (`_breath_gain`): THE PRE-DROP (2026-10-26, predrop plan step 5,
+    /home/javi/fleet-spotfx/data/predrop-plan/report.md §3.3-3.4). Some drops
+    have a pre-drop (a spike or a vocal intro shortly before them); it is
+    NOT a phase — it rides the LULL's own arm write as four told keys
+    (`pre_drop_at_s`, `pre_drop_s`, `pre_drop_kind`, `pre_drop_look`), the
+    lull_dark / lull_handoff / breath-hold way, told only to
+    `fx.device_model.PRE_DROP_EFFECTS` members (EMPTY at this step: no
+    effect is told anything yet; step 6 adds the first looks). The module
+    holds the keys, their schema fields, `resolve_look` (an entry's "auto" /
+    "same" / named choice against the effect's declared `pre_drop_looks`
+    registry block) and `phase_clock`, one object per frame naming the
+    phase's segment (`charge` / `approach` / `dark` / `breath` / `pre_drop`
+    / `drop` / `none`) with its kind, look, fraction, first-frame edge and
+    the time to the drop — read off keys effects already receive plus the
+    four new ones, so adopting it changes nothing on its own. The one
+    change to an existing module: a breath-hold black that ends exactly on
+    a told pre-drop lifts ON it instead of holding `BREATH_OVERRUN_S` past
+    its end (the pre-drop is on the effect's own clock and cannot be lost);
+    with no pre-drop told the breath is byte-identical. Evidence:
+    `tests/test_pre_drop_engine.py` (the helpers, the breath),
+    `tests/test_pre_drop_arm_identity.py` (with the set empty every arm
+    write over his 14 real scenes equals the pre-engine golden),
+    `tests/test_pre_drop_watchdog.py` (every phase effect as a stub member:
+    no orphan release before the drop). Unverified against his live room.

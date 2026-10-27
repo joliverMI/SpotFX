@@ -102,6 +102,27 @@ export function describeDropColour(c: Record<string, unknown> | undefined): stri
   return result ? ` · colour change: ${result}` : '';
 }
 
+const PRE_DROP_REASON: Record<string, string> = {
+  kind_off: 'this scene has that kind off',
+  gap_below_min: 'shorter than this scene\'s window',
+  gap_above_max: 'longer than this scene\'s window',
+  too_soon_after_lull: 'too soon after its lull started',
+  no_scene: 'no scene was showing',
+  unknown_kind: 'an unknown kind',
+  not_fired: 'its lull did not fire',
+};
+
+/** A lull's PRE-DROP verdict (spectra/services/pre_drop_play.py, the
+ * show log's `pre_drop`), as a tail: whether it played and, if not, why. */
+export function describePreDrop(v: Record<string, unknown> | undefined): string {
+  if (!v) return '';
+  const kind = v.kind === 'intro' ? 'vocal intro' : 'spike';
+  const gap = v.gap_ms as number | undefined;
+  if (v.plays) return ` · its ${kind} pre-drop plays${gap != null ? ` (${gap} ms before the drop)` : ''}`;
+  const reason = v.reason as string | undefined;
+  return ` · its ${kind} pre-drop does not play (${(reason && PRE_DROP_REASON[reason]) ?? reason ?? 'unknown'})`;
+}
+
 export function describeEvent(item: ReviewEventItem): string {
   const d = item.detail;
   switch (item.bucket) {
@@ -145,17 +166,19 @@ export function describeEvent(item: ReviewEventItem): string {
         return `Drop switched the scene to ${to}, a hard cut ${when}${res}`;
       }
       const colour = describeDropColour(d.drop_colour as Record<string, unknown> | undefined);
-      if (d.drop_sequence && d.member === 'pre_drop') {
-        // THE DROP COLOUR CHANGE starting its fade on a pre-drop.
-        return `Drop sequence: colour change at the pre-drop${colour}`;
+      if (d.member === 'pre_drop') {
+        // THE DROP COLOUR CHANGE starting its fade on a pre-drop — a drop
+        // sequence's, or (no drop_sequence) one of his own drops'.
+        return `${d.drop_sequence ? 'Drop sequence' : 'Your drop'}: colour change at the pre-drop${colour}`;
       }
+      const preDrop = describePreDrop(d.pre_drop as Record<string, unknown> | undefined);
       if (d.drop_sequence) {
         // A drop-sequence member (spectra/services/drop_firing.py) — the
         // ordinary charge/lull/drop response, not a stored trigger.
         const member = (d.member as string | undefined) ?? item.key.split(':')[1];
         const whose = d.his ? 'yours' : 'detected';
         const intensity = d.intensity as number | undefined;
-        return `Drop sequence: ${member} (${whose})${intensity != null ? ` @ ⚡${intensity.toFixed(2)}` : ''}${colour}`;
+        return `Drop sequence: ${member} (${whose})${intensity != null ? ` @ ⚡${intensity.toFixed(2)}` : ''}${preDrop}${colour}`;
       }
       if (d.analysed_flare) {
         // An unselected analysed transition fired as a flare
@@ -175,7 +198,7 @@ export function describeEvent(item: ReviewEventItem): string {
       const snapNote = snapGrid
         ? ` · moved to ${snapGrid} (${snapMoved != null && snapMoved >= 0 ? '+' : ''}${snapMoved ?? 0}ms)`
         : '';
-      return `Trigger fired: ${kind}${source ? ` (${source})` : ''}${snapNote}${colour}`;
+      return `Trigger fired: ${kind}${source ? ` (${source})` : ''}${snapNote}${preDrop}${colour}`;
     }
     case 'deferred': {
       if (item.key === 'drop_window') {

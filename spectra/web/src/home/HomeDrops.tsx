@@ -20,7 +20,8 @@
  * THE PRE-DROP's button wears its kind's glyph (`preDrop` for a spike,
  * `preDropVoice` for a vocal intro); on one of his own drops its tap goes
  * through the same `parts` call, since its state lives in the drop store,
- * never his song profile. Nothing plays from a pre-drop yet.
+ * never his song profile. One that plays fades the drop's colour change
+ * across it (dropsPanel.PRE_DROP_IN_THE_ROOM).
  *
  * TIE-INS (components/songTimelineView.tsx): a tap on a drop pill on the
  * song timeline, or on a sequence on Home's audio shape, selects the drop

@@ -33,14 +33,15 @@
  * stored in the drop store, never his song profile, so its tap asks
  * nothing first). A waiting pre-drop is something waiting for him: it
  * counts in the title and lights the double tick, his own rows included.
- * Nothing plays from a pre-drop yet; its words say so. The in-place
+ * One that plays fades the drop's colour change across it; its words say
+ * so (PRE_DROP_IN_THE_ROOM, the Timeline's). The in-place
  * editor's pre-drop handle snaps to the rail of its kind — a spike to the
  * hits (`DropRails.hits`), a vocal intro to the entries — and stays inside
  * its kind's lead range (`snapPreDrop` / `stepPreDrop` / `clampPreDrop`). */
 import type {
   DropSequencesResponse, DropSequenceView, PartKey, PartView, PreDropKind, YoursRow,
 } from '../timeline/dropSequences';
-import { PARTS, PHASE_COLOR, PRE_DROP_COLOR } from '../timeline/dropSequences';
+import { PARTS, PHASE_COLOR, PRE_DROP_COLOR, PRE_DROP_IN_THE_ROOM_SHORT } from '../timeline/dropSequences';
 import type { LastDrop } from '../types';
 
 export type RowKind = 'detected' | 'added' | 'yours';
@@ -106,9 +107,9 @@ export const PRE_DROP_KIND_WORD: Record<PreDropKind, string> = {
   spike: 'a spike', intro: 'a vocal intro',
 };
 
-/** What a pre-drop's tooltip adds while no pre-drop plays in the room yet
- * (drop_firing.PRE_DROPS_PLAY: the engine that plays them is a later step). */
-export const PRE_DROPS_DO_NOT_PLAY = 'pre-drops do not play in the room yet';
+/** What a pre-drop's tooltip adds about the room (predrop step 5): the
+ * Timeline's own words, read, never re-typed. */
+export const PRE_DROP_IN_THE_ROOM = PRE_DROP_IN_THE_ROOM_SHORT;
 
 /** What a tap on a part does: waiting → on, on → off, off → on. */
 export function nextPartState(s: PartView): 'on' | 'off' | null {
@@ -125,9 +126,9 @@ export function partTitle(row: Pick<PanelRow, 'kind'> & Partial<Pick<PanelRow, '
     // the pre-drop is never one of his triggers, his own drops included
     if (state === 'absent') return 'No pre-drop on this drop — add one in its editor (the pencil)';
     const named = row.preDropKind ? `${name} (${PRE_DROP_KIND_WORD[row.preDropKind]})` : name;
-    if (state === 'on') return `${named}: approved — tap to switch it off; ${PRE_DROPS_DO_NOT_PLAY}`;
-    if (state === 'off') return `${named}: off, never plays — tap to switch it back on; ${PRE_DROPS_DO_NOT_PLAY}`;
-    return `${named}: waiting for you — tap to approve it; ${PRE_DROPS_DO_NOT_PLAY}`;
+    if (state === 'on') return `${named}: approved — tap to switch it off; ${PRE_DROP_IN_THE_ROOM}`;
+    if (state === 'off') return `${named}: off, never plays — tap to switch it back on; ${PRE_DROP_IN_THE_ROOM}`;
+    return `${named}: waiting for you — tap to approve it; ${PRE_DROP_IN_THE_ROOM}`;
   }
   if (state === 'absent') return `No ${name.toLowerCase()} on this drop`;
   if (row.kind === 'yours') {

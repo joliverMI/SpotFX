@@ -5,7 +5,8 @@ and the double tick — on a detected drop, a drop he added, and one of his
 own drops (stored in the drop store under "mine:<his drop trigger id>",
 never his song profile); the snap rails it is dragged along; the routes;
 Sonic's set_pre_drop / switch_pre_drop. Every edit answers the undo pair.
-Nothing plays from a pre-drop yet (drop_firing.PRE_DROPS_PLAY).
+Whether a pre-drop plays is decided per scene by step 5's engine
+(spectra/services/pre_drop_play.py), not by anything edited here.
 
 Synthetic detections, plus his Eyes Cut Deeper shape (the step-3 fixture,
 tests/fixtures/predrop/ecd) where the rules and the rails need real audio.
@@ -223,13 +224,18 @@ def test_the_double_tick_and_confirm_approve_the_pre_drop_too():
     assert _seq()["parts"]["pre_drop"] == "on"
 
 
-def test_nothing_plays_from_an_edited_pre_drop_yet():
+def test_an_edited_approved_pre_drop_rides_its_lull_and_is_never_a_member():
+    """Since the pre-drop engine (step 5): his dragged and approved pre-drop
+    plays — it rides the sequence's LULL (FiringSequence.pre_drop_for, the
+    candidate the trigger clock hands the lull arm) — and is never a member
+    of its own: the sequence still fires charge, lull and drop."""
     from spectra.services import drop_firing, drop_sequences as ds
     _set_detected()
     _edit("handles", handles={"pre_drop": 43_000})
     _edit("approve")
     (seq,) = drop_firing.firing_sequences(ds.view(URI, triggers=[]))
-    assert seq.pre_drop_ms is None
+    assert (seq.pre_drop_ms, seq.pre_drop_kind) == (43_000, "spike")
+    assert seq.pre_drop_for("lull") == (43_000, "spike")
     assert [c for c, _ in seq.members()] == ["charge", "lull", "drop"]
 
 

@@ -375,6 +375,20 @@ DROP_SHOCK_TOLD_EFFECTS = DROP_SHOCK_EFFECTS | STRIP_PHASE_EFFECTS | {"radial"}
 # Shockwave member and takes the breath in its own draw.
 BREATH_HOLD_EFFECTS = (DROP_SHOCK_EFFECTS - {"fish"}) | {"pulse", "radial"}
 
+# THE PRE-DROP (fx/effects/pre_drop.py is the binding statement; predrop plan
+# step 5): the effects SpotFX tells a pre-drop on a lull arm that plays one
+# (`pre_drop_at_s`, `pre_drop_s`, `pre_drop_kind`, `pre_drop_look`) and whose
+# lull — progress ramp, dark point, breath-hold — it measures to the
+# pre-drop instead of the drop. EMPTY on purpose until each effect's look is
+# built and he has watched it (step 6: Fireworks, Pulse, Orbits; step 7:
+# Black Hole, then Fish, Star, Sauron, the strips — never Squiggles). With it
+# empty every arm write is byte-identical to before the engine existed
+# (tests/test_pre_drop_arm_identity.py); the engine still decides whether a
+# pre-drop plays, so the drop's colour change fades across one that does.
+# A member must also declare its looks (`pre_drop_looks` in
+# config/effect_params.json, `pre_drop_looks()` below).
+PRE_DROP_EFFECTS: frozenset = frozenset()
+
 # ... and its drop-side half: effects told the fire's intensity on every
 # drop arm (`drop_intensity`) so the drop's length and speed scale with the
 # music (lull_handoff.drop_scale). Every STRIP_PHASE_EFFECTS member too (the
@@ -595,6 +609,19 @@ def param_catalogue(effect_type: str) -> dict[str, dict]:
                 entry[field] = meta[field]
         out[name] = entry
     return out
+
+
+def pre_drop_looks(effect_type: str) -> Optional[dict]:
+    """The effect's declared PRE-DROP LOOKS (fx/effects/pre_drop.py, opt-in
+    step 3) — {"looks": {name: {"label", "kinds"}}, "auto": {kind: name}} —
+    or None when it declares none (every effect, until step 6 builds the
+    first looks). What the Phase tab offers per entry and what "auto"
+    resolves to (pre_drop.resolve_look)."""
+    block = (registry().get("effects", {}).get(effect_type, {})
+             .get("pre_drop_looks"))
+    if not isinstance(block, dict) or not isinstance(block.get("looks"), dict):
+        return None
+    return block
 
 
 def bg_color_blocked(effect_type: str) -> bool:
