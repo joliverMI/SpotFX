@@ -4031,6 +4031,7 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .jukebox-phone { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); min-width: 0; flex-wrap: wrap; }
 .jukebox-phone input { font: inherit; padding: 2px 6px; max-width: 14em; }
 .jukebox-phone-blocked { opacity: 0.6; }
+.jukebox-phone-jailed { border-left: 3px solid var(--danger); padding-left: 6px; }
 .jukebox-log pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 320px; overflow: auto; margin: 8px 0 0; }
 .jukebox-presets { display: grid; gap: 8px; margin-bottom: 10px; }
 .jukebox-preset { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px 12px; height: auto; white-space: normal; }

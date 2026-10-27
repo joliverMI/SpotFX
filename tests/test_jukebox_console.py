@@ -180,6 +180,22 @@ def test_a_guest_rule_asks_first_and_is_validated_by_spotfx(spotfx):
     assert set(jc.GUEST_RULE_KEYS) <= set(m.ShowConfig.model_fields)
 
 
+def test_a_free_play_rule_asks_first_and_is_validated_by_spotfx(spotfx):
+    """Free play's rules (PR 2.3: the room's skip, bumps, play next, the
+    jail's time-out) are guest rules like any other: asked first, the one
+    validator; pardoning a guest stays the phone's button."""
+    r = _run(jc._op_get_jukebox_settings())
+    assert r["guest_rules"]["free_skip_downs"] == 3 and r["guest_rules"]["free_jail_songs"] == 5
+    ask = _run(jc._op_set_jukebox_setting("free_jail_songs", 3))
+    assert ask["status"] == "needs_confirmation" and "5 → 3" in ask["question"] and not _writes(spotfx)
+    done = _run(jc._op_set_jukebox_setting("free_jail_songs", 3, confirm_id=ask["confirm_id"]))
+    assert done["status"] == "applied" and store.load_show().free_jail_songs == 3
+    for key, bad in (("free_skip_downs", 1), ("free_skip_share", 95), ("free_play_next", "anyone")):
+        r = _run(jc._op_set_jukebox_setting(key, bad))
+        assert r["status"] == "rejected" and key in r["reason"]
+    assert not any("pardon" in name or "phone" in name for name in jc.OPERATIONS)
+
+
 def test_program_keys_and_approval_go_to_their_own_stores(spotfx):
     ask = _run(jc._op_set_jukebox_setting("every", 3))
     assert _run(jc._op_set_jukebox_setting("every", 3, confirm_id=ask["confirm_id"]))["status"] == "applied"

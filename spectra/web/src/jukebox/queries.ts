@@ -166,12 +166,12 @@ export function useGuests(running: boolean) {
   });
 }
 
-/** Approve, block, rename or lock the name of one phone. */
+/** Approve, block, rename, lock the name of, or pardon one phone. */
 export function useHostPhone() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...patch }: { id: string; approved?: boolean; blocked?: boolean;
-                                     name_locked?: boolean; name?: string }) =>
+                                     name_locked?: boolean; name?: string; pardon?: boolean }) =>
       spotfxPost<GuestsRead>(`/jukebox/guests/${encodeURIComponent(id)}`, patch),
     onSuccess: (r) => {
       qc.setQueryData(['jukebox-guests'], r);
@@ -186,6 +186,21 @@ export function useHoldEntry() {
   return useMutation({
     mutationFn: ({ id, held }: { id: string; held: boolean }) =>
       spotfxPost<{ status: string; detail?: string }>(`/jukebox/line/${encodeURIComponent(id)}/hold`, { held }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status }),
+  });
+}
+
+/** Play next (free play's host-only move): a waiting song to the front of
+ * the waiting songs. A refusal (it was sent to Spotify meanwhile) is an error. */
+export function usePlayNext() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const r = await spotfxPost<{ status: string; detail?: string }>(
+        `/jukebox/line/${encodeURIComponent(id)}/move`, { to: 0 });
+      if (r.status === 'refused') throw new Error(r.detail || 'It could not move.');
+      return r;
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status }),
   });
 }

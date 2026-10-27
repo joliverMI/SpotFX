@@ -5,17 +5,17 @@
 //
 //   loading → idle (no night) | refused (no party link, party full) |
 //             welcome (first visit: name + house rules + "Let's go") |
-//             the screens (Now · Queue), with the "your song" strip, the
-//             "you're next" banner (Android also buzzes), and on iPhone the
-//             Add to Home Screen hint.
+//             the screens (Now · Queue · Add), with the "your song" strip, the
+//             "you're next" banner (Android also buzzes), on iPhone the Add to
+//             Home Screen hint, and the move sheet (free play's bumps).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, storePhone, storedPhone } from './api';
-import type { Refusal, RunningView, StripTone, View } from './types';
+import type { NextSong, Refusal, RunningView, StripTone, View } from './types';
 import {
-  bannerFor, fromAddress, homeScreenAddress, since, stripText, tabsFor, vibration,
+  bannerAfter, bannerFor, bumpOffer, fromAddress, homeScreenAddress, since, stripText, tabsFor, vibration,
   wantsHomeScreenHint, type BannerKind, type Tab,
 } from './logic';
-import { Sheet } from './bits';
+import { Art, Sheet } from './bits';
 import { AddScreen, NowScreen, QueueScreen, Welcome } from './screens';
 
 const TOKEN_KEY = 'jukebox.token';
@@ -50,6 +50,7 @@ export default function GuestApp() {
   const [error, setError] = useState('');
   const [banner, setBanner] = useState<BannerKind | null>(null);
   const [sheet, setSheet] = useState<'name' | 'home' | null>(null);
+  const [moving, setMoving] = useState<NextSong | null>(null);
   const [toast, setToast] = useState('');
   const [nowMs, setNowMs] = useState(() => Date.now());
   const tapped = useRef(false);
@@ -68,10 +69,11 @@ export default function GuestApp() {
       lastTone.current = null;
       return;
     }
-    const kind = bannerFor(lastTone.current, v.strip.tone);
+    const prev = lastTone.current;
+    const kind = bannerFor(prev, v.strip.tone);
     lastTone.current = v.strip.tone;
+    setBanner((showing) => bannerAfter(prev, v.strip.tone, showing));
     if (kind) {
-      setBanner(kind);
       const pattern = vibration(kind, typeof navigator.vibrate === 'function', tapped.current);
       if (pattern) navigator.vibrate(pattern);
     }
@@ -242,7 +244,10 @@ export default function GuestApp() {
                      onVote={(v) => void act(() => api.vote(v))}
                      homeHint={homeHint} onHomeHint={openHome} />
         )}
-        {tab === 'queue' && <QueueScreen view={view} elapsedMs={elapsed} nowMs={nowMs} />}
+        {tab === 'queue' && (
+          <QueueScreen view={view} elapsedMs={elapsed} nowMs={nowMs}
+                       onMove={(s) => { setError(''); setMoving(s); }} />
+        )}
         {tab === 'add' && (
           <AddScreen view={view} onAdded={(v, text) => { show(v); setToast(text); }} />
         )}
@@ -262,6 +267,24 @@ export default function GuestApp() {
                    onSave={(name) => { void act(() => api.rename(name)).then((ok) => { if (ok) closeSheet(); }); }}
                    onShuffle={() => void act(() => api.rename(null, true))} />
       )}
+      {moving && (
+        <MoveSheet song={moving} view={view} busy={busy} error={error}
+                   onClose={() => setMoving(null)}
+                   onMove={async (dir) => {
+                     setBusy(true);
+                     setError('');
+                     const r = await api.bump(moving.entry_id ?? '', dir);
+                     setBusy(false);
+                     if (r.ok) {
+                       show(r.view);
+                       setMoving(null);
+                       const place = r.bumped?.place;
+                       setToast(`Moved ${dir}${place ? ` — now #${place} of the waiting songs` : ''}`);
+                     } else {
+                       setError(r.refusal.detail);
+                     }
+                   }} />
+      )}
       {sheet === 'home' && (
         <Sheet title="Add to Home Screen" onClose={closeSheet}>
           <p>Keep tonight's Jukebox one tap away — and the same name comes with you.</p>
@@ -273,6 +296,38 @@ export default function GuestApp() {
         </Sheet>
       )}
     </div>
+  );
+}
+
+function MoveSheet({ song, view, busy, error, onClose, onMove }: {
+  song: NextSong; view: RunningView; busy: boolean; error: string;
+  onClose: () => void; onMove: (dir: 'up' | 'down') => void;
+}) {
+  const offer = bumpOffer(song, view.me.bumps, view.me.jail);
+  const left = view.me.bumps?.left ?? 0;
+  return (
+    <Sheet title={song.bump === 'up' ? 'Move your song up' : 'Move this song down'} onClose={onClose}>
+      <div className="g-move-song">
+        <Art song={song} size="small" />
+        <div className="g-row-text">
+          <div className="g-row-title">{song.title || 'A song'}</div>
+          <div className="g-row-artist">{song.artist}</div>
+        </div>
+      </div>
+      <p className="g-muted g-small">
+        {song.bump === 'up' ? 'It swaps with the song just ahead of it.' : 'It swaps with the song just behind it.'}
+        {' '}Free tonight — {left} bump{left === 1 ? '' : 's'} left this hour.
+      </p>
+      {offer && !offer.can && <p className="g-error">{offer.why}</p>}
+      {error && <p className="g-error" role="alert">{error}</p>}
+      <div className="g-sheet-actions">
+        <button type="button" className="g-btn g-btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="g-btn g-btn-primary" disabled={busy || !offer?.can}
+                onClick={() => offer && onMove(offer.dir)}>
+          {offer?.dir === 'up' ? '↑ Move up' : '↓ Move down'}
+        </button>
+      </div>
+    </Sheet>
   );
 }
 

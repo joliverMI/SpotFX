@@ -1,12 +1,14 @@
 // The guest screens: Welcome (first visit), Now (the main screen: what is
-// playing, its votes, the two big buttons, the next few songs), and Queue
-// (your songs, then everything coming up).
+// playing, its votes, the two big buttons, how close the room is to
+// skipping it, the next few songs), Queue (your songs, then everything
+// coming up, with ⇅ on the songs you may move) and Add.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { RunningView, SearchResult, View } from './types';
+import type { NextSong, RunningView, SearchResult, View } from './types';
 import {
-  SEARCH_DEBOUNCE_MS, SEARCH_MIN, addStatus, addedText, badges, byLine, mmss, progressNow,
+  SEARCH_DEBOUNCE_MS, SEARCH_MIN, addStatus, addedText, badges, bumpOffer, bumpsLine, byLine, mmss,
+  progressNow, skipLine,
 } from './logic';
-import { Art, OpenSpotify, SongRow, SpotifyIcon } from './bits';
+import { Art, MyRow, OpenSpotify, SongRow, SpotifyIcon } from './bits';
 import { api, type Found } from './api';
 
 export function Welcome({ view, busy, onShuffle, onGo, error }: {
@@ -104,6 +106,9 @@ export function NowScreen({ view, elapsedMs, nowMs, busy, onVote, homeHint, onHo
       ) : (
         <p className="g-why-not">{now.why_not}</p>
       )}
+      {skipLine(now.skip, now.votes.down) && (
+        <p className="g-skip-line" aria-live="polite">{skipLine(now.skip, now.votes.down)}</p>
+      )}
       {homeHint && (
         <button type="button" className="g-btn g-btn-ghost g-home-hint" onClick={onHomeHint}>
           ＋ Add to Home Screen
@@ -121,22 +126,33 @@ export function NowScreen({ view, elapsedMs, nowMs, busy, onVote, homeHint, onHo
   );
 }
 
-export function QueueScreen({ view, elapsedMs, nowMs }: { view: RunningView; elapsedMs: number; nowMs: number }) {
-  const mine = view.next.filter((s) => s.mine);
+export function QueueScreen({ view, elapsedMs, nowMs, onMove }: {
+  view: RunningView; elapsedMs: number; nowMs: number; onMove: (song: NextSong) => void;
+}) {
+  // the line about bumps shows wherever a song could move; ⇅ only where
+  // THIS phone can move it now (not in a time-out, not out of bumps)
+  const movable = (s: NextSong) => !!bumpOffer(s, view.me.bumps, view.me.jail);
+  const canMove = (s: NextSong) => !!bumpOffer(s, view.me.bumps, view.me.jail)?.can;
   return (
     <div className="g-queue">
       <section aria-label="Your songs">
         <h2 className="g-h2">Your songs</h2>
-        {mine.length ? (
-          <ul className="g-list">{mine.map((s) => <SongRow key={`m-${s.place}`} song={s} elapsedMs={elapsedMs} nowMs={nowMs} />)}</ul>
+        {view.mine.length ? (
+          <ul className="g-list">{view.mine.map((s) => <MyRow key={s.entry_id} song={s} elapsedMs={elapsedMs} nowMs={nowMs} />)}</ul>
         ) : (
-          <p className="g-muted">{view.mine.length ? 'Your song is further down the line.' : 'None in line yet — tap ＋ to add one.'}</p>
+          <p className="g-muted">None in line yet — tap ＋ to add one.</p>
         )}
       </section>
       <section aria-label="Coming up">
         <h2 className="g-h2">Coming up</h2>
+        {view.next.some(movable) && (
+          <p className="g-muted g-small g-bumps-line">{bumpsLine(view.me.bumps, view.me.jail)}</p>
+        )}
         {view.next.length ? (
-          <ul className="g-list">{view.next.map((s) => <SongRow key={`${s.place}-${s.uri}`} song={s} elapsedMs={elapsedMs} nowMs={nowMs} />)}</ul>
+          <ul className="g-list">{view.next.map((s) => (
+            <SongRow key={`${s.place}-${s.uri}`} song={s} elapsedMs={elapsedMs} nowMs={nowMs}
+                     onMove={canMove(s) ? () => onMove(s) : undefined} />
+          ))}</ul>
         ) : (
           <p className="g-muted">Nothing lined up yet.</p>
         )}
@@ -156,7 +172,7 @@ export function AddScreen({ view, onAdded }: {
   const [adding, setAdding] = useState('');
   const [added, setAdded] = useState<Set<string>>(new Set());
   const seq = useRef(0);
-  const status = addStatus(view.requests, view.me.approved);
+  const status = addStatus(view.requests, view.me.approved, view.me.jail);
 
   const run = useCallback(async (q: string, offset: number) => {
     const mine = ++seq.current;

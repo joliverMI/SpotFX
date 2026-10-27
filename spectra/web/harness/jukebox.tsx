@@ -114,7 +114,7 @@ let show = {
 // tonight's phones (the Guests tab): one waiting for approval, one blocked
 const PHONES = [
   { id: 'phoneAAAAAAAAAAAAAAAAA', name: 'Disco Ana', joined: true, created_ms: NOW - 50 * MIN, joined_ms: NOW - 50 * MIN, renames: 1, approved: true, blocked: false, name_locked: false, waiting: 1, played: 2, votes: 9 },
-  { id: 'phoneBBBBBBBBBBBBBBBBB', name: 'Lucky Otter', joined: true, created_ms: NOW - 40 * MIN, joined_ms: NOW - 39 * MIN, renames: 0, approved: true, blocked: false, name_locked: true, waiting: 1, played: 1, votes: 6 },
+  { id: 'phoneBBBBBBBBBBBBBBBBB', name: 'Lucky Otter', joined: true, created_ms: NOW - 40 * MIN, joined_ms: NOW - 39 * MIN, renames: 0, approved: true, blocked: false, name_locked: true, waiting: 1, played: 1, votes: 6, jail_left: 2, jail_count: 6, jail_at: 6, jails: 1 },
   { id: 'phoneCCCCCCCCCCCCCCCCC', name: 'Velvet Moose', joined: true, created_ms: NOW - 6 * MIN, joined_ms: NOW - 5 * MIN, renames: 0, approved: false, blocked: false, name_locked: false, waiting: 0, played: 0, votes: 0 },
   { id: 'phoneDDDDDDDDDDDDDDDDD', name: 'Witty Gecko', joined: false, created_ms: NOW - 2 * MIN, joined_ms: null, renames: 0, approved: true, blocked: true, name_locked: false, waiting: 0, played: 0, votes: 1 },
 ];
@@ -218,7 +218,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ show, fields: SNAP.fields, guest_fields: SNAP.guest_fields, presets: SNAP.presets });
   }
   if (url.includes('/api/jukebox/guests')) {
-    return json(RUNNING ? { running: true, phones: PHONES, pending: 1 } : { running: false, phones: [] });
+    return json(RUNNING ? { running: true, phones: PHONES, pending: 1, jailed: 1, crowd: 4 } : { running: false, phones: [] });
   }
   if (url.includes('/api/jukebox/line/')) return json({ status: 'refused', reason: 'harness', detail: 'This is the mocked harness — nothing changed.' });
   if (url.includes('/api/jukebox/price-check')) {

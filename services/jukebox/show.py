@@ -97,9 +97,17 @@ GUEST_FIELDS: list[tuple[str, str, str, str]] = [
     ("max_phones", "Guests", "Most phones tonight", "phones"),
     ("renames_per_night", "Guests", "Name changes per night", "changes"),
     ("word_filter", "Guests", "Word filter on names", ""),
+    # free play (report §4's Free play card, PR 2.3)
+    ("free_skip_downs", "Free play", "Skip by vote: at least", "▼"),
+    ("free_skip_share", "Free play", "…and this share of the votes", "%"),
+    ("free_bumps_per_hour", "Free play", "Bumps per guest", "an hour"),
+    ("free_play_next", "Free play", "Play next", ""),
+    ("free_jail_songs", "Free play", "Jail: a guest's songs sit out (0 = no jail)", "songs"),
 ]
 EXPLICIT_WORDS = {"no": "not allowed", "extra": "allowed (+2 credits with credits on)",
                   "after": "allowed after a set time"}
+PLAY_NEXT_WORDS = {"host": "host only", "off": "off"}
+CHOICE_WORDS = {"explicit": EXPLICIT_WORDS, "free_play_next": PLAY_NEXT_WORDS}
 
 SHOW_KEYS = frozenset({"economy", "approve_new_phones"} | {k for k, *_ in GUEST_FIELDS})
 
@@ -136,8 +144,8 @@ def guest_fields() -> list[dict]:
             lo = getattr(m, "ge", lo)
             hi = getattr(m, "le", hi)
         value = getattr(default, key)
-        if key == "explicit":
-            kind, choices = "choice", [{"value": k, "label": v} for k, v in EXPLICIT_WORDS.items()]
+        if key in CHOICE_WORDS:
+            kind, choices = "choice", [{"value": k, "label": v} for k, v in CHOICE_WORDS[key].items()]
         elif isinstance(value, bool):
             kind, choices = "bool", None
         elif isinstance(value, int):

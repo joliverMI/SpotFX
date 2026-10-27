@@ -1000,6 +1000,70 @@
    "min": null,
    "max": null,
    "choices": null
+  },
+  {
+   "key": "free_skip_downs",
+   "card": "Free play",
+   "label": "Skip by vote: at least",
+   "unit": "▼",
+   "kind": "int",
+   "default": 3,
+   "min": 2,
+   "max": 10,
+   "choices": null
+  },
+  {
+   "key": "free_skip_share",
+   "card": "Free play",
+   "label": "…and this share of the votes",
+   "unit": "%",
+   "kind": "int",
+   "default": 67,
+   "min": 50,
+   "max": 90,
+   "choices": null
+  },
+  {
+   "key": "free_bumps_per_hour",
+   "card": "Free play",
+   "label": "Bumps per guest",
+   "unit": "an hour",
+   "kind": "int",
+   "default": 2,
+   "min": 0,
+   "max": 10,
+   "choices": null
+  },
+  {
+   "key": "free_play_next",
+   "card": "Free play",
+   "label": "Play next",
+   "unit": "",
+   "kind": "choice",
+   "default": "host",
+   "min": null,
+   "max": null,
+   "choices": [
+    {
+     "value": "host",
+     "label": "host only"
+    },
+    {
+     "value": "off",
+     "label": "off"
+    }
+   ]
+  },
+  {
+   "key": "free_jail_songs",
+   "card": "Free play",
+   "label": "Jail: a guest's songs sit out (0 = no jail)",
+   "unit": "songs",
+   "kind": "int",
+   "default": 5,
+   "min": 0,
+   "max": 15,
+   "choices": null
   }
  ]
 }

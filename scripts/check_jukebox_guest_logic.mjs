@@ -103,5 +103,48 @@ ok(L.addedText(25 * 60_000, nine, 'en-US') === 'Added — plays in 25 min (~9:55
 ok(L.addedText(null, nine) === 'Added to the line.', 'no start time: just added');
 ok(L.SEARCH_DEBOUNCE_MS >= 300 && L.SEARCH_MIN === 2, 'searches wait for typing to stop, and need two letters');
 
+console.log('free play (PR 2.3)');
+const jail = L.stripText({ tone: 'jail', title: '', place: null, starts_in_ms: null, held: false, count: 1, jail_left: 3 }, 0, nine, true);
+ok(jail.tone === 'jail' && jail.label === "You're in a time-out" && jail.detail === 'Your songs sit out 3 more songs',
+   `a time-out turns the strip red with the songs left, on one line (${jail.detail})`);
+ok(L.bannerAfter('queued', 'next', null) === 'next' && L.bannerAfter('next', 'playing', 'next') === 'playing',
+   'a new "next" or "playing" shows the banner');
+ok(L.bannerAfter('playing', 'jail', 'playing') === null && L.bannerAfter('playing', 'queued', 'playing') === null,
+   'any other change of the strip takes a stale banner down');
+ok(L.bannerAfter('playing', 'playing', 'playing') === 'playing' && L.bannerAfter(null, 'jail', null) === null,
+   'no change: the banner stays as it was');
+const sk = (o) => ({ downs_at: 3, share: 67, rule: '3 ▼ and two-thirds of the votes skip a song', needed: 3,
+                     skipping: false, grace_left_ms: 0, ...o });
+ok(L.skipLine(sk({}), 0) === '3 ▼ and two-thirds of the votes skip a song.', 'no ▼ yet: the rule');
+ok(L.skipLine(sk({ needed: 1 }), 2) === 'One more ▼ skips this song.', 'one more');
+ok(L.skipLine(sk({ needed: 2 }), 1) === '2 more ▼ skip this song.', 'two more');
+ok(L.skipLine(sk({ needed: 0, grace_left_ms: 9000 }), 3).includes('in a few seconds'), 'due, waiting out the first seconds');
+ok(L.skipLine(sk({ skipping: true, needed: 0 }), 3) === '', 'already skipping: the song\'s own line says so');
+ok(L.skipLine(undefined, 0) === '', 'nothing to say for a song that can\'t be skipped');
+const song = (o) => ({ kind: 'jukebox', uri: 'u', title: 'T', artist: '', image: '', thumb: '', open_url: '',
+                       by: { kind: 'guest', name: 'Ana' }, mine: false, committed: false, starts_in_ms: 1,
+                       duration_ms: 1, place: 2, entry_id: 'e', bump: 'down', ...o });
+const bumps = (o) => ({ per_hour: 2, left: 2, next_at: null, ...o });
+const offer = L.bumpOffer(song({}), bumps({}), { in: false, songs_left: 0, count: 0, at: 5, on: true });
+ok(offer.dir === 'down' && offer.can && offer.label === 'Move it down one place', 'someone else\'s song: down');
+ok(L.bumpOffer(song({ bump: 'up', mine: true }), bumps({}), undefined).label === 'Move it up one place', 'your own: up');
+ok(L.bumpOffer(song({ committed: true }), bumps({}), undefined) === null, 'never the song sent to Spotify');
+ok(L.bumpOffer(song({ bump: null }), bumps({}), undefined) === null, 'nothing offered where the server offers nothing');
+const used = L.bumpOffer(song({}), bumps({ left: 0, next_at: '9:46' }), undefined);
+ok(!used.can && used.why.includes('free at 9:46'), `out of bumps: when the next frees up (${used.why})`);
+ok(!L.bumpOffer(song({}), bumps({ per_hour: 0, left: 0 }), undefined).can, 'bumps off');
+ok(L.bumpOffer(song({}), bumps({}), { in: true, songs_left: 2, count: 5, at: 5, on: true }).why.includes('after 2 more songs'),
+   'in a time-out: no bumps until it ends');
+ok(L.bumpsLine(bumps({ left: 1 }), undefined).startsWith('1 bump left this hour'), 'the Queue says how many bumps are left');
+ok(!L.addStatus(req({}), true, { in: true, songs_left: 1, count: 5, at: 5, on: true }).canAdd
+   && L.addStatus(req({}), true, { in: true, songs_left: 1, count: 5, at: 5, on: true }).text.includes('after 1 more song.'),
+   'in a time-out: no adding until it ends');
+const mine = (o) => ({ ...song({ mine: true }), state: 'waiting', held: false, known: false, ...o });
+ok(L.myStatus(mine({ jailed: true }), 0, nine) === 'Sits out your time-out · keeps its place', 'your song in a time-out');
+ok(L.myStatus(mine({ held: true }), 0, nine).startsWith('On hold'), 'your song on hold');
+ok(L.myStatus(mine({ state: 'playing' }), 0, nine) === 'Playing now', 'your song playing');
+ok(L.myStatus(mine({ starts_in_ms: 120_000, place: 3 }), 0, nine, 'en-US') === '#3 · in 2:00 · ~9:32',
+   `your song's place and time (${L.myStatus(mine({ starts_in_ms: 120_000, place: 3 }), 0, nine, 'en-US')})`);
+
 console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);
 process.exit(failures === 0 ? 0 : 1);

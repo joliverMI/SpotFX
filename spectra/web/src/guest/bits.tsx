@@ -2,8 +2,8 @@
 // shown as it is — never cropped, blurred or drawn over), the Spotify mark
 // with its link back, a song row, and the bottom sheet.
 import { useEffect, type ReactNode } from 'react';
-import type { NextSong, Song } from './types';
-import { byLine, clockAt, inWords } from './logic';
+import type { MySong, NextSong, Song } from './types';
+import { byLine, clockAt, inWords, myStatus } from './logic';
 
 export function Art({ song, size, className = '' }: { song: Song; size: 'big' | 'small'; className?: string }) {
   const src = size === 'big' ? (song.image || song.thumb) : (song.thumb || song.image);
@@ -36,7 +36,9 @@ export function OpenSpotify({ song, label = true }: { song: Song; label?: boolea
   );
 }
 
-export function SongRow({ song, elapsedMs, nowMs }: { song: NextSong; elapsedMs: number; nowMs: number }) {
+export function SongRow({ song, elapsedMs, nowMs, onMove }: {
+  song: NextSong; elapsedMs: number; nowMs: number; onMove?: () => void;
+}) {
   const left = song.starts_in_ms === null ? null : Math.max(0, song.starts_in_ms - elapsedMs);
   const when = left === null ? '' : `${inWords(left)} · ~${clockAt(nowMs, left)}`;
   return (
@@ -50,6 +52,31 @@ export function SongRow({ song, elapsedMs, nowMs }: { song: NextSong; elapsedMs:
           {when && <span> · {when}</span>}
           {song.committed && <span className="g-chip">sent to Spotify</span>}
           {song.kind === 'set' && <span className="g-chip g-chip-dim" title="The host's set plays in order">🔒 set</span>}
+        </div>
+      </div>
+      {onMove && (
+        <button type="button" className="g-move-btn" onClick={onMove}
+                aria-label={`Move ${song.title || 'this song'} ${song.bump === 'up' ? 'up' : 'down'}`}>
+          ⇅
+        </button>
+      )}
+      <OpenSpotify song={song} label={false} />
+    </li>
+  );
+}
+
+/** One of your own songs on the Queue, with where it stands. */
+export function MyRow({ song, elapsedMs, nowMs }: { song: MySong; elapsedMs: number; nowMs: number }) {
+  const waiting = song.jailed || song.held;
+  return (
+    <li className={`g-row g-row-mine${waiting ? ' g-row-waiting' : ''}`}>
+      <Art song={song} size="small" />
+      <div className="g-row-text">
+        <div className="g-row-title">{song.title || 'A song'}</div>
+        <div className="g-row-artist">{song.artist}</div>
+        <div className={`g-row-meta${song.jailed ? ' g-row-jailed' : ''}`}>
+          <span>{myStatus(song, elapsedMs, nowMs)}</span>
+          {song.committed && <span className="g-chip">sent to Spotify</span>}
         </div>
       </div>
       <OpenSpotify song={song} label={false} />

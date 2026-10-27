@@ -17,6 +17,16 @@ export interface Song {
   mine: boolean;
 }
 
+/** Free play's skip on the song playing: N ▼ and that share of the votes. */
+export interface SkipInfo {
+  downs_at: number;
+  share: number;               // percent
+  rule: string;                // "3 ▼ and two-thirds of the votes skip a song"
+  needed: number;              // more ▼ that skip it (0: the room has voted it off)
+  skipping: boolean;           // it is being skipped now
+  grace_left_ms: number;       // no skip in a song's first seconds
+}
+
 export interface NowSong extends Song {
   votes: { up: number; down: number };
   my_vote: -1 | 0 | 1;
@@ -25,6 +35,7 @@ export interface NowSong extends Song {
   duration_ms: number;
   progress_ms: number;
   is_playing: boolean;
+  skip?: SkipInfo;             // set and jukebox songs (free play)
 }
 
 export interface NextSong extends Song {
@@ -33,7 +44,9 @@ export interface NextSong extends Song {
   duration_ms: number;
   place: number;               // 1 = the next song
   known?: boolean;             // the lights already know it
-  entry_id?: string;           // only on your own songs
+  entry_id?: string;           // jukebox songs (an id for the song, never a phone)
+  bump?: 'up' | 'down' | null; // what you may do to it: your own up, others' down
+  bump_why?: string;           // why it can't move, when it can't
 }
 
 export interface MySong extends Song {
@@ -41,12 +54,13 @@ export interface MySong extends Song {
   state: 'playing' | 'next' | 'waiting';
   committed: boolean;
   held: boolean;               // the host is holding it: it keeps its place
+  jailed?: boolean;            // it sits out your time-out (keeps its place)
   known: boolean;
   place: number | null;
   starts_in_ms: number | null;
 }
 
-export type StripTone = 'none' | 'queued' | 'next' | 'playing';
+export type StripTone = 'none' | 'queued' | 'next' | 'playing' | 'jail';
 export interface Strip {
   tone: StripTone;
   title: string;
@@ -54,7 +68,14 @@ export interface Strip {
   starts_in_ms: number | null;
   held: boolean;
   count: number;
+  jail_left?: number;
 }
+
+/** The jail (free play): a time-out of N songs when your songs get the
+ *  bar's net ▼. */
+export interface JailInfo { in: boolean; songs_left: number; count: number; at: number; on: boolean }
+/** Bumps this hour. */
+export interface BumpsInfo { per_hour: number; left: number; next_at: string | null }
 
 /** Tonight's requests: open until last call; songs in line per guest. */
 export interface Requests {
@@ -93,7 +114,8 @@ export interface RunningView {
   state: 'running';
   server_ms: number;
   poll_ms: number;
-  me: { name: string; joined: boolean; approved: boolean; name_locked: boolean; renames_left: number };
+  me: { name: string; joined: boolean; approved: boolean; name_locked: boolean; renames_left: number;
+        jail?: JailInfo; bumps?: BumpsInfo };
   requests: Requests;
   features: Features;
   house_rules: string[];

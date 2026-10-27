@@ -1,9 +1,11 @@
 // The guest page's rules, pure (scripts/check_jukebox_guest_logic.mjs holds
 // them): the "your song" strip's words, when the "you're next" banner shows
 // and whether the phone buzzes, which phones get the Add to Home Screen hint,
-// the tabs, and how times read. Times count from when THIS phone received the
-// view (never the server's clock against the phone's — the two can disagree).
-import type { By, Features, Strip, StripTone } from './types';
+// the tabs, how times read, and free play's words (the room's skip, bumps,
+// the time-out). Times count from when THIS phone received the view (never
+// the server's clock against the phone's — the two can disagree). Whether a
+// skip, a bump or a time-out happens is SpotFX's; this only says it.
+import type { BumpsInfo, By, Features, JailInfo, MySong, NextSong, SkipInfo, Strip, StripTone } from './types';
 
 export function mmss(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -41,6 +43,11 @@ export interface StripText { tone: StripTone; label: string; detail: string }
 export function stripText(strip: Strip, elapsedMs: number, nowMs: number,
                           canAdd: boolean, locale?: string): StripText {
   const left = strip.starts_in_ms === null ? null : Math.max(0, strip.starts_in_ms - elapsedMs);
+  if (strip.tone === 'jail') {
+    const n = strip.jail_left ?? 0;
+    return { tone: 'jail', label: "You're in a time-out",
+             detail: `Your songs sit out ${n} more song${n === 1 ? '' : 's'}` };
+  }
   if (strip.held && strip.tone !== 'playing') {
     return { tone: 'queued', label: 'Your song is on hold',
              detail: `${strip.title} · the host is holding it; it keeps its place` };
@@ -68,6 +75,16 @@ export type BannerKind = 'next' | 'playing';
 export function bannerFor(prev: StripTone | null, tone: StripTone): BannerKind | null {
   if (prev === null || prev === tone) return null;
   return tone === 'next' || tone === 'playing' ? tone : null;
+}
+
+/** The banner after a new view: a new "next" or "playing" shows; any other
+ *  change of the strip takes a showing banner down — it would be stale. */
+export function bannerAfter(prev: StripTone | null, tone: StripTone,
+                            showing: BannerKind | null): BannerKind | null {
+  const kind = bannerFor(prev, tone);
+  if (kind) return kind;
+  if (prev !== null && prev !== tone) return null;
+  return showing;
 }
 
 /** Android phones buzz with the banner (the Vibration API); iPhones have no
@@ -142,11 +159,18 @@ export function badges(r: { known: boolean; long: boolean; duration_ms: number;
   return out;
 }
 
+function songs(n: number): string {
+  return `${n} more song${n === 1 ? '' : 's'}`;
+}
+
 /** The line under the search box: requests closed, your songs in line. */
 export function addStatus(req: { open: boolean; detail: string; closes_at: string;
                                  max_waiting: number; waiting: number },
-                          approved: boolean): { canAdd: boolean; text: string } {
+                          approved: boolean, jail?: JailInfo): { canAdd: boolean; text: string } {
   if (!approved) return { canAdd: false, text: 'The host hasn\'t let this phone in yet — hang on.' };
+  if (jail?.in) {
+    return { canAdd: false, text: `You're in a time-out — you can add again after ${songs(jail.songs_left)}.` };
+  }
   if (!req.open) return { canAdd: false, text: req.detail };
   if (req.waiting >= req.max_waiting) {
     return { canAdd: false,
@@ -161,4 +185,57 @@ export function addStatus(req: { open: boolean; detail: string; closes_at: strin
 export function addedText(startsInMs: number | null, nowMs: number, locale?: string): string {
   if (startsInMs === null) return 'Added to the line.';
   return `Added — plays ${inWords(startsInMs)} (~${clockAt(nowMs, startsInMs, locale)})`;
+}
+
+// ── free play ────────────────────────────────────────────────────────────
+
+/** Under the vote buttons: how close the room is to skipping the song. */
+export function skipLine(skip: SkipInfo | undefined, downs: number): string {
+  if (!skip || skip.skipping) return '';
+  if (skip.needed === 0) {
+    return skip.grace_left_ms > 0 ? 'The room has voted to skip it — it goes in a few seconds.'
+      : 'The room has voted to skip it.';
+  }
+  if (downs === 0) return `${skip.rule}.`;
+  return skip.needed === 1 ? 'One more ▼ skips this song.' : `${skip.needed} more ▼ skip this song.`;
+}
+
+/** The Queue's line about bumps. */
+export function bumpsLine(bumps: BumpsInfo | undefined, jail: JailInfo | undefined): string {
+  if (!bumps || bumps.per_hour === 0) return 'Bumps are off tonight.';
+  if (jail?.in) return "No bumps during your time-out.";
+  const how = 'tap ⇅ to move your song up, or someone else\'s down';
+  if (bumps.left === 0) return `No bumps left this hour — the next is free at ${bumps.next_at ?? 'soon'}.`;
+  return `${bumps.left} bump${bumps.left === 1 ? '' : 's'} left this hour · ${how}`;
+}
+
+export interface BumpOffer { dir: 'up' | 'down'; label: string; can: boolean; why: string }
+
+/** What the move sheet offers for one song: your own up, others' down —
+ *  and why not, when this phone can't right now. Null: nothing to offer. */
+export function bumpOffer(song: NextSong, bumps: BumpsInfo | undefined,
+                          jail: JailInfo | undefined): BumpOffer | null {
+  if (song.kind !== 'jukebox' || song.committed || !song.bump) return null;
+  const dir = song.bump;
+  const label = dir === 'up' ? 'Move it up one place' : 'Move it down one place';
+  let why = '';
+  if (jail?.in) why = `You're in a time-out — you can move songs again after ${songs(jail.songs_left)}.`;
+  else if (!bumps || bumps.per_hour === 0) why = 'Bumps are off tonight.';
+  else if (bumps.left === 0) {
+    why = `You've used your ${bumps.per_hour} bump${bumps.per_hour === 1 ? '' : 's'} this hour — `
+      + `the next one is free at ${bumps.next_at ?? 'soon'}.`;
+  }
+  return { dir, label, can: !why, why };
+}
+
+/** One of your songs, in words: playing, next, its place and time, or why
+ *  it is waiting (the host's hold, your time-out). */
+export function myStatus(m: MySong, elapsedMs: number, nowMs: number, locale?: string): string {
+  if (m.state === 'playing') return 'Playing now';
+  if (m.jailed) return 'Sits out your time-out · keeps its place';
+  if (m.held) return 'On hold · the host is holding it, it keeps its place';
+  if (m.starts_in_ms === null) return m.place ? `#${m.place}` : 'Further down the line';
+  const left = Math.max(0, m.starts_in_ms - elapsedMs);
+  const where = m.state === 'next' ? 'Next' : `#${m.place ?? '—'}`;
+  return `${where} · ${inWords(left)} · ~${clockAt(nowMs, left, locale)}`;
 }

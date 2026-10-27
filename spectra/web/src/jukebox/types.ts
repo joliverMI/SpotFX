@@ -113,6 +113,8 @@ export interface LineEntry {
   /** the lights already know it */
   known?: boolean;
   explicit?: boolean;
+  /** places other guests have bumped it back tonight (free play) */
+  pushed_back?: number;
 }
 
 export interface JukeboxStatus {
@@ -160,13 +162,20 @@ export interface ShowConfig {
   max_phones?: number;
   renames_per_night?: number;
   word_filter?: boolean;
+  /** free play (PR 2.3): the room's skip, bumps, play next, the jail */
+  free_skip_downs?: number;
+  free_skip_share?: number;
+  free_bumps_per_hour?: number;
+  free_play_next?: 'host' | 'off';
+  free_jail_songs?: number;
 }
 
 /** One of the guests' rules as the page draws it (services/jukebox/show.py
  * `guest_fields`): its range and choices are the server's own. */
 export interface GuestField {
   key: 'night_ends' | 'last_call_min' | 'explicit' | 'explicit_after' | 'max_phones'
-    | 'renames_per_night' | 'word_filter';
+    | 'renames_per_night' | 'word_filter' | 'free_skip_downs' | 'free_skip_share'
+    | 'free_bumps_per_hour' | 'free_play_next' | 'free_jail_songs';
   card: string;
   label: string;
   unit: string;
@@ -192,12 +201,21 @@ export interface GuestPhone {
   waiting: number;
   played: number;
   votes: number;
+  /** the jail (free play): songs left in its time-out (0: not in one), the
+   * net ▼ on its songs since the last one, the bar, and times jailed */
+  jail_left?: number;
+  jail_count?: number;
+  jail_at?: number;
+  jails?: number;
 }
 
 export interface GuestsRead {
   running: boolean;
   phones: GuestPhone[];
   pending?: number;
+  jailed?: number;
+  /** phones seen in the last 15 minutes: the crowd the jail's bar rises with */
+  crowd?: number;
 }
 
 /** One economy setting as the page draws it; the range is the server's

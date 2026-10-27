@@ -11114,7 +11114,39 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   red control). The host's controls are the master's routes
   (`GET/POST /api/jukebox/guests`, `POST /api/jukebox/line/{id}/hold`) and
   the Jukebox page's Guests tab; approving, blocking and renaming a phone
-  are a named Sonic exclusion. Pardon waits for the jail (PR 2.3).
+  are a named Sonic exclusion.
+- **FREE PLAY'S RULES (PR 2.3)**: the room's skip, bumps by count, the jail
+  as a time-out, the host's pardon — `services/jukebox/guests.py`'s FREE
+  PLAY section decides when, `night.py`'s FREE PLAY section acts. Four
+  things: (1) THE JAIL'S TERM IS THE ENGINE'S, THE COUNT IS THE BOOK'S —
+  `JukeboxNight.jail` (phone -> the `plays` count it ends at; `plays`
+  counts every song that starts, never a repair skip) is what `_fills`
+  reads, so a jailed guest's songs keep their places but are never sent;
+  `GuestBook.play_by` + `GuestPhone.jail_base` are the net ▼ count, reset
+  where the term ends (`_count_release`, run before any vote moves the
+  count). (2) THE ROOM'S SKIP WAITS OUT `skip_grace_s` on a timer task and
+  re-checks the tally then; `skip_by_vote` acts only on the SAME play and
+  sends a waiting jukebox song first, so the skip lands on the slot, and
+  records it (`_played("skipped", ...)`) so the night report's own
+  `played.skipped` count sees a real vote-skip, not just the line's. (3) A
+  BUMP MOVES AMONG THE SONGS THAT CAN BE SENT (`_movable`): a held or jailed
+  song stays put, nothing passes the committed one, and `pushed_back` caps
+  the song that ends up a place further back — a PER-SONG total, not a
+  per-direction one: an up-bump steps past the song ahead of it and pushes
+  THAT song back exactly as a down-bump would, refused the same way at the
+  cap, so a guest cycling fresh phones can't push one song past the limit
+  by bumping other songs up around it. (4) "guests" for the jail's crowd-scaled bar is phones seen
+  in the last 15 minutes (`Guests._seen`, memory only). Settings:
+  `ShowConfig.free_*`, the Guests tab's Free play card; Sonic sets them
+  asking first; Pardon is the phone's button (a named exclusion, like
+  approve/block/rename). THE BOT PARTY: `scripts/jukebox_bot_party.py` runs
+  a SpotFX stand-in (the real Jukebox routers, engine and guests; only
+  Spotify faked), the real guest app and N bot phones over loopback, with a
+  10 ms probe in the stand-in's loop — `--minutes 20` is the acceptance
+  run, `tests/test_jukebox_bot_party.py` a 25 s party. It measures the
+  Jukebox's own share of SpotFX's loop, not SpotFX whole. Specs:
+  `tests/test_jukebox_free_play.py`, the guest render's skip/move/time-out
+  shots, `check_jukebox_editor.mjs` §1e/§2d; help `jukebox-free-play`.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his program settings, one validator:

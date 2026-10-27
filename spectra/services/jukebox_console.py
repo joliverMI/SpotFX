@@ -37,11 +37,12 @@ excluded" from "forgotten":
     its votes, the songs it adds — are the guests', never the host's to make
     by voice (`jukebox_status` reads how many phones are on the page);
   * the host's controls over a PHONE (approve, block, rename, lock its name;
-    PR 2.2) — they act on a person standing in his room, by name, and a
-    misheard name would block or rename the wrong guest; they are the Guests
-    tab's buttons, where each phone is shown;
-  * the jukebox LINE — adding, removing and moving songs is the guests'
-    turn and the host's page;
+    PR 2.2; pardon a guest in a time-out, PR 2.3) — they act on a person
+    standing in his room, by name, and a misheard name would block, rename
+    or free the wrong guest; they are the Guests tab's buttons, where each
+    phone is shown;
+  * the jukebox LINE — adding, removing and moving songs (bumps, play
+    next) is the guests' turn and the host's page;
   * reordering the SET PLAYLIST — it rewrites his playlist's order in
     Spotify; a drag on the page, where the set is shown song by song;
   * the GUEST LINK (N1, SpotFX's services/jukebox/guest_link.py) —
@@ -88,7 +89,11 @@ SHOW_KEYS: tuple[str, ...] = ("approve_new_phones",)
 #: the night ends and requests close, explicit songs, phones, renames, the
 #: word filter — the same one validator a page edit runs
 GUEST_RULE_KEYS: tuple[str, ...] = ("night_ends", "last_call_min", "explicit", "explicit_after",
-                                    "max_phones", "renames_per_night", "word_filter")
+                                    "max_phones", "renames_per_night", "word_filter",
+                                    # free play (PR 2.3): the room's skip, bumps,
+                                    # play next, the jail's time-out
+                                    "free_skip_downs", "free_skip_share", "free_bumps_per_hour",
+                                    "free_play_next", "free_jail_songs")
 
 _PROGRAM_LABELS = {
     "mode": "where the jukebox slots go",
@@ -608,8 +613,8 @@ OPERATIONS: dict[str, SonicOperation] = {
     "set_jukebox_setting": SonicOperation(
         name="set_jukebox_setting", domain="jukebox", kind="write",
         summary="Change one Jukebox setting — a program setting, phone approval, a guest rule "
-                "(last call, explicit songs, phones, renames) or one credits setting (asks him "
-                "first).",
+                "(last call, explicit songs, phones, renames), a free-play rule (the room's "
+                "skip, bumps, the jail) or one credits setting (asks him first).",
         instructions=(
             _INSTR_COMMON + _INSTR_CONFIRM
             + "Keys: mode (auto | jukebox_first — never manual, which is placed on the page), "
@@ -617,6 +622,10 @@ OPERATIONS: dict[str, SonicOperation] = {
             "(15-90), approve_new_phones (true/false), the guest rules — night_ends and "
             "explicit_after (\"HH:MM\", house time), last_call_min (0-60), explicit (no | extra "
             "| after), max_phones (5-100), renames_per_night (0-10), word_filter (true/false) — "
+            "the free-play rules — free_skip_downs (2-10 ▼ to skip a song), free_skip_share "
+            "(50-90, the percent of the votes that must be ▼), free_bumps_per_hour (0-10), "
+            "free_play_next (host | off), free_jail_songs (0-15 songs a jailed guest's songs "
+            "sit out; 0 = no jail) — "
             "or any economy key from get_jukebox_settings. SpotFX validates first; an "
             "out-of-range value is refused with its reason before he is asked."),
         input_schema={"type": "object",
