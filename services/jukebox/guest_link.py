@@ -24,7 +24,14 @@ THREE THINGS IT KEEPS TRUE:
     it (whoever ended it), switching the link off mid-night closes it at
     once, and a supervised check closes a Funnel this process opened when
     no night is running (a crash or restart left it behind). The durable
-    state file says whether one is open, so a restart knows.
+    state file marks the link OPEN BEFORE the command that opens it runs —
+    so a crash mid-command is read as "might still be open", never as
+    safely closed — and an open command that fails or never answers is
+    taken down through the same close path a crash-left-open marker uses,
+    rather than having its marker cleared on a guess. That close path
+    self-heals a stale marker too: a close that fails but whose read-back
+    shows Funnel publishing nothing on the port clears the marker anyway,
+    since the failure was spurious.
   * THE SELF-TEST (N1's: ":8000/:8010 are never reachable through it").
     With nothing open it checks the plan — what WOULD be published. With
     the link open it reads Funnel's own status back (only our port is
