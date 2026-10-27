@@ -2,7 +2,7 @@
 SpotFX — the Jukebox's data model (data/jukebox-plan/report.md, phase 1:
 the program engine). services/jukebox/ is the code that runs it.
 
-Four stores, each with one job (services/jukebox/store.py):
+Five stores, each with one job (services/jukebox/store.py):
 
   ProgramConfig  storage/jukebox.json        HIS program settings: which
                                              playlist is the set, where the

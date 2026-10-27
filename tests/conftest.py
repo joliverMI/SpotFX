@@ -457,10 +457,11 @@ def _isolated_spotify_auth_age(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolated_jukebox(tmp_path, monkeypatch):
-    """The Jukebox's two stores (services/jukebox/store.py) and its one
-    process-wide runner (services/jukebox/night.py). Absorb's gate asks the
-    runner whether a night is running, so every test gets a fresh, idle one
-    reading from tmp_path — never his real storage/jukebox*.json."""
+    """The Jukebox's stores (services/jukebox/store.py), its one
+    process-wide runner (services/jukebox/night.py), and tonight's guests
+    (services/jukebox/guests.py) plus the guest app's key. Absorb's gate
+    asks the runner whether a night is running, so every test gets a fresh,
+    idle one reading from tmp_path — never his real storage/jukebox*.json."""
     from services.jukebox import ledger, night, store
     monkeypatch.setattr(ledger, "LEDGER_DIR", tmp_path / "jukebox_ledger")
     monkeypatch.setattr(store, "CONFIG_FILE", tmp_path / "jukebox.json")
