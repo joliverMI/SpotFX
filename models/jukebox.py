@@ -2,7 +2,7 @@
 SpotFX — the Jukebox's data model (data/jukebox-plan/report.md, phase 1:
 the program engine). services/jukebox/ is the code that runs it.
 
-Three stores, each with one job (services/jukebox/store.py):
+Four stores, each with one job (services/jukebox/store.py):
 
   ProgramConfig  storage/jukebox.json        HIS program settings: which
                                              playlist is the set, where the
@@ -24,6 +24,12 @@ Three stores, each with one job (services/jukebox/store.py):
                                              edit writes it
                                              (services/jukebox/show.py is
                                              the one validator).
+  GuestLinkConfig/   storage/                the guest link's settings (N1:
+  GuestLinkState     jukebox_guest_link.json  off until G4) and durable state
+                                               (whether a Funnel this process
+                                               opened is still open). One
+                                               validator, services/jukebox/
+                                               guest_link.apply_patch.
 
 The code says `program`, never `setlist`: SpotFX already has a feature
 called Set Lists (services/setlist_store.py, setlist_runtime.py: per-playlist
