@@ -11126,10 +11126,16 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   where the term ends (`_count_release`, run before any vote moves the
   count). (2) THE ROOM'S SKIP WAITS OUT `skip_grace_s` on a timer task and
   re-checks the tally then; `skip_by_vote` acts only on the SAME play and
-  sends a waiting jukebox song first, so the skip lands on the slot. (3) A
+  sends a waiting jukebox song first, so the skip lands on the slot, and
+  records it (`_played("skipped", ...)`) so the night report's own
+  `played.skipped` count sees a real vote-skip, not just the line's. (3) A
   BUMP MOVES AMONG THE SONGS THAT CAN BE SENT (`_movable`): a held or jailed
-  song stays put, nothing passes the committed one, `pushed_back` caps
-  bump-downs. (4) "guests" for the jail's crowd-scaled bar is phones seen
+  song stays put, nothing passes the committed one, and `pushed_back` caps
+  the song that ends up a place further back — a PER-SONG total, not a
+  per-direction one: an up-bump steps past the song ahead of it and pushes
+  THAT song back exactly as a down-bump would, refused the same way at the
+  cap, so a guest cycling fresh phones can't push one song past the limit
+  by bumping other songs up around it. (4) "guests" for the jail's crowd-scaled bar is phones seen
   in the last 15 minutes (`Guests._seen`, memory only). Settings:
   `ShowConfig.free_*`, the Guests tab's Free play card; Sonic sets them
   asking first; Pardon is the phone's button (a named exclusion, like

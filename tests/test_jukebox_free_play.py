@@ -86,6 +86,28 @@ def test_three_downs_skip_the_song_playing_even_the_hosts_set():
     _run(go())
 
 
+def test_a_room_skip_is_recorded_so_the_night_report_counts_it():
+    """`skip_by_vote` must record the skip the same way the "removed after
+    it was committed" repair path does (night.py's own `_played`), or the
+    night report's `played.skipped` undercounts the headline feature of
+    free play."""
+    async def go():
+        w = await _night(set_s=300)
+        g = _setup(w, _show(economy={"skip_grace_s": 0}))
+        a, b, c = await _phones(g, 3)
+        await g.vote(a, "down")
+        await g.vote(b, "down")
+        await g.vote(c, "down")
+        await w.run(1)
+        assert w.played() == ["S0", "S1"]
+        kinds = [p.kind for p in w.runner.night.played]
+        assert kinds.count("skipped") == 1
+        from services.jukebox import night_report
+        section = night_report.night_section(w.runner.night, w.deps.now_ms())
+        assert section["played"]["skipped"] == 1
+    _run(go())
+
+
 def test_the_share_counts_too_and_two_of_three_is_two_thirds():
     async def go():
         w = await _night(set_s=300)
@@ -321,6 +343,9 @@ def test_your_own_song_up_or_someone_elses_down_one_place():
         assert code == 200, out
         assert _waiting(w) == ["J0 Song", "J2 Song", "J1 Song"]
         assert out["view"]["me"]["bumps"]["left"] == 1
+        # the up-bump stepped past J1, pushing IT back one place -- that
+        # counts toward J1's own cap exactly as a down-bump of J1 would
+        assert next(e for e in w.runner.night.line if e.title == "J1 Song").pushed_back == 1
         code, out = await g.bump(ana, _id(w, "J0 Song"), "down")
         assert out["reason"] == "bump_others_down"
         code, out = await g.bump(ana, _id(w, "J2 Song"), "up")
@@ -383,6 +408,56 @@ def test_a_song_is_pushed_back_at_most_three_places():
         view = (await g.view(ps[4]))[1]["view"]
         j0_row = next(s for s in view["next"] if s["title"] == "J0 Song")
         assert j0_row["bump"] is None and "as far as it can go" in j0_row["bump_why"]
+    _run(go())
+
+
+def test_up_bumps_from_fresh_phones_cannot_push_one_song_past_the_cap():
+    """The cap is a PER-SONG total, not a per-direction one: a guest can't
+    dodge it by adding a fresh song right behind the target and bumping
+    THAT song up instead of bumping the target down directly. A brand-new
+    phone gets its own 2-bumps/hour allowance, so cycling fresh phones (a
+    throwaway song, one up-bump, repeat) must still be refused once the
+    target has already been pushed back `bump_down_max_places` times."""
+    async def go():
+        w = await _night(set_s=300)
+        g = _setup(w)
+        ana = await _phone(g)
+        assert (await g.add(ana, jb_uri(0)))[0] == 200            # the target
+        j0 = _id(w, "J0 Song")
+        for i in range(1, 4):
+            p = await _phone(g)                                   # a brand-new phone each time
+            assert (await g.add(p, jb_uri(i)))[0] == 200
+            code, out = await g.bump(p, _id(w, f"J{i} Song"), "up")
+            assert code == 200, out
+        assert next(e for e in w.runner.night.line if e.id == j0).pushed_back == 3
+        p4 = await _phone(g)
+        assert (await g.add(p4, jb_uri(4)))[0] == 200
+        code, out = await g.bump(p4, _id(w, "J4 Song"), "up")
+        assert code == 409 and out["reason"] == "pushed_max"
+        assert "as far as it can go" in out["detail"]
+        assert next(e for e in w.runner.night.line if e.id == j0).pushed_back == 3
+    _run(go())
+
+
+def test_the_queue_preview_refuses_an_up_bump_too_once_the_song_ahead_is_capped():
+    """The Queue preview (build_view) must agree with what a real up-bump
+    would be refused for — a guest should never see a live "up" arrow for a
+    bump night.py is about to turn down."""
+    async def go():
+        w = await _night(set_s=300, mode="jukebox_first")
+        g = _setup(w)
+        ps = await _phones(g, 5)
+        for i, p in enumerate(ps):
+            await g.add(p, jb_uri(i))
+        j0 = _id(w, "J0 Song")
+        for p in ps[1:4]:
+            assert (await g.bump(p, j0, "down"))[0] == 200
+        assert next(e for e in w.runner.night.line if e.id == j0).pushed_back == 3
+        view = (await g.view(ps[4]))[1]["view"]
+        j4_row = next(s for s in view["next"] if s["title"] == "J4 Song")
+        assert j4_row["bump"] is None and "as far as it can go" in j4_row["bump_why"]
+        code, out = await g.bump(ps[4], _id(w, "J4 Song"), "up")
+        assert code == 409 and out["reason"] == "pushed_max"
     _run(go())
 
 

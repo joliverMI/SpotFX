@@ -155,8 +155,9 @@ class LineEntry(_Model):
     # The lights already know it (its audio shape is captured): the guest
     # page's "Ready" badge. Not `ready`, which is phase 4's commit gate.
     known: bool = False
-    # Places other guests have bumped it back tonight (free play's bumps,
-    # PR 2.3): never more than the show's `bump_down_max_places`.
+    # Places it has been pushed back tonight (free play's bumps, PR 2.3) —
+    # whether by a down-bump of its own, or as the song an up-bump stepped
+    # past: never more than the show's `bump_down_max_places`.
     pushed_back: int = 0
     ready: bool = True
     state: LineState = "queued"

@@ -49,8 +49,11 @@ fair; every number is a show setting (§4's Free play card).
   engine skips (night.skip_by_vote), only if it is still the same play.
   BUMPS. A guest moves their own waiting song up one place, or someone
   else's down one place, `free_bumps_per_hour` (2) times in any hour; a song
-  is pushed back at most `bump_down_max_places` (3) places a night; nothing
-  passes the song already sent to Spotify; a held or jailed song can't move.
+  is pushed back at most `bump_down_max_places` (3) places a night — a
+  PER-SONG total, not per-mechanism: the song an up-bump steps past gets
+  pushed back exactly as a direct down-bump would, and is refused the same
+  way once it is already at the cap; nothing passes the song already sent
+  to Spotify; a held or jailed song can't move.
   THE JAIL. When the songs a guest added tonight have the jail's net ▼ (the
   economy's `jail_net_downs`, 5, rising with the crowd: 6 at 8 guests, 8 at
   15, 10 at 30 — "guests" being phones seen in the last 15 minutes), the
@@ -517,8 +520,14 @@ def build_view(book: GuestBook, phone_id: str, gs: dict, now_ms: int,
             if not it.committed and entry.id in movable:
                 pos = movable.index(entry.id)
                 if added_by == phone_id:
-                    song["bump"] = "up" if pos > 0 else None
-                    song["bump_why"] = "" if pos > 0 else sentence("at_front")
+                    # An up-bump steps past the song ahead of it, pushing
+                    # THAT song back one place — refused once it is already
+                    # at the cap, same as a down-bump on one's own song.
+                    ahead = entries.get(movable[pos - 1]) if pos > 0 else None
+                    ok = pos > 0 and (ahead is None or ahead.pushed_back < max_back)
+                    song["bump"] = "up" if ok else None
+                    song["bump_why"] = ("" if ok else sentence("at_front") if pos == 0
+                                        else sentence("pushed_max"))
                 else:
                     ok = pos < len(movable) - 1 and entry.pushed_back < max_back
                     song["bump"] = "down" if ok else None

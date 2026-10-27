@@ -1140,6 +1140,7 @@ class JukeboxRunner:
             if playing is not None and playing.state == "playing":
                 playing.state = "skipped"
             title = n.now.title or uri
+            self._played("skipped", uri, title, entry_id=playing.id if playing is not None else "")
             n.now = n.now.model_copy(update={"kind": "skipping", "skip_reason": "votes"})
             self._log(f"the room voted {title} off; skipping it")
             self.rt.skip_attempts = 0
@@ -1150,8 +1151,12 @@ class JukeboxRunner:
     async def bump(self, entry_id: str, up: bool, max_back: Optional[int] = None) -> dict:
         """Move a waiting song one place among the songs that can be sent
         (free play's bumps; who may, and how often, is guests.py's). Nothing
-        passes the song already sent to Spotify; a song moved back counts
-        toward `max_back`."""
+        passes the song already sent to Spotify. `pushed_back` is a per-song
+        total, not a per-direction count: whichever song ends up a place
+        further back — one's own song on a down-bump, or the song it steps
+        past on an up-bump — is the one counted and capped against
+        `max_back`, so a determined up-bumper can't push a third song back
+        past the limit a down-bump would have been refused at."""
         async with self._get_lock():
             self._ensure_loaded()
             if not self.running:
@@ -1172,13 +1177,14 @@ class JukeboxRunner:
                 return self._refused("at_front")
             if j >= len(movable):
                 return self._refused("at_back")
-            if not up and max_back is not None and e.pushed_back >= max_back:
+            other = movable[j]
+            pushed = other if up else e
+            if max_back is not None and pushed.pushed_back >= max_back:
                 return self._refused("pushed_max")
             line = self.night.line
-            a, b = line.index(e), line.index(movable[j])
+            a, b = line.index(e), line.index(other)
             line[a], line[b] = line[b], line[a]
-            if not up:
-                e.pushed_back += 1
+            pushed.pushed_back += 1
             self._log(f"a guest moved {e.title or e.uri} {'up' if up else 'down'} one place")
             await self._persist()
             return {"status": "moved", "place": j + 1, "starts_in_ms": self._starts_in(e.id)}
