@@ -123,6 +123,7 @@ from PIL import Image
 from pyfastnoiselite import pyfastnoiselite as fnl
 
 import fx.effects.particle_handoff as particle_handoff
+import fx.effects.pre_drop as pre_drop
 from fx.color import parse_gradient, validate_gradient
 from fx.effects import lull_handoff, phase_grammar
 from fx.effects.audio import AudioReactiveEffect
@@ -188,6 +189,25 @@ RADIAL_HEAT_MIX = 0.12     # the flames' heat tints the coordinate this much
 RAINBOW_SPAN_DEG = 180.0   # "auto" sorts a set spanning more hue cold->warm
 PALETTE_BAND = 0.35        # a sorted colour holds this share of its band
 SURGE_POKE_FLOOR = 0.001   # a fire at intensity 0 still edges the poke
+# THE PRE-DROP (fx/effects/pre_drop.py is the binding statement; predrop
+# plan step 8, the plan's 3.5: "the lids part to a narrow glare on the slit
+# pupil in the new colours, flames held down, brightening slowly until the
+# drop opens them fully" — "Sauron at a dimmer setting"). The lull's lids
+# close by the pre-drop (its ramp is measured to it) and the breath holds
+# the panel black; on the pre-drop the lids part over PRE_DROP_PART_S to
+# PRE_DROP_LID_OPEN_TO (Eye's lid pause: they rest on the iris's edge, so
+# the eye's own band shows and the panel above and below stays covered),
+# the gaze holds the lull's stare, the flames reach PRE_DROP_FLAMES of their
+# own and the ember sky is off, and the whole eye shows at PRE_DROP_GLARE
+# (dimmer than the plan's prototype, 0.35 -> 0.60), brightening toward the
+# drop, which opens the lids the rest of the way with its own eruption —
+# never slamming them shut first, as a drop landing on half-open lids
+# otherwise does.
+PRE_DROP_LOOK = "glare"
+PRE_DROP_LID_OPEN_TO = 0.62     # where they part to, 1 = shut: the iris's edge
+PRE_DROP_PART_S = 0.15          # they part this fast on the pre-drop
+PRE_DROP_FLAMES = 0.15          # the flames' reach, x their own, held down
+PRE_DROP_GLARE = (0.20, 0.36)   # the eye's gain on the pre-drop ... drop
 # a surge's eruption has visibly burned back (5% of it left) after this —
 # what the flare preview's ruler draws as the animation's end
 SURGE_VISIBLE_S = 3.0 * SURGE_TAU
@@ -334,6 +354,7 @@ class Sauron2d(Twod, GradientEffect):
         *phase_grammar.BREATH_KEYS,
         phase_grammar.SHOCK_ON_KEY,
         lull_handoff.DROP_KEY,
+        *pre_drop.KEYS,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -485,6 +506,9 @@ class Sauron2d(Twod, GradientEffect):
             **phase_grammar.shock_on_schema_fields(),
             **phase_grammar.breath_schema_fields(),
             **lull_handoff.drop_schema_fields(),
+            # THE PRE-DROP's told keys (ride only the lull arm; zeros on a
+            # lull that plays none) — fx/effects/pre_drop.py
+            **pre_drop.schema_fields(),
         }
     )
 
@@ -516,6 +540,10 @@ class Sauron2d(Twod, GradientEffect):
         # the lids are open again (eye.py's)
         self._lids_rotated = False
         self._drop_slam = False
+        # THE PRE-DROP: its clock (None on every frame of a lull not told
+        # one) and whether the glare was showing when the drop arrived
+        self._pd_clk = None
+        self._pd_glare = False
         self._charge_amt = 0.0
         self.noise = fnl.FastNoiseLite(
             seed=int(self._rng.integers(1, 1 << 30)))
@@ -822,10 +850,12 @@ class Sauron2d(Twod, GradientEffect):
             self._lids_rotated = self.lull_lids_upside_down
         if phase == "drop":
             self._drop = {"t": 0.0, "fired": False}
-            self._drop_slam = 0.03 < self._lid < 0.97
+            # after the pre-drop's glare the drop opens the lids from there
+            self._drop_slam = 0.03 < self._lid < 0.97 and not self._pd_glare
         else:
             self._drop = None
             self._drop_slam = False
+        self._pd_glare = False
 
     def shock_rim(self):
         """The Shockwave's eye (fx/effects/phase_grammar.py): the iris rim as
@@ -881,6 +911,22 @@ class Sauron2d(Twod, GradientEffect):
                     validate=False,
                     fire_event=False,
                 )
+
+    def _pre_drop_step(self) -> bool:
+        """THE PRE-DROP's clock: read only on a lull TOLD a pre-drop —
+        every other frame clears it, so a lull without one is today's,
+        byte for byte. True while the glare shows (and remembered for the
+        drop's edge)."""
+        if self._phase != "lull" or not pre_drop.told(self._config):
+            self._pd_clk = None
+            return False
+        clk = self._pd_clk = pre_drop.phase_clock(
+            self._config, self._phase, self.phase_progress, self._phase_t,
+            prev=self._pd_clk)
+        if clk.segment != "pre_drop":
+            return False
+        self._pd_glare = True
+        return True
 
     def _lid_travel(self, p, y_from, y_to, y_overlap):
         """eye.py's lid travel: fast ease-out to just overlapping the iris
@@ -1035,7 +1081,9 @@ class Sauron2d(Twod, GradientEffect):
                                + SURGE_REACH * surge)
                 * (1.0 + CHARGE_FLAME_GROW * charge))
 
-    def _flames(self, d, ang, gap, imp, surge, charge):
+    def _flames(self, d, ang, gap, imp, surge, charge, held=None):
+        """`held`: the pre-drop's hold on the reach (PRE_DROP_FLAMES), or
+        None for the flames as they are."""
         tn = self.tongues
         u = ang * (tn / (2 * np.pi))
         v = d * 2.6 - self._flow_t * 1.6
@@ -1043,6 +1091,8 @@ class Sauron2d(Twod, GradientEffect):
             u * 2.0 + 3.7, v * 2.0, self._t * 0.5 + 11.0)
         env = self._noise(u * 0.5, np.zeros_like(u), self._t * 0.35 + 40.0)
         reach = self.flame_reach(imp, surge, charge)
+        if held is not None:
+            reach = reach * held
         length = np.clip(reach * (0.55 + 0.65 * env), 0.08, OVERREACH) * gap
         rel = np.clip(d / np.maximum(length, 1e-4), 0.0, 1.5)
         fall = np.clip(1.0 - rel, 0.0, 1.0) ** 0.9
@@ -1174,6 +1224,7 @@ class Sauron2d(Twod, GradientEffect):
             blink_out = particle_handoff.transition_progress(virtual)
 
         self._phase_step(dt)
+        glare = self._pre_drop_step()
         beat = self._beat_pending
         self._beat_pending = False
         self._update_gaze(dt, beat)
@@ -1253,7 +1304,8 @@ class Sauron2d(Twod, GradientEffect):
 
         # ── flames + sky ────────────────────────────────────────────────
         gap = self._edge_gap(eye_px, eye_py, iris_r)
-        flame = self._flames(d, ang, gap, imp, surge, charge)
+        flame = self._flames(d, ang, gap, imp, surge, charge,
+                             held=PRE_DROP_FLAMES if glare else None)
         self.last_flame = np.where(d >= 0.0, flame, 0.0).astype(np.float32)
         # the PERIMETER RING (tune-up 1: thick enough to hold its shape on
         # the hex lattice as the eye moves): a band RING_WIDTH wide centred
@@ -1269,7 +1321,7 @@ class Sauron2d(Twod, GradientEffect):
         root = RING_OUT_HEAT * np.maximum(ring, fade)
         heat = np.where(d >= 0.0, (1.0 - (1.0 - flame) * (1.0 - root))
                         * (0.9 + SURGE_HEAT * surge), 0.0)
-        if self.sky > 0.0:
+        if self.sky > 0.0 and not glare:
             sk = self._noise(self.gx * 1.6, self.gy * 1.6 - self._t * 0.12,
                              self._t * 0.07 + 300.0)
             heat = np.maximum(heat, self.sky * (0.45 + 0.55 * sk)
@@ -1362,6 +1414,9 @@ class Sauron2d(Twod, GradientEffect):
             self._lids_rotated = False
         if self._lid > 0.001:
             self._draw_lids(rgb, dxp, dyp, eye_py, iris_r)
+        if glare:
+            g0, g1 = PRE_DROP_GLARE
+            rgb *= np.float32(g0 + (g1 - g0) * self._pd_clk.frac)
 
         self.matrix = Image.fromarray(
             np.clip(rgb, 0, 255).astype(np.uint8), "RGB"
@@ -1407,6 +1462,13 @@ class Sauron2d(Twod, GradientEffect):
             p = max(self.phase_progress,
                     min(self._phase_t / LULL_FALLBACK_S, 1.0))
             self._lid = float(np.clip(p, 0.0, 1.0))
+            clk = self._pd_clk
+            if clk is not None and clk.segment == "pre_drop":
+                # THE PRE-DROP: the lids part to the glare (PRE_DROP_*)
+                el = max(0.0, self._phase_t - pre_drop.at_s(self._config))
+                self._lid = float(max(
+                    PRE_DROP_LID_OPEN_TO,
+                    1.0 - (1.0 - PRE_DROP_LID_OPEN_TO) * el / PRE_DROP_PART_S))
         elif self._phase == "drop":
             if self._drop_slam:
                 self._lid = min(1.0, self._lid + dt / 0.06)

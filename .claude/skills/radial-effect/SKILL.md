@@ -141,6 +141,44 @@ Five things not visible cold:
   a live instance starts one (`config_updated`); the shaped radius blends
   linearly old->new, a piece's divisor harmonically (`_shape_div`).
 
+## THE PRE-DROP — the outline grows out of the centre (2026-10-27)
+
+His approval (the predrop plan, 2026-10-26): "the star predrop should grow
+from the center as it spins, so it doesn't just pop in." Star is in
+`fx.device_model.PRE_DROP_EFFECTS` since predrop step 8, one look for both
+kinds ("outline", `pre_drop_looks` in config/effect_params.json); the
+PRE_DROP block above `_LUM` in `fx/effects/radial.py` for the look. Four
+invariants not visible cold:
+
+- **THE DARK IS THE ARM'S.** Star is a LULL_DARK and BREATH_HOLD member, so
+  SpotFX measures its dark point and breath to the pre-drop: lull B's cut
+  empties the star early and the panel is black before the pre-drop with no
+  code of the look's own.
+- **THE OUTLINE IS RADIAL'S OWN SHAPE.** `_pre_drop_outline` draws a band
+  PRE_DROP_OUTLINE_W thin at a shaped radius (`_shaped_radius`, at the
+  outline's own angle: Star's rotation plus its spin-up, PRE_DROP_SPIN_FROM
+  -> _TO rev/s) growing from 0 to PRE_DROP_OUTLINE_R x the panel height,
+  eased out (`1 - (1 - frac)^2`) — a dot on the pre-drop, full size on the
+  drop. Dim (30% -> 40%), coloured round the set by angle from the cached
+  palette (so the colour change fading across the pre-drop shows in it),
+  composed brighter-wins over the black panel in `_star_phase_frame`. The
+  drop is Star's own D3.
+- **THE DROP'S PIECES WEAR THE SET AS IT IS AT THE DROP** (the plan's 2.2:
+  "Star re-samples its palette as the colour fades"). A falling piece keeps
+  its palette POSITION (`g`, NaN when no palette was seen); after a
+  pre-drop that played (`_pd_seen`) `_drop_snap` recolours the pieces from
+  the live palette every frame (`_palette_full`, nearest_set_grad's own
+  arithmetic, so an unchanged set gives the same colours back). Scoped to a
+  told pre-drop on purpose: Melt's gradient can roll, so re-sampling on
+  every drop would change untold drops. On a drop with NO pre-drop the
+  pieces still fly out in the colours they fell in with under the instant
+  colour change (about half a second) — left for his word.
+- **LIGHT AND IDENTITY.** The lull's light drops (-14% at a 0.8 s spike,
+  -48% at 2 s, -45% at a 3.3 s vocal intro). Untold, `_pre_drop_step`
+  clears the clock first, so the lull is today's frame for frame (proven
+  against the module at the step-8 base through `pre_drop_look_harness.
+  star_run`, which hosts the strip Star samples).
+
 ## Out of Star: the bands release (transition programs)
 
 A program out of Star captures `_program_snapshot(settings)` — NOT

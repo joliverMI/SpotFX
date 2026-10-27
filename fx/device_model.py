@@ -383,16 +383,18 @@ BREATH_HOLD_EFFECTS = (DROP_SHOCK_EFFECTS - {"fish"}) | {"pulse", "radial"}
 # Fireworks' rockets and Pulse's burst/swell (step 6), Orbits' jitter-and-
 # grow return and Black Hole's infall ring, idea 1 (step 7 — Orbits was
 # approved in step 6 and shipped one PR later so each look stayed
-# separately reviewable); Fish, Star, Sauron and the strips follow, each
-# its own step — never Squiggles. A member is told every key on every lull arm (zeros when
-# its pre-drop does not play), and every other effect's arm write is
-# byte-identical to before the engine existed
+# separately reviewable), Fish's dart to the centre, Star's outline growing
+# out of the centre and Sauron's dimmed glare (step 8); the strips' twinkle
+# follows as its own step — never Squiggles. A member is told every key on
+# every lull arm (zeros when its pre-drop does not play), and every other
+# effect's arm write is byte-identical to before the engine existed
 # (tests/test_pre_drop_arm_identity.py); the engine decides whether a
 # pre-drop plays either way, so the drop's colour change fades across one
 # that does. A member must also declare its looks (`pre_drop_looks` in
 # config/effect_params.json, `pre_drop_looks()` below).
 PRE_DROP_EFFECTS: frozenset = frozenset(
-    {"fireworks", "pulse", "orbits", "blackhole"})
+    {"fireworks", "pulse", "orbits", "blackhole", "fish", "radial",
+     "sauron"})
 
 # ... and its drop-side half: effects told the fire's intensity on every
 # drop arm (`drop_intensity`) so the drop's length and speed scale with the

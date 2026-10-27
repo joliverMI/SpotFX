@@ -1,4 +1,4 @@
-"""THE PRE-DROP LOOKS' RIG (predrop plan steps 6-7): every member driven
+"""THE PRE-DROP LOOKS' RIG (predrop plan steps 6-8): every member driven
 through a whole charge -> lull -> drop with the LULL ARM THE REAL ENGINE
 WRITES — read off the production scene_response._drive_phase through
 tests/pre_drop_arm_harness.py, never retyped — and, beside them, the same
@@ -36,6 +36,8 @@ ROWS, COLS = 37, 72
 PRE_REF = "34ce2b14f319a5c4af6a6b8d1bbf5e7f10dcdda0"
 # ... and just before step 7's: orbits.py and blackhole.py without theirs
 STEP7_REF = "29778cf327f50268408b433fc4f8067ea9afacae"
+# ... and just before step 8's: fish.py, radial.py and sauron.py without theirs
+STEP8_REF = "ed8b20087520d2b78ddd8f4c0248d946b9ecb09c"
 NEW_KEYS = set(pre_drop.KEYS)
 
 
@@ -78,13 +80,18 @@ def load_pinned(module: str, name: str, must_lack: str,
 
 # ── the engine's own lull arm ─────────────────────────────────────────────
 
-def _scene_dict(matrix: str = "fireworks") -> dict:
+def _scene_dict(matrix: str = "fireworks",
+                strips: Optional[str] = None) -> dict:
     from spectra.models.scene import SceneV2
-    return SceneV2(name="Pre-drop looks", devices=[
-        {"target_kind": "category", "target": "Matrix",
-         "effect_type": matrix},
-        {"target_kind": "category", "target": "Singles",
-         "effect_type": "pulse"}]).model_dump(mode="json")
+    devices = [{"target_kind": "category", "target": "Matrix",
+                "effect_type": matrix}]
+    if strips is not None:
+        devices.append({"target_kind": "category", "target": "Strips",
+                        "effect_type": strips})
+    devices.append({"target_kind": "category", "target": "Singles",
+                    "effect_type": "pulse"})
+    return SceneV2(name="Pre-drop looks",
+                   devices=devices).model_dump(mode="json")
 
 
 @dataclass
@@ -95,13 +102,17 @@ class Arm:
 
 def engine_arms(effect_type: str, lull_s: float, at_s: Optional[float] = None,
                 gap_s: Optional[float] = None, kind: str = "spike",
-                intensity: float = 0.8) -> dict[str, Arm]:
+                intensity: float = 0.8,
+                scene: Optional[dict] = None) -> dict[str, Arm]:
     """The charge, lull and drop arms production writes to `effect_type`'s
     virtual for a lull of `lull_s` to its drop, carrying a pre-drop `kind`
-    `at_s` into the lull and `gap_s` before the drop when given."""
+    `at_s` into the lull and `gap_s` before the drop when given (`scene`: a
+    whole scene to read them from — Star's carries its strip)."""
     from spectra.services.pre_drop_play import PreDropCandidate
     from tests import pre_drop_arm_harness as harness
-    scene = _scene_dict(effect_type if effect_type != "pulse" else "fireworks")
+    if scene is None:
+        scene = _scene_dict(effect_type if effect_type != "pulse"
+                            else "fireworks")
     out = {}
     for cls in ("charge", "lull", "drop"):
         cand = None
@@ -165,6 +176,28 @@ STEP7_CFG = {
 # what step 7's pinned modules must lack (each look's own constants)
 STEP7_LACKS = {"orbits": "PRE_DROP_GROW", "blackhole": "PRE_DROP_RING"}
 
+# step 8's members, with his own scenes' settings (a bound value at intensity
+# 0.75, the plan's prototype convention): Fish and Sauron on the crystal;
+# Star through star_run, beside the strip it samples
+STEP8_CFG = {
+    "fish": {"gradient": FIREWORKS_CFG["gradient"], "base_speed": 0.3,
+             "big_fish_avoid": 0.0, "brightness_audio": 0.5,
+             "color_shift": 1, "flap_amount": 0.45, "horizon_scale": 0.3,
+             "impulse_decay": 0.06, "jiggle": 0.5, "quiet_rest": 1.0,
+             "radius_scale": 1.8, "roam_scale": 0.75, "rush_chaos": 0.3,
+             "school_variation": 0.08, "size_audio": 0.5, "speed_jog": 1,
+             "speed_jump": 1, "spin": 0.37, "tail_drive": 1.0,
+             "tether_scatter": 0, "blob_size": 1.75, "particle_count": 6},
+    "radial": {"edges": 6, "star": 0.3, "spin": 0.55, "polygon": True,
+               "twist": 0.0},
+    "sauron": {"gradient": FIREWORKS_CFG["gradient"], "flame_audio": 2.0,
+               "impulse_decay": 0.06, "speed_audio": 2.9,
+               "drift_speed": 0.6875, "flames": 0.5, "snap_hold": 0.4125,
+               "snap_threshold": 0.525},
+}
+STEP8_LACKS = {"fish": "PRE_DROP_DART", "radial": "PRE_DROP_OUTLINE",
+               "sauron": "PRE_DROP_GLARE"}
+
 
 def _fireworks_info(eff) -> dict:
     live = eff.p_rocket[:eff.n] > 0
@@ -192,6 +225,44 @@ def _crystal_info(eff) -> dict:
                 floor=getattr(eff, "BREATH_FLOOR", 0.0)) if lull else 1.0),
             "phase_t": float(getattr(eff, "_phase_t", 0.0)),
             "grid_r": getattr(eff, "grid_r", None)}
+
+
+def _fish_info(eff) -> dict:
+    """The crystal info, plus the lull's keepers: how many, how far the
+    furthest is from the centre of view (px), the fish still swimming or
+    leaving, the dart's state and the head's look this frame."""
+    out = _crystal_info(eff)
+    n = int(eff.n)
+    mode = eff.p_mode[:n]
+    keep = np.flatnonzero(mode == 5)
+    d = None
+    if keep.size:
+        d = float(np.hypot((eff.p_x[keep] - eff.cam_nx) * eff.sx,
+                           (eff.p_y[keep] - eff.cam_ny) * eff.sy).max())
+    kst = eff._keep or {}
+    dart = getattr(eff, "_pd_dart", None) or {}
+    out.update({"keepers": int(keep.size), "keep_d_px": d,
+                "others": int(np.count_nonzero(mode < 5)),
+                "arrived": dart.get("arrived"),
+                "look": (float(np.abs(kst["look"]).max())
+                         if kst.get("look") is not None and len(kst["look"])
+                         else 0.0),
+                "turn": kst.get("turn"),
+                "body_px": float(eff._body_len_px())})
+    return out
+
+
+def _sauron_info(eff) -> dict:
+    """The crystal info, plus the lids, the glare, the drop's slam and
+    burst, and how many cells the flames reach this frame (its instrument)."""
+    out = _crystal_info(eff)
+    flame = getattr(eff, "last_flame", None)
+    out.update({"lid": float(eff._lid),
+                "glare": bool(getattr(eff, "_pd_glare", False)),
+                "slam": bool(eff._drop_slam), "burst": float(eff._burst),
+                "flame_cells": (int((flame > 0.1).sum())
+                                if flame is not None else 0)})
+    return out
 
 
 async def fireworks_run(tmp: Path, effect_type: str, arms: dict[str, Arm],
@@ -224,6 +295,13 @@ async def crystal_run(tmp: Path, effect_type: str, arms: dict[str, Arm],
     clock = cm.__enter__()
     eff = headless.attach_effect(host, virtual, effect_type, dict(config))
     eff._rng = np.random.default_rng(seed)
+    if hasattr(eff, "_wander_seed"):
+        # Sauron draws its gaze wander and its noise field's seed from an
+        # unseeded generator at construction (scripts/check_sauron.py's
+        # reseed): fixed here so two runs of one clip render the same bytes
+        eff._wander_seed = float(np.random.default_rng(seed).uniform(
+            0.0, 2.0 * np.pi))
+        eff.noise.seed = int(seed) * 7919 + 17
     run = Run()
     try:
         for ph, secs in schedule(3.0, lull_s, 1.6):
@@ -248,6 +326,81 @@ async def crystal_run(tmp: Path, effect_type: str, arms: dict[str, Arm],
     finally:
         cm.__exit__(None, None, None)
         await host.shutdown()
+    return run
+
+
+# ── Star beside its strip ────────────────────────────────────────────────
+
+STAR_STRIP_CFG = {"gradient": FIREWORKS_CFG["gradient"], "speed": 0.08,
+                  "reactivity": 0.3, "blur": 1.0, "brightness": 1.0,
+                  "background_brightness": 0.0}
+
+
+def _star_info(eff) -> dict:
+    clk = getattr(eff, "_pd_clk", None)
+    snap = eff._snap
+    return {"segment": clk.segment if clk is not None else None,
+            "pd_frac": clk.frac if clk is not None else None,
+            "spin": float(getattr(eff, "_pd_spin", 0.0)),
+            "snap": snap is not None,
+            "snap_resampled": snap is not None and "g" in snap,
+            "phase_t": float(getattr(eff, "_phase_t", 0.0))}
+
+
+def star_scene() -> dict:
+    return _scene_dict("radial", strips="melt")
+
+
+async def star_run(tmp: Path, star_type: str, arms: dict[str, Arm],
+                   strip_arms: dict[str, Arm], config: Optional[dict] = None,
+                   lull_s: float = 3.2, pokes: Optional[dict] = None,
+                   strip_pokes: Optional[dict] = None,
+                   strip_cfg: Optional[dict] = None) -> Run:
+    """Star (or its pinned copy) on the crystal and the Melt strip it
+    samples (tests/star_harness.StarRoom: the strip rendered and published
+    first, a fake clock behind time.time_ns, Star turning at its rig rate),
+    each driven with its own arms through settle -> charge -> lull -> drop.
+    `strip_pokes` lands writes on the strip (a colour change)."""
+    from star_harness import COLS as SC, ROWS as SR
+    from star_harness import STAR, STRIP, STRIP_N, StarRoom
+    from strip_phase_harness import scene_for
+    _TAG[0] += 1
+    rcfg = {"source_virtual": STRIP, "background_brightness": 0.0,
+            **STEP8_CFG["radial"], **(config or {})}
+    mcfg = {**STAR_STRIP_CFG, **(strip_cfg or {})}
+    room = StarRoom(str(tmp / f"pds{_TAG[0]}"),
+                    {STRIP: ("melt", STRIP_N, 1, mcfg),
+                     STAR: (star_type, SC * SR, SR, rcfg)},
+                    scene=scene_for({STRIP: "melt", STAR: "radial"}))
+    run = Run()
+    async with room:
+        eff, strip = room.effects[STAR], room.effects[STRIP]
+        for ph, secs in schedule(3.0, lull_s, 1.6):
+            arm, sarm = arms.get(ph), strip_arms.get(ph)
+            if arm is not None:
+                eff.update_config(dict(arm.params))
+            if sarm is not None:
+                strip.update_config(dict(sarm.params))
+            n = int(round(secs / DT))
+            ramp_n = max(1, int(round(arm.ramp_s / DT))) if arm else 0
+            sramp_n = max(1, int(round(sarm.ramp_s / DT))) if sarm else 0
+            for i in range(1, n + 1):
+                if arm is not None and i <= ramp_n:
+                    eff.update_config({"phase_progress": min(1.0, i / ramp_n)})
+                if sarm is not None and i <= sramp_n:
+                    strip.update_config(
+                        {"phase_progress": min(1.0, i / sramp_n)})
+                for (pph, k), poke in (pokes or {}).items():
+                    if pph == ph and k == i:
+                        eff.update_config(dict(poke))
+                for (pph, k), poke in (strip_pokes or {}).items():
+                    if pph == ph and k == i:
+                        strip.update_config(dict(poke))
+                room.step(1)
+                run.frames.append(np.asarray(room.frames[STAR][-1],
+                                             dtype=np.float32))
+                run.phase.append((ph, i * DT))
+                run.info.append(_star_info(eff))
     return run
 
 

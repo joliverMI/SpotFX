@@ -5,6 +5,7 @@ import voluptuous as vol
 from PIL import Image
 
 import fx.effects.particle_handoff as particle_handoff
+import fx.effects.pre_drop as pre_drop
 from fx.effects import lull_dark, lull_handoff, phase_grammar, strip_phase
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.twod import Twod
@@ -99,6 +100,25 @@ BAND_MIN_SHARE = 0.35        # a strip peak at least this share of the
 #                              brightest is a band a piece may land on
 BAND_FALLBACK = np.linspace(0.12, 0.92, 8, dtype=np.float32)
 
+# THE PRE-DROP (fx/effects/pre_drop.py is the binding statement; predrop
+# plan step 8, his approval: "the star predrop should grow from the center
+# as it spins, so it doesn't just pop in"): the dark point and the breath
+# are measured to the pre-drop, so the star has fallen into its core and
+# the panel is black before it; on the pre-drop a thin, dim OUTLINE in
+# Star's own shape grows out of the centre (eased out, so it reaches its
+# full size gently, on the drop) while it spins up, coloured round the set
+# by angle from the live palette, so the colour change fading across the
+# pre-drop shows in it. The drop is Star's own. Its thrown-back pieces wear
+# the set as it is at the drop, not as it was when they fell in (the plan's
+# 2.2: "Star re-samples its palette as the colour fades").
+PRE_DROP_LOOK = "outline"
+PRE_DROP_OUTLINE_R = 0.42       # its full size: shaped px, x the panel height
+PRE_DROP_OUTLINE_W = 1.6        # half-width: full within 0.6 px, gone by 1.6
+PRE_DROP_OUTLINE_GAIN0 = 0.30   # its brightness as it appears ...
+PRE_DROP_OUTLINE_GAIN1 = 0.40   # ... and on the drop (thin and dim)
+PRE_DROP_SPIN_FROM = 0.35       # its own spin, rev/s, on the pre-drop ...
+PRE_DROP_SPIN_TO = 1.8          # ... rising to this on the drop
+
 _LUM = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
 _SPLAT_R = 2
 _sp = np.arange(-_SPLAT_R, _SPLAT_R + 1)
@@ -168,7 +188,7 @@ class Radial2d(Twod):
     # hidden) so the arc can be hand-scrubbed in the LedFX UI for tuning.
     ADVANCED_KEYS = Twod.ADVANCED_KEYS + [
         "phase", "phase_progress", *lull_dark.KEYS, *phase_grammar.BREATH_KEYS,
-        lull_handoff.DROP_KEY, phase_grammar.SHOCK_ON_KEY,
+        lull_handoff.DROP_KEY, phase_grammar.SHOCK_ON_KEY, *pre_drop.KEYS,
     ]
     # Star takes the BREATH-HOLD itself (in its own draw, like Pulse) and
     # never the shared Shockwave overlay — its drop is D3, the bands
@@ -311,6 +331,9 @@ class Radial2d(Twod):
             **phase_grammar.breath_schema_fields(),
             **lull_handoff.drop_schema_fields(),
             **phase_grammar.shock_on_schema_fields(),
+            # THE PRE-DROP's told keys (ride only the lull arm; zeros on a
+            # lull that plays none) — fx/effects/pre_drop.py
+            **pre_drop.schema_fields(),
         }
     )
 
@@ -339,6 +362,12 @@ class Radial2d(Twod):
         self._spin_prev = None
         self._last_u = None    # last frame's shaped radius / angle fields
         self._last_angle = None
+        # THE PRE-DROP: its clock (None on every frame of a lull not told
+        # one), the outline's own spin (revolutions) and whether this lull's
+        # pre-drop played (so the drop's pieces wear the set as it is then)
+        self._pd_clk = None
+        self._pd_spin = 0.0
+        self._pd_seen = False
         super().__init__(ledfx, config)
 
     def config_updated(self, config):
@@ -855,10 +884,12 @@ class Radial2d(Twod):
             self._snap = None
             self._silent_drop = False
             self._held = None
+            self._pd_seen = False
         if new == "lull":
             self._bands = None
         if new == "drop":
             self._begin_snap()
+            self._pd_seen = False
         if prev == "lull" and new != "lull":
             self._bands = None
 
@@ -940,11 +971,13 @@ class Radial2d(Twod):
                 "phi": np.zeros(0, np.float32), "sw": np.zeros(0, np.float32),
                 "rgb": np.zeros((0, 3), np.float32),
                 "b": np.zeros(0, np.float32),
+                "g": np.zeros(0, np.float32),
             }
             if self._held is None:
                 self._held = {"u0": np.zeros(0, np.float32),
                               "phi": np.zeros(0, np.float32),
-                              "rgb": np.zeros((0, 3), np.float32)}
+                              "rgb": np.zeros((0, 3), np.float32),
+                              "g": np.zeros(0, np.float32)}
         # STAR HOLDS ITS OWN PICTURE (the plan's Q6): since 2026-10-14 the
         # strip Star reads skips its own lull while Star reads it (strip_
         # phase, THE STRIP STAR READS), so its brightness only eases back
@@ -984,7 +1017,10 @@ class Radial2d(Twod):
                 ys, xs = ys[keep][:max(room, 0)], xs[keep][:max(room, 0)]
             if xs.size:
                 cols = rgb[ys, xs]
-                _grad, full = self._set_colours(cols)
+                grad, full = self._set_colours(cols)
+                if self._palette is None:
+                    grad = np.full(xs.size, np.nan, np.float32)
+                st["g"] = np.concatenate([st["g"], grad.astype(np.float32)])
                 uu = u[ys, xs].astype(np.float32)
                 st["u"] = np.concatenate([st["u"], uu])
                 st["u0"] = np.concatenate([st["u0"], uu])
@@ -1027,8 +1063,9 @@ class Radial2d(Twod):
                 h["u0"] = np.concatenate([h["u0"], st["u0"][g]])
                 h["phi"] = np.concatenate([h["phi"], st["phi"][g]])
                 h["rgb"] = np.concatenate([h["rgb"], st["rgb"][g]])
+                h["g"] = np.concatenate([h["g"], st["g"][g]])
                 live = ~gone
-                for key in ("u", "u0", "phi", "sw", "rgb", "b"):
+                for key in ("u", "u0", "phi", "sw", "rgb", "b", "g"):
                     st[key] = st[key][live]
         if st["u"].size == 0:
             return None
@@ -1057,13 +1094,17 @@ class Radial2d(Twod):
         u0 = np.zeros(0, np.float32)
         phi = np.zeros(0, np.float32)
         rgb = np.zeros((0, 3), np.float32)
+        gpos = np.zeros(0, np.float32)
         if held is not None:
             u0, phi, rgb = held["u0"], held["phi"], held["rgb"]
+            gpos = held.get("g", np.full(u0.size, np.nan, np.float32))
         if st is not None and st["u"].size:
             # a drop landing before the last pieces were in throws them too
             u0 = np.concatenate([u0, st["u0"]])
             phi = np.concatenate([phi, st["phi"]])
             rgb = np.concatenate([rgb, st["rgb"]])
+            gpos = np.concatenate([gpos, st.get(
+                "g", np.full(st["u0"].size, np.nan, np.float32))])
         if u0.size == 0:
             self._snap = None
             return
@@ -1082,6 +1123,11 @@ class Radial2d(Twod):
             "decay": max(0.05, float(self._config.get(
                 "drop_snap_decay_s", DEFAULT_DROP_SNAP_DECAY_S)) * scale),
         }
+        if self._pd_seen:
+            # THE PRE-DROP played: the colour faded across it, so the pieces
+            # wear the set as it is now (re-read every frame of the snap).
+            # The drop's edge then forgets it (_phase_edge).
+            self._snap["g"] = gpos.astype(np.float32)
 
     def _drop_snap(self, rgb, dt):
         """DROP D3, one frame: the colour gain on the bands (hue-kept, in
@@ -1106,7 +1152,12 @@ class Radial2d(Twod):
         theta = ((self.spin_total + self.rotation) % 1.0) * 2 * np.pi
         x, y = self._piece_xy(u[on], sn["phi"][on], theta)
         layer = np.zeros_like(rgb)
-        splat_brighter(layer, x, y, sn["rgb"][on] * b[on, None])
+        cols = sn["rgb"]
+        if "g" in sn:
+            now = self._palette_full(sn["g"])
+            if now is not None:
+                cols = np.where(np.isfinite(sn["g"])[:, None], now, cols)
+        splat_brighter(layer, x, y, cols[on] * b[on, None])
         return layer
 
     def _track_rotation(self, dt):
@@ -1133,6 +1184,7 @@ class Radial2d(Twod):
         dt = float(self.passed) if np.isfinite(self.passed) else 1.0 / 60.0
         dt = min(max(dt, 0.0), 0.1)
         self._phase_step(dt)
+        self._pre_drop_step(dt)
         self._base_rotation_step(dt)
         self._track_rotation(dt)
         if self._morph is not None:
@@ -1400,8 +1452,9 @@ class Radial2d(Twod):
             breath = phase_grammar.breath_gain(self._config, self._phase_t)
             if not bands:
                 implode_fade = self._implode_fade()
+        outline = self._pre_drop_outline()
         if not bands and self._snap is None and breath >= 1.0 \
-                and implode_fade >= 1.0:
+                and implode_fade >= 1.0 and outline is None:
             return rgb_array
         rgb = rgb_array.astype(np.float32)
         layers = []
@@ -1420,6 +1473,9 @@ class Radial2d(Twod):
             rgb *= np.float32(breath)
         if implode_fade < 1.0:
             rgb *= np.float32(implode_fade)
+        if outline is not None:
+            lit = (outline @ _LUM) > (rgb @ _LUM)
+            rgb[lit] = outline[lit]
         return np.clip(rgb, 0, 255).astype(np.uint8)
 
     def _implode_fade(self):
@@ -1437,6 +1493,74 @@ class Radial2d(Twod):
         if tim.dark:
             return 0.0
         return 1.0 - float(_smooth(tim.approach))
+
+    # ── THE PRE-DROP (PRE_DROP_* above) ──────────────────────────────────
+
+    def _pre_drop_step(self, dt):
+        """THE PRE-DROP's clock: read only on a lull TOLD a pre-drop —
+        every other frame clears it before anything else reads it, so a
+        lull without one is today's, byte for byte. On the pre-drop it turns
+        the outline's own spin (rising PRE_DROP_SPIN_FROM -> _TO over the
+        gap) and marks the lull's pre-drop as played."""
+        if self._phase != "lull" or not pre_drop.told(self._config):
+            self._pd_clk = None
+            return
+        clk = self._pd_clk = pre_drop.phase_clock(
+            self._config, self._phase, self.phase_progress, self._phase_t,
+            prev=self._pd_clk)
+        if clk.segment != "pre_drop":
+            return
+        if clk.edge:
+            self._pd_spin = 0.0
+        self._pd_seen = True
+        rev_s = PRE_DROP_SPIN_FROM + (
+            PRE_DROP_SPIN_TO - PRE_DROP_SPIN_FROM) * clk.frac
+        self._pd_spin = (self._pd_spin + rev_s * dt) % 1.0
+
+    def _pre_drop_outline(self):
+        """The outline (H x W x 3 float, or None): Star's own shape at a
+        shaped radius growing from 0 at the pre-drop to PRE_DROP_OUTLINE_R x
+        the panel height on the drop (eased out), turned by Star's rotation
+        plus its own spin-up, PRE_DROP_OUTLINE_W thin, dim, in the set's
+        colours by angle as the cached palette holds them this frame."""
+        clk = self._pd_clk
+        if clk is None or clk.segment != "pre_drop" or self.max_radius is None:
+            return None
+        grow = 1.0 - (1.0 - clk.frac) ** 2
+        r = PRE_DROP_OUTLINE_R * float(self.r_height) * grow
+        theta = ((self.spin_total + self.rotation + self._pd_spin)
+                 % 1.0) * 2 * np.pi
+        ang = np.arctan2(self.dy, self.dx) - theta
+        shaped = self._shaped_radius(self.radius_base.copy(), ang, theta,
+                                     self.edges)
+        g = np.clip(PRE_DROP_OUTLINE_W - np.abs(shaped - r), 0.0, 1.0)
+        if not g.any():
+            return None
+        g = g * (PRE_DROP_OUTLINE_GAIN0
+                 + (PRE_DROP_OUTLINE_GAIN1 - PRE_DROP_OUTLINE_GAIN0) * clk.frac)
+        pos = ((ang / (2.0 * np.pi)) % 1.0).astype(np.float32)
+        try:
+            col = self.get_gradient_color_vectorized1d(pos.ravel())
+        except RuntimeError:                               # no set seen yet
+            return None
+        col = np.asarray(col, np.float32).reshape(shaped.shape + (3,))
+        return (col * g[..., None]).astype(np.float32)
+
+    def _palette_full(self, g):
+        """The set's colour at full at palette positions `g` from the
+        palette as it is now — exactly what `_set_colours` gave a piece at
+        `g` (transition_cloud.nearest_set_grad's own arithmetic), so an
+        unchanged set gives the same colour back. None with no palette."""
+        from fx.effects import transition_program as tp
+        pal = self._palette
+        if pal is None:
+            return None
+        n = tp.PALETTE_GRID.size
+        g = np.nan_to_num(np.asarray(g, np.float32), nan=0.0)
+        j = np.clip(np.rint(g * (n - 1)).astype(np.int32), 0, n - 1)
+        c = pal[j]
+        return (c * (255.0 / np.maximum(c.max(axis=1, keepdims=True), 1.0))
+                ).astype(np.float32)
 
     # ── INTO STAR (a transition program's FORM — transition_cloud.
     # RingFormer): the geometry and the bands the arriving pieces land on ──

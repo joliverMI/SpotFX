@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""THE PRE-DROP STORYBOARDS (predrop plan steps 6-7, report 3.4-3.5):
-Fireworks, Pulse, Orbits and Black Hole rendered offline through the shipped
-effects, today and with each kind of pre-drop, driven by the lull arm the
-real engine writes (tests/pre_drop_look_harness.py — the same rig the tests
-use).
+"""THE PRE-DROP STORYBOARDS (predrop plan steps 6-8, report 3.4-3.5):
+Fireworks, Pulse, Orbits, Black Hole, the Fish, Star and Sauron rendered
+offline through the shipped effects, today and with each kind of pre-drop,
+driven by the lull arm the real engine writes (tests/pre_drop_look_harness.py
+— the same rig the tests use).
 
 It is the tuning loop and a proof at once. It writes to
 docs/evidence/predrop-storyboards/:
@@ -11,7 +11,10 @@ docs/evidence/predrop-storyboards/:
   fireworks_<clip>.png / .gif  his crystal's 976 real cells (gap cells grey)
                                through the lull and the drop, one frame per
                                0.2 s on the sheet (and orbits_<clip>,
-                               blackhole_<clip>, the same clips);
+                               blackhole_<clip>, fish_<clip>, star_<clip>,
+                               sauron_<clip>, the same clips, plus
+                               star_spike_0.8s_newset: the set changing at
+                               the pre-drop);
   pulse_levels.png             Pulse's level on one light over the lull and
                                the drop, today (dashed) and with a pre-drop,
                                for Winny's spike gap, his 2 s maximum and
@@ -26,7 +29,10 @@ is below today's; Pulse is black through the breath and its dark span, the
 span a quarter of the gap clamped to 100-500 ms; Orbits is dim, never black,
 through the breath and its light is below today's at the plan's 0.8 s gap
 (within +20% at a longer one — a named deviation); Black Hole is black
-through the breath and its light is below today's at every gap.
+through the breath and its light is below today's at every gap; the Fish is
+never dark and its light is within the plan's own named +4%; Star and Sauron
+are black through the breath and their light is below today's at every gap;
+Star's drop wears the set as it is at the drop.
 
 Run from the repo root: .venv/bin/python scripts/render_predrop_storyboards.py
 """
@@ -157,7 +163,7 @@ def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix="predrop_storyboards_"))
     problems: list[str] = []
-    lines = ["# Pre-drop storyboards (predrop plan steps 6-7)", "",
+    lines = ["# Pre-drop storyboards (predrop plan steps 6-8)", "",
              "Rendered by `scripts/render_predrop_storyboards.py` through the "
              "shipped effects, driven by the lull arm the real engine writes. "
              "Light: each real cell's brightest channel / 255, summed over the "
@@ -304,6 +310,97 @@ def main() -> int:
               "longer gap adds light: the plan's own prototype measured only "
               "the 0.8 s gap, where it is below today's; a 2 s spike and a "
               "3.3 s vocal intro run above it (named, bounded at +20%).", ""]
+
+    # the Fish, Star and Sauron (step 8): today unchanged, then each clip
+    star_scene = H.star_scene()
+
+    def run8(effect, effect_type, lull, gap, kind, today_arm=False, **kw):
+        arms = arms_for("radial" if effect == "star" else effect, lull, gap,
+                        kind) if effect != "star" else H.engine_arms(
+            "radial", lull, at_s=None if gap is None else lull - gap,
+            gap_s=gap, kind=kind, scene=star_scene)
+        if today_arm:
+            arms = {k: H.todays_arm(a, "radial" if effect == "star"
+                                    else effect) for k, a in arms.items()}
+        if effect == "star":
+            strip = H.engine_arms(
+                "melt", lull, at_s=None if gap is None else lull - gap,
+                gap_s=gap, kind=kind, scene=star_scene)
+            return H.run_async(H.star_run(tmp, effect_type, arms, strip,
+                                          lull_s=lull, **kw))
+        info = H._fish_info if effect == "fish" else H._sauron_info
+        return H.run_async(H.crystal_run(tmp, effect_type, arms,
+                                         H.STEP8_CFG[effect], lull_s=lull,
+                                         info=info, **kw))
+
+    for effect, module, title in (("fish", "fish", "Fish"),
+                                  ("star", "radial", "Star"),
+                                  ("sauron", "sauron", "Sauron")):
+        lines += [f"## {title}", "",
+                  "| Clip | Lull before the pre-drop | Pre-drop to drop | "
+                  "Whole lull | vs today |", "|---|---:|---:|---:|---:|"]
+        pinned = H.load_pinned(module, f"{module}_prelook8",
+                               H.STEP8_LACKS[module], ref=H.STEP8_REF)
+        now = run8(effect, module, 3.2, None, "")
+        then = run8(effect, pinned, 3.2, None, "", today_arm=True)
+        same8 = (len(now.frames) == len(then.frames) and all(
+            np.array_equal(a, b) for a, b in zip(now.frames, then.frames)))
+        if not same8:
+            problems.append(f"{title} without a pre-drop is not today's")
+        today = {}
+        for name, lull, gap, kind in FW_CLIPS:
+            run = run8(effect, module, lull, gap, kind)
+            fw_sheet(name, run, lull, gap, prefix=effect)
+            a, b, whole = light_split(run, lull, gap)
+            if gap is None:
+                today[lull] = whole
+                vs = ""
+            else:
+                ratio = whole / today[lull]
+                vs = f"{100 * (ratio - 1):+.0f}%"
+                lull_lit = [H.light(f, MASK) for _t, f, _i in H.lull_frames(run)]
+                breath = [H.light(f, MASK) for (ph, t), f, i in zip(
+                    run.phase, run.frames, run.info)
+                    if ph == "lull" and i["segment"] == "breath"]
+                if effect == "fish":
+                    if ratio > 1.04:
+                        problems.append(f"{title} {name}: lull light past the "
+                                        "plan's named +4%")
+                    if min(lull_lit) <= 0.0:
+                        problems.append(f"{title} {name}: the lull went dark")
+                else:
+                    if ratio >= 1.0:
+                        problems.append(f"{title} {name}: lull light not below "
+                                        "today's")
+                    if max(breath) > 0.0:
+                        problems.append(f"{title} {name}: not black through "
+                                        "the breath")
+            lines.append(f"| {name} (lull {lull} s) | {a:.1f} | {b:.1f} | "
+                         f"{whole:.0f} | {vs} |")
+        lines += ["", f"Without a pre-drop, frame for frame against the "
+                  f"module before step 8 ({H.STEP8_REF[:8]}): "
+                  f"{'unchanged' if same8 else 'CHANGED'}.", ""]
+        if effect == "star":
+            # the set changes at the pre-drop (the colour fade, landed at
+            # once): the drop's pieces come back out in the new set
+            change = {("lull", int(round(2.4 / H.DT))): {
+                "gradient": "linear-gradient(90deg, #ff2000 0%, "
+                            "#ffa000 100%)"}}
+            run = run8(effect, module, 3.2, 0.8, "spike",
+                       strip_pokes=change)
+            fw_sheet("spike_0.8s_newset", run, 3.2, 0.8, prefix=effect)
+            if not any(i["snap_resampled"] for (ph, _t), i in zip(
+                    run.phase, run.info) if ph == "drop"):
+                problems.append("Star's drop did not take the set as it is "
+                                "at the drop")
+            lines += ["star_spike_0.8s_newset: the set changes to a warm one "
+                      "at the pre-drop; the drop's pieces come back out in it "
+                      "(today they keep the colours they fell in with).", ""]
+    lines += ["The Fish takes no breath, so its lull is never dark; the "
+              "plan's prototype measured it +4% (named), the build is at or "
+              "below today's. Sauron ships at the plan's dimmer setting "
+              "(the glare at 20% rising to 36%, the prototype's 35% to 60%).",
+              ""]
     (OUT / "README.md").write_text("\n".join(lines))
     print("\n".join(lines))
     if problems:
@@ -312,8 +409,8 @@ def main() -> int:
             print(f"  - {p}")
         return 1
     print("OK: unchanged without a pre-drop; black where it must be; the "
-          "Fireworks and Black Hole lulls below today's, Orbits' at the plan's "
-          "gap.")
+          "Fireworks, Black Hole, Star and Sauron lulls below today's, Orbits' "
+          "at the plan's gap, the Fish's within the plan's +4%.")
     return 0
 
 

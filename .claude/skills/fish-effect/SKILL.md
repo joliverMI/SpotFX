@@ -667,6 +667,43 @@ Untold reads True. It is an overlay, so nothing in this effect's own drop
 changes; `drop_shock` (the per-effect strength) is a separate knob. Help
 `drop-shockwave-switches`; proof `tests/test_drop_shock_switches.py`.
 
+## THE PRE-DROP — the searcher darts to the centre and waits there (2026-10-27)
+
+The plan's 3.5 (his approval, 2026-10-26: "do all recs"): "the searching
+fish darts to the centre on the pre-drop, then waits there poised, its head
+quivering, until the drop." The Fish is in `fx.device_model.
+PRE_DROP_EFFECTS` since predrop step 8, one look for both kinds ("dart",
+`pre_drop_looks` in config/effect_params.json). `fx/effects/pre_drop.py` is
+the binding statement for the told keys; the PRE_DROP block beside the
+searching lull's constants for the look. Four invariants not visible cold:
+
+- **THE SEARCHING LULL IS MEASURED TO THE PRE-DROP.** Told one,
+  `_lull_clock` ends the lull on it: the half-way keep mark is half the way
+  to it and the search's legs end on it — the rule the engine already
+  applies to every member's ramp, dark point and breath — so the lone
+  searcher is there to go. (Untold, a 2 s spike in a 3.2 s lull would land
+  0.4 s before the mark, with the others still leaving.)
+- **THE DART AND THE COIL ARE THE KEEPERS' OWN STEERING.** `_pre_drop_dart`
+  overwrites `self._keep` — the dart to each keeper's place at the centre of
+  view (its row offset kept), then a tight coil round it, the head's `look`
+  quivering harder toward the drop — and carries `turn` (PRE_DROP_TURN),
+  which draw() divides the keepers' turn clamp by; nothing writes config.
+  The numbers are the plan's prototype's (its contact sheet is exactly this
+  curl). On his settings the searcher sits about a body length from the
+  centre, so the dart is short and the coil is the energy; on a gap longer
+  than the prototype's 0.8 s the loops swing wider (mean 7-10 px from the
+  centre, up to ~16 px, still inside the lit hex) because the steering's
+  proportional turn lags a 2.2 rev/s target. A slower settle barely
+  tightens it; the first loop's rate (`PRE_DROP_COIL_REV[0]`) does.
+- **NEVER DARK.** The Fish takes no breath (BREATH_HOLD False, his
+  2026-10-12 word), so a told breath is a no-op and every lull frame is
+  lit. Its light over the lull is at or below today's (-5% at a 0.8 s
+  spike, -29% at 2 s, -0% at a 3.3 s vocal intro) — inside the plan's own
+  named +4%.
+- **UNTOLD IS TODAY'S.** `_pre_drop_step` clears the clock on every frame
+  of a lull not told one, so the lull is today's frame for frame (proven
+  against the module at the step-8 base).
+
 ## Thematic transitions + the Shoaling adoption fix (2026-10-11)
 
 - **THE ADOPTION FIX**: the generic (cross-type) adopt keeps a predecessor's

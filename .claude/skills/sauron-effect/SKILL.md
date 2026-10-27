@@ -143,6 +143,38 @@ Untold reads True. It is an overlay, so nothing in this effect's own drop
 changes; `drop_shock` (the per-effect strength) is a separate knob. Help
 `drop-shockwave-switches`; proof `tests/test_drop_shock_switches.py`.
 
+## THE PRE-DROP — the dimmed glare (2026-10-27)
+
+The plan's 3.5: "the lids part to a narrow glare on the slit pupil in the
+new colours, flames held down, brightening slowly until the drop opens them
+fully" — and it ships "at a dimmer setting" (his "do all recs"). Sauron is
+in `fx.device_model.PRE_DROP_EFFECTS` since predrop step 8, one look for
+both kinds ("glare"), ahead of the Sauron scene, which still waits on his
+tuning session. The PRE_DROP block beside the surge constants is the look.
+Four invariants not visible cold:
+
+- **WHERE THE LIDS PART TO.** PRE_DROP_LID_OPEN_TO (0.62) sits in Eye's lid
+  pause (LID_PAUSE_START..END): the lids rest on the iris's edge, so the
+  eye's own band shows and the panel above and below stays covered — the
+  prototype's glare exactly (its comment said "40% open"; it is the iris's
+  edge). They part over PRE_DROP_PART_S from shut; the lull's own close is
+  measured to the pre-drop and the breath holds the panel black before it.
+- **HELD DOWN, NOT REWRITTEN.** The flames' reach is multiplied in
+  `_flames(held=)` and the ember sky skipped while the glare shows — no
+  config write (the prototype wrote `flames`/`sky` and restored them).
+  Measured: about 460 flame cells through the approach, about 80 in the
+  glare.
+- **DIMMER, AND THE DROP NEVER SLAMS.** PRE_DROP_GLARE 0.20 -> 0.36 (the
+  prototype's 0.35 -> 0.60): the lull's light is below today's at every gap
+  (-2% at a 0.8 s spike, -38% at 2 s, -4% at a 3.3 s vocal intro), the gap
+  about 1.85x today's lid line (the prototype's 2.7x). A drop landing on
+  half-open lids slams them shut first (`_drop_slam`); after the glare
+  (`_pd_glare`) it does not: the eruption fires on the mark and the lids
+  open from the glare.
+- **UNTOLD IS TODAY'S** frame for frame (proven against the module at the
+  step-8 base; the rig reseeds `noise` and `_wander_seed`, which Sauron
+  draws from an unseeded generator at construction).
+
 ## Sonic reach
 
 Every registered param through `set_scene_entry_param` (registry-driven,

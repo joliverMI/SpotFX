@@ -1,7 +1,8 @@
-"""THE PRE-DROP LOOKS (predrop plan steps 6-7): Fireworks' rockets and
+"""THE PRE-DROP LOOKS (predrop plan steps 6-8): Fireworks' rockets and
 Pulse's burst and dim swell (step 6), Orbits' jitter-and-grow return and
-Black Hole's infall ring (step 7), on the real effects, driven by the lull arm
-the real engine writes (tests/pre_drop_look_harness.py).
+Black Hole's infall ring (step 7), the Fish's dart, Star's outline growing
+out of the centre and Sauron's dimmed glare (step 8), on the real effects,
+driven by the lull arm the real engine writes (tests/pre_drop_look_harness.py).
 
 The acceptance (report 3.7, step 6): without a pre-drop each effect is
 today's, frame for frame, against its own module before the looks (pinned
@@ -17,7 +18,15 @@ Black Hole are today's frame for frame against their modules before step
 full on the pre-drop, jittering harder and growing until the drop; Black
 Hole is dark from its dark point, black through the breath, and its infall
 ring falls from the hex edge to the centre over the gap, in the set's
-colours, its light over the lull below today's.
+colours, its light over the lull below today's. Step 8 (the same shape):
+untold, the Fish, Star and Sauron are today's frame for frame against their
+modules before step 8; told, the Fish's searching lull ends on the pre-drop,
+the keeper darts to the centre and waits poised there, its head quivering
+harder toward the drop, never dark; Star is dark from its dark point and
+black through the breath, its outline grows out of the centre as it spins
+up, in the set's colours, and the drop's pieces wear the set as it is at the
+drop; Sauron is black through the breath, its lids part to the glare and
+hold, flames held down, brightening, and the drop opens them without a slam.
 """
 from __future__ import annotations
 
@@ -421,3 +430,292 @@ def test_black_hole_light_over_the_lull_is_below_todays(tmp_path, lull_s,
                   lull_s=lull_s)
     assert _lull_light(told) < _lull_light(today)
     assert bh_mod.PRE_DROP_RING_R0 > bh_mod.HEX_FILL_RADIUS
+
+
+# ═══ Step 8: the Fish, Star and Sauron ═════════════════════════════════════
+
+from fx.effects import fish as fish_mod  # noqa: E402
+from fx.effects import radial as star_mod  # noqa: E402
+from fx.effects import sauron as sauron_mod  # noqa: E402
+
+GAPS8 = GAPS7
+INFO8 = {"fish": H._fish_info, "sauron": H._sauron_info}
+# a far set (warm) the drop's colour change lands on in the colour test
+NEW_SET = "linear-gradient(90deg, #ff2000 0%, #ffa000 100%)"
+
+
+def _pinned8(module):
+    try:
+        return H.load_pinned(module, f"{module}_prelook8",
+                             H.STEP8_LACKS[module], ref=H.STEP8_REF)
+    except RuntimeError as exc:
+        pytest.skip(str(exc))
+
+
+def _run8(tmp_path, effect_type, arms, effect=None, **kw):
+    effect = effect or effect_type
+    return H.run_async(H.crystal_run(tmp_path, effect_type, arms,
+                                     H.STEP8_CFG[effect], info=INFO8[effect],
+                                     **kw))
+
+
+def _told8(tmp_path, effect, lull_s=3.2, gap_s=0.8, kind="spike"):
+    arms = H.engine_arms(effect, lull_s, at_s=lull_s - gap_s, gap_s=gap_s,
+                         kind=kind)
+    return _run8(tmp_path, effect, arms, lull_s=lull_s)
+
+
+def _star(tmp_path, star_type, lull_s=3.2, gap_s=None, kind="spike",
+          today=False, **kw):
+    scene = H.star_scene()
+    at = None if gap_s is None else lull_s - gap_s
+    arms = H.engine_arms("radial", lull_s, at_s=at, gap_s=gap_s, kind=kind,
+                         scene=scene)
+    if today:
+        arms = _today(arms, "radial")
+    strip = H.engine_arms("melt", lull_s, at_s=at, gap_s=gap_s, kind=kind,
+                          scene=scene)
+    return H.run_async(H.star_run(tmp_path, star_type, arms, strip,
+                                  lull_s=lull_s, **kw))
+
+
+@pytest.mark.parametrize("effect", ["fish", "sauron"])
+def test_an_untold_step8_member_is_todays_frame_for_frame(tmp_path, effect):
+    pinned = _pinned8(effect)
+    arms = H.engine_arms(effect, 3.2)              # no pre-drop: NOT_TOLD
+    now = _run8(tmp_path, effect, arms, pokes=FLARE_WRITE)
+    then = _run8(tmp_path, pinned, _today(arms, effect), effect=effect,
+                 pokes=FLARE_WRITE)
+    assert len(now.frames) == len(then.frames)
+    assert max(float(f.max()) for f in now.frames) > 0.0
+    for i, (a, b) in enumerate(zip(now.frames, then.frames)):
+        assert np.array_equal(a, b), (effect, i, now.phase[i])
+
+
+def test_an_untold_star_is_todays_frame_for_frame(tmp_path):
+    pinned = _pinned8("radial")
+    now = _star(tmp_path, "radial", pokes=FLARE_WRITE)
+    then = _star(tmp_path, pinned, today=True, pokes=FLARE_WRITE)
+    assert len(now.frames) == len(then.frames)
+    assert max(float(f.max()) for f in now.frames) > 0.0
+    for i, (a, b) in enumerate(zip(now.frames, then.frames)):
+        assert np.array_equal(a, b), (i, now.phase[i])
+
+
+# ── the Fish: the searcher darts to the centre and waits there poised ─────
+
+@pytest.mark.parametrize("lull_s,gap_s,kind", GAPS8)
+def test_the_fish_searching_lull_ends_on_the_pre_drop(tmp_path, lull_s,
+                                                      gap_s, kind):
+    """Told, the half-way mark is half the way to the pre-drop: every other
+    fish has left by it and the keeper is there to go (on a 3.2 s lull with
+    a 2 s gap the untold mark, 1.6 s, would land 0.4 s after it)."""
+    run = _told8(tmp_path, "fish", lull_s, gap_s, kind)
+    first = _segment(run, "pre_drop")[0][2]
+    assert first["keepers"] >= 1
+    assert first["others"] == 0, "the lone searcher, no one else"
+
+
+@pytest.mark.parametrize("lull_s,gap_s,kind", GAPS8)
+def test_the_fish_darts_to_the_centre_and_waits_there_poised(
+        tmp_path, lull_s, gap_s, kind):
+    run = _told8(tmp_path, "fish", lull_s, gap_s, kind)
+    gap = _segment(run, "pre_drop")
+    at = lull_s - gap_s
+    assert all(inf["turn"] == fish_mod.PRE_DROP_TURN for _t, _f, inf in gap)
+    arrived = gap[-1][2]["arrived"]
+    assert arrived is not None
+    assert arrived - at <= fish_mod.PRE_DROP_DART_MAX_S + 2 * DT + EPS
+    body = gap[0][2]["body_px"]
+    d = [inf["keep_d_px"] for _t, _f, inf in gap]
+    assert np.mean(d) <= 2.0 * body, "it waits at the centre of view"
+    assert max(d) <= 3.0 * body
+    before = [inf for (ph, _t), inf in zip(run.phase, run.info)
+              if ph == "lull" and inf["segment"] != "pre_drop"]
+    assert all(inf["turn"] is None for inf in before), "the gap's alone"
+
+
+@pytest.mark.parametrize("lull_s,gap_s,kind", [(3.2, 2.0, "spike"),
+                                               (6.0, 3.3, "intro")])
+def test_the_fish_head_quivers_harder_toward_the_drop(tmp_path, lull_s,
+                                                      gap_s, kind):
+    run = _told8(tmp_path, "fish", lull_s, gap_s, kind)
+    looks = [inf["look"] for _t, _f, inf in _segment(run, "pre_drop")
+             if inf["arrived"] is not None]
+    third = len(looks) // 3
+    assert third >= 10
+    assert max(looks) <= fish_mod.PRE_DROP_QUIVER[1] + EPS
+    assert max(looks[-third:]) > 1.5 * max(looks[:third])
+
+
+@pytest.mark.parametrize("lull_s,gap_s,kind", GAPS8)
+def test_the_fish_lull_is_never_dark_and_its_light_is_within_the_plans(
+        tmp_path, lull_s, gap_s, kind):
+    """The Fish takes no breath, so every lull frame is lit; its light over
+    the lull stays within the plan's own named +4% (report 3.5: "every
+    idea stays at or below today's lull except Fish (+4%)")."""
+    told = _told8(tmp_path, "fish", lull_s, gap_s, kind)
+    assert all(H.light(f, MASK) > 0.0 for _t, f, _i in H.lull_frames(told))
+    today = _run8(tmp_path, "fish", H.engine_arms("fish", lull_s),
+                  lull_s=lull_s)
+    assert _lull_light(told) <= 1.04 * _lull_light(today)
+
+
+# ── Star: dark, the outline grows out of the centre, the drop's colours ────
+
+def _lit_radius(frame):
+    """The lit cells' brightness-weighted mean distance from the panel's
+    centre (px), over his real cells."""
+    v = frame.reshape(H.ROWS, H.COLS, 3).max(axis=2)
+    yy, xx = np.indices(v.shape)
+    r = np.hypot(xx - H.COLS * 0.5, yy - H.ROWS * 0.5)
+    w = v * MASK.reshape(v.shape)
+    return float((w * r).sum() / w.sum()) if w.sum() > 0 else 0.0
+
+
+@pytest.mark.parametrize("lull_s,gap_s,kind", GAPS8)
+def test_star_is_dark_from_its_dark_point_through_the_breath(
+        tmp_path, lull_s, gap_s, kind):
+    run = _star(tmp_path, "radial", lull_s, gap_s, kind)
+    dark = _segment(run, "dark") + _segment(run, "breath")
+    assert dark
+    for t, f, _inf in dark:
+        assert H.light(f, MASK) == 0.0, t
+    assert H.light(_segment(run, "pre_drop")[0][1], MASK) > 0.0
+
+
+@pytest.mark.parametrize("lull_s,gap_s,kind", [(3.2, 0.8, "spike"),
+                                               (6.0, 3.3, "intro")])
+def test_star_outline_grows_out_of_the_centre_as_it_spins_up(
+        tmp_path, lull_s, gap_s, kind):
+    """His approval: "the star predrop should grow from the center as it
+    spins, so it doesn't just pop in" — it starts as a dot at the centre and
+    reaches its full size on the drop, turning faster as it goes."""
+    run = _star(tmp_path, "radial", lull_s, gap_s, kind)
+    gap = _segment(run, "pre_drop")
+    radii = [_lit_radius(f) for _t, f, _i in gap]
+    assert radii[0] < 3.0, "a dot at the centre on the pre-drop"
+    full = star_mod.PRE_DROP_OUTLINE_R * H.ROWS
+    assert radii[-1] > 0.6 * full, "full size on the drop"
+    assert radii[0] < 0.25 * radii[-1]
+    assert all(b >= a - 0.5 for a, b in zip(radii, radii[1:])), \
+        "it only ever grows"
+    steps = [(b["spin"] - a["spin"]) % 1.0
+             for (_t, _f, a), (_u, _g, b) in zip(gap, gap[1:])]
+    third = len(steps) // 3
+    assert np.mean(steps[-third:]) > 2.0 * np.mean(steps[:third]), \
+        "it spins up"
+
+
+def test_star_outline_wears_the_sets_colours_never_white(tmp_path):
+    run = _star(tmp_path, "radial", 3.2, 0.8)
+    hues = set()
+    for _t, f, _inf in _segment(run, "pre_drop"):
+        px = f.reshape(-1, 3)[MASK]
+        assert phase_grammar.white_cells(px) == 0
+        lit = px[px.max(axis=1) > 40.0]
+        hues.update(int(np.degrees(np.arctan2(
+            np.sqrt(3.0) * (p[1] - p[2]), 2.0 * p[0] - p[1] - p[2])) // 15)
+            for p in lit)
+    assert len(hues) >= 3, "coloured round the set by angle"
+
+
+@pytest.mark.parametrize("lull_s,gap_s,kind", GAPS8)
+def test_star_light_over_the_lull_is_below_todays(tmp_path, lull_s, gap_s,
+                                                  kind):
+    told = _star(tmp_path, "radial", lull_s, gap_s, kind)
+    today = _star(tmp_path, "radial", lull_s)
+    assert _lull_light(told) < _lull_light(today)
+
+
+def _old_hue_cells(run, within_s=0.35):
+    """Lit real cells in the drop's first `within_s` whose hue is the OLD
+    set's (FIREWORKS_CFG's blue to purple) rather than NEW_SET's warm."""
+    import colorsys
+    count = 0
+    for (ph, t), f in zip(run.phase, run.frames):
+        if ph != "drop" or t > within_s:
+            continue
+        px = f.reshape(-1, 3)[MASK]
+        for r, g, b in px[px.max(axis=1) > 60.0]:
+            h = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)[0] * 360.0
+            count += 170.0 <= h <= 300.0
+    return count
+
+
+@pytest.mark.parametrize("lull_s,gap_s,kind", [(3.2, 0.8, "spike"),
+                                               (6.0, 3.3, "intro")])
+def test_star_drop_pieces_wear_the_set_as_it_is_at_the_drop(
+        tmp_path, lull_s, gap_s, kind):
+    """The plan's 2.2/3.5: "Star re-samples its palette as the colour
+    fades". The set changes at the pre-drop; the pieces the lull swallowed
+    fly back out on the drop in the NEW set. Today's module (the control,
+    no pre-drop) throws them out in the colours they fell in with."""
+    at = lull_s - gap_s
+    change = {("lull", int(round(at / DT))): {"gradient": NEW_SET}}
+    told = _star(tmp_path, "radial", lull_s, gap_s, kind, strip_pokes=change)
+    drop = [i for (ph, _t), i in zip(told.phase, told.info) if ph == "drop"]
+    assert drop[0]["snap"] and drop[0]["snap_resampled"]
+    assert _old_hue_cells(told) == 0
+    control = _star(tmp_path, _pinned8("radial"), lull_s, today=True,
+                    strip_pokes=change)
+    assert _old_hue_cells(control) > 100, "the control shows the defect"
+
+
+# ── Sauron: black, the lids part to a dimmed glare, no slam on the drop ───
+
+@pytest.mark.parametrize("lull_s,gap_s,kind", GAPS8)
+def test_sauron_is_black_through_the_breath_then_parts_to_the_glare(
+        tmp_path, lull_s, gap_s, kind):
+    run = _told8(tmp_path, "sauron", lull_s, gap_s, kind)
+    breath = _segment(run, "breath")
+    assert breath
+    for t, f, _inf in breath:
+        assert H.light(f, MASK) == 0.0, t
+    gap = _segment(run, "pre_drop")
+    at = lull_s - gap_s
+    open_to = sauron_mod.PRE_DROP_LID_OPEN_TO
+    assert gap[0][2]["lid"] > open_to and gap[0][2]["glare"]
+    parted = [t for t, _f, inf in gap if inf["lid"] <= open_to + EPS]
+    assert parted and parted[0] - at <= sauron_mod.PRE_DROP_PART_S + DT + EPS
+    assert all(inf["lid"] == pytest.approx(open_to) for t, _f, inf in gap
+               if t >= parted[0]), "the glare holds until the drop"
+
+
+def test_sauron_glare_holds_the_flames_down_and_brightens(tmp_path):
+    run = _told8(tmp_path, "sauron", 6.0, 3.3, "intro")
+    approach = [inf["flame_cells"] for _t, _f, inf in _segment(run, "approach")]
+    gap = _segment(run, "pre_drop")
+    assert max(inf["flame_cells"] for _t, _f, inf in gap) < 0.5 * np.mean(
+        approach), "the flames are held down"
+    held = [H.light(f, MASK) for t, f, _i in gap
+            if t >= gap[0][0] + sauron_mod.PRE_DROP_PART_S + DT]
+    third = len(held) // 3
+    assert np.mean(held[-third:]) > 1.2 * np.mean(held[:third]), \
+        "brightening toward the drop"
+
+
+@pytest.mark.parametrize("lull_s,gap_s,kind", [(3.2, 0.8, "spike"),
+                                               (6.0, 3.3, "intro")])
+def test_the_drop_opens_sauron_from_the_glare_without_a_slam(
+        tmp_path, lull_s, gap_s, kind):
+    run = _told8(tmp_path, "sauron", lull_s, gap_s, kind)
+    drop = [inf for (ph, _t), inf in zip(run.phase, run.info) if ph == "drop"]
+    first = drop[0]
+    assert first["slam"] is False
+    assert first["burst"] > 0.9, "the eruption fires on the mark"
+    lids = [inf["lid"] for inf in drop[:8]]
+    assert lids[0] < sauron_mod.PRE_DROP_LID_OPEN_TO
+    assert all(b <= a + EPS for a, b in zip(lids, lids[1:])), "opening"
+
+
+@pytest.mark.parametrize("lull_s,gap_s,kind", GAPS8)
+def test_sauron_light_over_the_lull_is_below_todays(tmp_path, lull_s, gap_s,
+                                                    kind):
+    """The plan's prototype measured Sauron at +3% over today's lull and
+    said it would ship at a dimmer setting: at PRE_DROP_GLARE it is below
+    today's at every gap."""
+    told = _told8(tmp_path, "sauron", lull_s, gap_s, kind)
+    today = _run8(tmp_path, "sauron", H.engine_arms("sauron", lull_s),
+                  lull_s=lull_s)
+    assert _lull_light(told) < _lull_light(today)

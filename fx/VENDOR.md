@@ -2587,7 +2587,7 @@ against that commit.
     lull_dark / lull_handoff / breath-hold way, told only to
     `fx.device_model.PRE_DROP_EFFECTS` members (empty at this step; step
     6, #87, adds Fireworks and Pulse; step 7, #88, Orbits and Black
-    Hole). The module
+    Hole; step 8, #89, the Fish, Star and Sauron). The module
     holds the keys, their schema fields, `resolve_look` (an entry's "auto" /
     "same" / named choice against the effect's declared `pre_drop_looks`
     registry block) and `phase_clock`, one object per frame naming the
@@ -2675,4 +2675,50 @@ against that commit.
     2 s spike and +14% at a 3.3 s vocal intro, named and bounded at
     +20%), storyboards `scripts/render_predrop_storyboards.py` ->
     `docs/evidence/predrop-storyboards/`. Unverified against his live
+    room.
+89. `effects/fish.py` + `effects/radial.py` + `effects/sauron.py`
+    (SpotFX-authored, #86's step-8 members; `effects/orbits.py` reuses the
+    frame's own `grow` for its jitter's gate, no change in behaviour): THE
+    PRE-DROP LOOKS, continued (2026-10-27, predrop plan step 8, report §3.5,
+    his approval "do all recs, except the star predrop should grow from the
+    center as it spins"). `fx.device_model.PRE_DROP_EFFECTS` adds `fish`,
+    `radial` and `sauron`, each declaring one look for both kinds in
+    config/effect_params.json. FISH ("dart"): told a pre-drop, the searching
+    lull is measured to it (`_lull_clock`: the keep mark is half the way to
+    it, the search's legs end on it); on the pre-drop `_pre_drop_dart`
+    overwrites the keepers' `_keep` targets — a dart to each keeper's place
+    at the centre of view (speed sized to arrive in `PRE_DROP_DART_S`), then
+    a tight coil round it (`PRE_DROP_COIL_*`), the head's look quivering
+    harder toward the drop — and carries `turn`, by which draw() divides the
+    keepers' turn clamp (no config write). Never dark (BREATH_HOLD False).
+    STAR ("outline"): the dark point and breath come from the arm, so the
+    panel is black before the pre-drop; on it `_pre_drop_outline` draws a
+    band in Radial's own shape (`_shaped_radius`) at a shaped radius growing
+    from 0 to `PRE_DROP_OUTLINE_R` x the panel height (`1 - (1 - frac)^2`),
+    turning with Star plus its own spin-up (`PRE_DROP_SPIN_FROM` -> `_TO`),
+    dim, coloured round the set by angle from the cached palette, composed
+    brighter-wins; a falling lull piece keeps its palette position (`g`) and,
+    after a pre-drop that played (`_pd_seen`), `_drop_snap` recolours the
+    pieces from the live palette (`_palette_full`, nearest_set_grad's own
+    arithmetic) — the plan's 2.2, "Star re-samples its palette as the colour
+    fades"; a drop with no pre-drop keeps today's colours. SAURON ("glare"):
+    on the pre-drop the lids part over `PRE_DROP_PART_S` to
+    `PRE_DROP_LID_OPEN_TO` (Eye's lid pause, on the iris's edge), the
+    flames' reach is held to `PRE_DROP_FLAMES` (`_flames(held=)`) and the
+    sky skipped, the eye at `PRE_DROP_GLARE` (0.20 -> 0.36, the plan's
+    "dimmer setting"; its prototype 0.35 -> 0.60), and a drop after the
+    glare (`_pd_glare`) opens the lids from it without the half-open slam.
+    Every new branch returns before touching state (or an rng) when nothing
+    is told, so an untold lull is today's. Evidence:
+    `tests/test_pre_drop_looks.py` (all three untold against their modules
+    at the step-8 base frame for frame — Star through `star_run`, beside the
+    strip it samples; the Fish's lull ending on the pre-drop, the dart, the
+    coil, the quiver, never dark, its light within the plan's named +4%;
+    Star black through the breath, the outline growing from a dot to full
+    size while it spins up, the set's colours, no white, the drop's pieces
+    in the new set with today's module as the red control; Sauron black
+    through the breath, the lids parting and holding, the flames held down,
+    brightening, the drop without a slam; Star's and Sauron's light below
+    today's at every gap), storyboards `scripts/render_predrop_storyboards.py`
+    -> `docs/evidence/predrop-storyboards/`. Unverified against his live
     room.
