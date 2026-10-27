@@ -4,7 +4,7 @@
  * same-origin through its own /api/jukebox routes; SPECTRA's backend is not
  * involved.
  *
- * TWO TABS:
+ * THREE TABS:
  *   Set list  the editor: link the set playlist, choose where the jukebox
  *             slots go (Auto · Jukebox first · Manual), what happens when
  *             the set runs out; the program bar for one pass; the set
@@ -14,6 +14,8 @@
  *             slot after it, a slot for another right after it, × to remove.
  *   Live      READ-ONLY: the night, what is playing, the next 20 program
  *             items with when they start, the jukebox line, the log.
+ *   Credits   the party-size presets, the price check, and every credits
+ *             setting (CreditsTab.tsx, phase 3.3).
  * Above both: the Spotify sign-in line (PR 1.2) when a warning is due —
  * every night stops if the sign-in lapses.
  *
@@ -26,6 +28,7 @@ import Icon from '../components/Icon';
 import InfoTip from '../components/InfoTip';
 import { useToast } from '../components/Toast';
 import SortableList from '../lightshow/SortableList';
+import CreditsTab from './CreditsTab';
 import {
   barSegments, canMove, clickSetSong, clickSlot, countLine, entryLine, GUEST_COUNTS, itemView,
   mmss, MODE_LABEL, nightLine, nightWarnings, nowLine, removeSlot, ruleLine, RUN_OUT_LABEL,
@@ -42,7 +45,7 @@ function errText(e: unknown): string {
 }
 
 export default function JukeboxPage() {
-  const [tab, setTab] = useState<'set' | 'live'>('set');
+  const [tab, setTab] = useState<'set' | 'live' | 'credits'>('set');
   const cfgQ = useJukeboxConfig();
   const statusQ = useJukeboxStatus();
   const cfg = cfgQ.data ?? null;
@@ -63,6 +66,8 @@ export default function JukeboxPage() {
             onClick={() => setTab('set')}>Set list</button>
           <button role="tab" aria-selected={tab === 'live'} className={tab === 'live' ? 'on' : ''}
             onClick={() => setTab('live')}>Live</button>
+          <button role="tab" aria-selected={tab === 'credits'} className={tab === 'credits' ? 'on' : ''}
+            onClick={() => setTab('credits')}>Credits</button>
         </div>
       </div>
       {sign && (
@@ -76,10 +81,10 @@ export default function JukeboxPage() {
       {(cfgQ.isError || statusQ.isError) && (
         <div className="card jukebox-error">The Jukebox couldn't be read from SpotFX — is it running?</div>
       )}
-      {tab === 'set'
-        ? <SetListTab cfg={cfg} preview={previewQ.data} loading={previewQ.isLoading}
-            status={status} />
-        : <LiveTab status={status} />}
+      {tab === 'set' && <SetListTab cfg={cfg} preview={previewQ.data} loading={previewQ.isLoading}
+        status={status} />}
+      {tab === 'live' && <LiveTab status={status} />}
+      {tab === 'credits' && <CreditsTab />}
     </div>
   );
 }

@@ -11005,6 +11005,16 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   file (`storage/jukebox_ledger/<night>.jsonl`): balances are derived, a
   refund is a new entry, a tip is one three-entry group, and `verify()`
   re-checks every rule from the entries alone.
+- **THE SHOW SETTINGS (PR 3.3, settings half)**: `services/jukebox/show.py`
+  is the ONE validator for every economy setting (`PUT /api/jukebox/show`,
+  partial, `?dry_run`); its `FIELDS` table gives each setting a card,
+  label and unit, and the RANGES are read off `EconomyConfig`'s own field
+  bounds — a new economy field must get a `FIELDS` row (a test refuses one
+  without). Presets (Small/Medium/Large) set the PROGRAM and Large's
+  approval, never a price (§3.5: one set of prices fits 4-30 guests). The
+  Credits tab's harness mocks a SNAPSHOT of those answers
+  (`spectra/web/harness/jukeboxShowSnapshot.json`) — regenerate it when they
+  change. Sonic's `jukebox` domain is still owed (plan PR 3.4).
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his settings, one validator:

@@ -120,6 +120,40 @@ const E = await bundle(`export * from ${JSON.stringify(join(web, 'src/jukebox/ju
   ok(E.startsIn(0) === 'next' && E.startsIn(200_000) === 'in 3:20' && E.mmss(3_725_000) === '1:02:05', 'times');
 }
 
+// ── 1b. the Credits tab's words ─────────────────────────────────────────
+console.log('\n§1b jukeboxCredits.ts — the settings checks and the price-check words');
+const C = await bundle(`export * from ${JSON.stringify(join(web, 'src/jukebox/jukeboxCredits.ts'))};`, 'credits');
+const FIELDS = [
+  { key: 'start_credits', card: 'Free credits', label: 'Starting credits', unit: 'credits', kind: 'int', default: 8, min: 0, max: 20 },
+  { key: 'add_base', card: 'Add a song', label: 'Base price', unit: 'credits', kind: 'int', default: 4, min: 1, max: 20 },
+  { key: 'skip_down_pct', card: 'Skip', label: 'Each net ▼ takes off', unit: '%', kind: 'float', default: 15, min: 0, max: 30 },
+  { key: 'tips', card: 'Earning', label: 'Tips', unit: '', kind: 'bool', default: true, min: null, max: null },
+];
+const PC = {
+  guests: 15, add: [{ wait_min: 0, price: 4 }, { wait_min: 30, price: 8 }], add_long: { duration_min: 6.5, price: 6 },
+  add_not_learned: 5, skip: [{ line_min: 0, downs: 0, price: 55 }, { line_min: 10, downs: 2, price: 30 }],
+  play_next: [{ jump_min: 10, price: 11 }], bump_up: [{ behind: 4, price: 3 }], bump_down: [{ ahead: 4, price: 4 }],
+  jail: { threshold: 8, fee: 10 }, start: { now: 4, later: 4, after_min: 20 }, topup: { every_min: 45, pauses_at: 10 },
+  tips: { on: true, max_per_song: 3, double_first: 5 }, songs_in_line: 2,
+};
+{
+  ok(JSON.stringify(C.groupFields(FIELDS).map((g) => g.card)) === '["Free credits","Add a song","Skip","Earning"]',
+    'settings group as their cards, in the server\'s order');
+  const f = FIELDS[1];
+  ok(C.checkValue(f, '5').ok && C.checkValue(f, '5').value === 5, 'a whole number in range is accepted');
+  ok(!C.checkValue(f, '5.5').ok && /whole number/.test(C.checkValue(f, '5.5').reason), 'an int setting refuses a fraction');
+  ok(!C.checkValue(f, '0').ok && /at least 1/.test(C.checkValue(f, '0').reason), 'below the range is refused, naming it');
+  ok(!C.checkValue(f, '21').ok && /at most 20/.test(C.checkValue(f, '21').reason), 'above the range is refused, naming it');
+  ok(!C.checkValue(f, 'x').ok && !C.checkValue(f, '').ok, 'not a number is refused');
+  ok(C.checkValue(FIELDS[2], '12.5').ok, 'a decimal is fine for a decimal setting');
+  ok(C.rangeLine(f) === '1–20 credits' && C.rangeLine(FIELDS[3]) === '', 'the range line');
+  const groups = C.priceRows(PC);
+  const flat = groups.flatMap((g) => g.rows.map((r) => `${r.label}=${r.value}`));
+  ok(flat.includes('nothing waiting, 0 net ▼=55') && flat.includes('a 10 min line, 2 net ▼=30'), 'the skip rows read the server\'s prices');
+  ok(flat.includes('First visit=4 now + 4 after 20 min') && flat.includes('songs in line per guest=2'), 'free credits and the line in words');
+  ok(groups.some((g) => g.title === 'Skip (a room of 15)'), 'the skip group names the room size');
+}
+
 // ── 2. the page, mounted ──────────────────────────────────────────────────
 let jsdomMod;
 try {
@@ -133,7 +167,7 @@ const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http:
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true });
-for (const k of ['HTMLElement', 'HTMLInputElement', 'Node', 'Element', 'MouseEvent', 'KeyboardEvent', 'Event', 'getComputedStyle']) {
+for (const k of ['HTMLElement', 'HTMLInputElement', 'Node', 'Element', 'MouseEvent', 'KeyboardEvent', 'FocusEvent', 'Event', 'getComputedStyle']) {
   globalThis[k] = dom.window[k];
 }
 globalThis.localStorage = dom.window.localStorage;
@@ -148,9 +182,15 @@ function newWorld(kind) {
     config: { playlist: 'spotify:playlist:check', mode: manual ? 'manual' : 'auto', every: 2, run: 1,
               manual: manual ? [{ after_uri: t(1), count: 2 }] : [], run_out: 'again', commit_lead_s: 45 },
     running,
+    show: { preset: null, approve_new_phones: false, economy: { start_credits: 8, add_base: 4, skip_down_pct: 15, tips: true } },
     requests: [],
   };
 }
+const PRESETS = [
+  { name: 'small', guests: '4-8', why: 'Every other song is the jukebox\'s.', approve_new_phones: false },
+  { name: 'medium', guests: '9-16', why: 'Two jukebox songs per set song.', approve_new_phones: false },
+  { name: 'large', guests: '17-30', why: 'Jukebox first.', approve_new_phones: true },
+];
 function lapFor(cfg) {
   const out = [];
   let since = 0;
@@ -188,6 +228,18 @@ globalThis.fetch = async (url, init = {}) => {
     if (method === 'PUT') { world.config = { ...world.config, ...body }; return json({ dry_run: false, config: world.config }); }
     return json(world.config);
   }
+  if (u.startsWith('/api/jukebox/show/preset')) {
+    world.show = { ...world.show, preset: body.preset, approve_new_phones: body.preset === 'large' };
+    return json({ show: world.show, fields: FIELDS, presets: PRESETS, config: world.config });
+  }
+  if (u.startsWith('/api/jukebox/show')) {
+    if (method === 'PUT') {
+      world.show = { ...world.show, ...(body.approve_new_phones !== undefined ? { approve_new_phones: body.approve_new_phones } : {}),
+        economy: { ...world.show.economy, ...(body.economy || {}) } };
+    }
+    return json({ show: world.show, fields: FIELDS, presets: PRESETS });
+  }
+  if (u.startsWith('/api/jukebox/price-check')) return json(PC);
   if (u.startsWith('/api/jukebox/status')) return json(statusOf());
   if (u.startsWith('/api/jukebox/preview')) {
     return json({ status: 'ok', playlist_name: 'Saturday set', set_songs: SET.length, set: SET,
@@ -301,10 +353,45 @@ console.log('\n§2 the editor, mounted — every click PUTs the slots the rule s
   P.unmount();
 }
 
+console.log('\n§2b the Credits tab, mounted — presets, the price check, each setting');
+{
+  world = newWorld('auto');
+  const c = P.mount();
+  await P.settle();
+  await click(buttonByText(c, /^Credits$/));
+  ok(c.querySelectorAll('.jukebox-preset').length === 3, 'the three party-size presets render');
+  ok(text($(c, '[data-testid="jukebox-price-check"]')).includes('55'), 'the price check shows the server\'s prices');
+  await click(buttonByText(c, /Medium/));
+  const pre = world.requests.filter((r) => r.method === 'POST' && r.url.startsWith('/api/jukebox/show/preset')).at(-1);
+  ok(pre?.body?.preset === 'medium', 'a preset button POSTs its name');
+  ok($(c, '.jukebox-preset.on')?.textContent.includes('Medium'), 'the applied preset is marked');
+  const input = c.querySelector('input[aria-label="Base price"]');
+  const setVal = (el, v) => {
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set;
+    P.actSync(() => { setter.call(el, v); el.dispatchEvent(new dom.window.Event('input', { bubbles: true })); });
+  };
+  const blur = (el) => P.actSync(() => el.dispatchEvent(new dom.window.FocusEvent('focusout', { bubbles: true })));
+  const before = puts().length;
+  setVal(input, '21');
+  blur(input);
+  await P.settle();
+  ok(puts().length === before, 'an out-of-range value is refused on the page — nothing is sent');
+  setVal(input, '5');
+  blur(input);
+  await P.settle();
+  ok(JSON.stringify(puts().at(-1)?.body) === JSON.stringify({ economy: { add_base: 5 } }),
+    `a valid value PUTs exactly that setting (${JSON.stringify(puts().at(-1)?.body)})`);
+  const tips = c.querySelector('input[aria-label="Tips"]');
+  await click(tips);
+  ok(JSON.stringify(puts().at(-1)?.body) === JSON.stringify({ economy: { tips: false } }), 'a switch PUTs its new value');
+  P.unmount();
+}
+
 // ── 3. help ───────────────────────────────────────────────────────────────
 console.log('\n§3 help — every topic is real and reachable from the page');
 {
-  const topics = ['jukebox', 'jukebox-set-list', 'jukebox-slots', 'jukebox-live', 'jukebox-sign-in'];
+  const topics = ['jukebox', 'jukebox-set-list', 'jukebox-slots', 'jukebox-live', 'jukebox-sign-in',
+    'jukebox-credits', 'jukebox-presets', 'jukebox-price-check'];
   const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
   const knownIds = new Set();
   for (const section of HELP_SECTIONS) {
@@ -339,8 +426,11 @@ console.log('\n§3 help — every topic is real and reachable from the page');
   hoverAll(c);
   await click(buttonByText(c, /^Live$/));
   hoverAll(c);
+  await click(buttonByText(c, /^Credits$/));
+  await P.settle();
+  hoverAll(c);
   ok(topics.every((id) => reached.has(id)) && reached.size === topics.length,
-    `hovering the page's own controls opens exactly the five jukebox topics (${[...reached].sort().join(', ')})`);
+    `hovering the page's own controls opens exactly the eight jukebox topics (${[...reached].sort().join(', ')})`);
   P.unmount();
 }
 

@@ -128,3 +128,58 @@ export interface SetMoveResult {
   detail?: string;
   set?: SetItem[];
 }
+
+// ── the show settings (phase 3.3) ───────────────────────────────────────────
+
+export type Preset = 'small' | 'medium' | 'large';
+
+/** Every economy setting (models.jukebox.EconomyConfig), by key. */
+export type EconomyConfig = Record<string, number | boolean>;
+
+export interface ShowConfig {
+  preset: Preset | null;
+  approve_new_phones: boolean;
+  economy: EconomyConfig;
+}
+
+/** One economy setting as the page draws it; the range is the server's
+ * own model bound, never typed twice. */
+export interface EconomyField {
+  key: string;
+  card: string;
+  label: string;
+  unit: string;
+  kind: 'int' | 'float' | 'bool';
+  default: number | boolean;
+  min: number | null;
+  max: number | null;
+}
+
+export interface PresetInfo {
+  name: Preset;
+  guests: string;
+  why: string;
+  approve_new_phones: boolean;
+}
+
+export interface ShowRead {
+  show: ShowConfig;
+  fields: EconomyField[];
+  presets: PresetInfo[];
+}
+
+export interface PriceCheck {
+  guests: number;
+  add: { wait_min: number; price: number }[];
+  add_long: { duration_min: number; price: number };
+  add_not_learned: number;
+  skip: { line_min: number; downs: number; price: number }[];
+  play_next: { jump_min: number; price: number }[];
+  bump_up: { behind: number; price: number }[];
+  bump_down: { ahead: number; price: number }[];
+  jail: { threshold: number; fee: number };
+  start: { now: number; later: number; after_min: number };
+  topup: { every_min: number; pauses_at: number };
+  tips: { on: boolean; max_per_song: number; double_first: number };
+  songs_in_line: number;
+}
