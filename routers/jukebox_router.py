@@ -81,6 +81,11 @@ process on its own port (phase 2) and never reaches these routes.
   GET    /api/jukebox/board           the board (services/jukebox/board.py):
                                       tonight's top songs, every people board
                                       marked shown or not, the song playing
+  POST   /api/jukebox/gift            {to: "everyone" | phone id, amount}
+                                      the host's gift (credits mode)
+  GET    /api/jukebox/bonus-codes     the printed bonus cards' codes
+  POST   /api/jukebox/bonus-codes     {count, batch?} — make one-time codes
+  DELETE /api/jukebox/bonus-codes/{code}  void an unused code
 
 A refusal is a RECORDED outcome answered with 200 and its reason
 (`{"status": "refused", "reason": ..., "detail": ...}`), never a silence —
@@ -96,7 +101,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from models.jukebox import ProgramConfig
-from services.jukebox import guest_link, guests, night, night_report, show, simulator, store
+from services.jukebox import (bonus_codes, guest_link, guests, night, night_report, show, simulator,
+                              store)
 from services.jukebox.night import sentence
 
 router = APIRouter(prefix="/api/jukebox", tags=["jukebox"])
@@ -264,6 +270,58 @@ async def post_guest(phone: str, body: PhoneBody) -> JSONResponse:
                                            name_locked=body.name_locked, name=body.name,
                                            pardon=body.pardon)
     return JSONResponse(out, status_code=code)
+
+
+class GiftBody(BaseModel):
+    to: str = Field(max_length=60)              # "everyone", or a phone's id
+    amount: int = 2
+
+
+@router.post("/gift")
+async def post_gift(body: GiftBody) -> JSONResponse:
+    """The host's gift (report §4: "Everyone +2", "Give…"), credits mode only."""
+    code, out = await guests.book.gift(body.to, body.amount)
+    return JSONResponse(out, status_code=code)
+
+
+class MintBody(BaseModel):
+    count: int = Field(ge=1, le=bonus_codes.MINT_MAX)
+    batch: str = Field("", max_length=40)
+
+
+def _bonus_read() -> dict:
+    try:
+        return bonus_codes.summary()
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@router.get("/bonus-codes")
+async def get_bonus_codes() -> dict:
+    """Every printed bonus card's code, unused first (report §9's N2)."""
+    return await asyncio.to_thread(_bonus_read)
+
+
+@router.post("/bonus-codes")
+async def post_bonus_codes(body: MintBody) -> dict:
+    """Make a batch of one-time codes for the printed cards."""
+    try:
+        made = await asyncio.to_thread(bonus_codes.mint, body.count, body.batch)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"made": [bonus_codes.pretty(c) for c in made], **await asyncio.to_thread(_bonus_read)}
+
+
+@router.delete("/bonus-codes/{code}")
+async def delete_bonus_code(code: str) -> dict:
+    """Void an UNUSED code (a lost card). A used one is kept, as a record."""
+    try:
+        gone = await asyncio.to_thread(bonus_codes.void, code)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    if not gone:
+        raise HTTPException(status_code=404, detail="No unused code like that.")
+    return await asyncio.to_thread(_bonus_read)
 
 
 @router.post("/set/move")

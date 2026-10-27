@@ -265,7 +265,8 @@ def build_server(tmp: Path, scene: Scene):
     from models.jukebox import GuestBook, GuestPhone
     from routers import jukebox_guest_router
     from services.jukebox import guests, store
-    for attr in ("CONFIG_FILE", "NIGHT_FILE", "SHOW_FILE", "GUEST_LINK_FILE", "GUESTS_FILE"):
+    for attr in ("CONFIG_FILE", "NIGHT_FILE", "SHOW_FILE", "GUEST_LINK_FILE", "GUESTS_FILE",
+                 "BONUS_FILE"):
         setattr(store, attr, tmp / f"{attr.lower()}.json")
     from services.jukebox import ledger
     ledger.LEDGER_DIR = tmp / "ledger"
@@ -439,7 +440,7 @@ async def run() -> int:
                 await cdp(ws, nid, "Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
                 return True
 
-            async def fresh(phone: tuple, me: str | None) -> bool:
+            async def fresh(phone: tuple, me: str | None, extra: str = "") -> bool:
                 name, w, h, scale, top, bottom, ua = phone
                 art_path = "/__art/0.png"
                 # The previous phone's page — and its running poll loop — must
@@ -460,7 +461,7 @@ async def run() -> int:
                 r = await cdp(ws, nid, "Emulation.setSafeAreaInsetsOverride",
                               {"insets": {"top": top, "bottom": bottom, "left": 0, "right": 0}})
                 native = "error" not in r
-                url = f"{base}/?t={TOKEN}"
+                url = f"{base}/?t={TOKEN}{extra}"
                 await cdp(ws, nid, "Page.navigate", {"url": base + art_path})
                 await wait_for(
                     f"location.pathname === {art_path!r} && document.readyState === 'complete'")
@@ -507,13 +508,27 @@ async def run() -> int:
                 book._wallet_for("render-night", store.load_show()).led.grant(cme, "host_gift", 60)
                 book._wallet = None            # reopened from the ledger, as after a restart
                 try:
-                    if not await fresh(phone, cme):
+                    # a bonus card: half the phones arrive through its join link (?b=, used once
+                    # they tap Let's go), the other half type its code in the Shop
+                    from services.jukebox import bonus_codes
+                    (card,) = bonus_codes.mint(1, "render")
+                    by_link = PHONES.index(phone) % 2 == 0
+                    if not await fresh(phone, cme, f"&b={bonus_codes.pretty(card)}" if by_link else ""):
                         failures.append(f"{name}: credits: the page never loaded")
                         return
                     if await wait_for("!!document.querySelector('.g-welcome .g-btn-go')", 4):
                         if not await evaluate(ws, nid, "!!document.querySelector('.g-welcome-credits')"):
                             failures.append(f"{name}: credits: the welcome screen doesn't name the credits")
+                        if by_link and not await evaluate(ws, nid, "!!document.querySelector('[data-testid=g-bonus-pending]')"):
+                            failures.append(f"{name}: credits: the welcome screen doesn't say the bonus card waits")
+                        if await evaluate(ws, nid, "location.search.includes('b=')"):
+                            failures.append(f"{name}: credits: the card's code stayed in the address")
                         await tap(".g-btn-go")
+                    if by_link and (not await wait_for("!!document.querySelector('.g-toast') && "
+                                                       "document.querySelector('.g-toast').textContent.includes('bonus card')", 6)
+                                    or "qr_bonus" not in ledger_kinds(cme)):
+                        failures.append(f"{name}: credits: the bonus card from the link wasn't used")
+                    await wait_for("!document.querySelector('.g-toast')", 7)
                     if not await wait_for("!!document.querySelector('.g-credit-actions .g-btn-skip:not([disabled])')"
                                           " && /🎟 6[0-9]/.test(document.querySelector('.g-credits-chip')?.textContent || '')"):
                         failures.append(f"{name}: credits: no credits chip, or no skip button on Now")
@@ -577,6 +592,20 @@ async def run() -> int:
                     if not await wait_for("document.querySelectorAll('.g-shop .g-history li').length >= 5"
                                           " && document.querySelectorAll('.g-shop .g-tile').length >= 5", 6):
                         failures.append(f"{name}: credits: the Shop has no tiles or no history")
+                    if not by_link:
+                        if not await wait_for("!!document.querySelector('.g-bonus input')", 4):
+                            failures.append(f"{name}: credits: the Shop has no bonus card field")
+                        else:
+                            await check(phone, "20b-bonus-field")
+                            await tap(".g-bonus input")
+                            await cdp(ws, nid, "Input.insertText", {"text": bonus_codes.pretty(card).lower()})
+                            await tap(".g-bonus .g-btn-primary:not([disabled])")
+                            if not await wait_for("!!document.querySelector('[data-testid=g-bonus-used]')", 6) \
+                                    or "qr_bonus" not in ledger_kinds(cme):
+                                failures.append(f"{name}: credits: typing the card's code didn't use it")
+                            await wait_for("!document.querySelector('.g-toast')", 7)
+                    if not await evaluate(ws, nid, "!!document.querySelector('[data-testid=g-bonus-used]')"):
+                        failures.append(f"{name}: credits: the Shop doesn't say the bonus card was used tonight")
                     await check(phone, "20-shop")
                     # jail: the card on Now, and a break-out that reaches the engine
                     scene.jailed = True

@@ -89,5 +89,6 @@ export const api = {
   breakOut: () => call('POST', '/g/breakout', {}),
   wallet: () => call('GET', '/g/wallet'),
   board: () => call('GET', '/g/board'),
+  bonus: (code: string) => call('POST', '/g/bonus', { code }),
   view: () => call('GET', '/g/view'),
 };

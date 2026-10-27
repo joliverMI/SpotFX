@@ -218,5 +218,17 @@ ok(L.peopleCount(1, { unit: 'songs voted on', unit_one: 'song voted on' }) === '
    'a people board counts in words: one song, three songs');
 ok(L.BOARD_POLL_MS >= 10000, 'the Board asks again at most every ten seconds or so');
 
+console.log('\nbonus cards (phase 3)');
+ok(L.bonusCode(' abcd-efgh ') === 'ABCDEFGH' && L.bonusCode('ABCD EFGH') === 'ABCDEFGH',
+   'a typed code folds: case, spaces and dashes');
+ok(L.bonusCode('ABCD-EFG') === null && L.bonusCode('ABCD-EFGO') === null && L.bonusCode('ABCD-EFG1') === null
+   && L.bonusCode('') === null && L.bonusCode(null) === null,
+   'not a code: too short, or a look-alike letter (O, 1) the codes never use');
+const withB = L.fromAddress('?t=party-token-123&b=abcd-efgh');
+ok(withB.bonus === 'ABCDEFGH' && withB.token === 'party-token-123', 'the join link carries a card\'s code (?b=)');
+ok(L.fromAddress('?t=party-token-123&b=nope').bonus === null, 'a bad ?b= is ignored');
+ok(L.withoutBonus('?t=party-token-123&b=ABCDEFGH') === '/?t=party-token-123' && L.withoutBonus('?b=ABCDEFGH') === '/',
+   'the code is taken out of the address once read (it is used once)');
+
 console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);
 process.exit(failures === 0 ? 0 : 1);

@@ -142,10 +142,27 @@ export function homeScreenAddress(phone: string, token: string | null): string {
 
 /** What the page's own address carries: tonight's token and, from a Home
  *  Screen icon, the phone's code. */
-export function fromAddress(search: string): { token: string | null; phone: string | null } {
+export function fromAddress(search: string): { token: string | null; phone: string | null;
+                                                bonus: string | null } {
   const q = new URLSearchParams(search);
   const ok = (v: string | null) => (v && /^[A-Za-z0-9_-]{8,128}$/.test(v) ? v : null);
-  return { token: ok(q.get('t')), phone: ok(q.get('p')) };
+  return { token: ok(q.get('t')), phone: ok(q.get('p')), bonus: bonusCode(q.get('b')) };
+}
+
+/** A printed bonus card's code as the server keeps it (SpotFX
+ *  services/jukebox/bonus_codes.py): 8 characters with no look-alikes,
+ *  case, spaces and dashes folded away. Null: not a code. */
+export function bonusCode(text: string | null | undefined): string | null {
+  const c = (text ?? '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+  return /^[2-9A-HJKMNP-TV-Z]{8}$/.test(c) ? c : null;
+}
+
+/** The page's address with the bonus code taken out (it is used once). */
+export function withoutBonus(search: string, path = '/'): string {
+  const q = new URLSearchParams(search);
+  q.delete('b');
+  const s = q.toString();
+  return s ? `${path}?${s}` : path;
 }
 
 /** How long to wait after the last keystroke before searching (the

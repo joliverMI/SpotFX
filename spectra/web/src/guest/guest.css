@@ -361,3 +361,8 @@ button.g-strip-btn { box-sizing: border-box; width: calc(100% - 2 * var(--gutter
                     border-radius: 8px; background: var(--surface); font-size: 14px; }
 .g-board-names li span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .g-board-names li span:last-child { flex: none; font-variant-numeric: tabular-nums; }
+
+/* the Shop's bonus card field (a printed card's code) */
+.g-bonus { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: var(--radius);
+           background: var(--surface); border: 1px solid var(--border); }
+.g-bonus .g-input { text-transform: uppercase; letter-spacing: 0.08em; }

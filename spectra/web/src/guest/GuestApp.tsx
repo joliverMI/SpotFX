@@ -16,7 +16,7 @@ import { api, storePhone, storedPhone, type Answer } from './api';
 import type { MySong, NextSong, Refusal, RunningView, StripTone, View } from './types';
 import {
   TIP_UNDO_MS, bannerAfter, bannerFor, bumpOffer, credits, earnedToast, fromAddress,
-  homeScreenAddress, nextOffer, since, skipOffer, stripText, tabsFor, vibration,
+  homeScreenAddress, nextOffer, since, skipOffer, stripText, tabsFor, vibration, withoutBonus,
   wantsHomeScreenHint, type BannerKind, type Tab,
 } from './logic';
 import { Art, Sheet } from './bits';
@@ -27,6 +27,7 @@ type Spend =
   | { kind: 'skip' } | { kind: 'chip' } | { kind: 'breakout' } | { kind: 'next'; song: MySong };
 
 const TOKEN_KEY = 'jukebox.token';
+const BONUS_KEY = 'jukebox.bonus';      // a bonus card's code, until it is used
 const HINT_KEY = 'jukebox.homeHintDone';
 
 function readSession(k: string): string | null {
@@ -61,6 +62,7 @@ export default function GuestApp() {
   const [moving, setMoving] = useState<NextSong | null>(null);
   const [spend, setSpend] = useState<Spend | null>(null);
   const [tipping, setTipping] = useState<string | null>(null);   // the tip held for its undo
+  const [bonusPending, setBonusPending] = useState<string | null>(null);  // a card from the link
   const tipTimer = useRef<number | undefined>(undefined);
   const [shopReload, setShopReload] = useState(0);
   const [toast, setToast] = useState('');
@@ -138,6 +140,12 @@ export default function GuestApp() {
     const addr = fromAddress(window.location.search);
     token.current = addr.token ?? readSession(TOKEN_KEY);
     if (addr.token) writeSession(TOKEN_KEY, addr.token);
+    if (addr.bonus) {
+      // the card's code rides in the join link once; it waits in the session until it is used
+      writeSession(BONUS_KEY, addr.bonus);
+      window.history.replaceState(null, '', withoutBonus(window.location.search, window.location.pathname));
+    }
+    setBonusPending(readSession(BONUS_KEY));
     phone.current = addr.phone ?? storedPhone();
     void hello().then(() => {
       if (!stopped) timer.current = window.setTimeout(() => { void loop(); }, wait());
@@ -183,6 +191,20 @@ export default function GuestApp() {
     return r.ok;
   }, [show]);
 
+  // A bonus card from the join link: used once the phone has joined, in
+  // credits mode (in free play it waits — the card is kept for a credits night)
+  const joinedCredits = phase.kind === 'running' && phase.view.me.joined && phase.view.features.credits;
+  useEffect(() => {
+    if (!bonusPending || !joinedCredits) return;
+    const code = bonusPending;
+    setBonusPending(null);
+    writeSession(BONUS_KEY, null);
+    void act(() => api.bonus(code), (r) => {
+      const b = r.data.bonus as { amount: number } | undefined;
+      if (b) setToast(`+${credits(b.amount)} from your bonus card`);
+    });
+  }, [bonusPending, joinedCredits, act]);
+
   // a tip is held TIP_UNDO_MS before it is sent, so a mis-tap can be undone
   const tip = useCallback((to: string) => {
     window.clearTimeout(tipTimer.current);
@@ -225,7 +247,7 @@ export default function GuestApp() {
   if (!view.me.joined) {
     return (
       <div className="g-app">
-        <Welcome view={view} busy={busy} error={error}
+        <Welcome view={view} busy={busy} error={error} bonusPending={!!bonusPending && view.features.credits}
                  onShuffle={() => void act(() => api.rename(null, true))}
                  onGo={(name) => void act(() => api.join(name === view.me.name ? undefined : name))} />
       </div>
@@ -305,7 +327,13 @@ export default function GuestApp() {
         {tab === 'add' && (
           <AddScreen view={view} onAdded={(v, text) => { show(v); setToast(text); setShopReload((n) => n + 1); }} />
         )}
-        {tab === 'shop' && view.features.shop && <ShopScreen view={view} reload={shopReload} />}
+        {tab === 'shop' && view.features.shop && (
+          <ShopScreen view={view} reload={shopReload} busy={busy}
+                      onBonus={(code) => void act(() => api.bonus(code), (r) => {
+                        const b = r.data.bonus as { amount: number } | undefined;
+                        if (b) setToast(`+${credits(b.amount)} from your bonus card`);
+                      })} />
+        )}
         {tab === 'board' && view.features.board && <BoardScreen />}
       </main>
       {tipping !== null && (

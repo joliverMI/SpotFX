@@ -8,15 +8,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Board, MySong, NextSong, RunningView, SearchResult, View, WalletView } from './types';
 import {
   BOARD_POLL_MS, SEARCH_DEBOUNCE_MS, SEARCH_MIN, addOffer, addStatus, addedText, badges, boardSongLine,
-  bumpOffer, bumpsLine, byLine, credits, jailCard, mmss, peopleCount, progressNow, signed, skipLine,
-  skipOffer, tipOffer,
+  bonusCode, bumpOffer, bumpsLine, byLine, credits, jailCard, mmss, peopleCount, progressNow, signed,
+  skipLine, skipOffer, tipOffer,
 } from './logic';
 import { Art, MyRow, OpenSpotify, SongRow, SpotifyIcon } from './bits';
 import { api, boardOf, walletOf, type Found } from './api';
 
-export function Welcome({ view, busy, onShuffle, onGo, error }: {
+export function Welcome({ view, busy, onShuffle, onGo, error, bonusPending = false }: {
   view: RunningView; busy: boolean; error: string;
-  onShuffle: () => void; onGo: (name: string) => void;
+  onShuffle: () => void; onGo: (name: string) => void; bonusPending?: boolean;
 }) {
   const [name, setName] = useState(view.me.name);
   const [edited, setEdited] = useState(false);
@@ -37,6 +37,9 @@ export function Welcome({ view, busy, onShuffle, onGo, error }: {
       {error && <p className="g-error" role="alert">{error}</p>}
       {view.start_credits !== undefined && (
         <p className="g-welcome-credits">🎟 You start with {credits(view.start_credits)} — free, for tonight only.</p>
+      )}
+      {bonusPending && (
+        <p className="g-welcome-credits" data-testid="g-bonus-pending">🎁 Your bonus card&apos;s credits arrive when you tap Let&apos;s go.</p>
       )}
       <ul className="g-how">
         {view.how.map((t) => (
@@ -366,7 +369,36 @@ function JailCard({ view, busy, onBreakOut }: { view: RunningView; busy: boolean
 /** The Shop (credits): the balance and how it was earned, six tiles with
  *  tonight's prices, how to earn, the rule that credits are only for
  *  tonight, and the history. */
-export function ShopScreen({ view, reload }: { view: RunningView; reload: number }) {
+/** "Have a bonus card?": type the code printed on it (the join QR uses it
+ *  by itself). One per phone a night; the server says why when it can't. */
+function BonusField({ bonus, busy, onUse }: {
+  bonus: NonNullable<WalletView['bonus']>; busy: boolean; onUse: (code: string) => void;
+}) {
+  const [text, setText] = useState('');
+  if (bonus.used) {
+    return <p className="g-muted g-small" data-testid="g-bonus-used">🎁 You&apos;ve used a bonus card tonight.</p>;
+  }
+  const code = bonusCode(text);
+  return (
+    <section className="g-bonus" aria-label="Bonus card">
+      <h2 className="g-h2">Have a bonus card?</h2>
+      <div className="g-name-row">
+        <input className="g-input" value={text} maxLength={12} autoComplete="off" autoCapitalize="characters"
+               spellCheck={false} placeholder="ABCD-EFGH" aria-label="Bonus card code"
+               onChange={(e) => setText(e.target.value)} />
+        <button type="button" className="g-btn g-btn-primary" disabled={busy || !code}
+                onClick={() => { if (code) { onUse(code); setText(''); } }}>
+          Use · +{bonus.amount}
+        </button>
+      </div>
+      <p className="g-muted g-small">One card per phone tonight. The QR on the card does this for you.</p>
+    </section>
+  );
+}
+
+export function ShopScreen({ view, reload, busy = false, onBonus }: {
+  view: RunningView; reload: number; busy?: boolean; onBonus?: (code: string) => void;
+}) {
   const [wallet, setWallet] = useState<WalletView | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -394,6 +426,7 @@ export function ShopScreen({ view, reload }: { view: RunningView; reload: number
         )}
       </section>
       {error && <p className="g-error" role="alert">{error}</p>}
+      {wallet?.bonus && onBonus && <BonusField bonus={wallet.bonus} busy={busy} onUse={onBonus} />}
       {wallet && (
         <>
           <ul className="g-tiles">

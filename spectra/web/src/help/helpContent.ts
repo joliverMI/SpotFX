@@ -2396,7 +2396,25 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Skipping costs the skip price (it follows the room, the line and the votes: every ▼ makes it cheaper). A guest can pay it all, or chip in part of it; when the pot is full the song is skipped. A song that ends before its pot fills gives every credit in it back. A guest\'s own songs, a song in its first seconds, and a song you have kept from skips can\'t be skipped.',
           'Tips go to whoever added the song playing (never to yourself or to the house\'s set), at most 3 a song, and the first 5 credits a guest gives count double for the guest who gets them.',
           'The jail in credits mode: when a guest\'s songs get more ▼ than ▲ by the bar, their waiting songs sit out until they break out (10 credits, the Credits tab\'s Jail card) or you press Pardon. Their red strip says so on every screen, and one tap on it opens the break-out. They keep their places and can still vote and earn. Switching to free play while someone is in jail turns it into an ordinary time-out — the Free play card\'s songs-to-sit-out number, counted from that moment, ending on its own with no break-out offered for it; switching back to credits while a free-play time-out is running leaves it exactly as it was.',
-          'Refunds come back on their own: a song you remove that a guest paid for, an unfilled skip pot, and every paid song still waiting when the night ends. The Shop tab is a guest\'s wallet — their credits, what each thing costs right now, how they earned what they hold, and every credit in and out, newest first.',
+          'Refunds come back on their own: a song you remove that a guest paid for, an unfilled skip pot, and every paid song still waiting when the night ends. The Shop tab is a guest\'s wallet — their credits, what each thing costs right now, how they earned what they hold, and every credit in and out, newest first. A guest with a bonus card types its code there (see Bonus cards), and gifts from you arrive there too (see Giving credits).',
+        ],
+      },
+      {
+        id: 'jukebox-gifts',
+        title: 'Giving credits',
+        keywords: 'give credits gift everyone plus two host gift give phone credits mode',
+        body: [
+          'In credits mode the Guests tab\'s Phones card has Everyone +2: 2 credits to every phone at tonight\'s party (joined, approved and not blocked — a phone still on the welcome screen gets nothing). Give… on a phone\'s row gives just that guest 1 to 20 credits. Each gift goes in the night\'s ledger and shows in the guest\'s Shop history as "From the host".',
+          'A gift is a gift: credits are never given in exchange for anything (a dish, a favour, money) — the plan\'s line that keeps credits a party allowance and nothing more. Sonic can give credits too, to everyone or to a guest named exactly as the Guests tab shows them, and always asks first.',
+        ],
+      },
+      {
+        id: 'jukebox-bonus-cards',
+        title: 'Bonus cards',
+        keywords: 'bonus card qr code printed card plus five one time code void make codes redeem',
+        body: [
+          'A printed bonus card carries a one-time code worth the QR bonus (5 credits, the Credits tab\'s Free credits card). Make codes in batches on the Credits tab\'s Bonus cards card (give a batch a label, like the party\'s name); each code is 8 characters with no look-alike letters, shown like ABCD-EFGH. The printable card puts each code on a card beside the join QR.',
+          'A guest uses a card by scanning its QR (the code rides in the link and is used once they tap Let\'s go) or by typing the code in the Shop. Each code works once, ever, and each phone can use one card a night; a phone gets 5 wrong tries a night. Cards only work in credits mode — in free play a card stays good for a credits night. Void a card\'s code while it is unused (a lost card); a used code stays on the list, with who used it.',
         ],
       },
       {
@@ -2426,8 +2444,8 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Guest rules: when tonight ends and how long before that requests close (last call), explicit songs (not allowed, allowed, or only after a set time), the most phones tonight, name changes per night and the word filter on names. Each saves on its own; a value outside its range is refused and nothing changes.',
           'Free play: the room\'s skip, bumps, play next and the jail (see Free play).',
           'The line: every jukebox song still to play, who added it, whether it was their 1st or 2nd song and, in credits mode, what they paid. Play next moves a waiting song to the front of the waiting songs (when Free play\'s Play next is "host only", and always in credits mode); Keep from skips protects a song (see Keeping a song from skips; the song playing has its own row above the line); Hold keeps a song in its place while slots pass it (Let go puts it back in play); Remove takes it out (a song already sent to Spotify is skipped the moment it starts). A song whose guest is in a time-out says so.',
-          'Phones: everyone at tonight\'s party, how they stand (on the welcome screen, in, in a time-out with the songs left or in jail until they break out, waiting for your approval, blocked) with their songs, votes, their ▼ count against the jail\'s bar and, in credits mode, the credits they hold. Approve lets a waiting phone in (with "New phones need my approval" on, on the Credits tab); Pardon ends a time-out now; Block takes a phone out for the night; Rename gives it a name of your choosing (your word, no filter); Lock name stops it changing its own.',
-          'Sonic can change the guest rules and the free-play rules (asking first) but not a phone: approving, pardoning, blocking and renaming act on a person by name, so they stay these buttons.',
+          'Phones: everyone at tonight\'s party, how they stand (on the welcome screen, in, in a time-out with the songs left or in jail until they break out, waiting for your approval, blocked) with their songs, votes, their ▼ count against the jail\'s bar and, in credits mode, the credits they hold. Approve lets a waiting phone in (with "New phones need my approval" on, on the Credits tab); in credits mode Give… gives that guest credits and Everyone +2 gives every phone at the party 2 (see Giving credits); Pardon ends a time-out now; Block takes a phone out for the night; Rename gives it a name of your choosing (your word, no filter); Lock name stops it changing its own.',
+          'Sonic can change the guest rules and the free-play rules and give credits (asking first, and only to a guest named exactly) but not approve, pardon, block or rename a phone: those act on a person by name, so they stay these buttons.',
         ],
       },
       {

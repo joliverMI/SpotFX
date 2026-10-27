@@ -8,9 +8,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { spotfxDel, spotfxGet, spotfxPost, spotfxPut } from '../api/client';
 import type {
-  GuestsRead, JukeboxBoardRead, JukeboxPreview, JukeboxStatus, NightReport, PriceCheck, ProgramConfig,
-  SetMoveResult,
-  ShowRead, SimResult,
+  BonusCodesRead, GuestsRead, JukeboxBoardRead, JukeboxPreview, JukeboxStatus, NightReport, PriceCheck,
+  ProgramConfig, SetMoveResult, ShowRead, SimResult,
 } from './types';
 
 export const JUKEBOX_KEYS = {
@@ -175,6 +174,46 @@ export function useJukeboxBoard(fast: boolean) {
     queryKey: ['jukebox-board'],
     queryFn: () => spotfxGet<JukeboxBoardRead>('/jukebox/board'),
     refetchInterval: fast ? 5000 : 15000,
+  });
+}
+
+/** The host's gift (report §4: "Everyone +2", "Give…"), credits mode. */
+export function useGift() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ to, amount }: { to: string; amount: number }) => {
+      const r = await spotfxPost<{ status: string; detail?: string;
+        gift?: { amount: number; phones: number; names: string[] } }>('/jukebox/gift', { to, amount });
+      if (r.status === 'refused') throw new Error(r.detail || 'The gift could not be given.');
+      return r;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['jukebox-guests'] }),
+  });
+}
+
+const BONUS_KEY = ['jukebox-bonus-codes'];
+
+/** The printed bonus cards' codes, unused first. */
+export function useBonusCodes() {
+  return useQuery({ queryKey: BONUS_KEY, queryFn: () => spotfxGet<BonusCodesRead>('/jukebox/bonus-codes') });
+}
+
+/** Make a batch of one-time codes for the printed cards. */
+export function useMintBonus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ count, batch }: { count: number; batch?: string }) =>
+      spotfxPost<BonusCodesRead>('/jukebox/bonus-codes', { count, batch: batch ?? '' }),
+    onSuccess: (r) => qc.setQueryData(BONUS_KEY, r),
+  });
+}
+
+/** Void an unused code (a lost card). */
+export function useVoidBonus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => spotfxDel<BonusCodesRead>(`/jukebox/bonus-codes/${encodeURIComponent(code)}`),
+    onSuccess: (r) => qc.setQueryData(BONUS_KEY, r),
   });
 }
 

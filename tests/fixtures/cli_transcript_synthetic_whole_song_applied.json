@@ -124,6 +124,7 @@
       "mcp__settings-console__start_show_sequence",
       "mcp__settings-console__stop_absorb",
       "mcp__settings-console__stop_jukebox_night",
+      "mcp__settings-console__give_jukebox_credits",
       "mcp__settings-console__stop_show_sequence",
       "mcp__settings-console__switch_pre_drop",
       "mcp__settings-console__undo_drop_edit",
