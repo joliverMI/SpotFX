@@ -444,7 +444,6 @@ async def post_guest_link_self_test() -> dict:
 # ── the printed card (N2): the join link, the unused bonus codes ─────────────
 
 def _card_read() -> dict:
-    guest_link.controller.ensure_token()
     st = guest_link.controller.status()
     try:
         codes = bonus_codes.summary()
@@ -463,7 +462,11 @@ async def get_card() -> dict:
     """What the printable card (report §9's N2) needs: the join link with the
     party token — made now if there is none yet, since the cards carry it —
     the unused bonus codes and the QR bonus. The Wi-Fi name and password are
-    typed on the card page and never reach SpotFX."""
+    typed on the card page and never reach SpotFX. The mint is serialized
+    with every other guest-link mutator (edit/rotate/on_night_start) before
+    the rest of the read runs off the loop, so a card read racing a night
+    start can't each mint and save a different token."""
+    await guest_link.controller.ensure_token_async()
     return await asyncio.to_thread(_card_read)
 
 

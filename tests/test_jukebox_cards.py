@@ -10,10 +10,12 @@ inch, the longest Wi-Fi still fitting), the same posture as
 tests/test_jukebox_guest_page.py."""
 from __future__ import annotations
 
+import asyncio
 import pathlib
 import shutil
 import subprocess
 import sys
+import time
 
 import pytest
 from fastapi import FastAPI
@@ -64,6 +66,39 @@ def test_a_token_made_for_the_cards_is_the_one_the_guest_page_admits():
     assert out.status_code == 200
     _cfg, st = store.load_guest_link()
     assert guest_link.token_matches(st.token, st) and not guest_link.token_matches("nope", st)
+
+
+def test_a_card_read_racing_a_night_start_mints_exactly_one_token(monkeypatch):
+    """A fresh store, no token yet: a card read's own first-ever mint used
+    to call `ensure_token()` directly, off the event loop, with no lock at
+    all, while `on_night_start` mints its own under the controller's lock
+    — so the two could each see an empty token and each mint and save a
+    different one, with whichever write landed last silently discarding
+    the other. `ensure_token_async()` now serializes the card route's mint
+    through the SAME lock `on_night_start` takes, so only one of the two
+    ever sees an empty token and the card response always carries
+    whichever one ends up stored."""
+    mints: list[int] = []
+    real_ensure_token = guest_link.GuestLink.ensure_token
+
+    def slow_ensure_token(self):
+        cfg, st = store.load_guest_link()
+        if not st.token:
+            mints.append(1)
+            time.sleep(0.05)                  # widen the check-then-act window
+        real_ensure_token(self)
+
+    monkeypatch.setattr(guest_link.GuestLink, "ensure_token", slow_ensure_token)
+
+    async def race():
+        return await asyncio.gather(jukebox_router.get_card(),
+                                    guest_link.controller.on_night_start("a-night"))
+
+    card, started = asyncio.run(race())
+    assert started is None                     # the link is off: on_night_start just mints and returns
+    assert len(mints) == 1                      # only one caller ever saw an empty token
+    _cfg, st = store.load_guest_link()
+    assert st.token and card["token_created_ms"] == st.token_created_ms
 
 
 @pytest.mark.skipif(

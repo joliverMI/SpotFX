@@ -345,6 +345,14 @@ class GuestLink:
             st.token, st.token_created_ms = new_token(), self.deps.now_ms()
             store.save_guest_link(cfg, st)
 
+    async def ensure_token_async(self) -> None:
+        """`ensure_token`, serialized through the same lock `edit`/`rotate`/
+        `on_night_start` take — so the card route's first-ever mint (N2,
+        off the event loop) can't race `on_night_start`'s own and have one
+        silently overwrite the other."""
+        async with self._get_lock():
+            await self.deps.to_thread(self.ensure_token)
+
     # ── the night's hooks (services/jukebox/night.py) ───────────────────────
 
     async def on_night_start(self, night_id: str) -> Optional[tuple[bool, str]]:
