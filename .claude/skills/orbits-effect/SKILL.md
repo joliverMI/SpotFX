@@ -163,6 +163,40 @@ per-frame `_phase_step`. The phase is `self._sp_phase`. What it owns:
 
 The 2-D Matrix `orbits.py` is untouched by all of this.
 
+## THE PRE-DROP — the blob dims, then comes back jittering and growing (2026-10-27)
+
+His words (the predrop plan, 2026-10-26): "on orbits, when it comes back
+in, make it jitter like it's full of energy and is about to burst, instead
+of staying still. Have it grow in size as it does slightly." Orbits is in
+`fx.device_model.PRE_DROP_EFFECTS` since predrop step 7, one look for both
+kinds ("jitter", `pre_drop_looks` in config/effect_params.json).
+`fx/effects/pre_drop.py` is the binding statement for the told keys;
+the module's PRE_DROP block (`fx/effects/orbits.py`) for the look. Four
+invariants not visible cold:
+
+- **ONE CURVE, NEVER DIMMED TWICE.** The base render (`Twod.render`)
+  already multiplies the lull by the breath, floored at `BREATH_FLOOR`
+  (25%). `_pre_drop_gain` is the factor ON TOP of that, so the product is
+  the plan's single curve: full at the lull's start, smoothstepping to the
+  25% floor by the breath's start (the pre-drop, if no breath is told),
+  held there through the breath, full on the pre-drop. Changing the
+  floor or the breath means re-reading both, not one.
+- **THE JITTER MOVES THE RENDER CENTRE, NOT THE PARTICLES** — a fresh
+  `self._rng` offset every 1/30 s (0.4 -> 1.8 px, `frac ** 1.3`) added to
+  `cx`/`cy` where `pxs`/`pys` are built, so the model, the tether and the
+  drop's explosion origin never move; kept blobs (`lull_keep`) share the
+  offset, so a meld's three blobs jitter together. The trail is cut to 30%
+  each jittering frame, or the smear reads as a fuzzy blob.
+- **IT GROWS INSTEAD OF SHRINKING**: on the pre-drop the lull's shrink is
+  skipped and the size runs 2.0x -> 2.6x over the gap (still capped at
+  `KERNEL_R`); the blob stays at the centre (`_pos_scale` is the lull's).
+- **A LONGER GAP ADDS LIGHT** — back at full and growing for the whole gap:
+  -9% against today's lull at the plan's 0.8 s spike, +1% at 2 s, +14% at a
+  3.3 s vocal intro (named; `tests/test_pre_drop_looks.py` bounds it at
+  +20%). Untold, every new branch returns before touching state or the rng,
+  so the lull is today's frame for frame (proven against the module at the
+  step-7 base).
+
 ## Thematic transitions (2026-10-11, transitions-drop plan phase 3)
 
 The Black Hole's ERUPTION implodes onto Orbits' LIVE blobs (his comment:
@@ -188,7 +222,9 @@ registered on `orbits1d`).
 `scripts/check_orbits_drop_burst_and_persistence.py`,
 `scripts/smoke_orbits_params.py`, `tests/test_orbits_drop_persistence.py`,
 `tests/test_fireworks_melds.py` (keep-N ring, the keepers flag, untold
-byte-identity), `tests/test_lull_handoff.py`. The strip on the strip phase
+byte-identity), `tests/test_lull_handoff.py`, `tests/test_pre_drop_looks.py`
+(the pre-drop look, and the untold lull against the step-7 base) with its
+storyboards `scripts/render_predrop_storyboards.py`. The strip on the strip phase
 layer: `scripts/check_particle_strip_phase.py` (before/after on his own
 Orbits V2 strip entry, the pinned pre-change module as red control) +
 `tests/test_particle_strip_phase.py`, `scripts/check_strip_phase.py`.

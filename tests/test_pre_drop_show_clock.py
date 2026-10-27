@@ -210,18 +210,21 @@ def test_a_pre_drop_the_scene_does_not_play_leaves_the_drop_instant(member):
 
 
 def test_a_scene_of_non_members_still_fades_the_colour_and_tells_nobody():
-    """A scene whose effects have no pre-drop look (Black Hole, until step
-    7): the pre-drop still plays (its verdict is the scene's), so the colour
-    fades across it — and the lull arm is today's, with no pre-drop key at
-    all."""
-    assert "blackhole" not in device_model.PRE_DROP_EFFECTS
-    rig = Rig(_view([_seq(20_000, 16_000, 12_000, pre=19_200)]))
+    """A scene whose effects have no pre-drop look (Eye, a breath-hold
+    effect the plan gives none): the pre-drop still plays (its verdict is
+    the scene's), so the colour fades across it — and the lull arm is
+    today's, with no pre-drop key at all."""
+    assert "eye" not in device_model.PRE_DROP_EFFECTS
+    assert "eye" in device_model.BREATH_HOLD_EFFECTS
+    scene = SceneV2(name="Eye", devices=[
+        {"target_kind": "category", "target": "Matrix", "effect_type": "eye"}])
+    rig = Rig(_view([_seq(20_000, 16_000, 12_000, pre=19_200)]), scene=scene)
     rig.sweep()
     assert [c["moment"] for c in rig.colour] == ["pre_drop"]
     arm = rig.lull_arm()["params"]
     assert not any(k.startswith("pre_drop") for k in arm)
     assert arm["lull_breath_at_s"] + arm["lull_breath_s"] == pytest.approx(4.0), \
-        "Black Hole's breath ends on the drop, as today"
+        "a non-member's breath ends on the drop, as today"
 
 
 def test_a_rewind_tells_the_pre_drop_again(member):

@@ -6,8 +6,8 @@ Every phase arm write `scene_response._drive_phase` makes — charge, lull
 and drop, every one of his 14 scenes, every gap and intensity in
 tests/pre_drop_arm_harness.py — is compared with what the code wrote before
 the engine existed (tests/fixtures/pre_drop/arm_writes_golden.json,
-captured on origin/master 0dd0828e). Since step 6 `fx.device_model.
-PRE_DROP_EFFECTS` holds Fireworks and Pulse, so:
+captured on origin/master 0dd0828e). Since steps 6-7 `fx.device_model.
+PRE_DROP_EFFECTS` holds Fireworks, Pulse, Orbits and Black Hole, so:
 
 - with no pre-drop, a member's lull arm is today's plus the four told keys
   at NOT_TOLD (and a zero breath for a member that is no breath-hold effect:
@@ -36,7 +36,9 @@ LULL_CASES = [c for c in CASES if c[1] == "lull"]
 ZERO_BREATH = {phase_grammar.BREATH_AT_KEY: 0.0, phase_grammar.BREATH_KEY: 0.0}
 # the look each member's "auto" plays (his entries all choose "auto")
 AUTO_LOOK = {("fireworks", "spike"): "rockets", ("fireworks", "intro"): "rockets",
-             ("pulse", "spike"): "burst", ("pulse", "intro"): "swell"}
+             ("pulse", "spike"): "burst", ("pulse", "intro"): "swell",
+             ("orbits", "spike"): "jitter", ("orbits", "intro"): "jitter",
+             ("blackhole", "spike"): "ring", ("blackhole", "intro"): "ring"}
 
 
 def _dump(writes) -> str:
@@ -60,8 +62,9 @@ def _untold(golden_writes):
     return out
 
 
-def test_the_members_are_fireworks_and_pulse():
-    assert device_model.PRE_DROP_EFFECTS == frozenset({"fireworks", "pulse"})
+def test_the_members_are_fireworks_pulse_orbits_and_black_hole():
+    assert device_model.PRE_DROP_EFFECTS == frozenset(
+        {"fireworks", "pulse", "orbits", "blackhole"})
     for et in device_model.PRE_DROP_EFFECTS:
         assert device_model.pre_drop_looks(et), et
 
@@ -120,10 +123,11 @@ def test_with_a_pre_drop_that_plays_only_the_members_lull_arms_change(case):
 
 def test_every_member_was_told_on_his_scenes():
     """Run last (file order): his scenes carry Pulse on the Singles and
-    Fireworks on Fireworks V2's crystal, so both members were told."""
+    Fireworks, Orbits and Black Hole on their V2 scenes' crystal, so every
+    member was told."""
     if not SEEN_TOLD:
         pytest.skip("run with the parametrised test above")
-    assert SEEN_TOLD == {"fireworks", "pulse"}
+    assert SEEN_TOLD == {"fireworks", "pulse", "orbits", "blackhole"}
 
 
 def test_the_engine_decides_on_his_scenes():

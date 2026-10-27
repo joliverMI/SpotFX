@@ -6,8 +6,9 @@ The ruler places the pre-drop the slider's gap before the drop's mark —
 moved with the drop by the drop timing offset — and carries the verdict
 the lull would reach on this scene (spectra/services/pre_drop_play.py, the
 show's own rule). The live program's LULL step hands the response engine
-the same candidate the trigger clock would, so a member effect (none
-until step 6) plays its look in the preview exactly as in the show.
+the same candidate the trigger clock would, so a member effect (Fireworks
+and Pulse since step 6, Orbits and Black Hole since step 7) plays its look
+in the preview exactly as in the show.
 """
 from __future__ import annotations
 
@@ -70,7 +71,8 @@ def test_the_pre_drop_sits_its_gap_before_the_drop_and_plays():
     assert pd["mark_s"] == pytest.approx(drop["mark_s"] - 0.8)
     assert pd["plays"] and pd["reason"] == "plays" and pd["kind"] == "spike"
     assert pd["gap_ms"] == 800
-    assert pd["told"] == [] and pd["member_lull"] is None, "no member yet"
+    # Black Hole is a member (predrop step 7): the ruler names it as told
+    assert pd["told"] == [VID] and pd["member_lull"] is not None
     assert "plays" in pd["sentence"]
 
 

@@ -1417,6 +1417,12 @@
       }
     },
     "blackhole": {
+      "pre_drop_looks": {
+        "looks": {
+          "ring": {"label": "Infall ring on the pre-drop", "kinds": ["spike", "intro"]}
+        },
+        "auto": {"spike": "ring", "intro": "ring"}
+      },
       "params": {
         "swirl": {
           "label": "Swirl",
@@ -1887,6 +1893,12 @@
       }
     },
     "orbits": {
+      "pre_drop_looks": {
+        "looks": {
+          "jitter": {"label": "Jitters and grows on the pre-drop", "kinds": ["spike", "intro"]}
+        },
+        "auto": {"spike": "jitter", "intro": "jitter"}
+      },
       "params": {
         "particle_count": {
           "label": "Particles",

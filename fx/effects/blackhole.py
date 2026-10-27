@@ -7,6 +7,7 @@ from PIL import Image
 
 import fx.effects.lull_dark as lull_dark
 import fx.effects.particle_handoff as particle_handoff
+import fx.effects.pre_drop as pre_drop
 from fx.color import parse_color, validate_color, validate_gradient
 from fx.effects import lull_handoff, phase_grammar
 from fx.effects.audio import AudioReactiveEffect
@@ -340,6 +341,20 @@ _HEX_FACE_D = np.array([f[2] for f in _HEX_FACES], dtype=np.float32)
 # the silhouette's furthest point from center — see LULL_FILL_PROGRESS
 HEX_FILL_RADIUS = max(math.hypot(vx, vy) for vx, vy in HEX_SPAWN_VERTS)
 
+# THE PRE-DROP (fx/effects/pre_drop.py is the binding statement; predrop
+# plan step 7, his "do idea 1 on the black hole"): a lull told a pre-drop
+# goes dark at its dark point (measured to the pre-drop) and is black
+# through the breath; ON the pre-drop the horizon that filled the hex lights
+# its rim at the hex edge and falls inward — the infall ring, in the set's
+# colours by angle, brightening as it falls, eased out so it leaves the edge
+# fast and lands on the centre on the drop, where the burst follows. One
+# look for both kinds: the fall stretches over the gap, so a vocal intro's
+# is slower. A lull not told one is today's, byte for byte.
+PRE_DROP_LOOK = "ring"
+PRE_DROP_RING_R0 = HEX_FILL_RADIUS + LULL_FILL_MARGIN  # the horizon's fill top
+PRE_DROP_RING_W = 0.09        # the ring's half-width, normalized radius
+PRE_DROP_RING_GAIN0 = 0.55    # its brightness at the edge, 1.0 on the drop
+
 
 def _hex_spawn_edge_radius(theta):
     """Distance from center to the measured crystal-mapper hex silhouette
@@ -385,6 +400,7 @@ class Blackhole2d(Twod, GradientEffect):
         "blob_rush",
         "horizon_follow_blobs",
         *phase_grammar.BREATH_KEYS,
+        *pre_drop.KEYS,
         phase_grammar.SHOCK_ON_KEY,
         lull_handoff.DROP_KEY,
     ]
@@ -558,6 +574,9 @@ class Blackhole2d(Twod, GradientEffect):
             **phase_grammar.shock_schema_fields(),
             **phase_grammar.shock_on_schema_fields(),
             **phase_grammar.breath_schema_fields(),
+            # THE PRE-DROP's told keys (ride ONLY the lull arm write, and
+            # only on a lull that plays one) — fx/effects/pre_drop.py
+            **pre_drop.schema_fields(),
             **lull_handoff.drop_schema_fields(),
         }
     )
@@ -686,6 +705,7 @@ class Blackhole2d(Twod, GradientEffect):
             self._phase_t = 0.0
             self._phase_pending = None
             self._phase_saved = {}
+            self._pd_clk = None       # THE PRE-DROP's clock, read in draw
             self._drop = None
             self._phase_done_t = None
             # same creation baseline for the reverse edge: a stale
@@ -1365,6 +1385,51 @@ class Blackhole2d(Twod, GradientEffect):
         punch.advance(dt)
         self._punch_level = punch.level(lull, self._config)
 
+    def _pre_drop_step(self):
+        """THE PRE-DROP's clock: read only on a lull TOLD a pre-drop — every
+        other frame clears it before anything else, so a lull without one is
+        today's, byte for byte."""
+        if self._phase != "lull" or not pre_drop.told(self._config):
+            self._pd_clk = None
+            return
+        self._pd_clk = pre_drop.phase_clock(
+            self._config, self._phase, self.phase_progress, self._phase_t,
+            prev=self._pd_clk)
+
+    def _pre_drop_ring(self, out):
+        """Idea 1, the infall ring (PRE_DROP_RING_*), max-composed over the
+        black disc on the pre-drop: from the hex edge to the centre over the
+        gap, eased out, brightening as it falls, coloured round the set by
+        angle (so the colour change fading across the pre-drop shows in it)."""
+        clk = self._pd_clk
+        if clk is None or clk.segment != "pre_drop":
+            return
+        e = 1.0 - (1.0 - clk.frac) ** 2
+        rad = PRE_DROP_RING_R0 * (1.0 - e)
+        g = np.clip(1.0 - np.abs(self.grid_r - rad) / PRE_DROP_RING_W,
+                    0.0, 1.0)
+        if not g.any():
+            return
+        g *= PRE_DROP_RING_GAIN0 + (1.0 - PRE_DROP_RING_GAIN0) * e
+        ring = g[..., None] * self._pre_drop_ring_colours()
+        np.maximum(out, ring, out=out)
+
+    def _pre_drop_ring_colours(self):
+        """The set's colour at each cell's angle round the centre (0 at
+        3 o'clock), in the particles' own projection."""
+        key = (self.grid_r.shape, self.cx, self.cy, self.sx, self.sy)
+        if getattr(self, "_pd_ring_key", None) != key:
+            y_idx, x_idx = np.indices(self.grid_r.shape)
+            gx = (x_idx - self.cx) / max(self.sx, 1e-6)
+            gy = (y_idx - self.cy) / max(self.sy, 1e-6)
+            self._pd_ring_pos = (
+                (np.arctan2(gy, gx) / (2.0 * np.pi)) % 1.0
+            ).astype(np.float32).ravel()
+            self._pd_ring_key = key
+        rgb = self.get_gradient_color_vectorized1d(self._pd_ring_pos)
+        return np.asarray(rgb, dtype=np.float32).reshape(
+            self.grid_r.shape + (3,))
+
     def _lull_timing(self):
         """Where the lull is relative to its dark point — the shared rule
         (fx/effects/lull_dark.py), LULL_FILL_PROGRESS when SpotFX did not
@@ -1694,6 +1759,7 @@ class Blackhole2d(Twod, GradientEffect):
 
         self._phase_step(dt)
         self._punch_step(dt)
+        self._pre_drop_step()
         horizon_on = self.horizon_scale > 0.0 or self._phase != "none"
         rh = self._horizon_radius() if horizon_on else 0.0
         swirl_sign = np.sign(self.swirl) if self.swirl != 0 else 1.0
@@ -2227,6 +2293,9 @@ class Blackhole2d(Twod, GradientEffect):
             # During a charge the disc lags the halo, which sweeps ahead.
             inside = self.grid_r < (self._disc_radius(rh) - 0.01)
             out[inside] = 0.0
+        # THE PRE-DROP's infall ring, over the black (a told lull only)
+        if col is None and self._pd_clk is not None:
+            self._pre_drop_ring(out)
         self.matrix = Image.fromarray(
             np.clip(out, 0, 255).astype(np.uint8), "RGB"
         )

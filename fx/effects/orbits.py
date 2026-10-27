@@ -5,6 +5,7 @@ import voluptuous as vol
 from PIL import Image
 
 import fx.effects.particle_handoff as particle_handoff
+import fx.effects.pre_drop as pre_drop
 from fx.color import validate_gradient
 from fx.effects import lull_handoff, phase_grammar
 from fx.effects.audio import AudioReactiveEffect
@@ -37,6 +38,28 @@ LULL_FALL_S = 3.0    # fall-to-center fallback when no lull ramp arrives
 # to this share of its lull picture — the lull's one blob stays, dim — never
 # to true black (his to tune).
 BREATH_FLOOR_DIM = 0.25
+# THE PRE-DROP (fx/effects/pre_drop.py is the binding statement; predrop
+# plan step 7, his "on orbits, when it comes back in, make it jitter like
+# it's full of energy and is about to burst, instead of staying still. Have
+# it grow in size as it does slightly"): a lull told a pre-drop dims its
+# blob from full to BREATH_FLOOR_DIM by the breath's start, and the breath
+# holds it there — one curve, never dimmed twice (_pre_drop_gain). ON the
+# pre-drop it is back at full brightness and JITTERS: a fresh random offset
+# of its real render position PRE_DROP_JITTER_HZ times a second, the
+# amplitude rising from PRE_DROP_JITTER_FROM_PX to PRE_DROP_JITTER_TO_PX
+# toward the drop (a crisp twitch: the trail is cut to PRE_DROP_TRAIL_KEEP
+# each frame), while it grows from PRE_DROP_GROW_FROM to PRE_DROP_GROW_TO
+# times its size, until the drop explodes it. One look for both kinds: the
+# rise stretches over the gap. Kept blobs (lull_keep) jitter and grow
+# together. A lull not told one is today's, byte for byte.
+PRE_DROP_LOOK = "jitter"
+PRE_DROP_GROW_FROM = 2.0
+PRE_DROP_GROW_TO = 2.6
+PRE_DROP_JITTER_FROM_PX = 0.4
+PRE_DROP_JITTER_TO_PX = 1.8
+PRE_DROP_JITTER_CURVE = 1.3   # amplitude = from + (to - from) * frac ** this
+PRE_DROP_JITTER_HZ = 30.0     # a fresh offset this many times a second
+PRE_DROP_TRAIL_KEEP = 0.3
 # THE LULL HAND-OFF HOOK (fx/effects/lull_handoff.py; drop-scene-variety
 # phase 3, fx/VENDOR.md #64). Told `lull_keep` N > 1 — a lull leading into
 # Fireworks asks for 3 — the lull keeps N blobs instead of its one, and the
@@ -111,6 +134,7 @@ class Orbits2d(Twod, GradientEffect):
         "phase_progress",
         *lull_handoff.KEYS,
         *phase_grammar.BREATH_KEYS,
+        *pre_drop.KEYS,
         phase_grammar.SHOCK_ON_KEY,
         lull_handoff.DROP_KEY,
     ]
@@ -261,6 +285,9 @@ class Orbits2d(Twod, GradientEffect):
             **phase_grammar.shock_schema_fields(),
             **phase_grammar.shock_on_schema_fields(),
             **phase_grammar.breath_schema_fields(),
+            # THE PRE-DROP's told keys (ride ONLY the lull arm write, and
+            # only on a lull that plays one) — fx/effects/pre_drop.py
+            **pre_drop.schema_fields(),
             **lull_handoff.drop_schema_fields(),
         }
     )
@@ -414,6 +441,9 @@ class Orbits2d(Twod, GradientEffect):
             self._phase_t = 0.0
             self._phase_pending = None
             self._drop_state = None
+            self._pd_clk = None       # THE PRE-DROP's clock, read in draw
+            self._pd_jit = None       # ... and its jitter offset (px)
+            self._pd_jit_t = 0.0
             self._charge_n0 = 1
             self._pos_scale = 1.0
             self._lull_f = 0.0
@@ -997,6 +1027,64 @@ class Orbits2d(Twod, GradientEffect):
         r = max(float(self.horizon_scale), 0.05)
         return (self.cx, self.cy, r * self.sx, r * self.sy)
 
+    def _pre_drop_step(self, dt):
+        """THE PRE-DROP's clock and jitter (PRE_DROP_*): runs only on a lull
+        TOLD a pre-drop — every other frame clears it before anything else
+        (and draws nothing from the rng), so a lull without one is today's,
+        byte for byte."""
+        if self._phase != "lull" or not pre_drop.told(self._config):
+            self._pd_clk = None
+            self._pd_jit = None
+            return
+        clk = pre_drop.phase_clock(self._config, self._phase,
+                                   self.phase_progress, self._phase_t,
+                                   prev=self._pd_clk)
+        self._pd_clk = clk
+        if clk.segment != "pre_drop":
+            self._pd_jit = None
+            return
+        self._pd_jit_t = 0.0 if clk.edge else self._pd_jit_t + dt
+        if self._pd_jit is None or (
+                self._pd_jit_t >= 1.0 / PRE_DROP_JITTER_HZ - 1e-9):
+            self._pd_jit_t = 0.0
+            amp = PRE_DROP_JITTER_FROM_PX + (
+                PRE_DROP_JITTER_TO_PX - PRE_DROP_JITTER_FROM_PX
+            ) * clk.frac ** PRE_DROP_JITTER_CURVE
+            a = self._rng.uniform(0.0, 2.0 * np.pi)
+            r = amp * np.sqrt(self._rng.uniform(0.3, 1.0))
+            self._pd_jit = (float(r * np.cos(a)), float(r * np.sin(a)))
+
+    def _pre_drop_grow(self):
+        """The blob's size multiplier on the pre-drop, None off it."""
+        clk = self._pd_clk
+        if clk is None or clk.segment != "pre_drop":
+            return None
+        return PRE_DROP_GROW_FROM + (
+            PRE_DROP_GROW_TO - PRE_DROP_GROW_FROM) * clk.frac
+
+    def _pre_drop_gain(self):
+        """The told lull's frame gain ON TOP OF the base render's breath
+        (Twod.render multiplies the lull picture by the breath, floored at
+        BREATH_FLOOR), so the product is the look's one curve: full at the
+        lull's start, smoothstepping down to BREATH_FLOOR_DIM as the breath
+        starts (as the pre-drop, with no breath told), held there through
+        the breath, full again on the pre-drop. 1.0 off a told lull."""
+        clk = self._pd_clk
+        if clk is None or clk.segment == "pre_drop":
+            return 1.0
+        if clk.segment == "breath":
+            want = BREATH_FLOOR_DIM
+        else:
+            b = float(self._config.get(phase_grammar.BREATH_KEY, 0.0) or 0.0)
+            stop = (float(self._config.get(phase_grammar.BREATH_AT_KEY, 0.0)
+                          or 0.0) if b > 0.0 else pre_drop.at_s(self._config))
+            f = 1.0 if stop <= 0.0 else min(1.0, max(
+                0.0, self._phase_t / stop))
+            want = 1.0 - (1.0 - BREATH_FLOOR_DIM) * f * f * (3.0 - 2.0 * f)
+        base = phase_grammar.breath_gain(self._config, self._phase_t,
+                                         floor=self.BREATH_FLOOR)
+        return min(1.0, want / max(base, 1e-6))
+
     def _phase_step(self, dt):
         """Advance the charge/lull/drop state machine. Runs every draw,
         before population management; sets the per-frame overrides
@@ -1354,6 +1442,7 @@ class Orbits2d(Twod, GradientEffect):
             self._beat_pending = False
 
         self._phase_step(dt)
+        self._pre_drop_step(dt)
         # THE COUNT RULE (the shoal-burst plan §5.4): a matched birth's
         # count holds until `transition_count_hold_ms` after the program
         # ends, then the authored count wins and _manage_population flies
@@ -1576,7 +1665,11 @@ class Orbits2d(Twod, GradientEffect):
             0.5,
             float(KERNEL_R),
         )
-        if self._lull_f > 0.0:
+        grow = self._pre_drop_grow()
+        if grow is not None:
+            # THE PRE-DROP: back from the lull's shrink, growing to the drop
+            sizes = np.clip(sizes * grow, 0.5, float(KERNEL_R))
+        elif self._lull_f > 0.0:
             # the falling blob shrinks as it approaches the center
             sizes = np.clip(
                 sizes * (1.0 - 0.6 * self._lull_f), 0.5, float(KERNEL_R)
@@ -1585,6 +1678,9 @@ class Orbits2d(Twod, GradientEffect):
         # ── render ──────────────────────────────────────────────────────
         half_life = 0.02 + self.trail_decay * 0.5
         self.trail *= np.float32(0.5 ** (dt / half_life))
+        jit = self._pd_jit if self._pre_drop_grow() is not None else None
+        if jit is not None:
+            self.trail *= np.float32(PRE_DROP_TRAIL_KEEP)
 
         # particles spawned in place this frame have no previous position —
         # snap it to the current one so they don't streak from the origin
@@ -1596,8 +1692,11 @@ class Orbits2d(Twod, GradientEffect):
         fractions = np.arange(1, SUBSTEPS + 1, dtype=np.float32) / SUBSTEPS
         xs = self.p_x0[:n][:, None] + (x - self.p_x0[:n])[:, None] * fractions
         ys = self.p_y0[:n][:, None] + (y - self.p_y0[:n])[:, None] * fractions
-        pxs = self.cx + xs * self.sx
-        pys = self.cy + ys * self.sy
+        cx, cy = self.cx, self.cy
+        if jit is not None:
+            cx, cy = cx + jit[0], cy + jit[1]   # the blob's real position
+        pxs = cx + xs * self.sx
+        pys = cy + ys * self.sy
 
         frame = np.zeros_like(self.trail)
         for i in range(n):
@@ -1638,6 +1737,9 @@ class Orbits2d(Twod, GradientEffect):
                 self._compact(~dead)
 
         out = np.asarray(self.matrix, dtype=np.float32) + self.trail
+        pd_gain = self._pre_drop_gain()
+        if pd_gain < 1.0:
+            out *= np.float32(pd_gain)
         self.matrix = Image.fromarray(
             np.clip(out, 0, 255).astype(np.uint8), "RGB"
         )

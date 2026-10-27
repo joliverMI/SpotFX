@@ -793,7 +793,7 @@ async def apply_scene_entry_param(scene: str, target: str, name: str, value: Any
 # intro wears the spike's), or a look the effect declares in its
 # `pre_drop_looks` registry block (fx/effects/pre_drop.py). Read only by a
 # fx.device_model.PRE_DROP_EFFECTS member — Fireworks and Pulse since
-# predrop step 6.
+# predrop step 6, Orbits and Black Hole since step 7.
 
 _PRE_DROP_KINDS = ("spike", "intro")
 

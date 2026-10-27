@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""THE PRE-DROP STORYBOARDS (predrop plan step 6, report 3.4-3.5): Fireworks
-and Pulse rendered offline through the shipped effects, today and with each
-kind of pre-drop, driven by the lull arm the real engine writes
-(tests/pre_drop_look_harness.py — the same rig the tests use).
+"""THE PRE-DROP STORYBOARDS (predrop plan steps 6-7, report 3.4-3.5):
+Fireworks, Pulse, Orbits and Black Hole rendered offline through the shipped
+effects, today and with each kind of pre-drop, driven by the lull arm the
+real engine writes (tests/pre_drop_look_harness.py — the same rig the tests
+use).
 
 It is the tuning loop and a proof at once. It writes to
 docs/evidence/predrop-storyboards/:
 
   fireworks_<clip>.png / .gif  his crystal's 976 real cells (gap cells grey)
                                through the lull and the drop, one frame per
-                               0.2 s on the sheet;
+                               0.2 s on the sheet (and orbits_<clip>,
+                               blackhole_<clip>, the same clips);
   pulse_levels.png             Pulse's level on one light over the lull and
                                the drop, today (dashed) and with a pre-drop,
                                for Winny's spike gap, his 2 s maximum and
@@ -21,7 +23,10 @@ and FAILS (exit 1) unless: each effect without a pre-drop is today's frame
 for frame against its own module before the looks (pinned out of git);
 Fireworks is black in every frame of the breath and its light over the lull
 is below today's; Pulse is black through the breath and its dark span, the
-span a quarter of the gap clamped to 100-500 ms.
+span a quarter of the gap clamped to 100-500 ms; Orbits is dim, never black,
+through the breath and its light is below today's at the plan's 0.8 s gap
+(within +20% at a longer one — a named deviation); Black Hole is black
+through the breath and its light is below today's at every gap.
 
 Run from the repo root: .venv/bin/python scripts/render_predrop_storyboards.py
 """
@@ -73,7 +78,7 @@ def crystal_image(frame: np.ndarray) -> Image.Image:
     return img.resize((H.COLS * SCALE, H.ROWS * SCALE), Image.NEAREST)
 
 
-def fw_sheet(name, run, lull, gap) -> None:
+def fw_sheet(name, run, lull, gap, prefix="fireworks") -> None:
     lull_rows = [(t, f) for (ph, t), f in zip(run.phase, run.frames)
                  if ph == "lull"]
     drop_rows = [(t, f) for (ph, t), f in zip(run.phase, run.frames)
@@ -96,10 +101,10 @@ def fw_sheet(name, run, lull, gap) -> None:
             mark = (" breath" if at - 0.4 - EPS <= t < at - EPS
                     else " pre-drop" if t >= at - EPS else "")
         d.text((x + 2, y + 1), f"{ph} {t:.1f}s{mark}", fill=(200, 190, 230))
-    sheet.save(OUT / f"fireworks_{name}.png")
+    sheet.save(OUT / f"{prefix}_{name}.png")
     frames = [crystal_image(f) for (ph, _), f in zip(run.phase, run.frames)
               if ph in ("lull", "drop")][::4]
-    frames[0].save(OUT / f"fireworks_{name}.gif", save_all=True,
+    frames[0].save(OUT / f"{prefix}_{name}.gif", save_all=True,
                    append_images=frames[1:], duration=66, loop=0)
 
 
@@ -152,7 +157,7 @@ def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix="predrop_storyboards_"))
     problems: list[str] = []
-    lines = ["# Pre-drop storyboards (predrop plan step 6)", "",
+    lines = ["# Pre-drop storyboards (predrop plan steps 6-7)", "",
              "Rendered by `scripts/render_predrop_storyboards.py` through the "
              "shipped effects, driven by the lull arm the real engine writes. "
              "Light: each real cell's brightest channel / 255, summed over the "
@@ -244,6 +249,61 @@ def main() -> int:
               "Pulse's light is delivered light (level ^ gamma) summed over "
               "the lull; the spike's burst is the look he asked for, so it can "
               "add light where the lull is short.", ""]
+
+    # Orbits and Black Hole (step 7): today unchanged, then each clip
+    for effect, title in (("orbits", "Orbits"), ("blackhole", "Black Hole")):
+        lines += [f"## {title}", "",
+                  "| Clip | Lull before the pre-drop | Pre-drop to drop | "
+                  "Whole lull | vs today |", "|---|---:|---:|---:|---:|"]
+        cfg = H.STEP7_CFG[effect]
+        pinned = H.load_pinned(effect, f"{effect}_prelook7",
+                               H.STEP7_LACKS[effect], ref=H.STEP7_REF)
+        arms = arms_for(effect, 3.2, None, "")
+        now = H.run_async(H.crystal_run(tmp, effect, arms, cfg))
+        then = H.run_async(H.crystal_run(
+            tmp, pinned, {k: H.todays_arm(a, effect) for k, a in arms.items()},
+            cfg))
+        same7 = (len(now.frames) == len(then.frames) and all(
+            np.array_equal(a, b) for a, b in zip(now.frames, then.frames)))
+        if not same7:
+            problems.append(f"{title} without a pre-drop is not today's")
+        today = {}
+        for name, lull, gap, kind in FW_CLIPS:
+            run = H.run_async(H.crystal_run(
+                tmp, effect, arms_for(effect, lull, gap, kind), cfg,
+                lull_s=lull))
+            fw_sheet(name, run, lull, gap, prefix=effect)
+            a, b, whole = light_split(run, lull, gap)
+            if gap is None:
+                today[lull] = whole
+                vs = ""
+            else:
+                ratio = whole / today[lull]
+                vs = f"{100 * (ratio - 1):+.0f}%"
+                strict = effect == "blackhole" or gap <= 0.8 + EPS
+                if strict and ratio >= 1.0:
+                    problems.append(f"{title} {name}: lull light not below "
+                                    "today's")
+                if not strict and ratio > 1.20:
+                    problems.append(f"{title} {name}: lull light past its "
+                                    "named +20% bound")
+                breath = [H.light(f, MASK) for (ph, t), f, i in zip(
+                    run.phase, run.frames, run.info)
+                    if ph == "lull" and i["segment"] == "breath"]
+                if effect == "blackhole" and max(breath) > 0.0:
+                    problems.append(f"{title} {name}: not black through the "
+                                    "breath")
+                if effect == "orbits" and min(breath) <= 0.0:
+                    problems.append(f"{title} {name}: the dim blob went black")
+            lines.append(f"| {name} (lull {lull} s) | {a:.1f} | {b:.1f} | "
+                         f"{whole:.0f} | {vs} |")
+        lines += ["", f"Without a pre-drop, frame for frame against the "
+                  f"module before step 7 ({H.STEP7_REF[:8]}): "
+                  f"{'unchanged' if same7 else 'CHANGED'}.", ""]
+    lines += ["Orbits is back at full and growing for the whole gap, so a "
+              "longer gap adds light: the plan's own prototype measured only "
+              "the 0.8 s gap, where it is below today's; a 2 s spike and a "
+              "3.3 s vocal intro run above it (named, bounded at +20%).", ""]
     (OUT / "README.md").write_text("\n".join(lines))
     print("\n".join(lines))
     if problems:
@@ -252,7 +312,8 @@ def main() -> int:
             print(f"  - {p}")
         return 1
     print("OK: unchanged without a pre-drop; black where it must be; the "
-          "Fireworks lull below today's.")
+          "Fireworks and Black Hole lulls below today's, Orbits' at the plan's "
+          "gap.")
     return 0
 
 

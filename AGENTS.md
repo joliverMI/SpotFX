@@ -12217,22 +12217,29 @@ has the cold-start detail. Four things:
   `switch_pre_drop`. Spec: `tests/test_predrop_edits.py` plus the
   drop-sequence view/edit and Home panel check scripts.
 
-**THE PRE-DROP ENGINE (2026-10-26, predrop plan step 5; the first looks,
-Fireworks and Pulse, step 6).** `fx/effects/pre_drop.py` (the told keys, the looks,
+**THE PRE-DROP ENGINE (2026-10-26, predrop plan step 5; the looks:
+Fireworks and Pulse, step 6; Orbits and Black Hole, step 7).** `fx/effects/pre_drop.py` (the told keys, the looks,
 `phase_clock`) and `spectra/services/pre_drop_play.py` (the one rule) are
 the binding statements; times are in `docs/SPECTRA_TIMING_CONVENTIONS.md`.
 Five things:
 
 - **NOT A PHASE — FOUR KEYS ON THE LULL ARM**, told only to
   `fx.device_model.PRE_DROP_EFFECTS` members — Fireworks and Pulse since
-  step 6. Every non-member arm write over his 14 real scenes is
+  step 6, Orbits and Black Hole since step 7. Every non-member arm write over his 14 real scenes is
   byte-identical to the pre-engine golden, and a member's lull arm differs
   only by the told keys (`tests/test_pre_drop_arm_identity.py`,
   `tests/fixtures/pre_drop/` — recapture only with a deliberate reason).
   THE LOOKS: Fireworks' lull stays dark (no rockets), is black through
   the breath, and its rocket ring fires ON the pre-drop and bursts on the
   drop; Pulse bursts (spike) or swells to 30% (vocal intro), then holds a
-  dark span (a quarter of the gap, 100-500 ms) black like the breath. An
+  dark span (a quarter of the gap, 100-500 ms) black like the breath;
+  Orbits dims its blob to its 25% floor by the breath and holds it there
+  (one curve with the base render's breath, never black), then is back at
+  full on the pre-drop, jittering harder and growing to the drop; Black
+  Hole is dark from its dark point and black through the breath, then its
+  infall ring falls from the hex edge to the centre over the gap, in the
+  set's colours. A longer gap adds light to Orbits (+1% at a 2 s spike,
+  +14% at a 3.3 s vocal intro — named, the test bounds it at +20%). An
   untold effect is today's frame for frame against its pinned pre-look
   module (`tests/test_pre_drop_looks.py`, rig `tests/
   pre_drop_look_harness.py`; storyboards `scripts/
