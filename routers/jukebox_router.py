@@ -13,9 +13,15 @@ process on its own port (phase 2) and never reaches these routes.
   GET    /api/jukebox/status          the night: what is playing, the next
                                       program items with start times, the
                                       line, warnings, the log — reads only
-  GET    /api/jukebox/preview         the program from the first set song for
-                                      the saved settings, empty line — reads
-                                      the set, changes nothing
+  GET    /api/jukebox/preview         what the set-list editor draws for the
+                                      saved settings: the whole set, one pass
+                                      with its slots, the next items, the
+                                      Auto pattern as Manual slots, the
+                                      playhead — reads the set (cached 60 s;
+                                      `?refresh=true` reads again)
+  POST   /api/jukebox/set/move        {from_index, to_index} — reorders the
+                                      SET PLAYLIST in Spotify; during a night
+                                      only songs two or more ahead may move
   POST   /api/jukebox/night/start     {play: true, start_index: 0}
   POST   /api/jukebox/night/stop      {pause: false}
   POST   /api/jukebox/line            {uri} — a song link, URI or id
@@ -90,12 +96,13 @@ async def get_status(count: int = 20) -> dict:
 
 
 @router.get("/preview")
-async def get_preview(count: int = 20) -> dict:
+async def get_preview(count: int = 20, refresh: bool = False) -> dict:
     cfg = store.load_config()
     if not cfg.playlist.strip():
         return {"status": "refused", "reason": "no_playlist", "detail": sentence("no_playlist")}
     try:
-        return await night.runner.preview(cfg, count=max(1, min(int(count), 60)))
+        return await night.runner.preview(cfg, count=max(1, min(int(count), 60)),
+                                          refresh=refresh)
     except Exception as exc:
         return {"status": "refused", "reason": "spotify_error",
                 "detail": sentence("spotify_error", f"{type(exc).__name__}")}
@@ -116,6 +123,11 @@ class AddBody(BaseModel):
 
 class MoveBody(BaseModel):
     to: int
+
+
+class SetMoveBody(BaseModel):
+    from_index: int
+    to_index: int
 
 
 @router.post("/night/start")
@@ -142,3 +154,8 @@ async def delete_line(entry_id: str) -> dict:
 @router.post("/line/{entry_id}/move")
 async def post_move(entry_id: str, body: MoveBody) -> dict:
     return await night.runner.move(entry_id, body.to)
+
+
+@router.post("/set/move")
+async def post_set_move(body: SetMoveBody) -> dict:
+    return await night.runner.move_set_song(body.from_index, body.to_index)

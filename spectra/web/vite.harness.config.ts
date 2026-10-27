@@ -23,6 +23,7 @@ export default defineConfig({
       hometimeline: resolve(__dirname, 'harness/hometimeline.html'),
       fidelity: resolve(__dirname, 'harness/fidelity.html'),
       absorb: resolve(__dirname, 'harness/absorb.html'),
+      jukebox: resolve(__dirname, 'harness/jukebox.html'),
       homedrops: resolve(__dirname, 'harness/homedrops.html'),
     } },
   },

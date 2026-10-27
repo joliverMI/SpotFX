@@ -190,3 +190,20 @@ def test_lap_counts_one_pass():
 def test_unbounded_gap_is_never_decremented():
     c = Cursor(gap_left=UNBOUNDED, started=True)
     assert program.on_jukebox_start(c).gap_left == UNBOUNDED
+
+
+def test_as_manual_copies_the_auto_pattern():
+    items = _set(6)
+    m = program.as_manual(_cfg(every=2, run=2), items)
+    assert [(x.after_uri, x.count) for x in m] == [(items[1].uri, 2), (items[3].uri, 2),
+                                                    (items[5].uri, 2)]
+    # copied as manual, the program is the same
+    manual = _cfg(mode="manual", manual=m)
+    auto = _cfg(every=2, run=2)
+    assert _labels(program.project(manual, items, Cursor(), _fills(9), 12)) == \
+        _labels(program.project(auto, items, Cursor(), _fills(9), 12))
+
+
+def test_as_manual_for_jukebox_first_is_a_slot_after_every_song():
+    m = program.as_manual(_cfg(mode="jukebox_first"), _set(3))
+    assert [x.count for x in m] == [1, 1, 1]

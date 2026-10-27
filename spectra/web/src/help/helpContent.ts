@@ -2308,6 +2308,56 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
   {
+    id: 'jukebox',
+    title: 'Jukebox — the set list with jukebox slots',
+    keywords: 'jukebox set list party playlist slots queue guests spotify program',
+    intro:
+      'The Jukebox (Engine ▾ Jukebox, /jukebox) plays your set playlist as Spotify\'s own context, in order, and puts jukebox slots between set songs. Spotify never sees a slot: about 45 seconds before the song in front of a slot ends, the top waiting jukebox song is sent into Spotify\'s queue and the queue is read back to confirm it is next; after it, the set carries on where it was. Only that one sent song is locked in place — everything still waiting can be moved or removed. This page is the master view: the Set list tab edits the program, the Live tab shows a running night (read-only). The guest page comes in a later phase.',
+    entries: [
+      {
+        id: 'jukebox-set-list',
+        title: 'The set list — the playlist, its order, the program bar',
+        keywords: 'set list playlist link order reorder drag program bar running order reload spotify',
+        body: [
+          'Link the playlist that is the night\'s set (a Spotify playlist link). It plays in playlist order with shuffle off — a night turns shuffle off when it starts and sets Spotify\'s repeat to match "When the set runs out".',
+          'Drag a song by its ⠿ handle to reorder the set. That writes the new order to the playlist in Spotify itself. During a night only songs at least two ahead of the one playing can move: Spotify may already have the next one lined up, so those handles are greyed out.',
+          'The program bar shows one pass through the set: each set song by its length and each jukebox slot at a typical song\'s length, with the playing song marked during a night. The line above it counts set songs and slots, with a rough share per guest at the party size you pick.',
+          'Reload reads the playlist from Spotify again (the page otherwise reuses its last read for a minute). If you edit the playlist in Spotify during a night, the night notices on its own at the next set song.',
+        ],
+      },
+      {
+        id: 'jukebox-slots',
+        title: 'Where the jukebox slots go',
+        keywords: 'slots auto every other jukebox first manual click slot two in a row empty slot passes runs out again jukebox only end the night',
+        body: [
+          'Auto puts a jukebox slot after every 1 to 5 set songs, 1 to 3 slots in a row ("after every 1, 1 in a row" is every other). Jukebox first plays the set only when nobody has a song waiting. Manual is whatever you place.',
+          'In Manual, click a set song to put a jukebox slot after it; click a slot to put another one right after it (two in a row; click again for three); × removes one. Slots stay with their song when you reorder the set. Switching from Auto or Jukebox first to Manual copies the pattern that was playing, so you start from it.',
+          'An empty slot — nobody\'s song waiting when it comes up — is simply passed and the set continues, so there is never a gap in the music. A slot that MISSES (its song didn\'t reach Spotify in time) is owed to the next gap instead, so the jukebox never loses its turn.',
+          'When the set runs out: Play the set again (Spotify loops it), Jukebox songs only (until the line is empty), or End the night with the last set song.',
+        ],
+      },
+      {
+        id: 'jukebox-live',
+        title: 'The Live tab',
+        keywords: 'live now playing coming up next line sent to spotify committed skipped log night read only',
+        body: [
+          'Read-only. It shows whether a night is running and since when, the song playing (a set song, a jukebox song, or something off the set — the Jukebox then waits until the set plays again), the next 20 program items with when each starts, and the jukebox line.',
+          '"Sent to Spotify" marks the one song already in Spotify\'s queue. If it is removed, it is skipped the moment it starts and the next waiting song takes its slot.',
+          'A night never starts while the house is sleeping (or while that can\'t be read), ends if sleeping comes on, and never runs while Absorb Music has a window open. In this phase a night is started for the daytime test; the guest page and the host\'s own controls come later.',
+        ],
+      },
+      {
+        id: 'jukebox-sign-in',
+        title: 'The Spotify sign-in line',
+        keywords: 'spotify sign in token expiry six months reauthorize login warning expired refused',
+        body: [
+          'Spotify\'s sign-in for SpotFX runs out six months after it was made, and when it does SpotFX\'s polling, Absorb and every Jukebox night stop at once. SpotFX now records when you sign in (at /api/spotify/login) and this line appears from 14 days before the end, naming the date.',
+          'A sign-in from before that record existed has no known date, so the line asks you to sign in again before a party — that starts a known clock. If Spotify refuses the sign-in outright, the line says so.',
+        ],
+      },
+    ],
+  },
+  {
     id: 'settings-console',
     title: 'Sonic — talk to it instead of hunting a form',
     keywords: 'settings console sonic agent chat voice dictation mic microphone brightness ambient transition scene change undo change log talk to the software',

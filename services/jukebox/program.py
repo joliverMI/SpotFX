@@ -50,7 +50,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable, Optional, Sequence
 
-from models.jukebox import Cursor, ProgramConfig, SetItem
+from models.jukebox import Cursor, ManualSlot, ProgramConfig, SetItem
 
 # "As many slots as the line holds" — a jukebox-first gap. Never decremented
 # and never owed: the line running dry is what closes it.
@@ -282,3 +282,23 @@ def lap(cfg: ProgramConfig, set_items: Sequence[SetItem]) -> Lap:
             if slot.after_uri not in uris:
                 out.notes.append(f"a manual slot follows {slot.after_uri}, which is not in the set")
     return out
+
+
+def as_manual(cfg: ProgramConfig, set_items: Sequence[SetItem]) -> list[ManualSlot]:
+    """The slots the current rule places in one pass, written as MANUAL
+    slots — what "switch Auto to Manual" copies so he can edit the pattern
+    (report §5). A jukebox-first program becomes one slot after every set
+    song (its closest fixed pattern). A song in the set twice keeps its
+    first run of slots: manual slots follow a song by its URI."""
+    out: dict[str, int] = {}
+    since = 0
+    for idx, item in enumerate(set_items):
+        if cfg.mode == "jukebox_first":
+            gap = 1
+        elif cfg.mode == "manual":
+            gap = _manual_count(cfg, item.uri)
+        else:
+            gap, since = rule_gap(cfg, set_items, idx, since)
+        if gap > 0 and item.uri not in out:
+            out[item.uri] = min(gap, 3)
+    return [ManualSlot(after_uri=uri, count=n) for uri, n in out.items()]

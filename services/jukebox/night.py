@@ -75,6 +75,7 @@ SHUFFLE_CHECK_S = 300.0       # how often a running night re-checks shuffle
 PLAY_SETTLE_S = 12.0          # after a Start, how long Spotify may still report the old song
 RAN_OUT_IDLE_S = 30.0         # the program is done and nothing has played this long: the night ends
 MAX_NIGHT_S = 12 * 3600.0     # a night older than this ends itself
+SET_CACHE_S = 60.0            # an editor's read of the set is reused this long
 
 # ── refusals and endings: ONE sentence per code ──────────────────────────────
 SENTENCES: dict[str, str] = {
@@ -100,6 +101,9 @@ SENTENCES: dict[str, str] = {
     "committed_fixed": ("That song has already been sent to Spotify, so it can't move. "
                         "Remove it to have it skipped as it starts."),
     "already_played": "That song has already played.",
+    "bad_position": "That place isn't in the set any more — the set changed; reload it.",
+    "too_close": ("Only set songs at least two ahead of the one playing can move during "
+                  "the night — Spotify may already have the next one lined up."),
 }
 
 
@@ -228,6 +232,7 @@ class JukeboxRunner:
         self._persist_lock: Optional[asyncio.Lock] = None
         self._kick: Optional[asyncio.Event] = None
         self._loaded = False
+        self._set_cache: dict[str, tuple[float, dict, list[SetItem]]] = {}
 
     # ── plumbing ────────────────────────────────────────────────────────────
 
@@ -1000,20 +1005,100 @@ class JukeboxRunner:
                 "warnings": account + list(n.warnings), "spotify_auth": sign_in,
                 "log": n.log[-60:], "history": self.history[:5]}
 
-    async def preview(self, cfg: ProgramConfig, count: int = 20) -> dict:
-        """The program for `cfg` from its first song, with an empty line —
-        what a night would play (reads the set; changes nothing)."""
-        pid_info = await self._call("resolve_playlist", cfg.playlist)
-        if not pid_info:
-            return {"status": "refused", "reason": "playlist_unresolved",
-                    "detail": sentence("playlist_unresolved")}
-        items = [SetItem(**it) for it in await self._call("playlist_items", pid_info["id"])]
-        out = program.with_start_times(program.project(cfg, items, Cursor(), [], count), 0)
+    async def read_set(self, cfg: ProgramConfig, refresh: bool = False) -> tuple[dict, list[SetItem]]:
+        """The set for `cfg`: the running night's own copy when the night is
+        on this playlist (no Spotify call), else a read cached for
+        SET_CACHE_S so an editor click never waits on Spotify — `refresh`
+        reads again. Raises LookupError when the playlist can't be read."""
+        n = self.night
+        if (self.running and n is not None and not refresh
+                and cfg.playlist.strip() == self.cfg.playlist.strip()):
+            return ({"id": n.playlist_id, "uri": n.playlist_uri, "name": n.playlist_name,
+                     "snapshot_id": n.snapshot_id}, list(n.set_items))
+        key = cfg.playlist.strip()
+        hit = self._set_cache.get(key)
+        if hit and not refresh and self.deps.clock() - hit[0] < SET_CACHE_S:
+            return hit[1], list(hit[2])
+        info = await self._call("resolve_playlist", cfg.playlist)
+        if not info:
+            raise LookupError(sentence("playlist_unresolved"))
+        items = [SetItem(**it) for it in await self._call("playlist_items", info["id"])]
+        self._set_cache[key] = (self.deps.clock(), info, items)
+        return info, list(items)
+
+    async def preview(self, cfg: ProgramConfig, count: int = 20, refresh: bool = False) -> dict:
+        """What the editor draws for `cfg`: the whole set, one pass of the
+        program with its slots (`lap_items`), the next `count` items from the
+        first song with an empty line, the Auto pattern written as Manual
+        slots (what "edit by hand" copies), and — with a night running — the
+        set song playing now. Reads the set; changes nothing."""
+        try:
+            info, items = await self.read_set(cfg, refresh=refresh)
+        except LookupError as exc:
+            return {"status": "refused", "reason": "playlist_unresolved", "detail": str(exc)}
         lap = program.lap(cfg, items)
-        return {"status": "ok", "playlist_name": pid_info.get("name") or "",
-                "set_songs": len(items), "next": [i.as_dict() for i in out],
+        lap_items = program.project(cfg, items, Cursor(), [], len(items) + lap.slots)
+        out = program.with_start_times(program.project(cfg, items, Cursor(), [], count), 0)
+        n = self.night
+        playhead = (n.cursor.set_pos if self.running and n is not None and n.cursor.started
+                    and n.playlist_id == info.get("id") else None)
+        return {"status": "ok", "playlist_name": info.get("name") or "",
+                "playlist_uri": info.get("uri") or "", "set_songs": len(items),
+                "set": [it.model_dump(mode="json") for it in items],
+                "lap_items": [i.as_dict() for i in lap_items],
+                "next": [i.as_dict() for i in out],
+                "manual_equivalent": [m.model_dump(mode="json")
+                                      for m in program.as_manual(cfg, items)],
+                "playhead": playhead,
                 "lap": {"set_songs": lap.set_songs, "slots": lap.slots,
                         "unbounded": lap.unbounded, "notes": lap.notes}}
+
+    async def move_set_song(self, from_index: int, to_index: int) -> dict:
+        """Reorder the SET PLAYLIST in Spotify: the song at `from_index` to
+        `to_index`. During a night, only songs at least two ahead of the one
+        playing may move (report §5: a playing client may hold its old
+        snapshot of the next song), and the positions are checked against a
+        fresh read so a stale editor can't move the wrong song."""
+        cfg = self.cfg if self.running else self.deps.load_config()
+        async with self._get_lock():
+            try:
+                info = await self._call("resolve_playlist", cfg.playlist)
+                if not info:
+                    raise LookupError(sentence("playlist_unresolved"))
+                items = [SetItem(**it) for it in await self._call("playlist_items", info["id"])]
+            except Exception as exc:
+                return {"status": "refused", "reason": "playlist_unresolved",
+                        "detail": sentence("playlist_unresolved", _err(exc))}
+            frm, to = int(from_index), int(to_index)
+            if not (0 <= frm < len(items) and 0 <= to < len(items)):
+                return {"status": "refused", "reason": "bad_position",
+                        "detail": sentence("bad_position")}
+            if frm == to:
+                return {"status": "moved", "set": [it.model_dump(mode="json") for it in items]}
+            n = self.night
+            if self.running and n is not None and n.cursor.started:
+                floor = n.cursor.set_pos + 2
+                if min(frm, to) < floor:
+                    return {"status": "refused", "reason": "too_close",
+                            "detail": sentence("too_close")}
+            insert_before = to + 1 if to > frm else to
+            try:
+                snap = await self._call("reorder", info["id"], frm, insert_before,
+                                        info.get("snapshot_id") or "")
+            except Exception as exc:
+                return {"status": "refused", "reason": "spotify_error",
+                        "detail": sentence("spotify_error", _err(exc))}
+            moved = items.pop(frm)
+            items.insert(to, moved)
+            self._set_cache[cfg.playlist.strip()] = (
+                self.deps.clock(), {**info, "snapshot_id": snap or ""}, list(items))
+            if self.running and n is not None and n.playlist_id == info["id"]:
+                n.set_items = list(items)
+                n.snapshot_id = snap or n.snapshot_id
+                n.cursor = program.reanchor(n.set_items, n.cursor)
+                self._log(f"moved {moved.title or moved.uri} from set song {frm + 1} to {to + 1}")
+                await self._persist()
+            return {"status": "moved", "set": [it.model_dump(mode="json") for it in items]}
 
     # ── a restart ───────────────────────────────────────────────────────────
 

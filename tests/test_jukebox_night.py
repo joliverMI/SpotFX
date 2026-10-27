@@ -668,3 +668,51 @@ def test_every_gateway_call_runs_on_a_worker_thread():
     go(run())
     assert seen and not any(on_loop for _, on_loop in seen)
     assert {n for n, _ in seen} >= {"add_to_queue", "queue", "start_context", "track"}
+
+
+# ── the set-list editor's reads and the set move ───────────────────────────
+
+def test_the_editor_preview_has_the_set_one_pass_and_the_manual_copy():
+    w = World(n_set=4, every=2)
+    p = go(w.runner.preview(w.cfg))
+    assert p["status"] == "ok" and len(p["set"]) == 4
+    assert [i["kind"] for i in p["lap_items"]] == ["set", "set", "open", "set", "set", "open"]
+    assert [m["after_uri"] for m in p["manual_equivalent"]] == [set_uri(1), set_uri(3)]
+    assert p["playhead"] is None
+    before = w.gw.names().count("playlist_items")
+    go(w.runner.preview(w.cfg))                       # an editor click: no Spotify read
+    assert w.gw.names().count("playlist_items") == before
+    go(w.runner.preview(w.cfg, refresh=True))
+    assert w.gw.names().count("playlist_items") == before + 1
+
+
+def test_moving_a_set_song_without_a_night_reorders_the_playlist():
+    w = World(n_set=5)
+    r = go(w.runner.move_set_song(4, 1))
+    assert r["status"] == "moved"
+    assert [w.titles[u] for u in w.player.context] == ["S0", "S4", "S1", "S2", "S3"]
+    assert [x["title"] for x in r["set"]] == ["S0", "S4", "S1", "S2", "S3"]
+    r = go(w.runner.move_set_song(1, 3))
+    assert [w.titles[u] for u in w.player.context] == ["S0", "S1", "S2", "S4", "S3"]
+
+
+def test_during_a_night_only_songs_two_or_more_ahead_move_and_the_new_order_plays():
+    w = World(n_set=6)
+
+    async def run():
+        await w.start()
+        await w.run(10)                                # S0 playing
+        near = await w.runner.move_set_song(1, 4)      # the next song: refused
+        assert near["reason"] == "too_close"
+        assert "reorder" not in w.gw.names()
+        ok = await w.runner.move_set_song(4, 2)        # two ahead: allowed
+        assert ok["status"] == "moved"
+        assert [s.title for s in w.runner.night.set_items[:4]] == ["S0", "S1", "S4", "S2"]
+        await w.run(3 * 120)
+    go(run())
+    assert w.played()[:4] == ["S0", "S1", "S4", "S2"]
+
+
+def test_a_stale_position_is_refused():
+    w = World(n_set=3)
+    assert go(w.runner.move_set_song(0, 7))["reason"] == "bad_position"
