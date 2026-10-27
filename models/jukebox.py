@@ -2,7 +2,7 @@
 SpotFX — the Jukebox's data model (data/jukebox-plan/report.md, phase 1:
 the program engine). services/jukebox/ is the code that runs it.
 
-Two stores, each with one job (services/jukebox/store.py):
+Three stores, each with one job (services/jukebox/store.py):
 
   ProgramConfig  storage/jukebox.json        HIS program settings: which
                                              playlist is the set, where the
@@ -17,6 +17,13 @@ Two stores, each with one job (services/jukebox/store.py):
                                              queue, a bounded log — plus a
                                              short history of earlier nights.
                                              Churns on every song.
+  ShowConfig     storage/jukebox_show.json   the show settings (phase 3.3):
+                                             the last party-size preset, the
+                                             new-phone approval switch, and
+                                             every economy setting. Only an
+                                             edit writes it
+                                             (services/jukebox/show.py is
+                                             the one validator).
 
 The code says `program`, never `setlist`: SpotFX already has a feature
 called Set Lists (services/setlist_store.py, setlist_runtime.py: per-playlist

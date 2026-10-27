@@ -2312,7 +2312,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Jukebox — the set list with jukebox slots',
     keywords: 'jukebox set list party playlist slots queue guests spotify program',
     intro:
-      'The Jukebox (Engine ▾ Jukebox, /jukebox) plays your set playlist as Spotify\'s own context, in order, and puts jukebox slots between set songs. Spotify never sees a slot: about 45 seconds before the song in front of a slot ends, the top waiting jukebox song is sent into Spotify\'s queue and the queue is read back to confirm it is next; after it, the set carries on where it was. Only that one sent song is locked in place — everything still waiting can be moved or removed. This page is the master view: the Set list tab edits the program, the Live tab shows a running night (read-only). The guest page comes in a later phase.',
+      'The Jukebox (Engine ▾ Jukebox, /jukebox) plays your set playlist as Spotify\'s own context, in order, and puts jukebox slots between set songs. Spotify never sees a slot: about 45 seconds before the song in front of a slot ends, the top waiting jukebox song is sent into Spotify\'s queue and the queue is read back to confirm it is next; after it, the set carries on where it was. Only that one sent song is locked in place — everything still waiting can be moved or removed. This page is the master view: the Set list tab edits the program, the Live tab shows a running night (read-only), and the Credits tab holds the party-size presets, the price check and every credits setting. The guest page comes in a later phase.',
     entries: [
       {
         id: 'jukebox-set-list',

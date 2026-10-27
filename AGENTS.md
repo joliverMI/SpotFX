@@ -10981,7 +10981,8 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   end. A sign-in older than the record reads `unknown`, never a guess.
 - **THE MASTER PAGE (PR 1.3)** is SPECTRA's `/jukebox` (Engine ▾ Jukebox,
   `spectra/web/src/jukebox/`): a Set list editor and a READ-ONLY Live tab,
-  plus the sign-in line. It never re-derives where slots go — it draws the
+  plus the sign-in line — a third tab, Credits, was added by PR 3.3
+  (below). It never re-derives where slots go — it draws the
   server's `lap_items` (`GET /api/jukebox/preview`, the set cached 60 s) and
   copies `manual_equivalent` on Auto → Manual; the click rules are
   `jukeboxEditor.ts`, pure. Dragging a set song REORDERS HIS PLAYLIST IN
@@ -11017,10 +11018,12 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   change. Sonic's `jukebox` domain is still owed (plan PR 3.4).
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
-  `storage/jukebox.json` (his settings, one validator:
-  `routers/jukebox_router.apply_config_patch`) and
-  `storage/jukebox_night.json`, isolated per test by conftest's
-  `_isolated_jukebox`. Tests: `tests/jukebox_world.py` models Spotify's
+  `storage/jukebox.json` (his program settings, one validator:
+  `routers/jukebox_router.apply_config_patch`), `storage/jukebox_night.json`,
+  and `storage/jukebox_show.json` (the show settings — presets, approval,
+  the economy; one validator: `services/jukebox/show.apply_patch`), all
+  isolated per test by conftest's `_isolated_jukebox`. Tests:
+  `tests/jukebox_world.py` models Spotify's
   queue rule and a crossfade lock — reuse it; a script run OUTSIDE pytest
   writes the real `storage/` unless it repoints `store.*_FILE` first.
 
