@@ -444,6 +444,18 @@ def _isolated_absorb_stores(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_spotify_auth_age(tmp_path, monkeypatch):
+    """SpotFX's Spotify sign-in record (services/spotify_auth_age.py) and
+    the token cache it reads: the OAuth callback writes one and every poll
+    may, so a test must never read or write his real storage/ — and the
+    in-process "a refusal was noted" flag starts clear."""
+    from services import spotify_auth_age
+    monkeypatch.setattr(spotify_auth_age, "RECORD_FILE", tmp_path / "spotify_auth.json")
+    monkeypatch.setattr(spotify_auth_age, "TOKEN_CACHE", tmp_path / ".spotify_token_cache")
+    monkeypatch.setattr(spotify_auth_age, "_failure_noted", False)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_jukebox(tmp_path, monkeypatch):
     """The Jukebox's two stores (services/jukebox/store.py) and its one
     process-wide runner (services/jukebox/night.py). Absorb's gate asks the

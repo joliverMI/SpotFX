@@ -18,6 +18,7 @@ from spotipy.oauth2 import SpotifyOAuth
 from config import settings, PROFILES_DIR
 from models.state import state, SpotifyTrackInfo, PrevTrackSnapshot
 from api.lastfm import fetch_lastfm_genres
+from services import spotify_auth_age
 
 logger = logging.getLogger(__name__)
 
@@ -137,9 +138,13 @@ def fetch_current_track() -> Optional[SpotifyTrackInfo]:
     except Exception as exc:
         logger.error("Spotify poll failed: %s", exc)
         state.poll_ok = False
+        # A refused refresh (invalid_grant) proves the sign-in is gone; any
+        # other failure is ignored there (services/spotify_auth_age.py).
+        spotify_auth_age.note_refresh_failure(exc)
         return None
 
     state.poll_ok = True
+    spotify_auth_age.note_refresh_ok()
     _cur = state.current_track
     _guest_owned = _cur is not None and _cur.spotify_uri.startswith("guest:")
 

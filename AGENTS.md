@@ -10972,6 +10972,13 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   confirmed "on" mid-night ends it (pausing only music the engine started),
   "unreadable" twice in a row does. Absorb and a night exclude each other
   in BOTH directions (`absorb_busy` here, Absorb's `jukebox_night` gate).
+- **THE SPOTIFY SIGN-IN HAS AN AGE (PR 1.2)**: Spotify's refresh tokens die six
+  months after sign-in and, when one lapses, polling, Absorb and the Jukebox
+  all stop at once. `services/spotify_auth_age.py` (its docstring is the
+  binding statement) records the moment at the ONE writer, the OAuth
+  callback, and reads it back as `GET /api/spotify/auth-age` and on the
+  jukebox status's `spotify_auth`/`warnings` — a line from 14 days before the
+  end. A sign-in older than the record reads `unknown`, never a guess.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his settings, one validator:
