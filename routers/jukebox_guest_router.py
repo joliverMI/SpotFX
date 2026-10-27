@@ -16,6 +16,7 @@ phone's whole view, or a refusal with its sentence.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -30,10 +31,25 @@ router = APIRouter(prefix="/api/jukebox/guest", tags=["jukebox-guest"])
 
 KEY_FILE = BASE_DIR / "storage" / "jukebox_guest_key"
 
+_key_cache: dict[Path, str] = {}
+
+
+def _cached_key(path: Path) -> str:
+    key = _key_cache.get(path)
+    if key is None:
+        key = guest_key.load_or_create(path)
+        _key_cache[path] = key
+    return key
+
 
 def _check(request: Request) -> None:
-    if not guest_key.matches(request.headers.get(guest_key.HEADER),
-                             guest_key.load_or_create(KEY_FILE)):
+    given = request.headers.get(guest_key.HEADER)
+    key = _cached_key(KEY_FILE)
+    if guest_key.matches(given, key):
+        return
+    key = guest_key.load_or_create(KEY_FILE)
+    _key_cache[KEY_FILE] = key
+    if not guest_key.matches(given, key):
         raise HTTPException(status_code=401, detail="guest routes answer the guest app only")
 
 

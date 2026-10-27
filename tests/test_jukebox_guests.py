@@ -341,6 +341,48 @@ def test_the_guest_routes_need_the_guest_apps_key(monkeypatch):
         assert c.get("/api/jukebox/status").json()["guests"] == {"phones": 0, "joined": 0}
 
 
+def test_the_guest_key_is_cached_and_a_recreated_file_is_picked_up(monkeypatch):
+    w = World()
+    w.runner = night_mod.JukeboxRunner(w.deps)
+    monkeypatch.setattr(night_mod, "runner", w.runner)
+    app = FastAPI()
+    app.include_router(jukebox_guest_router.router)
+    app.include_router(jukebox_router.router)
+    old_key = guest_key.load_or_create(jukebox_guest_router.KEY_FILE)
+
+    reads = []
+    real_load = guest_key.load_or_create
+
+    def _counting_load(path):
+        reads.append(path)
+        return real_load(path)
+    monkeypatch.setattr(guest_key, "load_or_create", _counting_load)
+
+    with TestClient(app) as c:
+        r1 = c.post("/api/jukebox/guest/hello", json={"token": "x"},
+                     headers={guest_key.HEADER: old_key})
+        assert r1.status_code == 200
+        assert len(reads) == 1
+
+        r2 = c.get("/api/jukebox/guest/view", headers={guest_key.HEADER: old_key})
+        assert r2.status_code == 200
+        assert len(reads) == 1
+
+        jukebox_guest_router.KEY_FILE.unlink()
+        new_key = real_load(jukebox_guest_router.KEY_FILE)
+        assert new_key != old_key
+
+        fresh = c.post("/api/jukebox/guest/hello", json={"token": "x"},
+                        headers={guest_key.HEADER: new_key})
+        assert fresh.status_code == 200
+        assert len(reads) == 2
+
+        stale = c.post("/api/jukebox/guest/hello", json={"token": "x"},
+                        headers={guest_key.HEADER: old_key})
+        assert stale.status_code == 401
+        assert len(reads) == 3
+
+
 def test_the_key_file_is_made_once_and_private(tmp_path):
     path = tmp_path / "k"
     a = guest_key.load_or_create(path)

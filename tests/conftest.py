@@ -474,6 +474,7 @@ def _isolated_jukebox(tmp_path, monkeypatch):
     from routers import jukebox_guest_router
     monkeypatch.setattr(guests, "book", guests.Guests())
     monkeypatch.setattr(jukebox_guest_router, "KEY_FILE", tmp_path / "jukebox_guest_key")
+    monkeypatch.setattr(jukebox_guest_router, "_key_cache", {})
     # The guest link publishes a port on the internet through Tailscale
     # Funnel. No test may ever run `tailscale`: the real command runner is
     # replaced by one that fails loudly; a test that needs one injects a fake.
