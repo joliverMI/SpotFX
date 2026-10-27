@@ -38,14 +38,15 @@ import { useToast } from '../components/Toast';
 import SortableList from '../lightshow/SortableList';
 import CreditsTab from './CreditsTab';
 import SimulateTab from './SimulateTab';
+import { compareCells, creditFacts, endLine, nightFacts } from './jukeboxReport';
 import {
   barSegments, canMove, clickSetSong, clickSlot, countLine, entryLine, GUEST_COUNTS, itemView,
   mmss, MODE_LABEL, nightLine, nightWarnings, nowLine, removeSlot, ruleLine, RUN_OUT_LABEL,
   signInView, slotsAfter, slotsByIndex, startsIn,
 } from './jukeboxEditor';
 import {
-  useJukeboxConfig, useJukeboxPreview, useJukeboxStatus, useMoveSetSong, useReloadSet,
-  useSaveJukeboxConfig,
+  useJukeboxConfig, useJukeboxPreview, useJukeboxReport, useJukeboxStatus, useMoveSetSong,
+  useReloadSet, useSaveJukeboxConfig,
 } from './queries';
 import type { JukeboxPreview, JukeboxStatus, ProgramConfig, RunOut, SetItem, SlotMode } from './types';
 
@@ -391,6 +392,8 @@ function LiveTab({ status }: { status: JukeboxStatus | undefined }) {
         </section>
       )}
 
+      {status?.night && <ReportCard nightId={status.night.id} />}
+
       {(status?.log?.length ?? 0) > 0 && (
         <details className="card jukebox-card jukebox-log">
           <summary>The night's log</summary>
@@ -398,5 +401,78 @@ function LiveTab({ status }: { status: JukeboxStatus | undefined }) {
         </details>
       )}
     </div>
+  );
+}
+
+// ── the post-party report (read-only; services/jukebox/night_report.py) ─────
+
+const COMPARE_SIZES = [4, 8, 15, 20, 30] as const;
+
+function ReportCard({ nightId }: { nightId: string }) {
+  const [size, setSize] = useState<number | null>(null);
+  const q = useJukeboxReport(true, size, nightId);
+  const r = q.data;
+  const n = r?.night;
+  const cmp = r?.comparison;
+  return (
+    <section className="card jukebox-card jukebox-list-card" data-testid="jukebox-report">
+      <div className="jukebox-card-head">
+        <InfoTip topic="jukebox-report"
+          text="The night measured: what played, the line, and — once guests use credits — the credits, each beside the model's nights at the same party size, so the next party starts from real numbers.">
+          <span className="card-title jukebox-card-title">The night's report</span>
+        </InfoTip>
+        <label className="jukebox-guests">
+          <span>compare with a party of</span>
+          <select aria-label="Compare with a party of" value={size ?? ''}
+            onChange={(e) => setSize(e.target.value ? Number(e.target.value) : null)}>
+            <option value="">{r?.guests_from === 'the ledger' ? `${r.guests} (the ledger)` : '—'}</option>
+            {COMPARE_SIZES.map((g) => <option key={g} value={g}>{g}</option>)}
+          </select>
+        </label>
+      </div>
+      {!r ? <p className="jukebox-muted">{q.isError ? 'The report couldn\'t be read from SpotFX.' : 'Working the report…'}</p> : (
+        <>
+          <p className="jukebox-night" data-testid="jukebox-report-summary">{r.summary}</p>
+          {n && <p className="jukebox-muted">{endLine(n)}</p>}
+          {n && (
+            <div className="jukebox-prices">
+              <div className="jukebox-price-group">
+                {nightFacts(n).map((f) => (
+                  <div key={f.label} className="jukebox-price-row"><span>{f.label}</span><span className="jukebox-price-value">{f.value}</span></div>
+                ))}
+              </div>
+              {r.credits && (
+                <div className="jukebox-price-group">
+                  {creditFacts(r.credits).map((f) => (
+                    <div key={f.label} className="jukebox-price-row"><span>{f.label}</span><span className="jukebox-price-value">{f.value}</span></div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {(r.integrity ?? []).map((p) => <p key={p} className="jukebox-bad">The ledger: {p}</p>)}
+          {cmp ? (
+            <div className="jukebox-sim-table" role="table" aria-label="This night beside the model" data-testid="jukebox-report-compare">
+              <div className="jukebox-sim-tr head" role="row">
+                <span role="columnheader">{cmp.guests} guests, {cmp.program}</span>
+                <span role="columnheader">This night</span>
+                <span role="columnheader">Model</span>
+              </div>
+              {cmp.rows.map((row) => {
+                const c = compareCells(row);
+                return (
+                  <div key={row.key} className="jukebox-sim-tr" role="row" title={c.why ?? undefined}>
+                    <span role="cell">{c.label}</span>
+                    <span role="cell" className="jukebox-price-value">{c.night}</span>
+                    <span role="cell" className="jukebox-price-value">{c.model}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : n && <p className="jukebox-muted">Pick a party size to see this night beside the model's nights.</p>}
+          {q.isFetching && <p className="jukebox-muted">Working the model's nights…</p>}
+        </>
+      )}
+    </section>
   );
 }

@@ -4090,6 +4090,7 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .jukebox-sim-table { display: flex; flex-direction: column; font-size: 13px; }
 .jukebox-sim-tr { display: grid; grid-template-columns: minmax(0, 1fr) 72px 72px; gap: 10px; padding: 3px 0; border-bottom: 1px solid var(--border); }
 .jukebox-sim-table.one .jukebox-sim-tr { grid-template-columns: minmax(0, 1fr) 72px; }
+[data-testid='jukebox-report'] .jukebox-sim-table { margin-top: 14px; }
 .jukebox-sim-tr > span:first-child { overflow-wrap: anywhere; }
 .jukebox-sim-tr.head { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
 .jukebox-sim-tr.head > span:not(:first-child) { text-align: right; }

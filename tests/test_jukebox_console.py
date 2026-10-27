@@ -242,3 +242,17 @@ def test_an_unreachable_spotfx_is_said_so(monkeypatch):
     monkeypatch.setattr(jc, "http", down)
     r = _run(jc._op_start_jukebox_night())
     assert r["status"] == "rejected" and "did not answer" in r["reason"]
+
+
+def test_the_night_report_is_a_read(spotfx):
+    r = _run(jc._op_jukebox_night_report())
+    assert r["status"] == "ok" and r["summary"] == "No night has been played yet."
+    spotfx.put("/api/jukebox/config", json={"playlist": PLAYLIST_URI})
+    spotfx.post("/api/jukebox/night/start", json={})
+    spotfx.post("/api/jukebox/night/stop", json={})
+    r = _run(jc._op_jukebox_night_report())
+    assert r["status"] == "ok" and r["credits"] is None and r["guests"] is None
+    assert r["rows"] and all(x["this_night"] is None and x["why"] for x in r["rows"])
+    r = _run(jc._op_jukebox_night_report(guests=8))
+    assert r["guests"] == 8 and all(x["yours"] is not None or x["key"] == "songs_per_lurk" for x in r["rows"])
+    assert not _writes(spotfx)
