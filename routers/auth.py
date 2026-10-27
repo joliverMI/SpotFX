@@ -15,7 +15,6 @@ from fastapi.responses import RedirectResponse, HTMLResponse
 
 import api.spotify_client as spotify_module
 from api.spotify_client import get_spotify
-from config import settings
 from services import spotify_auth_age
 
 router = APIRouter(prefix="/api/spotify", tags=["auth"])
