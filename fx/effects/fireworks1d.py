@@ -3,8 +3,9 @@ import logging
 import numpy as np
 import voluptuous as vol
 
+import fx.effects.pre_drop as pre_drop
 from fx.color import validate_gradient
-from fx.effects import strip_phase
+from fx.effects import phase_grammar, strip_phase
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
 from fx.effects.strip_phase import StripPhase
@@ -78,6 +79,33 @@ PAYOFF_LIFE = 1.5
 # ~PAYOFF_LIFE x burst_life the way it did before that flag existed.
 DROP_TAIL_RATE = 12.0          # strip phase plan phase 3 (was 8, the 2D's)
 DROP_TAIL_S = 2.5
+
+# THE PRE-DROP (fx/effects/pre_drop.py is the binding statement; predrop
+# plan step 9, report 3.5: "like the crystal: dark, then on the pre-drop two
+# rockets fire from the ends in the new colours and burst on the drop" — the
+# crystal Fireworks' own look, fx/effects/fireworks.py). A lull TOLD its drop
+# has a pre-drop launches no rockets at its start: the strip goes dark (the
+# ordinary show already pauses in a lull, so only what was flying fades out
+# under the layer's fade), truly black for the breath-hold right before the
+# pre-drop (SpotFX ends the breath exactly on it; whatever is still fading
+# is gone, and a flare landing in the breath is swallowed), then the SAME
+# two rockets fire ON the pre-drop from the strip's ends and fly the
+# pre-drop-to-drop gap, bursting on the drop (_rocket_payoff, unchanged).
+# The layer lifts the lull's 12% ember for them (_strip_phase_pre_drop_lift)
+# so they fly bright, as the crystal's do; they dim over the flight by the
+# crystal's own rule (0.3125 a second, never more than 0.75 — so a long
+# flight dims and the lull's light stays low). One look serves both kinds.
+# The shared layer's twinkle is not this strip's look. An untold lull is
+# today's, byte for byte.
+PRE_DROP_LOOK = "rockets"
+PRE_DROP_ROCKET_FADE_PER_S = 0.3125
+PRE_DROP_ROCKET_FADE_MAX = 0.75
+
+
+def pre_drop_rocket_fade(gap_s: float) -> float:
+    """What a pre-drop rocket loses over a flight of `gap_s` seconds."""
+    return min(PRE_DROP_ROCKET_FADE_MAX,
+               PRE_DROP_ROCKET_FADE_PER_S * max(0.0, gap_s))
 
 
 class Fireworks1d(StripPhase, AudioReactiveEffect, GradientEffect):
@@ -396,8 +424,16 @@ class Fireworks1d(StripPhase, AudioReactiveEffect, GradientEffect):
         if m <= 0:
             return
         idx = idx[:m]
-        p = float(np.clip(self.phase_progress, 0.0, 1.0))
-        f = p if p > 0.0 else min(self._sp_t / LULL_FLIGHT_S, 1.0)
+        clk = self._strip_phase_pre_drop()
+        if clk is not None and clk.segment == "pre_drop":
+            # THE PRE-DROP's rockets fly the pre-drop-to-drop gap on the
+            # layer's own clock, dimming by the crystal's rule
+            f = clk.frac
+            fade = pre_drop_rocket_fade(pre_drop.gap_s(self._config))
+            self.f_bright[idx] = 1.0 - fade * f
+        else:
+            p = float(np.clip(self.phase_progress, 0.0, 1.0))
+            f = p if p > 0.0 else min(self._sp_t / LULL_FLIGHT_S, 1.0)
         ease = 1.0 - (1.0 - f) ** 2
         self.f_pos[idx] = path["s"][:m] + (path["e"][:m] - path["s"][:m]) * ease
 
@@ -448,7 +484,10 @@ class Fireworks1d(StripPhase, AudioReactiveEffect, GradientEffect):
         watchdog releasing an orphaned one) burns them out."""
         self._charge_acc = 0.0
         if phase == "lull":
-            self._launch_rockets()
+            # a lull told a pre-drop stays dark: its rockets fire on the
+            # pre-drop instead (_pre_drop_step)
+            if not pre_drop.told(self._config):
+                self._launch_rockets()
         elif phase == "drop":
             self._rocket_payoff()
             self._tail_t = 0.0
@@ -458,6 +497,37 @@ class Fireworks1d(StripPhase, AudioReactiveEffect, GradientEffect):
             if idx.size:
                 self.f_life[idx] = self.f_age[idx] + 0.4
             self._rocket_path = None
+
+    def _strip_phase_pre_drop_lift(self):
+        """THE PRE-DROP (module constants): the rockets fly the gap at full,
+        so the layer lifts the lull's ember for it."""
+        clk = self._strip_phase_pre_drop()
+        return clk is not None and clk.segment == "pre_drop"
+
+    def _pre_drop_step(self):
+        """THE PRE-DROP's look (module constants): runs only on a lull TOLD
+        a pre-drop — every other frame returns 1.0 before touching anything,
+        so a lull without one is today's, byte for byte. Returns the gain on
+        the strip this frame: the breath-hold's ease into its black, 0.0
+        through the breath, 1.0 otherwise."""
+        clk = self._strip_phase_pre_drop()
+        if clk is None:
+            return 1.0
+        if clk.segment == "breath":
+            if clk.edge:
+                # true black: whatever is still fading from before the lull
+                # is gone before the rockets fire
+                self.n = 0
+                if self.trail is not None:
+                    self.trail[...] = 0.0
+                self._rocket_path = None
+            self._burst_pending = 0     # a flare in the breath is swallowed
+            return 0.0
+        if clk.segment == "pre_drop":
+            if clk.edge:
+                self._launch_rockets()
+            return 1.0
+        return phase_grammar.breath_gain(self._config, self._sp_t)
 
     def _phase_step(self, dt):
         """This frame's choreography: the charge's launch multipliers and
@@ -523,6 +593,7 @@ class Fireworks1d(StripPhase, AudioReactiveEffect, GradientEffect):
             self.spawn_acc = 0.0
 
         charge_rate = self._phase_step(dt)
+        pd_gain = self._pre_drop_step()
 
         n = self.n
         # ── update ──────────────────────────────────────────────────────
@@ -639,4 +710,8 @@ class Fireworks1d(StripPhase, AudioReactiveEffect, GradientEffect):
                 self.trail, np.minimum(self._frame, 255.0), out=self.trail
             )
 
-        self.pixels = self.trail.copy()
+        if pd_gain != 1.0:
+            # THE PRE-DROP's breath: the ease into its black, then black
+            self.pixels = self.trail * np.float32(pd_gain)
+        else:
+            self.pixels = self.trail.copy()

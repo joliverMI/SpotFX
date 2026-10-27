@@ -58,6 +58,30 @@ activity — so Star's own lull owns the crystal's dark. Charge and drop are
 unchanged. strip_phase's THE STRIP STAR READS; `tests/
 test_star_strip_lull.py`.
 
+## THE PRE-DROP — the strip twinkles (2026-10-27)
+
+Predrop plan step 9 (`fx/VENDOR.md` #90; the drop-detection skill for the
+engine). Every strip phase member is a `fx.device_model.PRE_DROP_EFFECTS`
+member, and this one plays the shared layer's look, `twinkle` (its
+`pre_drop_looks` block in `config/effect_params.json`, for both kinds) —
+drawn once in `fx/effects/strip_phase.py`'s THE PRE-DROP, nothing in this
+module. Told a pre-drop, the lull is measured to it (its dark point falls
+before the pre-drop) and runs exactly as this strip's own lull does; from
+the pre-drop to the drop a few pixels light in the set's colours at the
+effect's OWN brightness (his "make the twinkles max brightness match the
+effect brightness (don't dim, just use twinkle to "dim")") and fade over
+about a tenth of a second, born a little faster toward the drop. They are
+painted after the lull's fade, brighter-wins (never two hues mixed whiter).
+Untold is today's frame for frame against this strip AND the layer before
+step 9. Its light over the lull stays below today's at every measured gap.
+Proofs: `tests/test_pre_drop_looks.py` (the step-9 section; rig
+`tests/pre_drop_look_harness.py`'s `strip_run`/`load_pinned_strip`),
+storyboards `strip_melt_*` in `docs/evidence/predrop-storyboards/`.
+
+The strip Star reads skips its lull, so it never twinkles: Star draws
+its own pre-drop outline. Melt's own blur, applied after the layer as to
+everything it draws, softens a one-pixel twinkle's peak.
+
 ## Sonic reach
 
 The layer's tunables (Charge colour fill/brightness/activity, Lull

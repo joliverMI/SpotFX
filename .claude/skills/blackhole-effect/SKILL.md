@@ -233,6 +233,29 @@ for the look. Three invariants not visible cold:
   `_pre_drop_step` clears the clock first, so the lull is today's frame for
   frame (proven against the module at the step-7 base).
 
+## THE PRE-DROP — the strip twinkles (2026-10-27)
+
+Predrop plan step 9 (`fx/VENDOR.md` #90; the drop-detection skill for the
+engine). Every strip phase member is a `fx.device_model.PRE_DROP_EFFECTS`
+member, and this one plays the shared layer's look, `twinkle` (its
+`pre_drop_looks` block in `config/effect_params.json`, for both kinds) —
+drawn once in `fx/effects/strip_phase.py`'s THE PRE-DROP, nothing in this
+module. Told a pre-drop, the lull is measured to it (its dark point falls
+before the pre-drop) and runs exactly as this strip's own lull does; from
+the pre-drop to the drop a few pixels light in the set's colours at the
+effect's OWN brightness (his "make the twinkles max brightness match the
+effect brightness (don't dim, just use twinkle to "dim")") and fade over
+about a tenth of a second, born a little faster toward the drop. They are
+painted after the lull's fade, brighter-wins (never two hues mixed whiter).
+Untold is today's frame for frame against this strip AND the layer before
+step 9. Its light over the lull stays below today's at every measured gap.
+Proofs: `tests/test_pre_drop_looks.py` (the step-9 section; rig
+`tests/pre_drop_look_harness.py`'s `strip_run`/`load_pinned_strip`),
+storyboards `strip_blackhole1d_*` in `docs/evidence/predrop-storyboards/`.
+
+This is the Black Hole STRIP (`blackhole1d`); the crystal Black Hole's
+look is the infall ring above.
+
 ## Thematic transitions in and out (2026-10-11, transitions-drop plan phase 3)
 
 A scene change between the Black Hole and Orbits / Fish / Squiggles (and

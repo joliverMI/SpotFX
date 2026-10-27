@@ -1,18 +1,20 @@
 """ONLY THE MEMBERS' LULL ARMS CHANGE — every other arm write is
 byte-identical to before the pre-drop engine existed, over his real scene
-list (predrop plan steps 5-8).
+list (predrop plan steps 5-9).
 
 Every phase arm write `scene_response._drive_phase` makes — charge, lull
 and drop, every one of his 14 scenes, every gap and intensity in
 tests/pre_drop_arm_harness.py — is compared with what the code wrote before
 the engine existed (tests/fixtures/pre_drop/arm_writes_golden.json,
-captured on origin/master 0dd0828e). Since steps 6-8 `fx.device_model.
+captured on origin/master 0dd0828e). Since steps 6-9 `fx.device_model.
 PRE_DROP_EFFECTS` holds Fireworks, Pulse, Orbits, Black Hole, Fish, Star
-(radial) and Sauron, so:
+(radial), Sauron and every strip phase member (Melt, Power and the Black
+Hole, Orbits and Fireworks strips), so:
 
 - with no pre-drop, a member's lull arm is today's plus the four told keys
   at NOT_TOLD (and a zero breath for a member that is no breath-hold effect:
-  Fireworks, the Fish) — fx/effects/pre_drop.py's rule 2, so a pre-drop
+  Fireworks, the Fish, the strips) — fx/effects/pre_drop.py's rule 2, so a
+  pre-drop
   told for one lull never survives into the next — and every other write
   is today's, byte for byte;
 - with a pre-drop that plays, every non-member write is still today's, and
@@ -42,9 +44,19 @@ AUTO_LOOK = {("fireworks", "spike"): "rockets", ("fireworks", "intro"): "rockets
              ("blackhole", "spike"): "ring", ("blackhole", "intro"): "ring",
              ("fish", "spike"): "dart", ("fish", "intro"): "dart",
              ("radial", "spike"): "outline", ("radial", "intro"): "outline",
-             ("sauron", "spike"): "glare", ("sauron", "intro"): "glare"}
+             ("sauron", "spike"): "glare", ("sauron", "intro"): "glare",
+             **{(strip, kind): "twinkle"
+                for strip in ("melt", "power", "blackhole1d", "orbits1d")
+                for kind in ("spike", "intro")},
+             ("fireworks1d", "spike"): "rockets",
+             ("fireworks1d", "intro"): "rockets"}
 MEMBERS = {"fireworks", "pulse", "orbits", "blackhole", "fish", "radial",
-           "sauron"}
+           "sauron", "melt", "power", "blackhole1d", "orbits1d",
+           "fireworks1d"}
+# Power is a member (every strip phase member is) that no scene of his
+# carries any more — the Pulse migration took it off the Singles — so it is
+# never told on his scene list; its look is proven in test_pre_drop_looks
+ON_HIS_SCENES = MEMBERS - {"power"}
 
 
 def _dump(writes) -> str:
@@ -128,13 +140,17 @@ def test_with_a_pre_drop_that_plays_only_the_members_lull_arms_change(case):
 
 
 def test_every_member_was_told_on_his_scenes():
-    """Run last (file order): his scenes carry Pulse on the Singles and
-    every other member on a scene's crystal (Fireworks, Orbits and Black Hole
-    on their V2 scenes, the Fish on Fish and House Fish, Star on STAR and
-    House Star, Sauron on Sauron), so every member was told."""
+    """Run last (file order): his scenes carry Pulse on the Singles, every
+    crystal member on a scene's crystal (Fireworks, Orbits and Black Hole on
+    their V2 scenes, the Fish on Fish and House Fish, Star on STAR and House
+    Star, Sauron on Sauron) and every strip but Power on a scene's Strips
+    (Melt on STAR and the house scenes, the Black Hole strip on Black Hole
+    V2, Eye V2 and Sauron, the Orbits strip on Orbits V2 and its kin, the
+    Fireworks strip on Fireworks V2 and Fish), so every member on them was
+    told."""
     if not SEEN_TOLD:
         pytest.skip("run with the parametrised test above")
-    assert SEEN_TOLD == MEMBERS
+    assert SEEN_TOLD == ON_HIS_SCENES
 
 
 def test_the_engine_decides_on_his_scenes():

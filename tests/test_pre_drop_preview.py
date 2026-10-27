@@ -8,8 +8,8 @@ the lull would reach on this scene (spectra/services/pre_drop_play.py, the
 show's own rule). The live program's LULL step hands the response engine
 the same candidate the trigger clock would, so a member effect (Fireworks
 and Pulse since step 6, Orbits and Black Hole since step 7, the Fish, Star
-and Sauron since step 8) plays its look in the preview exactly as in the
-show.
+and Sauron since step 8, the strips since step 9) plays its look in the
+preview exactly as in the show.
 """
 from __future__ import annotations
 

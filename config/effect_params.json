@@ -438,6 +438,12 @@
       }
     },
     "power": {
+      "pre_drop_looks": {
+        "looks": {
+          "twinkle": {"label": "Sparse twinkle on the pre-drop", "kinds": ["spike", "intro"]}
+        },
+        "auto": {"spike": "twinkle", "intro": "twinkle"}
+      },
       "params": {
         "background_brightness": {
           "label": "Background Brightness",
@@ -682,6 +688,12 @@
       }
     },
     "melt": {
+      "pre_drop_looks": {
+        "looks": {
+          "twinkle": {"label": "Sparse twinkle on the pre-drop", "kinds": ["spike", "intro"]}
+        },
+        "auto": {"spike": "twinkle", "intro": "twinkle"}
+      },
       "params": {
         "background_color": {
           "label": "BG Color",
@@ -3345,6 +3357,12 @@
       }
     },
     "blackhole1d": {
+      "pre_drop_looks": {
+        "looks": {
+          "twinkle": {"label": "Sparse twinkle on the pre-drop", "kinds": ["spike", "intro"]}
+        },
+        "auto": {"spike": "twinkle", "intro": "twinkle"}
+      },
       "params": {
         "swirl": {
           "label": "Swirl",
@@ -3732,6 +3750,12 @@
       }
     },
     "orbits1d": {
+      "pre_drop_looks": {
+        "looks": {
+          "twinkle": {"label": "Sparse twinkle on the pre-drop", "kinds": ["spike", "intro"]}
+        },
+        "auto": {"spike": "twinkle", "intro": "twinkle"}
+      },
       "params": {
         "particle_count": {
           "label": "Particles",
@@ -4423,6 +4447,12 @@
       }
     },
     "fireworks1d": {
+      "pre_drop_looks": {
+        "looks": {
+          "rockets": {"label": "Two rockets fire on the pre-drop", "kinds": ["spike", "intro"]}
+        },
+        "auto": {"spike": "rockets", "intro": "rockets"}
+      },
       "params": {
         "blob_size": {
           "label": "Blob Size",

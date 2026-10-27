@@ -32,8 +32,9 @@ def scene(tmp_path, monkeypatch):
     from spectra.services import scene_store
     s = SceneV2(name="Black Hole V2", devices=[
         {"target_kind": "category", "target": "Matrix", "effect_type": "blackhole"},
-        # power declares no looks (Pulse has its own since step 6)
-        {"target_kind": "category", "target": "Singles", "effect_type": "power"},
+        # gradient declares no looks (Pulse has its own since step 6, and
+        # power the strips' twinkle since step 9)
+        {"target_kind": "category", "target": "Singles", "effect_type": "gradient"},
         {"target_kind": "category", "target": "Strips", "effect_type": "pulse"}])
     scene_store.save(s)
     return s

@@ -425,11 +425,13 @@ Predrop plan step 5. `fx/effects/pre_drop.py` (the told keys, the looks,
 the binding statements. Seven things, the first one the most important:
 
 - **ONLY THE MEMBERS LIGHT A PRE-DROP.** `fx.device_model.PRE_DROP_EFFECTS`
-  is Fireworks and Pulse (step 6), Orbits and Black Hole (step 7) and the
-  Fish, Star (radial) and Sauron (step 8; their looks: the fireworks-effect,
-  pulse-effect, orbits-effect, blackhole-effect, fish-effect, radial-effect
-  and sauron-effect skills). The strips' twinkle is the next step; Squiggles
-  gets none (his word). Every other arm write equals the pre-engine golden
+  is Fireworks and Pulse (step 6), Orbits and Black Hole (step 7), the
+  Fish, Star (radial) and Sauron (step 8) and every strip phase member
+  (step 9: the shared layer's twinkle on Melt, Power and the Black Hole and
+  Orbits strips, the Fireworks strip's rockets; their looks: the
+  fireworks-effect, pulse-effect, orbits-effect, blackhole-effect,
+  fish-effect, radial-effect, sauron-effect, melt-effect and power-effect
+  skills). Squiggles gets none (his word). Every other arm write equals the pre-engine golden
   over his 14 scenes, and a member's lull arm differs only by the told
   keys (`tests/test_pre_drop_arm_identity.py`). For every other effect the
   only visible change is the drop colour fade across a pre-drop that

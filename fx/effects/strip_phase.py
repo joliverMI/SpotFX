@@ -51,7 +51,7 @@ effect's own gradient — so colour jumps and rotates carry straight through.
 A set that itself contains white shows its white; that is the set.
 
 THE ORDER (StripPhase._strip_phase_stage): gain -> fill under -> wave over
--> x fade -> punch fill -> white guard.
+-> x fade -> twinkle (THE PRE-DROP, below) -> punch fill -> white guard.
 
 THE CURVES (every number is a registered, Sonic-reachable param; defaults
 are the plan's first guesses, pending his live tuning pass):
@@ -99,6 +99,33 @@ lull's approach — never a jump at the edge, never a fade. The key itself
 stays "lull" (`_sp_seen`), so nothing re-edges until SpotFX's next write.
 Charge and drop run exactly as on any strip. Every other strip — any strip
 no Radial reads — is unchanged.
+
+THE PRE-DROP (fx/effects/pre_drop.py is the binding statement; predrop plan
+step 9, report 3.5; his approval: "for the strips, do the twinkle, but make
+the twinkles max brightness match the effect brightness (don't dim, just use
+twinkle to "dim")"). Every member is in fx.device_model.PRE_DROP_EFFECTS, so
+a lull whose pre-drop plays is measured to it — the dark point (above) falls
+before the pre-drop — and the strip's own lull runs exactly as it does today
+up to the pre-drop. From the pre-drop to the drop the layer draws the
+TWINKLE (look PRE_DROP_LOOK, every member's but the Fireworks strip's): a
+few pixels light in the set's colours, each at the effect's OWN brightness
+(palette x brightness, never a dimmed copy), and fade over
+PRE_DROP_TWINKLE_TAU_S; they are born at PRE_DROP_TWINKLE_RATE per pixel per
+second, thickening toward the drop. Only the sparseness keeps the light low.
+The twinkle is drawn AFTER the lull's fade (THE ORDER: ... -> x fade ->
+twinkle -> punch fill -> white guard), painted over like the drop's wave
+(each pixel shows whichever of twinkle and strip is brighter, never the two
+hues mixed), so it shows over a strip the lull has taken dark; it reads the
+effect's own gradient each
+frame, so the drop's colour change fading across the pre-drop shows in it.
+`strip_phase_strength` scales the birth rate (0 = none, the rollback lever),
+never the twinkles' brightness. An effect with a pre-drop look of its own
+(the Fireworks strip's rockets) reads the layer's clock
+(`_strip_phase_pre_drop()`) and may ask the layer to lift the lull's fade
+for the gap (`_strip_phase_pre_drop_lift()`) so its look flies at full. A
+lull the strip Star reads skips is "none" here, so it gets neither (Star
+draws its own pre-drop). An untold lull — NOT_TOLD's zeros — is today's,
+byte for byte: no clock, no twinkle, no lift.
 
 A FLARE IN THE LULL'S DARK PUNCHES THROUGH (his answer 5): while a lull is
 running, a `flare_punch` poke opens lull_dark.punch_envelope; the fade
@@ -152,6 +179,12 @@ HOW AN EFFECT JOINS (existing or future — one line, plus one set):
        `lull_ember`): splice `tunable_fields(key=default)` into its own
        CONFIG_SCHEMA (the most derived schema wins) and register
        `registry_params({key: default})`.
+  6. THE PRE-DROP: joining STRIP_PHASE_EFFECTS makes the effect a
+     fx.device_model.PRE_DROP_EFFECTS member too, so it must declare a look
+     in config/effect_params.json (`pre_drop_looks`): the layer's
+     PRE_DROP_LOOK twinkle, or one of its own drawn from
+     `_strip_phase_pre_drop()` (the Fireworks strip's rockets, which also
+     answer `_strip_phase_pre_drop_lift()`).
 
 THE PARTICLE STRIPS' PLUMBING (plan phase 3). The edge detection, the
 orphan watchdog and the drop's self-reset used to be ~70 lines copied into
@@ -194,6 +227,7 @@ from typing import NamedTuple, Optional
 import numpy as np
 import voluptuous as vol
 
+import fx.effects.pre_drop as pre_drop
 from fx.effects import (Effect, lull_dark, lull_handoff, particle_handoff,
                         phase_grammar)
 
@@ -278,6 +312,16 @@ GUARD_MIN_LEVEL = 1.0
 # pixels go out untouched).
 NEUTRAL_EPS = 1e-6
 
+# THE PRE-DROP's twinkle (module docstring): births per pixel per second on
+# the pre-drop ... and on the drop (the plan's prototype doubled the same
+# way); each twinkle starts at the effect's own brightness and fades with
+# this time constant (the prototype's ~0.11 s); a strip with no twinkle left
+# above this stops drawing it.
+PRE_DROP_LOOK = "twinkle"
+PRE_DROP_TWINKLE_RATE = (0.4, 0.8)
+PRE_DROP_TWINKLE_TAU_S = 0.11
+PRE_DROP_TWINKLE_EPS = 1e-3
+
 # The tunables: (key, label, default, min, max, description). One table,
 # read by the schema AND by tests/test_strip_phase.py's registry check, so
 # config/effect_params.json can never drift from the schema it describes.
@@ -329,10 +373,13 @@ def tunable_fields(**overrides) -> dict:
     return fields
 
 
-# The keys SpotFX pushes (never in the registry).
+# The keys SpotFX pushes (never in the registry) — the pre-drop's four and
+# the breath-hold it is told with it (fx/effects/pre_drop.py's rule 1) ride
+# the lull arm too, so that write stays passive.
 PUSHED_KEYS = ("phase", "phase_progress", *lull_dark.KEYS,
                lull_handoff.DROP_KEY, STRENGTH_KEY, PUNCH_KEY, PUNCH_HOLD_KEY,
-               phase_grammar.SHOCK_ON_KEY)
+               phase_grammar.SHOCK_ON_KEY, *pre_drop.KEYS,
+               *phase_grammar.BREATH_KEYS)
 
 HELP_TOPIC = "strip-phases"
 
@@ -346,6 +393,9 @@ class StripFrame(NamedTuple):
     punch_fill: float = 0.0
     guard: float = 0.0
     activity: float = 1.0
+    # 1 while THE PRE-DROP's twinkle has light to draw (its own per-pixel
+    # levels live on the effect, StripPhase._sp_tw)
+    twinkle: float = 0.0
 
     def neutral(self) -> bool:
         return (abs(self.gain - 1.0) <= NEUTRAL_EPS
@@ -353,7 +403,8 @@ class StripFrame(NamedTuple):
                 and abs(self.fade - 1.0) <= NEUTRAL_EPS
                 and self.punch_fill <= NEUTRAL_EPS
                 and self.guard <= NEUTRAL_EPS
-                and abs(self.activity - 1.0) <= NEUTRAL_EPS)
+                and abs(self.activity - 1.0) <= NEUTRAL_EPS
+                and self.twinkle <= NEUTRAL_EPS)
 
 
 def registry_params(defaults: Optional[dict] = None) -> dict:
@@ -386,6 +437,11 @@ def _schema() -> vol.Schema:
         **lull_dark.schema_fields(),
         **lull_handoff.drop_schema_fields(),
         **phase_grammar.shock_on_schema_fields(),
+        # THE PRE-DROP's four told keys and the breath-hold they come with
+        # (no strip is a breath-hold effect, so it is told one only on a
+        # lull that plays a pre-drop) — fx/effects/pre_drop.py
+        **pre_drop.schema_fields(),
+        **phase_grammar.breath_schema_fields(),
         vol.Optional(
             STRENGTH_KEY,
             description="The room's strip phase strength (driven by SpotFX; 0 = off)",
@@ -410,7 +466,9 @@ def _clip01(x: float) -> float:
 
 def apply_strength(frame: StripFrame, strength: float) -> StripFrame:
     """Every quantity's distance from neutral, times the room's strength —
-    0 returns exactly neutral. The white guard scales by min(1, strength)."""
+    0 returns exactly neutral. The white guard scales by min(1, strength).
+    The twinkle carries through (strength scales its birth rate, never its
+    brightness — THE PRE-DROP), and is off at 0."""
     s = max(0.0, float(strength))
     if s == 1.0:
         return frame
@@ -423,6 +481,7 @@ def apply_strength(frame: StripFrame, strength: float) -> StripFrame:
         guard=frame.guard * min(1.0, s),
         activity=(max(0.05, 1.0 + s * (frame.activity - 1.0))
                   if frame.activity != 1.0 else 1.0),
+        twinkle=frame.twinkle if s > 0.0 else 0.0,
     )
 
 
@@ -605,6 +664,11 @@ class StripPhase(Effect):
             self._sp_guard_allow = None
             self._sp_lull_timing = None
             self._sp_punch_level = 0.0
+            # THE PRE-DROP: this frame's clock (None outside a lull told
+            # one), the twinkle's per-pixel levels and its own generator
+            self._sp_pd_clk = None
+            self._sp_tw = None
+            self._sp_tw_rng = np.random.default_rng()
             return
         self._sp_pending = new_phase if new_phase != self._sp_seen else None
         self._sp_punch.note(new_punch)
@@ -644,6 +708,9 @@ class StripPhase(Effect):
         prev = self._sp_phase
         self._sp_seen = pend
         self._sp_skip = None
+        self._sp_pd_clk = None
+        if pend == "lull":
+            self._sp_tw = None      # a new lull starts with no twinkle left
         if pend == "lull" and self._strip_phase_serving_radial():
             # THE STRIP STAR READS (module docstring): Star takes the lull;
             # this strip leaves its build as on a release and only eases
@@ -717,6 +784,15 @@ class StripPhase(Effect):
                 self._sp_drop_t = None
         punch.advance(dt)
 
+        # THE PRE-DROP (module docstring): the clock on a lull told one, and
+        # this frame's twinkle
+        clk = None
+        if phase == "lull" and pre_drop.told(cfg):
+            clk = pre_drop.phase_clock(cfg, "lull", progress, self._sp_t,
+                                       prev=self._sp_pd_clk)
+        self._sp_pd_clk = clk
+        twinkle = self._strip_phase_twinkle_step(dt, clk, cfg)
+
         gain, fill, act, wave, fade, guard = 1.0, 0.0, 1.0, 0.0, 1.0, 0.0
         in_lull = False
         self._sp_punch_level = 0.0
@@ -738,6 +814,11 @@ class StripPhase(Effect):
             fill = fill0 * (1.0 - a)
             act = act0 + (float(cfg["lull_activity"]) - act0) * a
             fade = 1.0 + (float(cfg["lull_ember"]) - 1.0) * a
+            if (clk is not None and clk.segment == "pre_drop"
+                    and self._strip_phase_pre_drop_lift()):
+                # an effect's own pre-drop look flies at full (the Fireworks
+                # strip's rockets): the lull's fade is lifted for the gap
+                fade = 1.0
             self._sp_raw = (gain * fade, fill, act)
         elif self._sp_drop_t is not None:
             t = self._sp_drop_t
@@ -775,7 +856,7 @@ class StripPhase(Effect):
 
         frame = apply_strength(
             StripFrame(gain=gain, fill=fill, wave=wave, fade=fade,
-                       guard=guard, activity=act),
+                       guard=guard, activity=act, twinkle=twinkle),
             float(cfg.get(STRENGTH_KEY, DEFAULT_STRENGTH)))
 
         p = punch.level(in_lull, cfg)
@@ -811,6 +892,52 @@ class StripPhase(Effect):
         formation) reads this, so its content and the fade can never
         disagree about when the strip is dark."""
         return getattr(self, "_sp_lull_timing", None)
+
+    def _strip_phase_pre_drop(self) -> Optional[pre_drop.PhaseClock]:
+        """THE PRE-DROP's clock this frame (fx/effects/pre_drop.py) on the
+        layer's own lull clock, or None outside a lull told a pre-drop — for
+        an effect drawing a pre-drop look of its own (the Fireworks strip's
+        rockets)."""
+        return getattr(self, "_sp_pd_clk", None)
+
+    def _strip_phase_pre_drop_lift(self) -> bool:
+        """True while the effect draws its own pre-drop look at full, so the
+        layer lifts the lull's fade for the gap (the Fireworks strip's
+        rockets). Default: False — the layer's twinkle shows over the
+        faded strip."""
+        return False
+
+    def _strip_phase_twinkle_step(self, dt: float, clk, cfg) -> float:
+        """THE PRE-DROP's twinkle, one frame (module docstring): every live
+        twinkle fades, and on a pre-drop told the layer's look new ones are
+        born. Returns 1.0 while there is light to draw, else 0.0 (and the
+        levels are dropped, so an untold lull never carries any)."""
+        tw = self._sp_tw
+        born_now = (clk is not None and clk.segment == "pre_drop"
+                    and pre_drop.look(cfg) == PRE_DROP_LOOK)
+        if tw is None and not born_now:
+            return 0.0
+        n = int(getattr(self, "pixel_count", 0) or 0)
+        if n <= 0:
+            self._sp_tw = None
+            return 0.0
+        if tw is None or tw.shape[0] != n:
+            tw = np.zeros(n, dtype=np.float32)
+        elif dt > 0.0:
+            tw *= np.float32(math.exp(-dt / PRE_DROP_TWINKLE_TAU_S))
+        if born_now and dt > 0.0:
+            strength = min(1.0, max(0.0, float(cfg.get(STRENGTH_KEY,
+                                                       DEFAULT_STRENGTH))))
+            r0, r1 = PRE_DROP_TWINKLE_RATE
+            rate = (r0 + (r1 - r0) * clk.frac) * strength
+            if rate > 0.0:
+                born = self._sp_tw_rng.random(n) < 1.0 - math.exp(-rate * dt)
+                tw[born] = 1.0
+        if not born_now and float(tw.max()) < PRE_DROP_TWINKLE_EPS:
+            self._sp_tw = None
+            return 0.0
+        self._sp_tw = tw
+        return 1.0
 
     def _strip_phase_before_render(self):
         """Effect._render, before render(): advance the layer, then apply
@@ -874,11 +1001,12 @@ class StripPhase(Effect):
             out *= frame.gain
             hue_kept_clip(out, limit)
         needs_palette = (frame.fill > 0.0 or frame.wave > 0.0
-                         or frame.punch_fill > 0.0 or frame.guard > 0.0)
+                         or frame.punch_fill > 0.0 or frame.guard > 0.0
+                         or frame.twinkle > 0.0)
         palette = self._strip_phase_palette(n) if needs_palette else None
         bright = float(self.brightness if self.brightness is not None else 1.0)
+        colour = palette * bright if palette is not None else None
         if palette is not None:
-            colour = palette * bright
             if frame.fill > 0.0:
                 hz = SHIMMER_HZ_START + (SHIMMER_HZ_END - SHIMMER_HZ_START) * _clip01(
                     self._config.get("phase_progress", 0.0) or 0.0)
@@ -895,6 +1023,16 @@ class StripPhase(Effect):
                 out[brighter] = wave_px[brighter]
         if frame.fade != 1.0:
             out *= frame.fade
+        tw = self._sp_tw
+        if (colour is not None and frame.twinkle > 0.0 and tw is not None
+                and tw.shape[0] == n):
+            # THE PRE-DROP's twinkle: the set's colours at the effect's own
+            # brightness (never dimmed), painted over whatever the lull has
+            # left the way the wave is — each pixel shows whichever is
+            # brighter, never two hues mixed into a whiter third
+            sparkle = colour * tw[:, None]
+            brighter = _peak(sparkle) > _peak(out)
+            out[brighter] = sparkle[brighter]
         if palette is not None and frame.punch_fill > 0.0:
             own = np.clip(_peak(out) / 255.0, 0.0, 1.0)
             out += (palette * bright) * (frame.punch_fill * (1.0 - own))[:, None]

@@ -2587,7 +2587,8 @@ against that commit.
     lull_dark / lull_handoff / breath-hold way, told only to
     `fx.device_model.PRE_DROP_EFFECTS` members (empty at this step; step
     6, #87, adds Fireworks and Pulse; step 7, #88, Orbits and Black
-    Hole; step 8, #89, the Fish, Star and Sauron). The module
+    Hole; step 8, #89, the Fish, Star and Sauron; step 9, #90, the
+    strips). The module
     holds the keys, their schema fields, `resolve_look` (an entry's "auto" /
     "same" / named choice against the effect's declared `pre_drop_looks`
     registry block) and `phase_clock`, one object per frame naming the
@@ -2722,3 +2723,44 @@ against that commit.
     today's at every gap), storyboards `scripts/render_predrop_storyboards.py`
     -> `docs/evidence/predrop-storyboards/`. Unverified against his live
     room.
+90. `effects/strip_phase.py` + `effects/fireworks1d.py` (SpotFX-authored,
+    #86's step-9 members — every `STRIP_PHASE_EFFECTS` effect): THE PRE-DROP
+    LOOKS, the strips (2026-10-27, predrop plan step 9, report §3.5, his
+    approval "for the strips, do the twinkle, but make the twinkles max
+    brightness match the effect brightness (don't dim, just use twinkle to
+    "dim")"). `fx.device_model.PRE_DROP_EFFECTS` adds `STRIP_PHASE_EFFECTS`,
+    each declaring one look for both kinds in config/effect_params.json. The
+    LAYER takes the four told keys and the breath told with them as PUSHED
+    (passive) keys and schema fields, runs a pre-drop clock on its own lull
+    clock (`_sp_pd_clk`, `_strip_phase_pre_drop()`), and on a lull told its
+    look `twinkle` (Melt, Power, the Black Hole and Orbits strips) draws THE
+    TWINKLE from the pre-drop to the drop: per-pixel levels (`_sp_tw`) born
+    at `PRE_DROP_TWINKLE_RATE` per pixel per second (0.4 -> 0.8, scaled by
+    min(1, `strip_phase_strength`)) from its own generator, each starting at
+    1 and fading over `PRE_DROP_TWINKLE_TAU_S`, painted after the lull's
+    fade as the set's colours x the effect's own brightness, brighter-wins
+    (`StripFrame.twinkle`; THE ORDER: ... -> x fade -> twinkle -> punch fill
+    -> white guard). `_strip_phase_pre_drop_lift()` (default False) lets an
+    effect lift the lull's fade for the gap. THE FIREWORKS STRIP
+    ("rockets", the crystal's idea): a told lull launches no rockets at its
+    start; `_pre_drop_step` makes the breath true black (particles and trail
+    cleared on its first frame, a flare burst in it swallowed) and fires the
+    two rockets from the strip's ends on the pre-drop, guided over the gap by
+    the layer's clock and dimming by `pre_drop_rocket_fade` (the crystal's
+    0.3125/s, capped at 0.75), the layer's 12% ember lifted for them; they
+    burst on the drop (`_rocket_payoff`, unchanged). A strip the Radial
+    reads skips its lull, so it gets neither — but, a member now, that
+    skipped lull's ease back to neutral is measured to the pre-drop (Star's
+    own dark point), which moves Melt's pattern under Star's told drop
+    bloom. Every new branch returns before touching state (or an rng) when
+    nothing is told, so an untold lull is today's. Evidence:
+    `tests/test_pre_drop_looks.py` (every strip untold against itself AND
+    the layer at the step-9 base, frame for frame — `load_pinned_strip`;
+    a twinkle strip its own lull up to the pre-drop, each twinkle at the
+    set's colour x the effect's brightness, sparse and thickening, never
+    white, none at strength 0, none on the strip Star reads; the Fireworks
+    strip dark until the pre-drop, black through the breath, its rockets
+    from the ends, bright, bursting on the drop; every strip's light over
+    the lull below today's at every gap), storyboards
+    `scripts/render_predrop_storyboards.py` -> `docs/evidence/
+    predrop-storyboards/strip_*`. Unverified against his live room.
