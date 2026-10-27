@@ -716,3 +716,38 @@ def test_during_a_night_only_songs_two_or_more_ahead_move_and_the_new_order_play
 def test_a_stale_position_is_refused():
     w = World(n_set=3)
     assert go(w.runner.move_set_song(0, 7))["reason"] == "bad_position"
+
+
+def test_during_the_settle_window_the_floor_is_the_chosen_start_index():
+    w = World(n_set=6)
+
+    async def run():
+        r = await w.start(start_index=2)
+        assert r["status"] == "running"
+        assert w.runner.night.start_index == 2
+        assert w.runner.night.cursor.started is False
+        at_start = await w.runner.move_set_song(2, 5)
+        assert at_start["reason"] == "too_close"
+        plus_one = await w.runner.move_set_song(3, 5)
+        assert plus_one["reason"] == "too_close"
+        ok = await w.runner.move_set_song(4, 5)
+        assert ok["status"] == "moved"
+    go(run())
+
+
+def test_a_follow_mode_night_refuses_every_move_until_its_cursor_starts():
+    w = World(n_set=6)
+
+    async def run():
+        w.player.start_context(0)              # he already started the set himself
+        r = await w.start(play=False)
+        assert r["status"] == "running"
+        assert w.runner.night.start_index is None
+        assert w.runner.night.cursor.started is False
+        refused = await w.runner.move_set_song(4, 5)
+        assert refused["reason"] == "too_close"
+        await w.run(5)                          # the engine observes S0 playing
+        assert w.runner.night.cursor.started is True
+        ok = await w.runner.move_set_song(4, 5)
+        assert ok["status"] == "moved"
+    go(run())

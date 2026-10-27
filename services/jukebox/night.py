@@ -380,6 +380,7 @@ class JukeboxRunner:
                                                sentence("playback_failed", _err(exc))))
                 self.rt.settle_until = now + PLAY_SETTLE_S
                 self.rt.expect_uri = n.set_items[int(start_index)].uri
+                n.start_index = int(start_index)
             await self._shuffle_and_repeat(first=True)
             self.rt.last_sleep_check = now
             self.rt.last_shuffle_check = d.clock()
@@ -1058,7 +1059,10 @@ class JukeboxRunner:
         `to_index`. During a night, only songs at least two ahead of the one
         playing may move (report §5: a playing client may hold its old
         snapshot of the next song), and the positions are checked against a
-        fresh read so a stale editor can't move the wrong song."""
+        fresh read so a stale editor can't move the wrong song. Before the
+        cursor confirms the playing song (the settle window right after a
+        Start), the chosen start index stands in for it; a follow-mode night
+        (no chosen start) refuses every move until its cursor starts."""
         cfg = self.cfg if self.running else self.deps.load_config()
         async with self._get_lock():
             try:
@@ -1076,8 +1080,13 @@ class JukeboxRunner:
             if frm == to:
                 return {"status": "moved", "set": [it.model_dump(mode="json") for it in items]}
             n = self.night
-            if self.running and n is not None and n.cursor.started:
-                floor = n.cursor.set_pos + 2
+            if self.running and n is not None:
+                if n.cursor.started:
+                    floor = n.cursor.set_pos + 2
+                elif n.start_index is not None:
+                    floor = n.start_index + 2
+                else:
+                    floor = len(items)
                 if min(frm, to) < floor:
                     return {"status": "refused", "reason": "too_close",
                             "detail": sentence("too_close")}

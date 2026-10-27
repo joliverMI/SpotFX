@@ -176,6 +176,11 @@ class JukeboxNight(_Model):
     # The engine started playback (a "Start" with play), so the night's own
     # ending may pause it; a night that only followed his playback never does.
     owns_playback: bool = False
+    # The set index playback was told to start from (play nights only) — the
+    # playing position until the cursor confirms it (`cursor.started`), used
+    # by the "two or more ahead" reorder floor during the settle window after
+    # start. None on a follow-mode night (it never chose a start song).
+    start_index: Optional[int] = None
     device_name: str = ""
     playlist_id: str = ""
     playlist_uri: str = ""
