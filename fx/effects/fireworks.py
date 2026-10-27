@@ -5,6 +5,8 @@ import voluptuous as vol
 from PIL import Image
 
 import fx.effects.particle_handoff as particle_handoff
+import fx.effects.phase_grammar as phase_grammar
+import fx.effects.pre_drop as pre_drop
 from fx.color import validate_gradient
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
@@ -53,6 +55,31 @@ PAYOFF_LIFE = 1.35     # giant-firework life multiplier
 # ~PAYOFF_LIFE x burst_life the way it did before that flag existed.
 DROP_TAIL_RATE = 8.0   # launches/s right after the payoff
 DROP_TAIL_S = 2.5      # seconds for the tail to ease back to the ordinary show
+
+# THE PRE-DROP (fx/effects/pre_drop.py is the binding statement; predrop
+# plan step 6, report 3.5; fx/VENDOR.md #87). A lull TOLD its drop has a
+# pre-drop launches no rockets at its start: the panel stays dark (the
+# ordinary show already stops in a lull, so only what was flying before it
+# fades out), goes truly black for the breath-hold right before the
+# pre-drop (SpotFX ends the breath exactly on it; whatever is still fading
+# is gone, and a flare landing in the breath is swallowed), then the SAME
+# rocket ring fires ON the pre-drop and flies the pre-drop-to-drop gap
+# (fast for a spike, the whole entry for a vocal intro), bursting on the
+# drop (_rocket_payoff, unchanged). One look serves both kinds. An untold
+# lull is today's, byte for byte: every pre-drop branch returns before it
+# touches anything.
+PRE_DROP_LOOK = "rockets"
+# a rocket fired on the pre-drop loses brightness at this rate over its
+# flight — 0.25 over the plan's 0.8 s prototype, so a spike's short flight
+# stays bright — and never more than the whole-lull rockets' own
+# LULL_ROCKET_FADE, so a long flight (his 2 s spike maximum, a vocal intro)
+# dims like today's and the lull's light stays at or below today's
+PRE_DROP_ROCKET_FADE_PER_S = 0.3125
+
+
+def pre_drop_rocket_fade(gap_s: float) -> float:
+    """What a pre-drop rocket loses over a flight of `gap_s` seconds."""
+    return min(LULL_ROCKET_FADE, PRE_DROP_ROCKET_FADE_PER_S * max(0.0, gap_s))
 
 # THE KEEPERS MELD (2026-10-08, drop-scene-variety plan phase 3 — spectra/
 # services/drop_switch.py is the binding statement; fx/VENDOR.md #64). His
@@ -103,6 +130,8 @@ class Fireworks2d(Twod, GradientEffect):
         "phase",
         "phase_progress",
         "burst_rockets",
+        *pre_drop.KEYS,
+        *phase_grammar.BREATH_KEYS,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -227,6 +256,11 @@ class Fireworks2d(Twod, GradientEffect):
                 description="Payoff bursts to explode right now (driven by SpotFX flares; self-resets)",
                 default=0,
             ): vol.All(vol.Coerce(int), vol.Range(min=0, max=12)),
+            # THE PRE-DROP: the four told keys and the breath-hold before it
+            # (Fireworks is no breath-hold effect, so it is told a breath
+            # only on a lull that plays a pre-drop) — fx/effects/pre_drop.py
+            **pre_drop.schema_fields(),
+            **phase_grammar.breath_schema_fields(),
         }
     )
 
@@ -320,6 +354,7 @@ class Fireworks2d(Twod, GradientEffect):
             self._phase_pending = None
             self._rocket_path = None
             self._phase_done_t = None
+            self._pd_clk = None       # THE PRE-DROP's clock, read in draw
             # per-frame spawn-shaping multipliers (charge sets these)
             self._pspawn = 1.0
             self._pcount = 1.0
@@ -853,15 +888,23 @@ class Fireworks2d(Twod, GradientEffect):
         if m <= 0:
             return
         idx = idx[:m]
-        # progress-driven once it moves (hand-scrubbable in the LedFX UI);
-        # the wall-clock fallback only runs while progress sits at 0 so a
-        # lost ramp still flies the rockets in
-        p = float(np.clip(self.phase_progress, 0.0, 1.0))
-        f = p if p > 0.0 else min(self._phase_t / LULL_FLIGHT_S, 1.0)
+        clk = self._pd_clk
+        if clk is not None and clk.segment == "pre_drop":
+            # THE PRE-DROP's rockets fly the pre-drop-to-drop gap on the
+            # effect's own clock, staying bright
+            f = clk.frac
+            fade = pre_drop_rocket_fade(pre_drop.gap_s(self._config))
+        else:
+            # progress-driven once it moves (hand-scrubbable in the LedFX
+            # UI); the wall-clock fallback only runs while progress sits at
+            # 0 so a lost ramp still flies the rockets in
+            p = float(np.clip(self.phase_progress, 0.0, 1.0))
+            f = p if p > 0.0 else min(self._phase_t / LULL_FLIGHT_S, 1.0)
+            fade = LULL_ROCKET_FADE
         ease = 1.0 - (1.0 - f) ** 2  # launch fast, drift into the target
         self.p_x[idx] = path["sx"][:m] + (path["ex"][:m] - path["sx"][:m]) * ease
         self.p_y[idx] = path["sy"][:m] + (path["ey"][:m] - path["sy"][:m]) * ease
-        self.p_bright[idx] = 1.0 - LULL_ROCKET_FADE * f
+        self.p_bright[idx] = 1.0 - fade * f
 
     def _rocket_payoff(self):
         """Drop: every rocket explodes into a giant firework in its own
@@ -938,7 +981,10 @@ class Fireworks2d(Twod, GradientEffect):
                 if pend == "lull":
                     if self._keeper_hold_t is not None:
                         self._release_keepers()
-                    self._launch_rockets()
+                    # a lull told a pre-drop stays dark: its rockets fire
+                    # on the pre-drop instead (_pre_drop_step)
+                    if not pre_drop.told(self._config):
+                        self._launch_rockets()
                 elif pend == "drop":
                     # held keepers (THE KEEPERS MELD) are rockets: the
                     # payoff explodes each where it stands
@@ -1020,6 +1066,33 @@ class Fireworks2d(Twod, GradientEffect):
         self._tail_t = t
         return DROP_TAIL_RATE * (1.0 - t / DROP_TAIL_S)
 
+    def _pre_drop_step(self):
+        """THE PRE-DROP's look (the module constants): runs only on a lull
+        TOLD a pre-drop — every other frame returns 1.0 before touching
+        anything, so a lull without one is today's, byte for byte. Returns
+        the gain on the trail this frame: the breath-hold's ease into its
+        black, 0.0 through the breath, 1.0 otherwise."""
+        if self._phase != "lull" or not pre_drop.told(self._config):
+            self._pd_clk = None
+            return 1.0
+        clk = pre_drop.phase_clock(self._config, self._phase,
+                                   self.phase_progress, self._phase_t,
+                                   prev=self._pd_clk)
+        self._pd_clk = clk
+        if clk.segment == "breath":
+            if clk.edge:
+                # true black: whatever is still fading from before the lull
+                # is gone before the rockets fire
+                self.n = 0
+                self.trail[...] = 0.0
+                self._rocket_path = None
+            self._burst_pending = 0     # a flare in the breath is swallowed
+            return 0.0
+        if clk.segment == "pre_drop" and clk.edge:
+            self._launch_rockets()
+            return 1.0
+        return phase_grammar.breath_gain(self._config, self._phase_t)
+
     # ── draw ────────────────────────────────────────────────────────────
 
     def draw(self):
@@ -1038,6 +1111,7 @@ class Fireworks2d(Twod, GradientEffect):
             self.spawn_acc = 0.0
 
         self._phase_step(dt)
+        pd_gain = self._pre_drop_step()
 
         virtual = self._virtual
 
@@ -1312,7 +1386,9 @@ class Fireworks2d(Twod, GradientEffect):
                 ).reshape(self.r_height, self.r_width)
             np.maximum(self.trail, np.minimum(frame, 255.0), out=self.trail)
 
-        out = np.asarray(self.matrix, dtype=np.float32) + self.trail
+        trail = (self.trail if pd_gain >= 1.0
+                 else self.trail * np.float32(pd_gain))
+        out = np.asarray(self.matrix, dtype=np.float32) + trail
         self.matrix = Image.fromarray(
             np.clip(out, 0, 255).astype(np.uint8), "RGB"
         )

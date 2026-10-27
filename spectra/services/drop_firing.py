@@ -374,9 +374,9 @@ def _member_ms(s: dict, cls: str, testing: bool) -> Optional[int]:
 # time and kind are read into FiringSequence while this is True (the
 # master switch the engine shipped behind in steps 2-4, kept as one line
 # to turn the whole pre-drop path off again). Whether a pre-drop then PLAYS
-# is spectra/services/pre_drop_play.py's, at its lull; with
-# fx.device_model.PRE_DROP_EFFECTS empty the only thing that changes is
-# the drop colour change fading across a pre-drop that plays.
+# is spectra/services/pre_drop_play.py's, at its lull; then the
+# fx.device_model.PRE_DROP_EFFECTS members play their looks and the drop
+# colour change fades across it.
 PRE_DROPS_PLAY = True
 
 

@@ -95,6 +95,11 @@ INPUTS THE ENGINE PUSHES (phase 2) — hooks with safe defaults:
   effect"): the lull arm also tells `lull_breath_at_s`/`lull_breath_s`
   (the room's lull_breath_hold_s, 0.4 s) and the light is TRUE BLACK for
   that window right before the drop — a flare's punch or flash included.
+  THE PRE-DROP (2026-10-27, predrop plan step 6; the PRE_DROP_* constants
+  are the rule): a lull told a pre-drop is measured to it — fade, dark
+  point and breath all end on the pre-drop — then the spike's burst or the
+  vocal intro's dim swell plays, and the dark span before the drop is held
+  black the way the breath is. Untold, the lull is exactly as above.
   drop: begins ON
   its first frame at `drop_burst` with a `drop_white` mix, settles over
   `drop_settle_beats`, then the phase key self-resets to "none" so an
@@ -188,6 +193,7 @@ import voluptuous as vol
 import fx.effects.lull_dark as lull_dark
 import fx.effects.particle_handoff as particle_handoff
 import fx.effects.phase_grammar as phase_grammar
+import fx.effects.pre_drop as pre_drop
 from fx import pulse_modulation
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
@@ -239,6 +245,33 @@ LULL_LEGACY_DARK_AT = 1.0    # lull reaches black here when SpotFX sends no
                              # lull timing (fx/effects/lull_dark.py)
 BURST_DONE = 0.01            # drop burst below this = settled
 
+# THE PRE-DROP (fx/effects/pre_drop.py is the binding statement; predrop
+# plan step 6, report 3.5 — the explainer's level curves are the rule;
+# fx/VENDOR.md #87). On a lull TOLD a pre-drop, SpotFX measures the lull's
+# dark point and its breath-hold to the PRE-DROP, so the light fades out
+# earlier and is truly black right before it. From the pre-drop (u seconds
+# since it, over the pre-drop-to-drop gap):
+#   "burst" (the spike's look): full brightness in the colour it is showing
+#     (no white) held for PRE_DROP_PEAK_S — so the pre-drop's own frame is
+#     always at full, wherever a frame lands — then a fast fade, (1 - x)^2,
+#     to black where the DARK SPAN begins;
+#   "swell" (the vocal intro's look — a long entry, so the light stays low):
+#     a smoothstep rise to PRE_DROP_SWELL_TOP across the same stretch, then
+#     black;
+# and in both the DARK SPAN, PRE_DROP_DARK_FRAC of the gap clamped to
+# PRE_DROP_DARK_MIN_S..PRE_DROP_DARK_MAX_S, held truly black the way the
+# breath is (a flare's punch or flash included, so the 100 ms minimum is
+# real), then the drop. The burst spends the flash budget like a hit; the
+# swell barely does. A drop that never comes lets the dark span go after
+# phase_grammar.BREATH_OVERRUN_S, like a breath.
+PRE_DROP_BURST = "burst"
+PRE_DROP_SWELL = "swell"
+PRE_DROP_PEAK_S = 0.02
+PRE_DROP_SWELL_TOP = 0.3
+PRE_DROP_DARK_FRAC = 0.25
+PRE_DROP_DARK_MIN_S = 0.1
+PRE_DROP_DARK_MAX_S = 0.5
+
 # rainbow walk
 RAINBOW_SPAN_DEG = 180.0     # a gradient spanning more hue than this walks
 ACHROMATIC_WEIGHT = 0.05     # a stop below this saturation x value has no hue
@@ -260,6 +293,27 @@ def _lerp(a, b, t):
 def _smooth(x):
     x = min(1.0, max(0.0, x))
     return x * x * (3.0 - 2.0 * x)
+
+
+def pre_drop_dark_s(gap_s: float) -> float:
+    """THE PRE-DROP's dark span before the drop (seconds) for a gap."""
+    return min(PRE_DROP_DARK_MAX_S,
+               max(PRE_DROP_DARK_MIN_S, PRE_DROP_DARK_FRAC * float(gap_s)))
+
+
+def pre_drop_level(look: str, u: float, gap_s: float) -> float:
+    """THE PRE-DROP's eye-scale level `u` seconds after the pre-drop, for a
+    pre-drop-to-drop gap of `gap_s` (the module constants' rule): 0 before
+    it and from the dark span on."""
+    rise = float(gap_s) - pre_drop_dark_s(gap_s)
+    if u < 0.0 or u >= rise:
+        return 0.0
+    if look == PRE_DROP_SWELL:
+        return PRE_DROP_SWELL_TOP * _smooth(u / rise)
+    peak = min(PRE_DROP_PEAK_S, rise)
+    if u < peak:
+        return 1.0
+    return (1.0 - (u - peak) / max(rise - peak, 1e-6)) ** 2
 
 
 def _per_frame(alpha_60, dt):
@@ -331,6 +385,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         *lull_dark.KEYS,
         *lull_dark.PUNCH_KEYS,
         *phase_grammar.BREATH_KEYS,
+        *pre_drop.KEYS,
         "flash",
         "flip",
     ]
@@ -501,6 +556,9 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             # the breath-hold before the drop, pushed by SpotFX on the lull
             # arm — fx/effects/phase_grammar.py
             **phase_grammar.breath_schema_fields(),
+            # THE PRE-DROP's four told keys, pushed on the lull arm —
+            # fx/effects/pre_drop.py
+            **pre_drop.schema_fields(),
         }
     )
 
@@ -533,6 +591,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
         self._blend_t = 0.0
         self._rest = 0.0
         self._lull_from = 0.0
+        self._pd_booked = False      # THE PRE-DROP's rise spent this lull
         # phase (creation baseline: a stale persisted phase never edge-fires)
         self._phase = "none"
         self._phase_t = 0.0
@@ -880,6 +939,10 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
                 level = max(level, (floor + self._pulse(env, depth)) * pp)
                 rest = max(rest, floor * pp)
                 keep = max(keep, pp)
+            # THE PRE-DROP's look (module constants): 0 unless told one
+            look = self._pre_drop_look_level()
+            if look > 0.0:
+                level = max(level, look)
             # THE BREATH-HOLD (fx/effects/phase_grammar.py, 2026-10-12, the
             # Admiral: "I do want it on pulse effect"): the short true black
             # right before the drop wins over everything in the lull — the
@@ -912,7 +975,50 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             self._config, self._progress(), self._phase_t,
             LULL_LEGACY_DARK_AT).approach)
         breath = phase_grammar.breath_gain(self._config, self._phase_t)
+        cfg = self._config
+        if pre_drop.told(cfg):
+            # THE PRE-DROP's dark span is held black the way the breath is
+            gap = pre_drop.gap_s(cfg)
+            u = self._phase_t - pre_drop.at_s(cfg)
+            if (max(0.0, gap - pre_drop_dark_s(gap)) <= u
+                    < gap + phase_grammar.BREATH_OVERRUN_S):
+                breath = 0.0
         return fade, self._punch_level, breath
+
+    def _pre_drop_look(self):
+        """The told look, or this kind's own when the told one is not
+        Pulse's (an entry SpotFX could not find tells "")."""
+        look = pre_drop.look(self._config)
+        if look in (PRE_DROP_BURST, PRE_DROP_SWELL):
+            return look
+        if pre_drop.kind(self._config) == pre_drop.KIND_INTRO:
+            return PRE_DROP_SWELL
+        return PRE_DROP_BURST
+
+    def _pre_drop_look_level(self):
+        """THE PRE-DROP's level this frame (module constants), 0.0 untold."""
+        cfg = self._config
+        if self._phase != "lull" or not pre_drop.told(cfg):
+            return 0.0
+        return pre_drop_level(self._pre_drop_look(),
+                              self._phase_t - pre_drop.at_s(cfg),
+                              pre_drop.gap_s(cfg))
+
+    def _spend_pre_drop(self):
+        """THE PRE-DROP spends the flash budget like a hit, on its first
+        frame: the whole rise its look will make, booked once a lull."""
+        cfg = self._config
+        if (self._pd_booked or self._phase != "lull"
+                or not pre_drop.told(cfg)
+                or self._phase_t < pre_drop.at_s(cfg)):
+            return
+        self._pd_booked = True
+        peak = 1.0 if self._pre_drop_look() == PRE_DROP_BURST \
+            else PRE_DROP_SWELL_TOP
+        g = cfg["gamma"]
+        rise = max(0.0, peak ** g - self.level ** g)
+        if rise > 0.0:
+            self._flash_window.append([self._render_t, rise])
 
     def _floor_gain(self):
         """How much of the Light Show's brightness FLOOR applies this frame
@@ -959,6 +1065,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             self._flash_window.append([self._render_t, rise])
             return
         if phase == "lull":
+            self._pd_booked = False
             # fade from where the light actually rests now (mid-ease: from
             # where the ease has got to)
             if self._blend_from is not None:
@@ -1125,6 +1232,7 @@ class PulseAudioEffect(AudioReactiveEffect, GradientEffect):
             1.0 - math.exp(-dt / ENERGY_SLEW_S)
         )
         self._phase_step(dt)
+        self._spend_pre_drop()
         self._step_punch(dt)
         self._advance_envelope(dt)
         self._consume_pokes()

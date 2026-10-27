@@ -1,8 +1,9 @@
 """THE PRE-DROP ENGINE (predrop plan step 5) — the told keys, the one play
 rule, and what a member's lull arm carries.
 
-fx.device_model.PRE_DROP_EFFECTS ships EMPTY, so these tests make real
-effects STUB MEMBERS by patching the set (and the registry's looks): the
+These tests make real effects that are not members (Black Hole, Orbits)
+STUB MEMBERS by patching fx.device_model.PRE_DROP_EFFECTS (and the
+registry's looks), so they hold whatever the real members are: the
 acceptance is that the keys — kind and look included — arrive on the lull
 arm only when the showing scene allows that kind and the gap is inside its
 window; that a member's told breath ends exactly at `pre_drop_at_s` while a

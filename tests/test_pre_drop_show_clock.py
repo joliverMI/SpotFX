@@ -6,9 +6,9 @@ one), in a show-clock test with a late lull.
 The REAL TriggerEngine.tick() is driven over a 200 ms position feed (the
 show clock's own cadence, TICK_S). Its lull member's fire reaches a real
 ResponseEngine (a scratch pair on a RecordingExecutor), which decides the
-pre-drop against the scene showing; Black Hole is made a stub member
-(fx.device_model.PRE_DROP_EFFECTS ships empty) so the told keys can be read
-off its arm. The drop's colour change is the engine's hook, recorded with
+pre-drop against the scene showing; Black Hole (not a member of
+fx.device_model.PRE_DROP_EFFECTS) is made a stub member so the told keys
+can be read off its arm. The drop's colour change is the engine's hook, recorded with
 the show-clock position it was asked at.
 
 The lull's MARK sits between two ticks, so it fires late — and the told
@@ -209,11 +209,12 @@ def test_a_pre_drop_the_scene_does_not_play_leaves_the_drop_instant(member):
     assert arm["pre_drop_at_s"] == 0.0
 
 
-def test_the_set_empty_still_fades_the_colour_and_tells_nobody():
-    """THE SHIPPED STATE: no member, the pre-drop still plays (its verdict
-    is the scene's), so the colour fades across it — and the lull arm is
-    today's, with no pre-drop key at all."""
-    assert device_model.PRE_DROP_EFFECTS == frozenset()
+def test_a_scene_of_non_members_still_fades_the_colour_and_tells_nobody():
+    """A scene whose effects have no pre-drop look (Black Hole, until step
+    7): the pre-drop still plays (its verdict is the scene's), so the colour
+    fades across it — and the lull arm is today's, with no pre-drop key at
+    all."""
+    assert "blackhole" not in device_model.PRE_DROP_EFFECTS
     rig = Rig(_view([_seq(20_000, 16_000, 12_000, pre=19_200)]))
     rig.sweep()
     assert [c["moment"] for c in rig.colour] == ["pre_drop"]

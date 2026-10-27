@@ -138,6 +138,30 @@ than before on a short lull (half of it, matching the crystal), and a
 20 s lull is pitch black for exactly its last 3 s. Read lull_dark.py's
 docstring before changing anything about when this lull goes dark.
 
+## THE PRE-DROP — a burst or a dim swell, then a dark span (2026-10-27)
+
+Predrop plan step 6 (`fx/VENDOR.md` #87; the drop-detection skill for the
+engine). Pulse is a `fx.device_model.PRE_DROP_EFFECTS` member with two
+looks: `burst` (the spike's recommendation) and `swell` (the vocal
+intro's). Told a pre-drop, SpotFX measures the lull's fade, dark point
+and breath to the pre-drop; on it the burst holds FULL for
+`PRE_DROP_PEAK_S` (20 ms) in the colour showing and fades fast to black,
+the swell rises to `PRE_DROP_SWELL_TOP` (0.3); then the DARK SPAN
+(`pre_drop_dark_s`: a quarter of the gap, 100-500 ms) is held black the
+way the breath is, released `BREATH_OVERRUN_S` past the drop if it never
+comes. Four things not visible cold:
+
+- **The black wins over everything** in the breath and the dark span —
+  a flash, a flip, a flare punch (`_lull_keeps`' breath term).
+- **The rise spends the flash budget once a lull, like a hit**
+  (`_spend_pre_drop` books it predictively; the output guard still holds
+  the delivered light) — never `_drop_landing`'s free pass.
+- **A told look it does not know** (SpotFX tells "" when an entry is not
+  found) plays its kind's own (`_pre_drop_look`).
+- **The burst raises the lull's light** (x1.10 at Winny's 627 ms gap,
+  x1.25 at the 2 s maximum, storyboard README) — his specified look; the
+  swell lowers it (x0.56). Untold is today's, level for level.
+
 ## Sonic reach
 
 Effect params: YES, as of the 2026-10-06 Sonic coverage audit build —
@@ -214,7 +238,9 @@ Pulse Test. Spec: `tests/test_migrate_singles_to_pulse.py`.
 ## Proofs
 
 `tests/test_lull_dark.py` (the dark-point rule and this effect's lull on
-the real pipeline).
+the real pipeline). `tests/test_pre_drop_looks.py` (the pre-drop looks,
+untold identity against the pinned pre-look module, the black, the flash
+budget) and `scripts/render_predrop_storyboards.py`.
 `tests/test_pulse_effect.py` (phase 1), `tests/test_pulse_engine_wiring.py`
 (phase 2), `tests/test_pulse_rainbow_flares.py` (phase 3: walk, flares,
 gating, real pipeline + device preview, his songs),

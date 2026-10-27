@@ -421,12 +421,15 @@ Predrop plan step 5. `fx/effects/pre_drop.py` (the told keys, the looks,
 `phase_clock`) and `spectra/services/pre_drop_play.py` (the one rule) are
 the binding statements. Seven things, the first one the most important:
 
-- **NOTHING LIGHTS A PRE-DROP YET.** `fx.device_model.PRE_DROP_EFFECTS` is
-  EMPTY: every arm write equals the pre-engine golden over his 14 scenes
-  (`tests/test_pre_drop_arm_identity.py`). The only visible change is the
-  drop colour fade across a pre-drop that plays. Step 6 (Fireworks, Pulse,
-  Orbits) joins the set — each behind his tuning gate — and declares
-  `pre_drop_looks` in `config/effect_params.json`.
+- **ONLY THE MEMBERS LIGHT A PRE-DROP.** `fx.device_model.PRE_DROP_EFFECTS`
+  is Fireworks and Pulse (step 6; their looks: the fireworks-effect and
+  pulse-effect skills). Every other arm write equals the pre-engine golden
+  over his 14 scenes, and a member's lull arm differs only by the told
+  keys (`tests/test_pre_drop_arm_identity.py`). For every other effect the
+  only visible change is the drop colour fade across a pre-drop that
+  plays. A new member joins the set and declares `pre_drop_looks` in
+  `config/effect_params.json` (Orbits and step 7's effects, each behind
+  his tuning gate).
 - **THE DECISION IS AT THE LULL, ON THE SCENE SHOWING.** Rules in order:
   a playable part (a sequence's via `drop_firing._pre_drop_fields` — its
   OWN `pre_drop_tier` for "waiting", never the drop's tier; his own via

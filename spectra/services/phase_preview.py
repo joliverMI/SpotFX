@@ -445,8 +445,9 @@ def pre_drop_for_ruler(scene: SceneV2, intensity: float, marks: list[dict],
     """THE PRE-DROP on the drop-sequence ruler: its mark (the drop's mark
     less the gap — moved with the drop), the verdict the lull would reach
     on this scene (pre_drop_play.decide, the show's own rule), which
-    virtuals would be told (fx.device_model.PRE_DROP_EFFECTS — none yet),
-    and their lull measured to the pre-drop. None when no kind is asked."""
+    virtuals would be told (fx.device_model.PRE_DROP_EFFECTS — Fireworks
+    and Pulse since predrop step 6), and their lull measured to the
+    pre-drop. None when no kind is asked."""
     from fx import device_model
     from fx.effects import phase_grammar
     from spectra.services import pre_drop_play
