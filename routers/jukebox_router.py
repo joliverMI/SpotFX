@@ -47,6 +47,7 @@ process on its own port (phase 2) and never reaches these routes.
   GET    /api/jukebox/card            the printable card (N2): the join link
                                       (making the party token if there is none
                                       yet), the unused bonus codes, the bonus
+                                      amount and the play mode
   GET    /api/jukebox/report          the post-party report of the latest night
                                       (services/jukebox/night_report.py): what
                                       it played, its line, its credits ledger
