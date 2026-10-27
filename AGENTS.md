@@ -11175,6 +11175,23 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   the room's vote, a paid skip and a filling pot all refuse it in either
   mode; it is a named Sonic exclusion (a line action). Credits mode's jail
   is `JAIL_UNTIL_FREED` — it ends on a break-out (`jail_fee`) or Pardon.
+  **(5) A JAIL'S KIND IS STORED WITH ITS TERM** (`JukeboxNight.jail_kind`,
+  "timeout"/"breakout"), set by `night.jail()` and read everywhere a jail
+  is shown or acted on (`guests.py`'s `jail_kind_of`: `build_view`'s
+  `jail`/strip, `Guests.phones()`, `_jailed_refusal`, `break_out`) —
+  **never reinterpreted by the CURRENT `play_mode`**, which can change
+  mid-night. `night.convert_jail_mode` (called from `PUT /api/jukebox/show`
+  — the one validator path, so Sonic's `set_jukebox_setting` gets it too —
+  the instant `play_mode` actually changes) converts what is RUNNING:
+  switching credits off turns a "breakout" jail into an ordinary "timeout"
+  of `free_jail_songs` songs counted from that moment (or ends it at once
+  with none, at 0); switching credits on leaves a "timeout" jail exactly as
+  it was, with no break-out ever offered for it. Found live by review:
+  before this, both the guest page and the Guests tab reinterpreted every
+  jail by whichever mode was CURRENT, so a credits jail surviving a switch
+  to free play read its `JAIL_UNTIL_FREED` term as "a billion songs to go"
+  and a free-play time-out switched to credits could be paid away with
+  `break_out()` though it was meant to end for free.
   The guest app forwards `/g/tip`, `/g/skip`, `/g/next`, `/g/breakout`,
   `GET /g/wallet`. Specs: `tests/test_jukebox_credits_play.py`, the guest
   render's credits shots (14-21), `check_jukebox_guest_logic.mjs`'s credits

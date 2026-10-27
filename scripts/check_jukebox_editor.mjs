@@ -270,7 +270,8 @@ const PHONES = [
   ok(rows[1].by === 'Disco Ana' && rows[1].round === '2nd song' && rows[1].held && rows[1].canHold, 'a held 2nd song, by name');
   ok(rows[2].by === 'a guest', 'an unknown phone reads "a guest"');
   // free play (PR 2.3): the time-out, Pardon, Play next
-  ok(GW.phoneState(PHONES[3]) === 'jailed' && GW.phoneLine(PHONES[3]).startsWith('in a time-out (3 songs to go)'),
+  ok(GW.phoneState(PHONES[3]) === 'jailed'
+    && GW.phoneLine(PHONES[3]) === 'in a time-out (3 songs to go) · 1 in line · 1 played · 3 votes',
     `a phone in a time-out says how many songs are left (${GW.phoneLine(PHONES[3])})`);
   ok(JSON.stringify(GW.phoneActions(PHONES[3])) === '["pardon","block","lock","rename"]', 'only a phone in a time-out can be pardoned');
   ok(GW.phoneLine({ ...PHONES[0], jail_count: 2, jail_at: 5 }).includes('net ▼ 2 of 5'), 'a phone shows its ▼ count against the bar');
@@ -281,8 +282,14 @@ const PHONES = [
   ok(jl[3].jailed && !jl[1].jailed, 'a song whose guest is in a time-out says so');
   // credits mode (PR 3.2): a phone's credits, the jail until break-out, the skip lock
   ok(GW.phoneLine({ ...PHONES[0], credits: 7 }).includes('🎟 7'), 'a phone shows the credits it holds');
-  ok(GW.phoneLine({ ...PHONES[3], jail_kind: 'breakout' }).startsWith('in jail (until they break out)'),
+  ok(GW.phoneLine({ ...PHONES[3], jail_kind: 'breakout' })
+    === 'in jail (until they break out) · 1 in line · 1 played · 3 votes',
     `credits mode's jail says it lasts until they break out (${GW.phoneLine({ ...PHONES[3], jail_kind: 'breakout' })})`);
+  // jail status and the net ▼ count are never shown together; the credits
+  // balance rides alongside either one (review-3's fix)
+  ok(GW.phoneLine({ ...PHONES[3], credits: 7 })
+    === 'in a time-out (3 songs to go) · 🎟 7 · 1 in line · 1 played · 3 votes',
+    `the credits chip shows beside a time-out, never the ▼ count too (${GW.phoneLine({ ...PHONES[3], credits: 7 })})`);
   const kl = GW.lineRows(line, PHONES, false, ['u2']);
   ok(kl[1].skipLocked && !kl[0].skipLocked && !kl[2].skipLocked, 'a song the host kept from skips is marked, by its song');
   ok(GW.lineRows([{ ...line[1], paid: 6 }], PHONES)[0].paid === 6, 'what a guest paid for a song rides on its row');

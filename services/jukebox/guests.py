@@ -63,8 +63,10 @@ fair; every number is a show setting (§4's Free play card).
   keep their places but are never sent, and the guest can't add or bump
   (they can still vote). When the time-out ends — or the host pardons them
   — their count starts again at 0. The host's songs never go to jail. The
-  term is the engine's (JukeboxNight.jail, counted in songs that start); the
-  count is this book's (GuestBook.play_by, GuestPhone.jail_base).
+  term is the engine's (JukeboxNight.jail, counted in songs that start),
+  alongside its KIND (JukeboxNight.jail_kind, "timeout" here — see CREDITS
+  MODE below for the other kind and how a mode switch converts one into the
+  other); the count is this book's (GuestBook.play_by, GuestPhone.jail_base).
   PLAY NEXT is the host's only (his "Play next" on the Guests tab), or off.
 
 ADDING A SONG (report §1.5, in free play). A guest finds a song — his own
@@ -104,8 +106,16 @@ play's book:
   the skip (the rest of its price, or a chip-in toward its POT; a pot filled
   makes the engine skip; a pot whose song ends first is refunded), tips (to
   the guest whose song is playing, never the host or yourself) and the
-  break-out from jail. In credits mode the jail lasts until the guest breaks
-  out (`jail_fee`) or the host pardons (night.JAIL_UNTIL_FREED).
+  break-out from jail. In credits mode a NEW jail lasts until the guest
+  breaks out (`jail_fee`) or the host pardons (night.JAIL_UNTIL_FREED,
+  stored kind "breakout") — but a jail already running keeps the kind it
+  was imposed under (`jail_kind_of`, read off the night's own stored
+  `jail_kind`, never the CURRENT `play_mode`): a mode switch converts an
+  existing "breakout" jail into an ordinary "timeout" one of
+  `free_jail_songs` songs (`night.convert_jail_mode`, run from the show's
+  one validator path on a `play_mode` edit), and a "timeout" jail switched
+  INTO credits mode keeps ending by itself, with no break-out ever offered
+  for it.
   REFUNDS are written, never assumed: a paid song the host removed, an
   unfilled pot, and every paid song still waiting when the night ends
   (`_close_night`).
@@ -252,6 +262,7 @@ SENTENCES: dict[str, str] = {
     "nexted": "That song has had its play next.",
     "next_too_soon": "Play next is for a song at least {m} minutes away.",
     "not_jailed_self": "You're not in jail.",
+    "not_breakout_jail": "Your time-out ends on its own — there's nothing to break out of.",
     "skip_none": "There's nothing to skip right now.",
     "pot_full": "The pot is already full — the song is being skipped.",
     "bad_amount": "That isn't an amount of credits.",
@@ -458,6 +469,16 @@ def jailed_now(gs: dict, phone_id: str) -> int:
     return max(0, until - plays) if until is not None else 0
 
 
+def jail_kind_of(gs: dict, phone_id: str) -> str:
+    """The STORED kind of this guest's time-out ("timeout" or "breakout"),
+    set by `night.jail()` at the moment it was imposed and converted (if
+    at all) by `night.convert_jail_mode()` on a later mode switch — never
+    reinterpreted here by the CURRENT `ShowConfig.play_mode`, which may
+    have changed since. "timeout" is the default for a jail that predates
+    this field."""
+    return (gs.get("jail_kind") or {}).get(phone_id, "timeout")
+
+
 def net_downs(book: GuestBook, phone_id: str) -> int:
     """▼ minus ▲ on every song this guest added tonight (before the reset)."""
     total = 0
@@ -512,15 +533,18 @@ def build_view(book: GuestBook, phone_id: str, gs: dict, now_ms: int,
     cr = credits if show.play_mode == "credits" and credits is not None else None
     balance = int(cr["balance"]) if cr else 0
     left = jailed_now(gs, phone_id)
+    jkind = jail_kind_of(gs, phone_id)
+    is_breakout = jkind == "breakout"
     out: dict[str, Any] = {
         "state": "running", "server_ms": now_ms, "poll_ms": POLL_MS,
         "me": {"name": me.name, "joined": me.joined, "approved": me.approved,
                "name_locked": me.name_locked,
                "renames_left": max(0, show.renames_per_night - me.renames),
-               "jail": {"in": bool(left), "songs_left": left if not cr else 0,
-                        "kind": "breakout" if cr else "timeout",
+               "jail": {"in": bool(left), "songs_left": left if not is_breakout else 0,
+                        "kind": jkind,
                         "fee": cfg.jail_fee,
-                        "can_break_out": bool(cr) and bool(left) and balance >= cfg.jail_fee,
+                        "can_break_out": is_breakout and bool(left) and bool(cr)
+                                        and balance >= cfg.jail_fee,
                         "count": jail_count(book, phone_id, gs),
                         "at": economy.jail_threshold(crowd, cfg),
                         "on": bool(cr) or bool(show.free_jail_songs)},
@@ -705,8 +729,8 @@ def build_view(book: GuestBook, phone_id: str, gs: dict, now_ms: int,
     out["strip"] = {"tone": "jail" if left and not (lead and lead["state"] == "playing") else
                     ("playing" if lead["state"] == "playing" else
                      "next" if lead["state"] == "next" else "queued") if lead else "none",
-                    "jail_left": left if not cr else 0,
-                    "jail_kind": "breakout" if cr else "timeout",
+                    "jail_left": left if not is_breakout else 0,
+                    "jail_kind": jkind,
                     "jail_fee": cfg.jail_fee,
                     "title": lead["title"] if lead else "",
                     "place": lead["place"] if lead else None,
@@ -1241,7 +1265,7 @@ class Guests:
             credits = show.play_mode == "credits"
             left = jailed_now(gs, phone)
             if left:
-                return self._jailed_refusal(left, credits, show)
+                return self._jailed_refusal(left, jail_kind_of(gs, phone), show)
             now_ms = self.deps.now_ms()
             if not credits:
                 if not show.free_bumps_per_hour:
@@ -1291,8 +1315,10 @@ class Guests:
 
     # ── credits mode: the guest's own spends (PR 3.2) ──────────────────────
 
-    def _jailed_refusal(self, left: int, credits: bool, show: ShowConfig) -> tuple[int, dict]:
-        if credits:
+    def _jailed_refusal(self, left: int, kind: str, show: ShowConfig) -> tuple[int, dict]:
+        """`kind` is the STORED jail kind (jail_kind_of), never the current
+        `play_mode` — a timeout jail reads "jailed" regardless of mode."""
+        if kind == "breakout":
             return refusal("jailed_credits", 409, fee=show.economy.jail_fee)
         return refusal("jailed", 409, n=left, s="" if left == 1 else "s")
 
@@ -1472,7 +1498,7 @@ class Guests:
                 return gate
             left = jailed_now(gs, phone)
             if left:
-                return self._jailed_refusal(left, True, show)
+                return self._jailed_refusal(left, jail_kind_of(gs, phone), show)
             line = gs.get("line") or []
             entry = next((e for e in line if e.id == entry_id), None)
             if entry is None or entry.state not in ("queued", "committed"):
@@ -1510,13 +1536,17 @@ class Guests:
 
     async def break_out(self, phone: Any) -> tuple[int, dict]:
         """Break out of jail (§1 rule 9): `jail_fee` credits, and your count
-        starts again at 0."""
+        starts again at 0. Only a credits-imposed jail (the STORED kind,
+        "breakout") can be broken out of — a free-play time-out ends on its
+        own, whatever the CURRENT play_mode is, and is never charged for."""
         async with self._get_lock():
             gate, gs, book, show = await self._credits_gate(phone)
             if gate:
                 return gate
             if not jailed_now(gs, phone):
                 return refusal("not_jailed_self", 409)
+            if jail_kind_of(gs, phone) != "breakout":
+                return refusal("not_breakout_jail", 409)
             fee = show.economy.jail_fee
             stop = self._afford(gs, phone, show, fee, None)
             if stop:
@@ -1707,7 +1737,7 @@ class Guests:
         show = self.deps.show()
         left = jailed_now(gs, phone)
         if left:
-            return self._jailed_refusal(left, show.play_mode == "credits", show)
+            return self._jailed_refusal(left, jail_kind_of(gs, phone), show)
         track_uri = parse_track_uri(uri if isinstance(uri, str) else "")
         if not track_uri:
             return refusal("track_unknown", 422)
@@ -1801,7 +1831,7 @@ class Guests:
                         "played": sum(1 for e in mine if e.state == "played"),
                         "votes": votes.get(p.id, 0),
                         "jail_left": jailed_now(gs, p.id),
-                        "jail_kind": "breakout" if credits else "timeout",
+                        "jail_kind": jail_kind_of(gs, p.id),
                         "jail_count": jail_count(book, p.id, gs), "jail_at": at,
                         **({"credits": w.balance(p.id)} if credits else {})})
         return {"running": True, "phones": out,

@@ -271,12 +271,15 @@ async def put_show(request: Request, dry_run: bool = False) -> dict:
         patch = await request.json()
     except Exception:
         raise HTTPException(status_code=422, detail="expected a JSON object")
+    old = store.load_show()
     try:
-        new = show.apply_patch(store.load_show(), patch)
+        new = show.apply_patch(old, patch)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     if not dry_run:
         store.save_show(new)
+        if new.play_mode != old.play_mode:
+            await night.runner.convert_jail_mode(new.play_mode == "credits", new.free_jail_songs)
     return {"dry_run": dry_run, **show.read(new)}
 
 

@@ -250,6 +250,14 @@ class JukeboxNight(_Model):
     # songs keep their places but are never sent (slots pass them). The
     # host's pardon removes the term.
     jail: dict[str, int] = Field(default_factory=dict)
+    # The KIND each entry in `jail` is — "timeout" (free play, ends on its
+    # own) or "breakout" (credits, ends only by paying `jail_fee` or a
+    # pardon) — stored WITH the term so a later mode switch
+    # (services/jukebox/night.py's `convert_jail_mode`, run from
+    # services/jukebox/show.py's one validator path) can convert it
+    # instead of every reader reinterpreting it by the CURRENT play_mode.
+    # Reset (popped) whenever the matching `jail` entry ends or is pardoned.
+    jail_kind: dict[str, str] = Field(default_factory=dict)
     # Songs the host has kept from skips tonight (their URIs): neither the
     # room's vote nor a paid skip touches them (report §12, "Skip griefing").
     no_skip: list[str] = Field(default_factory=list)
@@ -345,8 +353,8 @@ Preset = Literal["small", "medium", "large"]
 FreePlayNext = Literal["host", "off"]
 # The guest page's mode (report §6: "One switch on the Show settings page
 # (Mode: Credits · Free play) hides every price, the credits chip and the
-# Shop"). Free play ships as the default: nothing about a night changes until
-# he switches.
+# Shop"). Credits ships as the default (the plan's §4 tuned values):
+# nothing about a night changes to free play until he switches.
 PlayMode = Literal["free", "credits"]
 
 # Explicit songs (report §4, "Add a song"): not allowed (the default), allowed

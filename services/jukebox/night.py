@@ -55,7 +55,14 @@ CREDITS MODE (PR 3.2) reuses all three — a paid skip or a filled chip-in pot
 is `skip_by_vote(reason="paid")`, a priced bump is `bump`, a jail lasts until
 the guest breaks out (`JAIL_UNTIL_FREED`) — and adds a guest's own PLAY NEXT
 (`play_next`: to the front of the songs that can be sent, once per song;
-nothing passes the committed song). THE PUSH-BACK CAP IS PER SONG, whatever
+nothing passes the committed song). EACH JAIL'S KIND IS STORED WITH ITS TERM
+(`JukeboxNight.jail_kind`, "timeout"/"breakout"), so a later `play_mode`
+switch converts what is RUNNING instead of every reader guessing it from the
+current mode (`convert_jail_mode`, run from services/jukebox/show.py's one
+validator path): switching credits off turns a "breakout" jail into an
+ordinary "timeout" of `free_jail_songs` songs from that moment; switching
+credits on leaves a "timeout" jail exactly as it was, with no break-out ever
+offered for it. THE PUSH-BACK CAP IS PER SONG, whatever
 moved it (the firstmate's ruling on PR 2.3, "a play-next jump if it pushes
 songs back" included): every song a play next jumps past is pushed back one
 place, and a guest's play next is refused when one of them is already at the
@@ -408,6 +415,7 @@ class JukeboxRunner:
         for pid, until in list(n.jail.items()):
             if n.plays >= until:
                 del n.jail[pid]
+                n.jail_kind.pop(pid, None)
                 self._log("a guest's time-out is over; their songs are back in line")
 
     def _jailed(self, phone: str) -> bool:
@@ -1230,7 +1238,10 @@ class JukeboxRunner:
     async def jail(self, phone: str, songs: Optional[int]) -> dict:
         """A guest's time-out: their waiting songs keep their places but sit
         out the next `songs` songs to start — or, with `songs` None (credits
-        mode), until they break out or the host pardons them."""
+        mode), until they break out or the host pardons them. The KIND is
+        stored WITH the term (`jail_kind`), so a later mode switch can
+        convert it instead of a reader reinterpreting it by the current
+        `play_mode`."""
         async with self._get_lock():
             self._ensure_loaded()
             if not self.running:
@@ -1238,9 +1249,11 @@ class JukeboxRunner:
             n = self.night
             if songs is None:
                 n.jail[phone] = n.plays + JAIL_UNTIL_FREED
+                n.jail_kind[phone] = "breakout"
                 self._log("a guest's songs got too many ▼; they sit out until they break out")
             else:
                 n.jail[phone] = n.plays + max(1, int(songs))
+                n.jail_kind[phone] = "timeout"
                 self._log(f"a guest's songs got too many ▼; they sit out {songs} song"
                           f"{'' if songs == 1 else 's'}")
             await self._persist()
@@ -1255,12 +1268,48 @@ class JukeboxRunner:
                 return self._refused("not_running")
             if not self._jailed(phone):
                 self.night.jail.pop(phone, None)
+                self.night.jail_kind.pop(phone, None)
                 return self._refused("not_jailed")
             del self.night.jail[phone]
+            self.night.jail_kind.pop(phone, None)
             self._log("a guest broke out of jail; their songs are back in line" if broke_out
                       else "the host pardoned a guest; their songs are back in line")
             await self._persist()
             return {"status": "pardoned"}
+
+    async def convert_jail_mode(self, credits: bool, free_jail_songs: int) -> None:
+        """A mode switch (services/jukebox/show.py's one validator path, the
+        PUT /api/jukebox/show route) converts jails already running — the
+        Credits tab's own promise, "it applies from the next thing a guest
+        does": switching credits OFF turns a credits-imposed jail (kind
+        "breakout", the JAIL_UNTIL_FREED sentinel) into an ordinary
+        time-out of `free_jail_songs` songs counted from NOW (or ends it at
+        once, with none set, when `free_jail_songs` is 0). Switching
+        credits ON does nothing here — a free-play time-out (kind
+        "timeout") keeps ending by itself and is never offered a
+        break-out, whatever `play_mode` reads now (guests.py's own
+        `jail_kind_of` always reads this STORED kind, never the current
+        mode)."""
+        async with self._get_lock():
+            self._ensure_loaded()
+            if not self.running or credits:
+                return
+            n = self.night
+            changed = False
+            for phone, kind in list(n.jail_kind.items()):
+                if kind != "breakout":
+                    continue
+                if free_jail_songs > 0:
+                    n.jail[phone] = n.plays + int(free_jail_songs)
+                    n.jail_kind[phone] = "timeout"
+                    self._log("a guest's jail became an ordinary time-out (credits switched off)")
+                else:
+                    n.jail.pop(phone, None)
+                    n.jail_kind.pop(phone, None)
+                    self._log("a guest's jail ended (credits switched off, no time-out set)")
+                changed = True
+            if changed:
+                await self._persist()
 
     # ── credits mode: play next, the line's prices, what a song paid (3.2) ──
 
@@ -1419,7 +1468,8 @@ class JukeboxRunner:
                 "is_playing": bool(on and getattr(track, "is_playing", False)),
                 "duration_ms": duration, "remaining_ms": remaining,
                 "next": items, "line": list(n.line), "set_items": n.set_items,
-                "plays": n.plays, "jail": dict(n.jail), "no_skip": list(n.no_skip)}
+                "plays": n.plays, "jail": dict(n.jail), "jail_kind": dict(n.jail_kind),
+                "no_skip": list(n.no_skip)}
 
     async def read_set(self, cfg: ProgramConfig, refresh: bool = False) -> tuple[dict, list[SetItem]]:
         """The set for `cfg`: the running night's own copy when the night is

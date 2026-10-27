@@ -420,6 +420,90 @@ def test_credits_jail_lasts_until_the_guest_breaks_out():
     _run(go())
 
 
+# ═══ 3b. a mode switch converts a jail already running (jail_kind) ═════════
+
+def _mode_switch_world(show: ShowConfig, monkeypatch) -> tuple[World, G.Guests, FastAPI]:
+    w = World(set_s=60, jb_s=60)
+    w.deps.load_config = store.load_config
+    w.runner = night_mod.JukeboxRunner(w.deps)
+    monkeypatch.setattr(night_mod, "runner", w.runner)
+    store.save_show(show)
+    g = G.Guests(G.GuestDeps(
+        state=lambda: w.runner.guest_state(count=24), token_ok=lambda t: t == TOKEN,
+        now_ms=lambda: int(w.clock.t * 1000), to_thread=_inline, rng=random.Random(1),
+        runner=lambda: w.runner, gateway=lambda: Catalog(w), library_search=Lib([]),
+        known=lambda uris: {u: False for u in uris}, clock=w.clock))
+    monkeypatch.setattr(G, "book", g)
+    app = FastAPI()
+    app.include_router(jukebox_guest_router.router)
+    app.include_router(jukebox_router.router)
+    return w, g, app
+
+
+def test_a_credits_jail_becomes_an_ordinary_time_out_when_free_play_turns_on(monkeypatch):
+    w, g, app = _mode_switch_world(_show(economy={"jail_scale": False, "skip_grace_s": 0}),
+                                   monkeypatch)
+    with TestClient(app) as c:
+        store.save_config(store.load_config().model_copy(update={"playlist": w.cfg.playlist}))
+        assert c.post("/api/jukebox/night/start", json={}).json()["status"] == "running"
+        ps = c.portal.call(_phones, g, 7)
+        ana = ps[0]
+        _gift(g, w, ana, 30)
+        c.portal.call(g.add, ana, jb_uri(0))
+        c.portal.call(g.add, ana, jb_uri(1))
+        c.portal.call(_until_playing, w, jb_uri(0))
+        for p in ps[1:6]:
+            c.portal.call(g.vote, p, "down")
+        view = c.portal.call(g.view, ana)[1]["view"]
+        assert view["me"]["jail"]["in"] and view["me"]["jail"]["kind"] == "breakout"
+        plays_before = w.runner.night.plays
+        r = c.put("/api/jukebox/show", json={"play_mode": "free"})
+        assert r.status_code == 200 and r.json()["show"]["play_mode"] == "free"
+        # the credits jail became a 5-song time-out (free_jail_songs' default) from this moment
+        assert w.runner.night.jail_kind.get(ana) == "timeout"
+        assert w.runner.night.jail[ana] == plays_before + 5
+        view = c.portal.call(g.view, ana)[1]["view"]
+        assert view["me"]["jail"]["kind"] == "timeout" and view["me"]["jail"]["songs_left"] == 5
+        assert not view["me"]["jail"]["can_break_out"]
+        host_row = next(p for p in g.phones()["phones"] if p["id"] == ana)
+        assert host_row["jail_kind"] == "timeout"             # the host's view agrees
+        c.portal.call(w.run, 60 * 7)                           # 5+ songs start: it ends on its own
+        assert ana not in w.runner.night.jail and ana not in w.runner.night.jail_kind
+
+
+def test_a_free_play_time_out_keeps_ending_on_its_own_when_credits_turns_on(monkeypatch):
+    free_show = ShowConfig(play_mode="free", free_skip_downs=10,
+                           economy=EconomyConfig(jail_scale=False, skip_grace_s=0))
+    w, g, app = _mode_switch_world(free_show, monkeypatch)
+    with TestClient(app) as c:
+        store.save_config(store.load_config().model_copy(update={"playlist": w.cfg.playlist}))
+        assert c.post("/api/jukebox/night/start", json={}).json()["status"] == "running"
+        ps = c.portal.call(_phones, g, 7)
+        ana, rest = ps[0], ps[1:6]
+        assert c.portal.call(g.add, ana, jb_uri(0))[0] == 200
+        assert c.portal.call(g.add, ana, jb_uri(1))[0] == 200
+        c.portal.call(_until_playing, w, jb_uri(0))
+        for p in rest:
+            c.portal.call(g.vote, p, "down")
+        view = c.portal.call(g.view, ana)[1]["view"]
+        assert view["me"]["jail"]["in"] and view["me"]["jail"]["kind"] == "timeout"
+        r = c.put("/api/jukebox/show", json={"play_mode": "credits"})
+        assert r.status_code == 200 and r.json()["show"]["play_mode"] == "credits"
+        # unchanged: a free-play time-out offers no break-out, whatever play_mode reads now
+        assert w.runner.night.jail_kind.get(ana) == "timeout"
+        view = c.portal.call(g.view, ana)[1]["view"]
+        assert view["me"]["jail"]["kind"] == "timeout" and not view["me"]["jail"]["can_break_out"]
+        _gift(g, w, ana, 20)
+        before = _bal(g, w, ana)
+        code, out = c.portal.call(g.break_out, ana)
+        assert code == 409 and out["reason"] == "not_breakout_jail"
+        assert _bal(g, w, ana) == before                       # never charged for it
+        host_row = next(p for p in g.phones()["phones"] if p["id"] == ana)
+        assert host_row["jail_kind"] == "timeout"              # the host's view agrees
+        c.portal.call(w.run, 60 * 7)                           # it still ends on its own
+        assert ana not in w.runner.night.jail and ana not in w.runner.night.jail_kind
+
+
 def test_the_host_keeps_a_song_from_skips_in_both_modes():
     async def go():
         w = await _night(set_s=300)

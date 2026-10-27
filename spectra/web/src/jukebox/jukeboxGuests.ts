@@ -39,9 +39,12 @@ function songs(n: number): string {
 
 export function phoneLine(p: GuestPhone): string {
   const parts = [PHONE_WORDS[phoneState(p)]];
-  if (p.jail_left) parts[0] = jailWords(p);
+  if (p.jail_left) {
+    parts[0] = jailWords(p);
+  } else if (p.jail_count && p.jail_count > 0 && p.jail_at) {
+    parts.push(`net ▼ ${p.jail_count} of ${p.jail_at}`);
+  }
   if (p.credits !== undefined) parts.push(`🎟 ${p.credits}`);
-  else if (p.jail_count && p.jail_count > 0 && p.jail_at) parts.push(`net ▼ ${p.jail_count} of ${p.jail_at}`);
   if (p.waiting) parts.push(`${p.waiting} in line`);
   if (p.played) parts.push(`${p.played} played`);
   if (p.votes) parts.push(`${p.votes} vote${p.votes === 1 ? '' : 's'}`);

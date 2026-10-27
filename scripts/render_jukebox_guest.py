@@ -206,14 +206,17 @@ class Scene:
                    ProgramItem("set", sets[3].uri, sets[3].title, sets[3].artist, 270000, set_index=3)]
         from services.jukebox.program import with_start_times
         jail: dict = {}
+        jail_kind: dict = {}
         if self.name == "jailed":
             # your song sits out a time-out: it keeps its place, the slots pass it
             line.append(LineEntry(id="e4", uri="spotify:track:jbx0000000000000000004",
                                   title="Mr. Brightside", artist="The Killers", duration_ms=222000,
                                   image="/__art/3.png", thumb="/__art/3.png", added_by=ME))
             jail = {ME: 13}
+            jail_kind = {ME: "timeout"}
         if self.name == "credits" and self.jailed:
             jail = {self.me: 10 ** 9}           # credits mode's jail: until they break out
+            jail_kind = {self.me: "breakout"}
         line += self.added
         nxt += [ProgramItem("jukebox", e.uri, e.title, e.artist, e.duration_ms, entry_id=e.id)
                 for e in self.added]
@@ -221,7 +224,7 @@ class Scene:
                 "now": now, "is_playing": True,
                 "duration_ms": duration, "remaining_ms": remaining,
                 "next": with_start_times(nxt, remaining), "line": line, "set_items": sets,
-                "plays": 10, "jail": jail, "no_skip": []}
+                "plays": 10, "jail": jail, "jail_kind": jail_kind, "no_skip": []}
 
 
 class Catalog:
