@@ -205,5 +205,18 @@ ok(L.addOffer({ price: 7, afford: true }).label === 'Add · 7' && !L.addOffer({ 
    && L.addOffer({}).label === 'Add', 'Add shows the price in credits mode, plain in free play');
 ok(L.TIP_UNDO_MS === 3000, 'a tip waits three seconds for its undo');
 
+console.log('\nthe Board (phase 3)');
+ok(L.boardSongLine({ by: { kind: 'guest', name: 'Ana' }, mine: false, ups: 3, plays: 1 }) === 'Added by Ana · ▲ 3',
+   `a board song: who added it and its ▲ (${L.boardSongLine({ by: { kind: 'guest', name: 'Ana' }, mine: false, ups: 3, plays: 1 })})`);
+ok(L.boardSongLine({ by: { kind: 'guest', name: 'Ana' }, mine: true, ups: 2, plays: 2 }).endsWith('▲ 2 · played 2 times')
+   && L.boardSongLine({ by: { kind: 'guest', name: 'Ana' }, mine: true, ups: 2, plays: 2 }).startsWith(L.byLine({ kind: 'guest', name: 'Ana' }, true)),
+   'your own song reads as yours, and a song played twice says so');
+ok(JSON.stringify(L.tabsFor({ add: true, board: true, credits: true, shop: true })) === '["now","queue","add","shop","board"]',
+   'the bottom bar: Now · Queue · Add · Shop · Board (the plan\'s §7.1 order)');
+ok(L.peopleCount(1, { unit: 'songs voted on', unit_one: 'song voted on' }) === '1 song voted on'
+   && L.peopleCount(3, { unit: 'songs voted on', unit_one: 'song voted on' }) === '3 songs voted on',
+   'a people board counts in words: one song, three songs');
+ok(L.BOARD_POLL_MS >= 10000, 'the Board asks again at most every ten seconds or so');
+
 console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);
 process.exit(failures === 0 ? 0 : 1);

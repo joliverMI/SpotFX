@@ -183,6 +183,13 @@ export interface Refusal { status: 'refused'; reason: string; detail: string; pr
 /** The Shop (credits): balance, how it was made, prices, history. */
 export interface HistoryRow { seq: number; at_ms: number; kind: string; what: string; delta: number; detail: string }
 export interface ShopTile { id: string; title: string; price: number | null; note: string }
+/** The Board (report §1 rule 11, §2.2): songs ranked by ▲, with who added
+ *  each; people boards only when the host turns them on. */
+export interface BoardSong extends Song { ups: number; downs: number; plays: number }
+export interface PeopleBoard { id: string; title: string; unit: string; unit_one?: string; shown: boolean;
+  rows: { name: string; value: number }[] }
+export interface Board { title: string; empty: string; songs: BoardSong[]; people: PeopleBoard[] }
+
 export interface WalletView {
   balance: number;
   earned: { free: number; votes: number; 'your songs': number; tips: number; spent: number; refunded: number };

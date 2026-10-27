@@ -398,6 +398,15 @@ class ShowConfig(_Model):
     # plan's §4 default is Credits ("defaults are the tuned values"); free play
     # hides every price, the credits chip and the Shop (§6)
     play_mode: PlayMode = "credits"
+    # the board (report §1 rule 11, §2.2, §4's Board card; D1 (a)): the
+    # guests' Board tab shows "Tonight's top songs"; the PEOPLE boards are his
+    # call and ship off (the "a game" flag); "On the TV" is the master's own
+    # full-screen board page (services/jukebox/board.py)
+    board_on: bool = True
+    board_top_pickers: bool = False
+    board_top_voters: bool = False
+    board_most_generous: bool = False
+    board_on_tv: bool = False
 
 
 # ── the guest link (N1: services/jukebox/guest_link.py) ──────────────────────

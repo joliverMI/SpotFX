@@ -275,7 +275,8 @@ def build_server(tmp: Path, scene: Scene):
     from services.jukebox.library import Song
     ends = datetime.now(guests.HOUSE_TZ) + timedelta(hours=3)
     # free play for the phase-2 scenes; credits_pass switches to credits and back
-    store.save_show(ShowConfig(night_ends=f"{ends.hour:02d}:{ends.minute:02d}", play_mode="free"))
+    store.save_show(ShowConfig(night_ends=f"{ends.hour:02d}:{ends.minute:02d}", play_mode="free",
+                               board_top_voters=True))   # one people board on, to draw it
     catalog = Catalog()
     library = [catalog.songs[0]["uri"], catalog.songs[6]["uri"]]
     book = guests.Guests(guests.GuestDeps(
@@ -716,6 +717,14 @@ async def run() -> int:
                 if await evaluate(ws, nid, "!!document.querySelector('.g-move-btn')"):
                     failures.append(f"{name}: ⇅ is offered during a time-out")
                 await check(phone, "13-time-out-queue")
+                # ── the Board: tonight's top songs (the phone's own ▲ above is on it) ──
+                await tap(".g-tab:last-child")
+                if not await wait_for("document.querySelectorAll('.g-board-songs li').length >= 1"
+                                      " && !!document.querySelector('.g-board-people')", 6):
+                    failures.append(f"{name}: the Board tab shows no songs or no people board")
+                elif await evaluate(ws, nid, "!document.querySelector('.g-board-songs li a[href^=\"https://open.spotify.com/\"]')"):
+                    failures.append(f"{name}: a song on the Board has no Open Spotify link")
+                await check(phone, "22-board")
                 # ── credits mode (PR 3.2) ──
                 await credits_pass(phone)
                 # ── no night ──

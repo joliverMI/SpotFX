@@ -10,14 +10,16 @@
 import { useState } from 'react';
 import InfoTip from '../components/InfoTip';
 import { useToast } from '../components/Toast';
+import BoardLists from './BoardLists';
 import { lineRows, phoneActions, phoneLine, type PhoneAction } from './jukeboxGuests';
 import {
-  useGuests, useHoldEntry, useHostPhone, useJukeboxShow, usePlayNext, useRemoveEntry, useSaveShow,
-  useSkipLock,
+  useGuests, useHoldEntry, useHostPhone, useJukeboxBoard, useJukeboxShow, usePlayNext, useRemoveEntry,
+  useSaveShow, useSkipLock,
 } from './queries';
 import type { GuestField, GuestPhone, JukeboxStatus, ShowConfig } from './types';
 
 const FREE_PLAY = 'Free play';
+const BOARD = 'Board';
 const ACTION_WORDS: Record<PhoneAction, string> = {
   approve: 'Approve', pardon: 'Pardon', block: 'Block', unblock: 'Unblock', lock: 'Lock name',
   unlock: 'Unlock name', rename: 'Rename',
@@ -31,6 +33,7 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
   const toast = useToast();
   const running = !!status?.running;
   const guestsQ = useGuests(running);
+  const boardQ = useJukeboxBoard(false);
   const showQ = useJukeboxShow();
   const save = useSaveShow();
   const host = useHostPhone();
@@ -48,8 +51,10 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
   const now = status?.running ? status.now : null;
   const nowLocked = !!now?.uri && noSkip.includes(now.uri);
   const allFields = showQ.data?.guest_fields ?? [];
-  const fields = allFields.filter((f) => f.card !== FREE_PLAY);
+  const fields = allFields.filter((f) => f.card !== FREE_PLAY && f.card !== BOARD);
   const freeFields = allFields.filter((f) => f.card === FREE_PLAY);
+  const boardFields = allFields.filter((f) => f.card === BOARD);
+  const board = boardQ.data?.board;
   const ruleRows = (list: GuestField[]) => show && list.map((f) => (
     <RuleRow key={f.key} f={f} show={show}
       onSave={(v) => save.mutate({ [f.key]: v }, { onError })}
@@ -86,6 +91,21 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
         )}
         {show ? <div className="jukebox-settings">{ruleRows(freeFields)}</div>
           : <p className="jukebox-muted">Reading the rules…</p>}
+      </section>
+
+      <section className="card jukebox-card" data-testid="jukebox-board-card">
+        <div className="jukebox-card-head">
+          <InfoTip topic="jukebox-board"
+            text="The guests' Board tab: Tonight's top songs — songs, not people, ranked by ▲ with who added each. The people boards (top pickers, top voters, most generous) ship off: ranking people reads like a game, so they are your call.">
+            <span className="card-title jukebox-card-title">Board</span>
+          </InfoTip>
+          <button type="button" onClick={() => window.open('/spectra/jukebox/tv', 'jukebox-tv')}
+                  title="The board full screen, for your TV or the wall kiosk">Open the TV page</button>
+        </div>
+        {show ? <div className="jukebox-settings">{ruleRows(boardFields)}</div>
+          : <p className="jukebox-muted">Reading the rules…</p>}
+        {board ? <BoardLists board={board} people={board.people} />
+          : <p className="jukebox-muted">{boardQ.data && !boardQ.data.running ? 'The board fills in during a night.' : 'Reading the board…'}</p>}
       </section>
 
       <section className="card jukebox-card" data-testid="jukebox-guest-line">

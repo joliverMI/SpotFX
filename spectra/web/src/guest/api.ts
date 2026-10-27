@@ -2,7 +2,7 @@
 // (jukebox_guest/app.py's /g/ routes — the only ones it answers). The phone
 // is named by its cookie; a copy of its code in this phone's own storage
 // rides along so a cleared cookie doesn't make it a stranger.
-import type { Refusal, SearchResult, View, WalletView } from './types';
+import type { Board, Refusal, SearchResult, View, WalletView } from './types';
 
 const PHONE_KEY = 'jukebox.phone';
 
@@ -17,6 +17,12 @@ export function storePhone(id: string): void {
 export interface Found { results: SearchResult[]; more: boolean; next_offset: number; query: string }
 export interface Added { entry_id: string; title: string; starts_in_ms: number | null }
 export interface Bumped { place: number | null; starts_in_ms: number | null }
+
+/** The Board's answer, from a board call's data. */
+export function boardOf(data: Record<string, unknown>): Board | null {
+  const b = data.board as Board | undefined;
+  return b && Array.isArray(b.songs) && Array.isArray(b.people) ? b : null;
+}
 
 /** The Shop's answer, from a wallet call's data. */
 export function walletOf(data: Record<string, unknown>): WalletView | null {
@@ -82,5 +88,6 @@ export const api = {
     call('POST', '/g/next', price === undefined ? { entry_id } : { entry_id, price }),
   breakOut: () => call('POST', '/g/breakout', {}),
   wallet: () => call('GET', '/g/wallet'),
+  board: () => call('GET', '/g/board'),
   view: () => call('GET', '/g/view'),
 };

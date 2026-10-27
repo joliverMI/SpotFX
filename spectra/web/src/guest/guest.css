@@ -350,3 +350,14 @@ button.g-strip-btn { box-sizing: border-box; width: calc(100% - 2 * var(--gutter
 .g-history-what { min-width: 0; }
 .g-history-delta { font-weight: 800; color: var(--ok); font-variant-numeric: tabular-nums; flex: none; }
 .g-history-delta.g-neg { color: var(--danger); }
+
+/* the Board (report §1 rule 11, §2.2): songs ranked by ▲, people boards when on */
+.g-board { display: flex; flex-direction: column; gap: 10px; }
+.g-board-place { flex: none; width: 22px; text-align: center; font-weight: 800; color: var(--muted);
+                 font-variant-numeric: tabular-nums; }
+.g-board-people { display: flex; flex-direction: column; gap: 6px; }
+.g-board-names { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.g-board-names li { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px;
+                    border-radius: 8px; background: var(--surface); font-size: 14px; }
+.g-board-names li span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.g-board-names li span:last-child { flex: none; font-variant-numeric: tabular-nums; }

@@ -1064,6 +1064,61 @@
    "min": 0,
    "max": 15,
    "choices": null
+  },
+  {
+   "key": "board_on",
+   "card": "Board",
+   "label": "Show the board (Tonight's top songs)",
+   "unit": "",
+   "kind": "bool",
+   "default": true,
+   "min": null,
+   "max": null,
+   "choices": null
+  },
+  {
+   "key": "board_top_pickers",
+   "card": "Board",
+   "label": "People board: top pickers",
+   "unit": "",
+   "kind": "bool",
+   "default": false,
+   "min": null,
+   "max": null,
+   "choices": null
+  },
+  {
+   "key": "board_top_voters",
+   "card": "Board",
+   "label": "People board: top voters",
+   "unit": "",
+   "kind": "bool",
+   "default": false,
+   "min": null,
+   "max": null,
+   "choices": null
+  },
+  {
+   "key": "board_most_generous",
+   "card": "Board",
+   "label": "People board: most generous (credits mode)",
+   "unit": "",
+   "kind": "bool",
+   "default": false,
+   "min": null,
+   "max": null,
+   "choices": null
+  },
+  {
+   "key": "board_on_tv",
+   "card": "Board",
+   "label": "On the TV",
+   "unit": "",
+   "kind": "bool",
+   "default": false,
+   "min": null,
+   "max": null,
+   "choices": null
   }
  ]
 }

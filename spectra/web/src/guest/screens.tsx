@@ -5,13 +5,14 @@
 // on the songs you may move), Add, and the Shop (credits: the balance, what
 // things cost, how to earn, the history).
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MySong, NextSong, RunningView, SearchResult, View, WalletView } from './types';
+import type { Board, MySong, NextSong, RunningView, SearchResult, View, WalletView } from './types';
 import {
-  SEARCH_DEBOUNCE_MS, SEARCH_MIN, addOffer, addStatus, addedText, badges, bumpOffer, bumpsLine,
-  byLine, credits, jailCard, mmss, progressNow, signed, skipLine, skipOffer, tipOffer,
+  BOARD_POLL_MS, SEARCH_DEBOUNCE_MS, SEARCH_MIN, addOffer, addStatus, addedText, badges, boardSongLine,
+  bumpOffer, bumpsLine, byLine, credits, jailCard, mmss, peopleCount, progressNow, signed, skipLine,
+  skipOffer, tipOffer,
 } from './logic';
 import { Art, MyRow, OpenSpotify, SongRow, SpotifyIcon } from './bits';
-import { api, walletOf, type Found } from './api';
+import { api, boardOf, walletOf, type Found } from './api';
 
 export function Welcome({ view, busy, onShuffle, onGo, error }: {
   view: RunningView; busy: boolean; error: string;
@@ -420,6 +421,60 @@ export function ShopScreen({ view, reload }: { view: RunningView; reload: number
           ) : <p className="g-muted">Nothing yet.</p>}
         </>
       )}
+    </div>
+  );
+}
+
+/** The Board (report §1 rule 11, §2.2): "Tonight's top songs" — songs, not
+ *  people, ranked by ▲ with who added each — and the people boards only when
+ *  the host has turned them on. Asked again every BOARD_POLL_MS while open. */
+export function BoardScreen() {
+  const [board, setBoard] = useState<Board | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let live = true;
+    const load = () => void api.board().then((r) => {
+      if (!live) return;
+      if (r.ok) { setBoard(boardOf(r.data)); setError(''); }
+      else setError(r.refusal.detail);
+    });
+    load();
+    const t = window.setInterval(load, BOARD_POLL_MS);
+    return () => { live = false; window.clearInterval(t); };
+  }, []);
+  if (error) return <div className="g-board"><p className="g-error" role="alert">{error}</p></div>;
+  if (!board) return <div className="g-board"><p className="g-muted">Loading the board…</p></div>;
+  return (
+    <div className="g-board">
+      <h2 className="g-h2">{board.title}</h2>
+      {board.songs.length ? (
+        <ol className="g-list g-board-songs">
+          {board.songs.map((s, i) => (
+            <li key={s.uri} className={`g-row${s.mine ? ' g-row-mine' : ''}`}>
+              <span className="g-board-place" aria-hidden="true">{i + 1}</span>
+              <Art song={s} size="small" />
+              <div className="g-row-text">
+                <div className="g-row-title">{s.title || 'A song'}</div>
+                <div className="g-row-artist">{s.artist}</div>
+                <div className="g-row-meta">{boardSongLine(s)}</div>
+              </div>
+              <OpenSpotify song={s} label={false} />
+            </li>
+          ))}
+        </ol>
+      ) : <p className="g-muted">{board.empty}</p>}
+      {board.people.map((p) => (
+        <section key={p.id} className="g-board-people" aria-label={p.title}>
+          <h2 className="g-h2">{p.title}</h2>
+          {p.rows.length ? (
+            <ol className="g-board-names">
+              {p.rows.map((r) => (
+                <li key={r.name}><span>{r.name}</span><span className="g-muted">{peopleCount(r.value, p)}</span></li>
+              ))}
+            </ol>
+          ) : <p className="g-muted">Nobody yet.</p>}
+        </section>
+      ))}
     </div>
   );
 }

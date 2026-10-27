@@ -250,6 +250,7 @@ SENTENCES: dict[str, str] = {
     "not_jailed": "That phone isn't in a time-out.",
     # credits mode (PR 3.2)
     "credits_off": "Credits are off tonight — it's free play.",
+    "board_off": "The board is off tonight.",
     "skip_locked": "The host has kept this song from skips.",
     "own_skip": "It's your song — you can't skip it.",
     "skip_grace": "No skips in a song's first {s} seconds.",
@@ -549,7 +550,7 @@ def build_view(book: GuestBook, phone_id: str, gs: dict, now_ms: int,
                         "at": economy.jail_threshold(crowd, cfg),
                         "on": bool(cr) or bool(show.free_jail_songs)},
                "bumps": bumps_state(me, show, now_ms)},
-        "features": {"add": True, "board": False, "credits": bool(cr), "shop": bool(cr)},
+        "features": {"add": True, "board": show.board_on, "credits": bool(cr), "shop": bool(cr)},
         "requests": {**reqs, "max_waiting": cfg.max_waiting,
                      "waiting": mine_waiting},
         "house_rules": house_rules(show), "privacy": PRIVACY,
@@ -1564,6 +1565,56 @@ class Guests:
             await self._save()
             gs = self.deps.state()
             return self._ok(book, phone, gs, broke_out={"paid": fee})
+
+    # ── the board (report §1 rule 11, §2.2; services/jukebox/board.py) ──────
+
+    def _tips_given(self, gs: dict, show: ShowConfig) -> Optional[dict[str, int]]:
+        """Credits each phone gave as tips tonight — only in credits mode
+        (free play has no tips, so "most generous" isn't a board there)."""
+        if show.play_mode != "credits":
+            return None
+        from services.jukebox import board
+        return board.tips_given(self._wallet_for(gs["night_id"], show).led.entries)
+
+    async def board_view(self, phone: Any) -> tuple[int, dict]:
+        """The guests' Board tab: tonight's top songs, and the people boards
+        his switches turn on (they ship off)."""
+        from services.jukebox import board
+        gate, gs, book = self._gate(phone)
+        if gate:
+            return gate
+        show = self.deps.show()
+        if not show.board_on:
+            return refusal("board_off", 409)
+        tips = self._tips_given(gs, show) if show.board_most_generous else None
+        return 200, {"status": "ok", "board": board.build_board(book, gs, show, tips, viewer=phone)}
+
+    def host_board(self) -> dict:
+        """The board for the master's own pages (the Guests tab's Board card,
+        the TV page): the songs, and EVERY people board, each marked with
+        whether guests see it. Names only, never a phone's id."""
+        from services.jukebox import board
+        gs = self._running()
+        show = self.deps.show()
+        settings = {k: getattr(show, k) for k in ("board_on", "board_top_pickers",
+                                                  "board_top_voters", "board_most_generous",
+                                                  "board_on_tv")}
+        if gs is None:
+            return {"running": False, "settings": settings}
+        book = self._book_for(gs["night_id"])
+        out = board.build_board(book, gs, show, self._tips_given(gs, show),
+                                every_people_board=True)
+        now = gs.get("now")
+        now_out = None
+        if getattr(now, "kind", "") in ("set", "jukebox") and getattr(now, "uri", ""):
+            info = board.song_info(gs).get(now.uri, {})
+            adder = book.play_by.get(play_key(now)) or info.get("added_by")
+            names = {pid: p.name for pid, p in book.phones.items()}
+            now_out = {"uri": now.uri, "title": now.title or info.get("title", ""),
+                       "artist": info.get("artist", ""), "image": info.get("image", ""),
+                       "thumb": info.get("thumb", ""), "open_url": open_url(now.uri),
+                       "by": board._by(adder, names), **tally(book, play_key(now))}
+        return {"running": True, "settings": settings, "board": out, "now": now_out}
 
     async def wallet_view(self, phone: Any) -> tuple[int, dict]:
         """The Shop: the balance and how it was made, what each thing costs

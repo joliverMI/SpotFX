@@ -41,7 +41,7 @@ ROUTES: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/g/hello"), ("POST", "/g/join"), ("POST", "/g/name"), ("POST", "/g/vote"),
     ("POST", "/g/search"), ("POST", "/g/add"), ("POST", "/g/bump"), ("GET", "/g/view"),
     ("POST", "/g/tip"), ("POST", "/g/skip"), ("POST", "/g/next"), ("POST", "/g/breakout"),
-    ("GET", "/g/wallet"),
+    ("GET", "/g/wallet"), ("GET", "/g/board"),
 })
 FORWARDS: dict[str, tuple[str, str]] = {
     "hello": ("POST", "/api/jukebox/guest/hello"),
@@ -56,6 +56,7 @@ FORWARDS: dict[str, tuple[str, str]] = {
     "next": ("POST", "/api/jukebox/guest/next"),
     "breakout": ("POST", "/api/jukebox/guest/breakout"),
     "wallet": ("GET", "/api/jukebox/guest/wallet"),
+    "board": ("GET", "/api/jukebox/guest/board"),
     "view": ("GET", "/api/jukebox/guest/view"),
 }
 STATIC_FILES = {"/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
@@ -329,6 +330,10 @@ def create_app(*, spotfx_url: str = SPOTFX_URL, key_file: Path = guest_key.DEFAU
     @app.get("/g/wallet")
     async def wallet(request: Request) -> Response:
         return await _phone_call(request, "wallet", "view", ())
+
+    @app.get("/g/board")
+    async def board(request: Request) -> Response:
+        return await _phone_call(request, "board", "view", ())
 
     @app.get("/g/view")
     async def view(request: Request) -> Response:

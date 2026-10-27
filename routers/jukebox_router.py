@@ -78,6 +78,9 @@ process on its own port (phase 2) and never reaches these routes.
                                       lock, songs, votes
   POST   /api/jukebox/guests/{phone}  {approved?, blocked?, name_locked?,
                                       name?} — the host's controls over a phone
+  GET    /api/jukebox/board           the board (services/jukebox/board.py):
+                                      tonight's top songs, every people board
+                                      marked shown or not, the song playing
 
 A refusal is a RECORDED outcome answered with 200 and its reason
 (`{"status": "refused", "reason": ..., "detail": ...}`), never a silence —
@@ -245,6 +248,14 @@ async def post_skip_lock(body: SkipLockBody) -> dict:
 @router.get("/guests")
 async def get_guests() -> dict:
     return guests.book.phones()
+
+
+@router.get("/board")
+async def get_board() -> dict:
+    """The board (services/jukebox/board.py) for his own pages: the Guests
+    tab's Board card and the TV page — every people board, each marked with
+    whether guests see it, and the song playing with its votes."""
+    return guests.book.host_board()
 
 
 @router.post("/guests/{phone}")

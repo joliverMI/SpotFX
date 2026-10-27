@@ -219,6 +219,27 @@ export interface GuestPhone {
   credits?: number;
 }
 
+/** The board (SpotFX services/jukebox/board.py): tonight's top songs and
+ *  every people board, each marked with whether guests see it. */
+export interface BoardBy { kind: 'set' | 'host' | 'guest'; name: string }
+export interface BoardSong {
+  uri: string; title: string; artist: string; image: string; thumb: string; open_url: string;
+  by: BoardBy; ups: number; downs: number; plays: number;
+}
+export interface PeopleBoard { id: string; title: string; unit: string; unit_one?: string; shown: boolean;
+  rows: { name: string; value: number }[] }
+export interface BoardSettings {
+  board_on: boolean; board_top_pickers: boolean; board_top_voters: boolean;
+  board_most_generous: boolean; board_on_tv: boolean;
+}
+export interface JukeboxBoardRead {
+  running: boolean;
+  settings: BoardSettings;
+  board?: { title: string; empty: string; songs: BoardSong[]; people: PeopleBoard[] };
+  now?: { uri: string; title: string; artist: string; image: string; thumb: string;
+          open_url: string; by: BoardBy; up: number; down: number } | null;
+}
+
 export interface GuestsRead {
   running: boolean;
   phones: GuestPhone[];

@@ -329,3 +329,20 @@ def test_the_play_mode_asks_first_and_is_validated_by_spotfx(spotfx):
     assert r["status"] == "rejected" and "play_mode" in r["reason"]
     assert store.load_show().play_mode == "free"
     assert not any("skip_lock" in name or "lock" in name for name in jc.OPERATIONS)
+
+
+def test_the_board_switches_are_settings_sonic_asks_before_changing(spotfx):
+    """The board (§4's Board card): Sonic reads every switch and changes one
+    only on his yes — the people boards ship off (D1, the plan's §2.2 flag)."""
+    rules = _run(jc._op_get_jukebox_settings())["guest_rules"]
+    assert (rules["board_on"], rules["board_top_pickers"], rules["board_top_voters"],
+            rules["board_most_generous"], rules["board_on_tv"]) == (True, False, False, False, False)
+    ask = _run(jc._op_set_jukebox_setting("board_top_voters", True))
+    assert ask["status"] == "needs_confirmation" and not _writes(spotfx)
+    done = _run(jc._op_set_jukebox_setting("board_top_voters", True, confirm_id=ask["confirm_id"]))
+    assert done["status"] == "applied" and store.load_show().board_top_voters is True
+    r = _run(jc._op_set_jukebox_setting("board_on_tv", "sometimes"))
+    assert r["status"] == "rejected" and "board_on_tv" in r["reason"]
+    assert {k for k in jc.GUEST_RULE_KEYS if k.startswith("board_")} == {
+        k for k, card, *_ in show.GUEST_FIELDS if card == "Board"}
+
