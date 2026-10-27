@@ -265,6 +265,55 @@ def test_a_close_that_fails_stays_marked_open_and_is_retried(world):
     assert not store.load_guest_link()[1].funnel_open and world.ts.published() == []
 
 
+def test_a_crash_right_after_the_open_command_leaves_it_marked_open_and_restart_closes_it(world):
+    """The durable record must be written BEFORE the real `tailscale funnel
+    --bg` call, not after its own read-back check, so a crash in that
+    window still leaves `funnel_open` true on disk — and a restarted
+    process (a fresh GuestLink reading only the store) can close the real
+    Funnel it left behind."""
+    _enable()
+    seen = {}
+
+    def run(argv, timeout):
+        rc, out, err = world.ts.run(argv, timeout)
+        if argv[1] == "funnel" and "--bg" in argv:
+            seen["persisted_before_readback"] = store.load_guest_link()[1].funnel_open
+        return rc, out, err
+    world.link.deps.run = run
+
+    _run(world.runner.start())
+    assert seen["persisted_before_readback"] is True
+    assert world.ts.published() == [f"{HOST}:8443"]
+
+    restarted = gl.GuestLink(gl.GuestLinkDeps(
+        run=world.ts.run, to_thread=_inline, now_ms=lambda: int(world.clock.t * 1000),
+        night_running=lambda: False, probe=lambda url, timeout: 404))
+    assert "closed" in _run(restarted.reconcile())
+    assert not store.load_guest_link()[1].funnel_open and world.ts.published() == []
+
+
+def test_a_stale_open_marker_with_nothing_published_is_cleared_not_retried_forever(world):
+    """A marker left `funnel_open=True` by a crash before anything was ever
+    actually published must self-heal even when its own close command
+    fails — never stay stuck retrying a close against a Funnel that isn't
+    there."""
+    _enable()
+    cfg, st = store.load_guest_link()
+    st.funnel_open, st.opened_ms, st.opened_for_night, st.host = (
+        True, int(world.clock.t * 1000), "n0", HOST)
+    store.save_guest_link(cfg, st)
+    assert world.ts.published() == []                               # nothing was ever opened
+
+    world.ts.fail["funnel --https=8443"] = (1, "", "no such funnel")
+    said = _run(world.link.reconcile())
+    assert said is not None and "closed" in said
+    assert not store.load_guest_link()[1].funnel_open
+
+    calls_before = len(world.ts.calls)
+    assert _run(world.link.reconcile()) is None
+    assert len(world.ts.calls) == calls_before                      # never retried again
+
+
 def test_the_token_rotates_only_between_nights(world):
     _enable()
     first = _run(world.link.rotate())

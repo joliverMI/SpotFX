@@ -203,6 +203,19 @@ def serve_conflict(status: Any, cfg: GuestLinkConfig) -> Optional[str]:
     return None
 
 
+def port_published(status: Any, port: int) -> bool:
+    """Whether Funnel's own status (`judge_status`'s shape) shows anything
+    at all published on `port` — used to tell "a crash left the marker set
+    but nothing ever went out" from "it really is still open"."""
+    if not isinstance(status, dict):
+        return True   # couldn't be read: assume it might still be published
+    allowed = (status.get("AllowFunnel") or {})
+    if any(_port_of(hp) == port for hp, on in allowed.items() if on):
+        return True
+    web = (status.get("Web") or {})
+    return any(_port_of(hp) == port for hp in web)
+
+
 def judge_probe(results: dict[str, Optional[int]]) -> dict:
     """The public address asked for the master's and SPECTRA's own paths:
     none may answer 200 (the guest app answers only its own routes)."""
@@ -462,15 +475,17 @@ class GuestLink:
         conflict = serve_conflict(before, cfg)
         if conflict:
             return self._record(cfg, st, "open", False, f"the guest link didn't open: {conflict}")
+        st.funnel_open, st.opened_ms, st.opened_for_night, st.host = (
+            True, self.deps.now_ms(), night_id, host)
+        store.save_guest_link(cfg, st)
         try:
             rc, out, err = await self._run(open_argv(cfg))
         except Exception as exc:                                  # noqa: BLE001
             rc, out, err = -1, "", f"{type(exc).__name__}: {exc}"
         if rc != 0:
+            st.funnel_open, st.opened_ms, st.opened_for_night = False, None, ""
             return self._record(cfg, st, "open", False,
                                 f"the guest link didn't open: {(err or out or f'exit {rc}').strip()}")
-        st.funnel_open, st.opened_ms, st.opened_for_night, st.host = (
-            True, self.deps.now_ms(), night_id, host)
         after, _ = await self._status(cfg)
         checks = judge_status(after, cfg)
         if not all(c["ok"] for c in checks):
@@ -488,6 +503,12 @@ class GuestLink:
         except Exception as exc:                                  # noqa: BLE001
             rc, out, err = -1, "", f"{type(exc).__name__}: {exc}"
         if rc != 0:
+            status, _ = await self._status(cfg)
+            if status is not None and not port_published(status, cfg.public_port):
+                st.funnel_open = False
+                st.opened_ms = None
+                return self._record(cfg, st, "close", True,
+                                    f"guest link closed ({why}): nothing was published")
             # left marked open: the supervised check tries again
             return self._record(cfg, st, "close", False,
                                 f"the guest link couldn't close ({why}): "
