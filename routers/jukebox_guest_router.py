@@ -11,6 +11,7 @@ directly, and a wrong or missing key is a plain 401.
   POST /api/jukebox/guest/vote    {phone, vote: up|down|none}
   POST /api/jukebox/guest/search  {phone, q, offset}     his library first, then Spotify
   POST /api/jukebox/guest/add     {phone, uri}           a song into the line (fair order)
+  POST /api/jukebox/guest/bump    {phone, entry_id, direction: up|down}  free play's bump
   GET  /api/jukebox/guest/view?phone=                    the screen, again
 
 What each does is services/jukebox/guests.py; every answer carries the
@@ -95,6 +96,12 @@ class AddBody(BaseModel):
     uri: str = Field(max_length=200)
 
 
+class BumpBody(BaseModel):
+    phone: Optional[str] = Phone
+    entry_id: str = Field(max_length=40)
+    direction: str = Field(max_length=8)
+
+
 @router.post("/hello")
 async def post_hello(body: HelloBody, request: Request) -> JSONResponse:
     _check(request)
@@ -129,6 +136,12 @@ async def post_search(body: SearchBody, request: Request) -> JSONResponse:
 async def post_add(body: AddBody, request: Request) -> JSONResponse:
     _check(request)
     return _answer(await guests.book.add(body.phone, body.uri))
+
+
+@router.post("/bump")
+async def post_bump(body: BumpBody, request: Request) -> JSONResponse:
+    _check(request)
+    return _answer(await guests.book.bump(body.phone, body.entry_id, body.direction))
 
 
 @router.get("/view")

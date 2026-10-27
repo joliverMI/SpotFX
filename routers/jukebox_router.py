@@ -222,6 +222,7 @@ class PhoneBody(BaseModel):
     blocked: Optional[bool] = None
     name_locked: Optional[bool] = None
     name: Optional[str] = Field(default=None, max_length=64)
+    pardon: bool = False                  # end its time-out now (free play's jail, PR 2.3)
 
 
 @router.post("/line/{entry_id}/hold")
@@ -237,7 +238,8 @@ async def get_guests() -> dict:
 @router.post("/guests/{phone}")
 async def post_guest(phone: str, body: PhoneBody) -> JSONResponse:
     code, out = await guests.book.host_set(phone, approved=body.approved, blocked=body.blocked,
-                                           name_locked=body.name_locked, name=body.name)
+                                           name_locked=body.name_locked, name=body.name,
+                                           pardon=body.pardon)
     return JSONResponse(out, status_code=code)
 
 

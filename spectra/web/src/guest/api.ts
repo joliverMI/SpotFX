@@ -1,4 +1,4 @@
-// The guest page's five calls, all to the guest app on this same origin
+// The guest page's calls, all to the guest app on this same origin
 // (jukebox_guest/app.py's /g/ routes — the only ones it answers). The phone
 // is named by its cookie; a copy of its code in this phone's own storage
 // rides along so a cleared cookie doesn't make it a stranger.
@@ -16,9 +16,10 @@ export function storePhone(id: string): void {
 
 export interface Found { results: SearchResult[]; more: boolean; next_offset: number; query: string }
 export interface Added { entry_id: string; title: string; starts_in_ms: number | null }
+export interface Bumped { place: number | null; starts_in_ms: number | null }
 
 export type Answer =
-  | { ok: true; view: View; phone?: string; found?: Found; added?: Added }
+  | { ok: true; view: View; phone?: string; found?: Found; added?: Added; bumped?: Bumped }
   | { ok: false; status: number; refusal: Refusal };
 
 const UNREACHABLE: Refusal = {
@@ -47,7 +48,9 @@ async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promi
     const view = (d.state === 'idle' ? d : d.view) as View;
     const found = Array.isArray(d.results) ? (d as unknown as Found) : undefined;
     const added = d.added && typeof d.added === 'object' ? (d.added as Added) : undefined;
-    return { ok: true, view, phone: typeof d.phone === 'string' ? d.phone : undefined, found, added };
+    const bumped = d.bumped && typeof d.bumped === 'object' ? (d.bumped as Bumped) : undefined;
+    return { ok: true, view, phone: typeof d.phone === 'string' ? d.phone : undefined, found, added,
+             bumped };
   }
   if (typeof d.reason === 'string' && typeof d.detail === 'string') {
     return { ok: false, status: r.status, refusal: d as unknown as Refusal };
@@ -63,5 +66,6 @@ export const api = {
   vote: (vote: 'up' | 'down' | 'none') => call('POST', '/g/vote', { vote }),
   search: (q: string, offset = 0) => call('POST', '/g/search', { q, offset }),
   add: (uri: string) => call('POST', '/g/add', { uri }),
+  bump: (entry_id: string, direction: 'up' | 'down') => call('POST', '/g/bump', { entry_id, direction }),
   view: () => call('GET', '/g/view'),
 };

@@ -155,6 +155,9 @@ class LineEntry(_Model):
     # The lights already know it (its audio shape is captured): the guest
     # page's "Ready" badge. Not `ready`, which is phase 4's commit gate.
     known: bool = False
+    # Places other guests have bumped it back tonight (free play's bumps,
+    # PR 2.3): never more than the show's `bump_down_max_places`.
+    pushed_back: int = 0
     ready: bool = True
     state: LineState = "queued"
     # A committed song he removed: it is already in Spotify's queue and can't
@@ -182,13 +185,16 @@ class Cursor(_Model):
 
 
 class NowItem(_Model):
-    """What is playing, as the program sees it."""
+    """What is playing, as the program sees it. `skip_reason` says why a
+    "skipping" item is being skipped: "removed" (a committed song he took
+    out, the repair path) or "votes" (the room voted it off, PR 2.3)."""
     kind: Literal["", "set", "jukebox", "skipping", "foreign"] = ""
     uri: str = ""
     title: str = ""
     set_index: Optional[int] = None
     entry_id: str = ""
     started_ms: Optional[int] = None
+    skip_reason: Literal["", "removed", "votes"] = ""
 
 
 class PlayedItem(_Model):
@@ -226,6 +232,14 @@ class JukeboxNight(_Model):
     cursor: Cursor = Field(default_factory=Cursor)
     now: NowItem = Field(default_factory=NowItem)
     played: list[PlayedItem] = Field(default_factory=list)
+    # Songs that have started tonight (set, jukebox or off the set; never a
+    # repair skip) — the clock a jail term runs on.
+    plays: int = 0
+    # THE JAIL (free play, PR 2.3): phone id -> the `plays` count at which
+    # its time-out ends. While `plays` is below it, that guest's waiting
+    # songs keep their places but are never sent (slots pass them). The
+    # host's pardon removes the term.
+    jail: dict[str, int] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     log: list[str] = Field(default_factory=list)
 
@@ -313,6 +327,10 @@ class EconomyConfig(_Model):
 Preset = Literal["small", "medium", "large"]
 
 
+# Free play's "play next" (report §4's Free play card): the host's own button
+# on the Guests tab's line, or nobody's.
+FreePlayNext = Literal["host", "off"]
+
 # Explicit songs (report §4, "Add a song"): not allowed (the default), allowed
 # for +2 credits ("extra" — in free play simply allowed), or only after a set
 # time of the night.
@@ -338,6 +356,17 @@ class ShowConfig(_Model):
     max_phones: int = Field(40, ge=5, le=100)
     renames_per_night: int = Field(3, ge=0, le=10)
     word_filter: bool = True
+    # FREE PLAY (report §6 and §4's Free play card, PR 2.3): nothing costs
+    # anything, and counts keep it fair. A song is skipped once it has
+    # `free_skip_downs` ▼ AND that share (a whole percent, rounded) of its
+    # votes; a guest may bump `free_bumps_per_hour` times in any hour; a
+    # guest whose songs reach the jail's net ▼ (the economy's jail_net_downs,
+    # rising with the crowd) sits out `free_jail_songs` songs (0 = no jail).
+    free_skip_downs: int = Field(3, ge=2, le=10)
+    free_skip_share: int = Field(67, ge=50, le=90)
+    free_bumps_per_hour: int = Field(2, ge=0, le=10)
+    free_play_next: FreePlayNext = "host"
+    free_jail_songs: int = Field(5, ge=0, le=15)
 
 
 # ── the guest link (N1: services/jukebox/guest_link.py) ──────────────────────
@@ -418,6 +447,16 @@ class GuestPhone(_Model):
     approved: bool = True
     blocked: bool = False
     name_locked: bool = False
+    # THE JAIL (PR 2.3). The term itself is the engine's (JukeboxNight.jail);
+    # the book keeps the count. `jail_base` is the net ▼ on this phone's
+    # songs when its last term ended — "your count starts again at 0" — and
+    # `jail_open` says a term was begun and its end not yet counted.
+    jail_open: bool = False
+    jail_base: int = 0
+    jails: int = 0
+    jailed_ms: Optional[int] = None
+    # when this phone bumped a song, for "N bumps an hour" (the last hour's only)
+    bumps_ms: list[int] = Field(default_factory=list)
 
 
 class GuestBook(_Model):
@@ -427,3 +466,7 @@ class GuestBook(_Model):
     night_id: str = ""
     phones: dict[str, GuestPhone] = Field(default_factory=dict)
     votes: dict[str, dict[str, int]] = Field(default_factory=dict)
+    # which guest added each voted play (play key -> phone id): the jail
+    # counts the net ▼ on a guest's songs from it. Host and set songs are
+    # never here (they never go to jail).
+    play_by: dict[str, str] = Field(default_factory=dict)

@@ -41,6 +41,16 @@ started it. It never starts while Absorb Music has a window open, and
 Absorb refuses to open while a night runs (services/absorb.py's
 `jukebox_night` gate). It only ever acts on the device it was started for.
 
+FREE PLAY (PR 2.3). Three guest rules act on the program, and the engine
+owns their effect while services/jukebox/guests.py decides when: a song the
+room votes off is skipped (`skip_by_vote` — only if it is still the same
+play, and a jukebox slot coming next is sent to Spotify first, so the skip
+lands on it); a waiting song moves one place among the songs that can be
+sent (`bump` — nothing passes the committed song, a held or jailed song
+stays where it is); and a jailed guest's waiting songs keep their places but
+are never sent until their time-out has run (`jail`, `pardon`) — the term is
+counted in songs that start (`JukeboxNight.plays`).
+
 A night is a record: every start, refusal and ending is in the night file
 with its reason, and `status()` answers what is playing, the next 20 program
 items with their start times, the line, and any warning.
@@ -104,6 +114,12 @@ SENTENCES: dict[str, str] = {
     "bad_position": "That place isn't in the set any more — the set changed; reload it.",
     "too_close": ("Only set songs at least two ahead of the one playing can move during "
                   "the night — Spotify may already have the next one lined up."),
+    "moved_on": "That song isn't playing any more.",
+    "at_front": "It's already at the front of the line.",
+    "at_back": "It's already at the back of the line.",
+    "pushed_max": "That song has been moved back as far as it can go tonight.",
+    "on_hold": "That song is on hold, so it can't move.",
+    "not_jailed": "That guest isn't in a time-out.",
 }
 
 
@@ -331,7 +347,8 @@ class JukeboxRunner:
     def _fills(self) -> list[program.Fill]:
         line = self.night.line
         live = [e for e in line if e.state == "committed" and not e.doomed]
-        queued = [e for e in line if e.state == "queued" and e.ready and not e.held]
+        queued = [e for e in line if e.state == "queued" and e.ready and not e.held
+                  and not self._jailed(e.added_by)]
         return ([program.Fill(e.id, e.uri, e.title, e.artist, e.duration_ms, True) for e in live]
                 + [program.Fill(e.id, e.uri, e.title, e.artist, e.duration_ms, False)
                    for e in queued])
@@ -361,8 +378,27 @@ class JukeboxRunner:
         return max(0, duration - progress)
 
     def _played(self, kind: str, uri: str, title: str = "", **kw: Any) -> None:
-        self.night.played.append(PlayedItem(kind=kind, uri=uri, title=title,
-                                            at_ms=self.deps.now_ms(), **kw))
+        n = self.night
+        n.played.append(PlayedItem(kind=kind, uri=uri, title=title,
+                                   at_ms=self.deps.now_ms(), **kw))
+        if kind == "skipped":
+            return                      # a repair skip isn't a song that played
+        n.plays += 1
+        for pid, until in list(n.jail.items()):
+            if n.plays >= until:
+                del n.jail[pid]
+                self._log("a guest's time-out is over; their songs are back in line")
+
+    def _jailed(self, phone: str) -> bool:
+        """This guest is serving a time-out: their waiting songs are never sent."""
+        until = self.night.jail.get(phone)
+        return until is not None and self.night.plays < until
+
+    def _movable(self) -> list[LineEntry]:
+        """The waiting songs that can be sent, in line order: the ones a
+        bump moves among (a held or jailed song stays where it is)."""
+        return [e for e in self.night.line
+                if e.state == "queued" and not e.held and not self._jailed(e.added_by)]
 
     # ── starting and stopping a night ───────────────────────────────────────
 
@@ -659,7 +695,8 @@ class JukeboxRunner:
         if committed is not None and committed.doomed:
             committed.state = "skipped"
             n.now = NowItem(kind="skipping", uri=uri, title=committed.title or title,
-                            entry_id=committed.id, started_ms=self.deps.now_ms())
+                            entry_id=committed.id, started_ms=self.deps.now_ms(),
+                            skip_reason="removed")
             self._played("skipped", uri, committed.title or title, entry_id=committed.id)
             self._log(f"skipping {committed.title or uri}: it was removed after it was "
                       "sent to Spotify")
@@ -1074,6 +1111,106 @@ class JukeboxRunner:
             await self._persist()
             return {"status": "moved", "line": self.line_view()}
 
+    # ── free play: the room's skip, bumps, the jail (PR 2.3) ────────────────
+
+    def _refused(self, code: str) -> dict:
+        return {"status": "refused", "reason": code, "detail": sentence(code)}
+
+    async def skip_by_vote(self, started_ms: Optional[int], uri: str) -> dict:
+        """The room voted the song playing off (services/jukebox/guests.py
+        decides when). Skipped only if it is still the same play. A jukebox
+        slot coming next is sent to Spotify first, so the skip lands on it,
+        not on the next set song."""
+        async with self._get_lock():
+            self._ensure_loaded()
+            if not self.running:
+                return self._refused("not_running")
+            n = self.night
+            if (n.now.kind not in ("set", "jukebox") or n.now.uri != uri
+                    or not started_ms or n.now.started_ms != started_ms):
+                return self._refused("moved_on")
+            now = self.deps.clock()
+            nxt = self._project(1)
+            if (nxt and nxt[0].kind == "jukebox" and not nxt[0].committed
+                    and not self.rt.warnings.get("off_device") and not self.rt.recheck_entry):
+                entry = self._entry(nxt[0].entry_id)
+                if entry is not None and entry.state == "queued":
+                    await self._commit(entry, now)
+            playing = self._entry(n.now.entry_id) if n.now.kind == "jukebox" else None
+            if playing is not None and playing.state == "playing":
+                playing.state = "skipped"
+            title = n.now.title or uri
+            n.now = n.now.model_copy(update={"kind": "skipping", "skip_reason": "votes"})
+            self._log(f"the room voted {title} off; skipping it")
+            self.rt.skip_attempts = 0
+            await self._skip(now)
+            await self._persist()
+            return {"status": "skipped", "title": title}
+
+    async def bump(self, entry_id: str, up: bool, max_back: Optional[int] = None) -> dict:
+        """Move a waiting song one place among the songs that can be sent
+        (free play's bumps; who may, and how often, is guests.py's). Nothing
+        passes the song already sent to Spotify; a song moved back counts
+        toward `max_back`."""
+        async with self._get_lock():
+            self._ensure_loaded()
+            if not self.running:
+                return self._refused("not_running")
+            e = self._entry(entry_id)
+            if e is None:
+                return self._refused("no_entry")
+            if e.state == "committed":
+                return self._refused("committed_fixed")
+            if e.state != "queued":
+                return self._refused("already_played")
+            movable = self._movable()
+            if e not in movable:
+                return self._refused("on_hold")
+            i = movable.index(e)
+            j = i - 1 if up else i + 1
+            if j < 0:
+                return self._refused("at_front")
+            if j >= len(movable):
+                return self._refused("at_back")
+            if not up and max_back is not None and e.pushed_back >= max_back:
+                return self._refused("pushed_max")
+            line = self.night.line
+            a, b = line.index(e), line.index(movable[j])
+            line[a], line[b] = line[b], line[a]
+            if not up:
+                e.pushed_back += 1
+            self._log(f"a guest moved {e.title or e.uri} {'up' if up else 'down'} one place")
+            await self._persist()
+            return {"status": "moved", "place": j + 1, "starts_in_ms": self._starts_in(e.id)}
+
+    async def jail(self, phone: str, songs: int) -> dict:
+        """A guest's time-out: their waiting songs keep their places but sit
+        out the next `songs` songs to start."""
+        async with self._get_lock():
+            self._ensure_loaded()
+            if not self.running:
+                return self._refused("not_running")
+            n = self.night
+            n.jail[phone] = n.plays + max(1, int(songs))
+            self._log(f"a guest's songs got too many ▼; they sit out {songs} song"
+                      f"{'' if songs == 1 else 's'}")
+            await self._persist()
+            return {"status": "jailed", "songs_left": n.jail[phone] - n.plays}
+
+    async def pardon(self, phone: str) -> dict:
+        """The host ends a guest's time-out now."""
+        async with self._get_lock():
+            self._ensure_loaded()
+            if not self.running:
+                return self._refused("not_running")
+            if not self._jailed(phone):
+                self.night.jail.pop(phone, None)
+                return self._refused("not_jailed")
+            del self.night.jail[phone]
+            self._log("the host pardoned a guest; their songs are back in line")
+            await self._persist()
+            return {"status": "pardoned"}
+
     # ── program settings, and reads ─────────────────────────────────────────
 
     def apply_config(self, cfg: ProgramConfig) -> Optional[Refusal]:
@@ -1144,7 +1281,8 @@ class JukeboxRunner:
         return {"running": True, "night_id": n.id, "started_ms": n.started_ms, "now": n.now,
                 "is_playing": bool(on and getattr(track, "is_playing", False)),
                 "duration_ms": duration, "remaining_ms": remaining,
-                "next": items, "line": list(n.line), "set_items": n.set_items}
+                "next": items, "line": list(n.line), "set_items": n.set_items,
+                "plays": n.plays, "jail": dict(n.jail)}
 
     async def read_set(self, cfg: ProgramConfig, refresh: bool = False) -> tuple[dict, list[SetItem]]:
         """The set for `cfg`: the running night's own copy when the night is

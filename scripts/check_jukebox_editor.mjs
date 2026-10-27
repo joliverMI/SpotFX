@@ -19,8 +19,9 @@
 //      maps /jukebox to `jukebox`, /jukebox is in the Engine menu — and,
 //      behaviourally, hovering the page's own controls opens each topic,
 //      and the page's 💬 Sonic opens `sonic-jukebox`.
-// Plus the Guests tab (§1e pure, §2d mounted, phase 2.2: the rules, Hold and
-// Remove on the line, Approve/Block/Rename/Lock on a phone), the Credits tab (§1b, §2b, phase 3.3) and the party simulator's
+// Plus the Guests tab (§1e pure, §2d mounted, phases 2.2-2.3: the rules, the
+// free-play rules, Hold, Play next and Remove on the line, Approve/Pardon/
+// Block/Rename/Lock on a phone), the Credits tab (§1b, §2b, phase 3.3) and the party simulator's
 // playback (§1c pure, §2c mounted against the harness's own snapshot of the
 // server's answer, phase 3.4): it only ever POSTs /api/jukebox/simulate.
 //
@@ -248,6 +249,7 @@ const PHONES = [
   { id: 'pa', name: 'Disco Ana', joined: true, created_ms: 1, joined_ms: 1, renames: 0, approved: true, blocked: false, name_locked: false, waiting: 1, played: 2, votes: 1 },
   { id: 'pb', name: 'Velvet Moose', joined: true, created_ms: 2, joined_ms: 2, renames: 0, approved: false, blocked: false, name_locked: false, waiting: 0, played: 0, votes: 0 },
   { id: 'pc', name: 'Witty Gecko', joined: false, created_ms: 3, joined_ms: null, renames: 0, approved: true, blocked: true, name_locked: true, waiting: 0, played: 0, votes: 0 },
+  { id: 'pd', name: 'Lucky Otter', joined: true, created_ms: 4, joined_ms: 4, renames: 0, approved: true, blocked: false, name_locked: false, waiting: 1, played: 1, votes: 3, jail_left: 3, jail_count: 5, jail_at: 5, jails: 1 },
 ];
 {
   const GW = await bundle(`export * from ${JSON.stringify(join(web, 'src/jukebox/jukeboxGuests.ts'))};`, 'guests');
@@ -267,6 +269,16 @@ const PHONES = [
   ok(rows[0].sent && !rows[0].canHold && rows[0].by === 'the host', 'a song sent to Spotify can be removed, not held');
   ok(rows[1].by === 'Disco Ana' && rows[1].round === '2nd song' && rows[1].held && rows[1].canHold, 'a held 2nd song, by name');
   ok(rows[2].by === 'a guest', 'an unknown phone reads "a guest"');
+  // free play (PR 2.3): the time-out, Pardon, Play next
+  ok(GW.phoneState(PHONES[3]) === 'jailed' && GW.phoneLine(PHONES[3]).startsWith('in a time-out (3 songs to go)'),
+    `a phone in a time-out says how many songs are left (${GW.phoneLine(PHONES[3])})`);
+  ok(JSON.stringify(GW.phoneActions(PHONES[3])) === '["pardon","block","lock","rename"]', 'only a phone in a time-out can be pardoned');
+  ok(GW.phoneLine({ ...PHONES[0], jail_count: 2, jail_at: 5 }).includes('net ▼ 2 of 5'), 'a phone shows its ▼ count against the bar');
+  ok(!rows.some((r) => r.canPlayNext), 'no Play next unless the show lets the host');
+  const jl = GW.lineRows([...line, { id: 'e5', uri: 'u5', title: 'E', artist: '', duration_ms: 1, added_by: 'pd', state: 'queued', doomed: false, commit_check: '' }], PHONES, true);
+  ok(!jl[1].canPlayNext && jl[2].canPlayNext && jl[3].canPlayNext && !jl[0].canPlayNext,
+    'Play next on every waiting song but the first (never on the one sent to Spotify)');
+  ok(jl[3].jailed && !jl[1].jailed, 'a song whose guest is in a time-out says so');
 }
 
 // ── 2. the page, mounted ──────────────────────────────────────────────────
@@ -306,7 +318,8 @@ function newWorld(kind) {
     running,
     show: { preset: null, approve_new_phones: false, economy: { start_credits: 8, add_base: 4, skip_down_pct: 15, tips: true },
             night_ends: '00:00', last_call_min: 20, explicit: 'no', explicit_after: '22:00', max_phones: 40,
-            renames_per_night: 3, word_filter: true },
+            renames_per_night: 3, word_filter: true, free_skip_downs: 3, free_skip_share: 67,
+            free_bumps_per_hour: 2, free_play_next: 'host', free_jail_songs: 5 },
     phones: running ? JSON.parse(JSON.stringify(PHONES)) : [],
     requests: [],
   };
@@ -338,7 +351,8 @@ function statusOf() {
     remaining_ms: 40_000,
     next: [{ kind: 'jukebox', uri: 'spotify:track:j', title: 'Bad Romance', artist: 'Lady Gaga', duration_ms: 1, set_index: null, entry_id: 'e1', committed: true, starts_in_ms: 40_000 }],
     line: [{ id: 'e1', uri: 'spotify:track:j', title: 'Bad Romance', artist: 'Lady Gaga', duration_ms: 1, added_by: 'host', state: 'committed', doomed: false, commit_check: 'next' },
-           { id: 'e2', uri: 'spotify:track:k', title: 'Take On Me', artist: 'a-ha', duration_ms: 1, added_by: 'pa', state: 'queued', doomed: false, commit_check: '', round: 1 }],
+           { id: 'e2', uri: 'spotify:track:k', title: 'Take On Me', artist: 'a-ha', duration_ms: 1, added_by: 'pa', state: 'queued', doomed: false, commit_check: '', round: 1 },
+           { id: 'e3', uri: 'spotify:track:m', title: 'Vogue', artist: 'Madonna', duration_ms: 1, added_by: 'pd', state: 'queued', doomed: false, commit_check: '', round: 1 }],
     warnings: [sign.warning, 'Shuffle is on in Spotify, so the set won\'t play in order.'], spotify_auth: sign,
     log: ['started'], history: [],
   };
@@ -368,11 +382,14 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.startsWith('/api/jukebox/guests')) {
     const id = u.split('/api/jukebox/guests/')[1];
     if (method === 'POST' && id) {
-      world.phones = world.phones.map((p) => (p.id === decodeURIComponent(id) ? { ...p, ...body } : p));
+      const { pardon, ...patch } = body || {};
+      world.phones = world.phones.map((p) => (p.id === decodeURIComponent(id)
+        ? { ...p, ...patch, ...(pardon ? { jail_left: 0, jail_count: 0 } : {}) } : p));
     }
     return json({ running: world.running, phones: world.phones, pending: world.phones.filter((p) => !p.approved && !p.blocked).length });
   }
   if (u.startsWith('/api/jukebox/line/')) {
+    if (u.endsWith('/move')) return json({ status: 'moved', line: [] });
     return json(method === 'DELETE' ? { status: 'removed' } : { status: body?.held ? 'held' : 'released' });
   }
   if (u.startsWith('/api/jukebox/price-check')) return json(PC);
@@ -576,8 +593,13 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
   await click(buttonByText(c, /^Guests$/));
   await P.settle();
   const rows = [...c.querySelectorAll('[data-testid="jukebox-guest-line"] .jukebox-item')];
-  ok(rows.length === 2 && rows[1].textContent.includes('added by Disco Ana') && rows[1].textContent.includes('1st song'),
+  ok(rows.length === 3 && rows[1].textContent.includes('added by Disco Ana') && rows[1].textContent.includes('1st song'),
     'the line shows each song with who added it and their round');
+  ok(rows[2].textContent.includes('sits out a time-out'), 'a song whose guest is in a time-out says so');
+  ok(!buttonByText(rows[1], /^Play next$/) && !!buttonByText(rows[2], /^Play next$/), 'Play next on a waiting song behind the first');
+  await click(buttonByText(rows[2], /^Play next$/));
+  const mv = world.requests.filter((r) => r.url === '/api/jukebox/line/e3/move').at(-1);
+  ok(mv?.method === 'POST' && JSON.stringify(mv.body) === '{"to":0}', 'Play next POSTs {to: 0} for that song');
   ok(!rows[0].textContent.includes('Hold') && rows[1].textContent.includes('Hold'), 'only a waiting song can be held');
   await click(buttonByText(rows[1], /^Hold$/));
   const holdReq = world.requests.filter((r) => r.url === '/api/jukebox/line/e2/hold').at(-1);
@@ -585,7 +607,17 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
   await click(buttonByText(rows[0], /^Remove$/));
   ok(world.requests.some((r) => r.method === 'DELETE' && r.url === '/api/jukebox/line/e1'), 'Remove DELETEs that song');
   const phones = [...c.querySelectorAll('[data-testid="jukebox-phone"]')];
-  ok(phones.length === 3 && text(phones[1]).includes('waiting for your approval'), 'every phone, with how it stands');
+  ok(phones.length === 4 && text(phones[1]).includes('waiting for your approval'), 'every phone, with how it stands');
+  ok(text(phones[3]).includes('in a time-out (3 songs to go)'), 'a phone in a time-out, with the songs left');
+  await click(buttonByText(phones[3], /^Pardon$/));
+  const pard = world.requests.filter((r) => r.url === '/api/jukebox/guests/pd').at(-1);
+  ok(pard?.method === 'POST' && JSON.stringify(pard.body) === '{"pardon":true}', 'Pardon POSTs {pardon: true} for that phone');
+  await P.settle();
+  ok(!buttonByText([...c.querySelectorAll('[data-testid="jukebox-phone"]')][3], /^Pardon$/), 'the pardoned phone loses its Pardon button');
+  const fp = c.querySelector('[data-testid="jukebox-free-play"]');
+  ok(!!fp && !!fp.querySelector('input[aria-label="Skip by vote: at least"]')
+    && !c.querySelector('[data-testid="jukebox-guest-rules"] input[aria-label="Skip by vote: at least"]'),
+    'the free-play rules have their own card');
   await click(buttonByText(phones[1], /^Approve$/));
   const appr = world.requests.filter((r) => r.url === '/api/jukebox/guests/pb').at(-1);
   ok(appr?.method === 'POST' && JSON.stringify(appr.body) === '{"approved":true}', 'Approve POSTs {approved: true} for that phone');
@@ -614,7 +646,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
 {
   const topics = ['jukebox', 'jukebox-set-list', 'jukebox-slots', 'jukebox-live', 'jukebox-sign-in',
     'jukebox-credits', 'jukebox-presets', 'jukebox-price-check', 'jukebox-simulator', 'sonic-jukebox',
-    'jukebox-report', 'jukebox-guest-page', 'jukebox-guests'];
+    'jukebox-report', 'jukebox-guest-page', 'jukebox-guests', 'jukebox-free-play'];
   const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
   const knownIds = new Set();
   for (const section of HELP_SECTIONS) {
@@ -666,7 +698,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     if (id && id !== 'sonic-scene-backups') reached.add(id);
   }
   ok(topics.every((id) => reached.has(id)) && reached.size === topics.length,
-    `the page's own controls and its 💬 Sonic open exactly the thirteen jukebox topics (${[...reached].sort().join(', ')})`);
+    `the page's own controls and its 💬 Sonic open exactly the fourteen jukebox topics (${[...reached].sort().join(', ')})`);
   P.unmount();
 }
 

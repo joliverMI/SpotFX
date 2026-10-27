@@ -39,7 +39,7 @@ ROUTES: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/"), ("GET", "/assets/{name}"), ("GET", "/manifest.webmanifest"),
     ("GET", "/icon.svg"), ("GET", "/icon-180.png"), ("GET", "/icon-512.png"),
     ("POST", "/g/hello"), ("POST", "/g/join"), ("POST", "/g/name"), ("POST", "/g/vote"),
-    ("POST", "/g/search"), ("POST", "/g/add"), ("GET", "/g/view"),
+    ("POST", "/g/search"), ("POST", "/g/add"), ("POST", "/g/bump"), ("GET", "/g/view"),
 })
 FORWARDS: dict[str, tuple[str, str]] = {
     "hello": ("POST", "/api/jukebox/guest/hello"),
@@ -48,6 +48,7 @@ FORWARDS: dict[str, tuple[str, str]] = {
     "vote": ("POST", "/api/jukebox/guest/vote"),
     "search": ("POST", "/api/jukebox/guest/search"),
     "add": ("POST", "/api/jukebox/guest/add"),
+    "bump": ("POST", "/api/jukebox/guest/bump"),
     "view": ("GET", "/api/jukebox/guest/view"),
 }
 STATIC_FILES = {"/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
@@ -293,6 +294,10 @@ def create_app(*, spotfx_url: str = SPOTFX_URL, key_file: Path = guest_key.DEFAU
     @app.post("/g/add")
     async def add(request: Request) -> Response:
         return await _phone_call(request, "add", "write", ("uri",))
+
+    @app.post("/g/bump")
+    async def bump(request: Request) -> Response:
+        return await _phone_call(request, "bump", "write", ("entry_id", "direction"))
 
     @app.get("/g/view")
     async def view(request: Request) -> Response:

@@ -21,8 +21,11 @@ the REAL guest app (jukebox_guest/), forwarding over an in-process loopback
 to SpotFX's REAL guest routes and services/jukebox/guests.py — only the
 night itself is a fixed scene (a set song playing, a line of songs, art
 drawn locally), switched between "plain", "your song is next", "your song
-is playing" and "no night". Every store is repointed to a temp directory
-first; nothing touches a live service or his storage.
+is playing", "your songs are in a time-out" and "no night". Free play's
+pieces are checked too (PR 2.3): the skip line under the vote buttons, the
+⇅ on a song the phone may move and its sheet (whose button reaches the
+engine's bump), and the red time-out strip. Every store is repointed to a
+temp directory first; nothing touches a live service or his storage.
 
     cd spectra/web && npx vite build --config vite.guest.config.ts
     .venv/bin/python scripts/render_jukebox_guest.py
@@ -91,6 +94,12 @@ class Scene:
         self.name = "plain"
         self.started_ms = int(time.time() * 1000) - 3_600_000
         self.added: list = []
+        self.bumped: list = []
+
+    async def bump(self, entry_id, up, max_back=None) -> dict:
+        """The engine's bump, for the scene: it lands (the scene's line stays put)."""
+        self.bumped.append((entry_id, up))
+        return {"status": "moved", "place": 2, "starts_in_ms": 10 * 60_000}
 
     async def add_entry(self, entry, *, fair: bool = True, latest_start_ms=None) -> dict:
         """The engine's add, for the scene: the song joins the back of the line."""
@@ -143,13 +152,21 @@ class Scene:
                    ProgramItem("jukebox", line[2].uri, "El Apagón", "Bad Bunny", 202000, entry_id="e3"),
                    ProgramItem("set", sets[3].uri, sets[3].title, sets[3].artist, 270000, set_index=3)]
         from services.jukebox.program import with_start_times
+        jail: dict = {}
+        if self.name == "jailed":
+            # your song sits out a time-out: it keeps its place, the slots pass it
+            line.append(LineEntry(id="e4", uri="spotify:track:jbx0000000000000000004",
+                                  title="Mr. Brightside", artist="The Killers", duration_ms=222000,
+                                  image="/__art/3.png", thumb="/__art/3.png", added_by=ME))
+            jail = {ME: 13}
         line += self.added
         nxt += [ProgramItem("jukebox", e.uri, e.title, e.artist, e.duration_ms, entry_id=e.id)
                 for e in self.added]
         return {"running": True, "night_id": "render-night", "started_ms": self.started_ms,
                 "now": now, "is_playing": True,
                 "duration_ms": duration, "remaining_ms": remaining,
-                "next": with_start_times(nxt, remaining), "line": line, "set_items": sets}
+                "next": with_start_times(nxt, remaining), "line": line, "set_items": sets,
+                "plays": 10, "jail": jail}
 
 
 class Catalog:
@@ -207,7 +224,9 @@ def build_server(tmp: Path, scene: Scene):
         known=lambda uris: {u: u in (library[0], catalog.songs[3]["uri"]) for u in uris}))
     book._book = GuestBook(night_id="render-night", phones={
         ANA: GuestPhone(id=ANA, name="Disco Ana", joined=True),
-        OTTER: GuestPhone(id=OTTER, name="Lucky Otter", joined=True)})
+        OTTER: GuestPhone(id=OTTER, name="Lucky Otter", joined=True)},
+        # two ▼ already on the set song playing: the skip line has something to say
+        votes={f"spotify:track:set{1:019d}@1": {ANA: -1, OTTER: -1}})
     guests.book = book
     spotfx = FastAPI()
     spotfx.include_router(jukebox_guest_router.router)
@@ -446,10 +465,25 @@ async def run() -> int:
                 tally = book._book.votes if book._book else {}
                 if not voted or not any(v == 1 for plays in tally.values() for v in plays.values()):
                     failures.append(f"{name}: two taps did not land a vote in SpotFX's book")
+                if not await wait_for("!!document.querySelector('.g-skip-line')", 4):
+                    failures.append(f"{name}: no skip line under the vote buttons")
                 await check(phone, "3-voted")
                 await tap(".g-tab:nth-child(2)")
                 await wait_for("!!document.querySelector('.g-queue')")
                 await check(phone, "4-queue")
+                # ── free play: move someone else's song down (the sheet) ──
+                if await wait_for("!!document.querySelector('.g-move-btn')", 4):
+                    await tap(".g-move-btn")
+                    await wait_for("!!document.querySelector('.g-sheet .g-move-song')")
+                    await check(phone, "11-move-sheet")
+                    before = len(scene.bumped)
+                    await tap(".g-sheet .g-btn-primary")
+                    if not await wait_for("!!document.querySelector('.g-toast')", 6) or \
+                            len(scene.bumped) != before + 1:
+                        failures.append(f"{name}: the move sheet's button didn't move the song")
+                    await wait_for("!document.querySelector('.g-toast')", 7)
+                else:
+                    failures.append(f"{name}: no ⇅ on a song the phone may move")
                 await tap(".g-name-chip")
                 await wait_for("!!document.querySelector('.g-sheet')")
                 await check(phone, "5-name-sheet")
@@ -498,6 +532,21 @@ async def run() -> int:
                         await check(phone, "7-home-screen-sheet")
                     else:
                         failures.append(f"{name}: no Add to Home Screen hint on an iPhone")
+                # ── your songs in a time-out (free play's jail) ──
+                await evaluate(ws, nid, "document.querySelector('.g-sheet-backdrop')?.click(); true")
+                scene.name = "jailed"
+                await tap(".g-tab:nth-child(1)")
+                if not await wait_for("!!document.querySelector('.g-strip-jail')", 8):
+                    failures.append(f"{name}: a time-out didn't turn the strip red")
+                if not await wait_for("!document.querySelector('.g-banner')", 4):
+                    failures.append(f"{name}: the 'your song is playing' banner outlived the song")
+                await check(phone, "12-time-out")
+                await tap(".g-tab:nth-child(2)")
+                if not await wait_for("!!document.querySelector('.g-row-jailed')", 4):
+                    failures.append(f"{name}: your song in a time-out isn't marked on Queue")
+                if await evaluate(ws, nid, "!!document.querySelector('.g-move-btn')"):
+                    failures.append(f"{name}: ⇅ is offered during a time-out")
+                await check(phone, "13-time-out-queue")
                 # ── no night ──
                 scene.name = "idle"
                 await fresh(phone, None)

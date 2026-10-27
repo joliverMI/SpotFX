@@ -286,3 +286,16 @@ h1, h2 { margin: 0; }
   padding: 12px 16px; border-radius: var(--radius); background: var(--ok); color: #052e16;
   font-weight: 700; text-align: center; animation: g-pop 0.3s ease-out;
 }
+
+/* ── free play: the room's skip, moving a song, the time-out ─────────── */
+.g-skip-line { margin: 10px 0 0; text-align: center; font-size: 14px; color: var(--muted); }
+.g-move-btn {
+  width: 44px; height: 44px; flex: none; border-radius: 22px; border: 1px solid var(--border);
+  background: var(--surface2); font-size: 20px; line-height: 1;
+}
+.g-bumps-line { margin: -2px 0 8px; }
+.g-move-song { display: flex; align-items: center; gap: 12px; }
+.g-row-waiting { opacity: 0.8; border-style: dashed; }
+.g-row-jailed { color: var(--danger); font-weight: 600; }
+.g-strip-jail { background: #7f1d1d; border-color: var(--danger); }
+.g-strip-jail span { color: #fecaca; }
