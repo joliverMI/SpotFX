@@ -1,5 +1,6 @@
 """PRE-DROPS — the moment that leads into a drop (predrop plan section 1,
-build step 3: detection only; nothing plays from it yet).
+build step 3: detection. What plays from one is step 5's engine:
+spectra/services/pre_drop_play.py and fx/effects/pre_drop.py).
 
 Plan: /home/javi/fleet-spotfx/data/predrop-plan/report.md (section 1 is the
 detection study, 3.1 the marker). The Admiral: "Some drops have what I want

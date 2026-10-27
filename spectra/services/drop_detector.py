@@ -125,8 +125,9 @@ note says so; it moves exactly Eyes Cut Deeper drop 1 in his store). Its
 lull and charge stay placed against the hit (the break leads into the
 pre-drop, and the pre-drop into the drop), so only the drop moves. Every
 detected sequence then carries the pre-drop the two rules find before its
-drop (`pre_drop`: ms, kind, lead_ms, score, tier) or None. Nothing plays
-from it yet: drop_firing.PRE_DROPS_PLAY.
+drop (`pre_drop`: ms, kind, lead_ms, score, tier) or None. Whether it
+plays is decided at its lull (spectra/services/pre_drop_play.py, predrop
+step 5).
 
 Pure: analyse() reads the two files (through analysis_reader and the
 config paths, nothing else), detect() is arithmetic over that. The store,

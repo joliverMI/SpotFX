@@ -32,12 +32,13 @@ happened to be written first.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from spectra.models.scene import SceneV2
+from spectra.models.scene import (PreDropIntroWindow, PreDropLooks,
+                                  PreDropSpikeWindow, SceneV2)
 from spectra.services import (flare_preview_hold, phase_preview, preview_pause,
                               scene_store, transition_preview)
 
@@ -91,11 +92,34 @@ class SequenceRequest(BaseModel):
     # scene's own value. Never written anywhere from here: the Scenes page's
     # Save is what persists it.
     drop_timing_offset_ms: Optional[int] = Field(default=None, ge=-2000, le=2000)
+    # THE PRE-DROP (the kind switch and the gap slider): a `pre_drop_kind`
+    # pre-drop `pre_drop_gap_ms` before the drop, carried on the lull
+    # (phase_preview.pre_drop_candidate). None = no pre-drop, today's
+    # sequence. The scene's windows and its entries' looks AS DRAFTED, when
+    # sent, stand in for the stored ones, the drop timing offset's way.
+    pre_drop_kind: Optional[Literal["spike", "intro"]] = None
+    pre_drop_gap_ms: Optional[int] = Field(default=None, ge=0, le=10_000)
+    pre_drop_spike: Optional[PreDropSpikeWindow] = None
+    pre_drop_intro: Optional[PreDropIntroWindow] = None
+    pre_drop_looks: Optional[dict[str, PreDropLooks]] = None
 
     def scene_for_preview(self, scene: SceneV2) -> SceneV2:
-        if "drop_timing_offset_ms" not in self.model_fields_set:
-            return scene
-        return scene.model_copy(update={"drop_timing_offset_ms": self.drop_timing_offset_ms})
+        update: dict = {}
+        if "drop_timing_offset_ms" in self.model_fields_set:
+            update["drop_timing_offset_ms"] = self.drop_timing_offset_ms
+        if self.pre_drop_spike is not None:
+            update["pre_drop_spike"] = self.pre_drop_spike
+        if self.pre_drop_intro is not None:
+            update["pre_drop_intro"] = self.pre_drop_intro
+        if self.pre_drop_looks:
+            update["devices"] = [
+                d.model_copy(update={"pre_drop_looks": self.pre_drop_looks[d.id]})
+                if d.id in self.pre_drop_looks else d for d in scene.devices]
+        return scene.model_copy(update=update) if update else scene
+
+    def pre_drop(self) -> Optional[tuple[str, Optional[int]]]:
+        return (None if self.pre_drop_kind is None
+                else (self.pre_drop_kind, self.pre_drop_gap_ms))
 
     def gaps(self) -> dict[str, int]:
         out: dict[str, int] = {}
@@ -132,7 +156,8 @@ async def open_sequence(body: SequenceRequest):
     scene = body.scene_for_preview(_scene(body.scene_id))
     timeline = await phase_preview.build_timeline(
         scene, body.intensity, gaps=body.gaps(),
-        drop_switch_enabled=body.drop_switch)
+        drop_switch_enabled=body.drop_switch,
+        pre_drop_kind=body.pre_drop_kind, pre_drop_gap_ms=body.pre_drop_gap_ms)
     flare_preview_hold.clear_ceiling_lock()
     _arm_pause()
     return timeline
@@ -143,7 +168,8 @@ async def fire_sequence(body: SequenceRequest):
     scene = body.scene_for_preview(_scene(body.scene_id))
     program = phase_preview.PhaseSequenceProgram(
         scene, body.gaps(),
-        switch=phase_preview.switch_for(scene, body.intensity, body.drop_switch))
+        switch=phase_preview.switch_for(scene, body.intensity, body.drop_switch),
+        pre_drop=body.pre_drop())
     return await _fire(program, body.intensity, body.step)
 
 

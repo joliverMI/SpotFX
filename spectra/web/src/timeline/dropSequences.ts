@@ -50,7 +50,8 @@
  * through his "his:<drop id>" key. Its look follows its part state the way a
  * member's follows its tier (`preDropLook`): approved (or placed by him on
  * an older server) and a confident one solid, a suggested one dashed, one
- * switched off drawn as an off member is. Nothing plays from a pre-drop yet.
+ * switched off drawn as an off member is. A pre-drop that plays fades the
+ * drop's colour change across it (PRE_DROP_IN_THE_ROOM).
  *
  * DOM-free, so scripts/check_drop_sequence_view.mjs drives it directly. */
 import { phaseBlendSpan, type PhaseBlendSpan } from './phaseBlend';
@@ -152,8 +153,8 @@ export interface DropSequenceView {
    * the detector puts it (null when the detector found none — on an added
    * drop always), and how sure the detector is — tier and score are the
    * detector's, null once he placed it himself (`moved.pre_drop`). Its part
-   * state is parts.pre_drop. Absent from an older server. Nothing plays from
-   * a pre-drop yet (drop_firing.PRE_DROPS_PLAY). */
+   * state is parts.pre_drop. Absent from an older server. Whether it plays is
+   * decided at its lull (spectra/services/pre_drop_play.py). */
   pre_drop_ms?: number | null;
   pre_drop_kind?: PreDropKind | null;
   pre_drop_auto?: number | null;
@@ -773,14 +774,18 @@ export function handleRows(s: DisplaySeq): HandleRow[] {
 /** A pre-drop's kind as a noun ("a spike", "a vocal intro" in a sentence). */
 export const PRE_DROP_KIND_NAME: Record<PreDropKind, string> = { spike: 'spike', intro: 'vocal intro' };
 
-/** What a pre-drop does in the room today: nothing (drop_firing.
- * PRE_DROPS_PLAY — the engine that plays them is a later step). */
-export const PRE_DROP_NOT_YET = 'Nothing plays from a pre-drop yet — a later step builds that.';
+/** What a pre-drop does in the room today (predrop step 5): when it plays —
+ * its kind on and its gap inside the showing scene's window — the drop's
+ * colour change fades across it; no effect lights it yet (each effect's
+ * look is a later step). The one wording, shared by the Home Drops panel. */
+export const PRE_DROP_IN_THE_ROOM = 'When a pre-drop plays, the drop\'s colour change fades across it, landing on the drop. Each scene chooses which kinds play (its Phase tab); no effect has a pre-drop look yet.';
+/** The same, as a tooltip's tail. */
+export const PRE_DROP_IN_THE_ROOM_SHORT = 'when it plays, the drop\'s colour fades across it — no effect lights it yet';
 
 /** How a pre-drop is drawn, following its part state the way a member's look
  * follows its tier: `his` — approved (or, from an older server with no part
  * states, placed by him) — solid; `confident` — waiting, and it will play on
- * its own once pre-drops play — solid; `suggested` — waiting for his approval
+ * its own — solid; `suggested` — waiting for his approval
  * (a suggested one, or one he placed and has not approved) — dashed; `off` —
  * switched off, drawn as an off member is. Null: nothing to draw. */
 export type PreDropLook = 'his' | 'confident' | 'suggested' | 'off';

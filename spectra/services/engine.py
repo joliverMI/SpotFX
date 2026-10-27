@@ -60,7 +60,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from fx import light_ownership
 from spectra.models.scene import SceneV2
@@ -273,7 +273,8 @@ trigger_engine._drop_colour = fire_drop_colour_event
 async def fire_response_event(event_class: str, intensity: float,
                               gap_ms: int | None = None,
                               via_trigger: bool = False,
-                              analysed: bool = False) -> None:
+                              analysed: bool = False,
+                              pre_drop: Any = None) -> Optional[dict]:
     """The ONE response-fire choke point: the bridge's classified legacy
     trigger_fired events and SPECTRA-native fire_response triggers
     (spectra.services.trigger_engine) both call this — and, since
@@ -325,16 +326,26 @@ async def fire_response_event(event_class: str, intensity: float,
     spectra/services/analysed_flares.py — a transition that did not make
     the density cut, fired as a flare): its tier is the analysed one, so
     "analysed" is admitted beside "full"/"triggers_only". trigger_engine
-    has already applied the per-song rule before calling."""
+    has already applied the per-song rule before calling.
+
+    pre_drop (a lull only) is the sequence's pre-drop that may play
+    (spectra/services/pre_drop_play.PreDropCandidate) — decided against the
+    scene showing in scene_response._drive_phase. RETURNS the response
+    engine's record (its `phase.pre_drop` is that verdict, which the
+    trigger clock reads to fade the drop's colour change across a pre-drop
+    that plays), or None when the gate held the fire."""
     from spectra.services import absorb_hold, fire_history
     gate = _response_gate(via_trigger, analysed)
     if gate is not None:
         if gate == absorb_hold.REASON:
             absorb_hold.record_deferral(f"response:{event_class}", {
                 "event_class": event_class, "intensity": intensity})
-        return
-    await responses.on_event(event_class, intensity, gap_ms,
-                             anchor_relocated=via_trigger)
+        return None
+    # pre_drop rides only when there is one, so every caller and test
+    # double of on_event without a pre-drop keeps the old call shape.
+    extra = {} if pre_drop is None else {"pre_drop": pre_drop}
+    record = await responses.on_event(event_class, intensity, gap_ms,
+                                      anchor_relocated=via_trigger, **extra)
     # The 2D drift gradient's DROP kick (owner ask 2026-08-24, order item 2):
     # a drop jumps X a full extra leg-step, pushes the Y TARGET up by the
     # drop's own energy, and lands the resulting colour immediately — see
@@ -352,6 +363,7 @@ async def fire_response_event(event_class: str, intensity: float,
     fire_history.record_fire("responses", event_class,
                              {"event_class": event_class, "intensity": intensity})
     _schedule_fire_tail(lambda: _response_gate(via_trigger, analysed))
+    return record
 
 
 async def rearm_phase_event(event_class: str, progress: float,

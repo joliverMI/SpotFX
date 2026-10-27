@@ -27,8 +27,10 @@ Three halves, the plan's own acceptance (report section 2.4):
      the INCOMING scene's pool; his own drop trigger changes colour too; a
      preview, Force Colour, a house mode and a gradient each hold it and are
      named; the drop band's own colour jump skips; the fade across a
-     pre-drop (dormant until drop_firing.PRE_DROPS_PLAY) starts on the
-     pre-drop and lands on the drop, a late tick included. A red control
+     pre-drop that plays (live since predrop step 5 — decided at its lull,
+     pre_drop_play.py) starts one tick before the pre-drop and lands on the
+     drop, a late tick included, and one the scene does not play leaves the
+     change instant. A red control
      reproduces the defect: unwired, a drop changes no colour.
 """
 from __future__ import annotations
@@ -841,34 +843,42 @@ def test_a_drop_over_the_rainbow_limit_lands_a_rainbow(monkeypatch, show):
     assert entry["detail"]["drop_colour"]["rung"] == dc.RUNG_TO_RAINBOW
 
 
-# ── the fade across a pre-drop: built, tested, dormant ──────────────────────
+# ── the fade across a pre-drop (live since predrop step 5) ──────────────────
 
-def _with_pre_drop(lead_ms=800):
+def _with_pre_drop(lead_ms=800, kind="spike"):
+    """Every detected sequence carries a confident pre-drop `lead_ms`
+    before its drop — one whose part plays on its own."""
     def view(uri, triggers):
         v = ds.view(uri, triggers=triggers)
         for s in v.get("sequences") or []:
             s["pre_drop_ms"] = int(s["drop_ms"]) - lead_ms
+            s["pre_drop_kind"] = kind
+            s["pre_drop_tier"] = dd.TIER_CONFIDENT
         return v
     return view
 
 
-def test_pre_drops_do_not_play_yet(monkeypatch, show):
-    """Until the pre-drop engine lands (drop_firing.PRE_DROPS_PLAY), a view
-    carrying pre-drop times changes nothing: the change is instant, on the
-    drop."""
-    assert drop_firing.PRE_DROPS_PLAY is False
+def test_a_pre_drop_the_scene_does_not_play_leaves_the_change_instant(monkeypatch, show):
+    """THE PRE-DROP ENGINE (step 5): a pre-drop fades the change only when
+    it PLAYS (spectra/services/pre_drop_play.py, decided at its lull). With
+    the showing scene's spike pre-drops off it does not, and the change is
+    instant, on the drop — as on a drop with no pre-drop at all."""
+    from spectra.models.scene import PreDropSpikeWindow
+    assert drop_firing.PRE_DROPS_PLAY is True
     _controls(scene_change_mode="analysed")
     _detect(drops=DROPS[:1])
+    show["orbits"].pre_drop_spike = PreDropSpikeWindow(enabled=False)
     rig = Show(monkeypatch, show, drop_view=_with_pre_drop())
     rig.sweep(stop=21_000)
     colour = rig.colour_writes()
     assert [(w["kind"], w["at"]) for w in colour if w["kind"] == "jump"] == \
         [("jump", pytest.approx(20.0))]
     assert not [w for w in colour if w["kind"] == "glide"]
+    told = rig.engine.status()["pre_drops"]
+    assert [v["reason"] for v in told.values()] == ["kind_off"]
 
 
 def test_with_a_pre_drop_the_change_fades_from_it_and_lands_on_the_drop(monkeypatch, show):
-    monkeypatch.setattr(drop_firing, "PRE_DROPS_PLAY", True)
     _controls(scene_change_mode="analysed")
     _detect(drops=DROPS[:1])
     rig = Show(monkeypatch, _with_drop_colour_jump(show),
@@ -876,8 +886,10 @@ def test_with_a_pre_drop_the_change_fades_from_it_and_lands_on_the_drop(monkeypa
     rig.sweep(stop=21_000)
     colour = rig.colour_writes()
     [glide] = [w for w in colour if w["kind"] == "glide"]
-    assert glide["at"] == pytest.approx(19.2), "starts ON the pre-drop"
-    assert glide["duration_ms"] == 800, "lands on the drop"
+    # the pre-drop's target is 19.2 s; the change leads it by one trigger
+    # tick (PRE_DROP_COLOUR_LEAD_MS) — "on (before) the pre-drop"
+    assert glide["at"] == pytest.approx(19.0), "starts one tick before the pre-drop"
+    assert glide["duration_ms"] == 1000, "lands on the drop"
     assert glide["params"]["gradient"] == COLOURS["cyan"]
     assert not [w for w in colour if w["kind"] == "jump"], \
         "the drop does not change again"
@@ -901,7 +913,6 @@ def test_the_colour_journey_is_told_when_the_change_lands(monkeypatch, show):
     instant = Show(monkeypatch, show)
     instant.sweep(stop=21_000)
     assert instant.cue_told == [20_000]
-    monkeypatch.setattr(drop_firing, "PRE_DROPS_PLAY", True)
     ds.reset()
     _detect(drops=DROPS[:1])
     cj.save_room(cj.RoomColorState(wheel_position_deg=0.0, active_set_id="red"))
@@ -910,22 +921,45 @@ def test_the_colour_journey_is_told_when_the_change_lands(monkeypatch, show):
     assert faded.cue_told == [20_000]
 
 
+def test_a_drop_led_cut_with_a_pre_drop_fades_from_the_incoming_pool(monkeypatch, show):
+    """The drop-led switch (drop_switch.py) cuts to Star ON the second drop.
+    Its pre-drop was decided at its lull on the scene SHOWING then (Orbits —
+    the lull and its pre-drop run on the scene that is showing; Star's
+    spike pre-drops are off and do not matter), and the fade across it
+    picks from the INCOMING scene's pool — orange, which Orbits never
+    accepts — so the cut, on the drop, compiles in the set the fade landed."""
+    from spectra.models.scene import PreDropSpikeWindow
+    _controls(scene_change_mode="analysed")
+    _detect()
+    show["star"].pre_drop_spike = PreDropSpikeWindow(enabled=False)
+    rig = Show(monkeypatch, show, drop_view=_with_pre_drop(800))
+    rig.sweep()
+    assert rig.cuts == [("star-scene", "orange")]
+    told = rig.engine.status()["pre_drops"]
+    assert told[dd.drop_key(52_000)]["reason"] == "plays"
+    glides = [w for w in rig.colour_writes() if w["kind"] == "glide"]
+    second = [g for g in glides if g["at"] > 40]
+    assert [g["at"] for g in second] == [pytest.approx(51.0)]
+    assert second[0]["params"]["gradient"] == COLOURS["orange"]
+    assert second[0]["duration_ms"] == 1000
+    assert _room().active_set_id == "orange"
+
+
 def test_a_late_pre_drop_tick_still_lands_on_the_drop(monkeypatch, show):
-    monkeypatch.setattr(drop_firing, "PRE_DROPS_PLAY", True)
     _controls(scene_change_mode="analysed")
     _detect(drops=DROPS[:1])
     rig = Show(monkeypatch, show, drop_view=_with_pre_drop(800))
-    rig.sweep(positions=list(range(0, 19_001, 200)) + [19_300, 19_500, 19_700,
-                                                       19_900, 20_100, 20_300])
+    rig.sweep(positions=list(range(0, 18_801, 200)) + [19_100, 19_300, 19_500,
+                                                       19_700, 19_900, 20_100,
+                                                       20_300])
     [glide] = [w for w in rig.colour_writes() if w["kind"] == "glide"]
-    assert glide["at"] == pytest.approx(19.3)
-    assert glide["duration_ms"] == 700, "the time left to the drop, not 800"
+    assert glide["at"] == pytest.approx(19.1)
+    assert glide["duration_ms"] == 900, "the time left to the drop"
 
 
 def test_a_held_fade_leaves_the_drop_its_own_try(monkeypatch, show):
     """A fade that did not land (a hold at the pre-drop) is not remembered:
     the drop tries again — and lands, once the hold is gone."""
-    monkeypatch.setattr(drop_firing, "PRE_DROPS_PLAY", True)
     _controls(scene_change_mode="analysed")
     _detect(drops=DROPS[:1])
     from spectra.services import house
@@ -950,7 +984,6 @@ def test_a_held_fade_leaves_the_drop_its_own_try(monkeypatch, show):
 
 
 def test_a_rewind_forgets_the_fade(monkeypatch, show):
-    monkeypatch.setattr(drop_firing, "PRE_DROPS_PLAY", True)
     _controls(scene_change_mode="analysed")
     _detect(drops=DROPS[:1])
     rig = Show(monkeypatch, show, drop_view=_with_pre_drop(800))

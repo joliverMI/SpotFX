@@ -157,11 +157,16 @@ def test_an_automatic_pre_drop_left_behind_by_his_drop_is_left_out():
     assert any("pre-drop left out" in n for n in s["notes"])
 
 
-def test_nothing_plays_from_a_pre_drop_yet():
+def test_his_confirmed_drop_plays_its_confident_pre_drop():
+    """Since the pre-drop engine (step 5), his answer 2: a CONFIDENT
+    pre-drop plays wherever its sequence fires — his confirmed Eyes Cut
+    Deeper drop 1 carries its clap on its lull — and is never a member of
+    its own."""
     from spectra.services import drop_firing
     _store([_moved()], HIS_EDIT)
     (seq,) = drop_firing.firing_sequences(_view())
-    assert seq.pre_drop_ms is None
+    assert (seq.pre_drop_ms, seq.pre_drop_kind) == (PRE["ms"], PRE["kind"])
+    assert seq.pre_drop_for("lull") == (PRE["ms"], PRE["kind"])
     assert [c for c, _ in seq.members()] == ["charge", "lull", "drop"]
 
 

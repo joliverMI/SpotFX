@@ -120,6 +120,29 @@ console.log('§4 the fade across a pre-drop');
   ok(rode.endsWith('new colours: Mid - Fire (166° away), fading to the drop (at its pre-drop)'), rode);
 }
 
+console.log('§4b the pre-drop engine (predrop step 5)');
+{
+  const his = describeEvent({
+    bucket: 'triggers', key: 'drop_sequence:pre_drop_colour', wall_ms: 0, position_ms: 19000,
+    detail: { member: 'pre_drop', pre_drop_key: 'his:d1',
+              drop_colour: { result: 'jumped', to_set_name: 'Mid - Fire', distance_deg: 166,
+                             rung: 'band', moment: 'pre_drop' } },
+  });
+  ok(his === 'Your drop: colour change at the pre-drop · new colours: Mid - Fire (166° away), fading to the drop', his);
+  const played = describeEvent({
+    bucket: 'triggers', key: 'drop_sequence:lull', wall_ms: 0, position_ms: 16200,
+    detail: { drop_sequence: 'drop:20000', member: 'lull', his: false, intensity: 0.8,
+              pre_drop: { plays: true, reason: 'plays', kind: 'spike', gap_ms: 700 } },
+  });
+  ok(played === 'Drop sequence: lull (detected) @ ⚡0.80 · its spike pre-drop plays (700 ms before the drop)', played);
+  const off = describeEvent({
+    bucket: 'triggers', key: 'authored:fire_response', wall_ms: 0, position_ms: 16200,
+    detail: { action_kind: 'fire_response', source: 'authored',
+              pre_drop: { plays: false, reason: 'kind_off', kind: 'intro', gap_ms: 2100 } },
+  });
+  ok(off === 'Trigger fired: fire_response (authored) · its vocal intro pre-drop does not play (this scene has that kind off)', off);
+}
+
 console.log('§5 the colour-set count');
 {
   const c = describeEvent({ bucket: 'color_sets', key: 'c1', wall_ms: 0, position_ms: 20000,

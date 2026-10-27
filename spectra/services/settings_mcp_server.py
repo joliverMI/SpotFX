@@ -110,6 +110,7 @@ _FlareTypeEnum = Literal["drift_jump", "momentary", "permanent",
                          "pulse_flash", "pulse_flip", "big_fish",
                          "sauron_surge"]
 _JumpEnum = Literal["color_set", "dice"]
+_PreDropKindEnum = Literal[tuple(scene_console._PRE_DROP_KINDS)]
 _CopyFieldEnum = Literal[tuple(scene_console.COPYABLE_DEVICE_ENTRY_FIELDS)]
 _DeviceTypeEnum = Literal[tuple(device_schema.device_types())]
 _RoomEffectKeyEnum = Literal[tuple(list(room_effect_console.KNOBS)
@@ -324,6 +325,24 @@ async def set_scene_entry_param(scene: str, target: str, name: str, value: Any) 
     value given, rather than refusing."""
     return await _call("set_scene_entry_param", scene=scene, target=target,
                        name=name, value=value)
+
+
+@mcp.tool()
+async def get_pre_drop_looks(scene: str, target: str) -> dict:
+    """Read one scene device entry's PRE-DROP looks: what it plays for a
+    spike and a vocal intro pre-drop, the looks its effect offers, and the
+    scene's window per kind."""
+    return await _call("get_pre_drop_looks", scene=scene, target=target)
+
+
+@mcp.tool()
+async def set_pre_drop_look(scene: str, target: str, kind: _PreDropKindEnum,
+                            look: str) -> dict:
+    """Choose which PRE-DROP look one scene device entry plays for one kind
+    of pre-drop: "auto", "same" (vocal intro only) or a look its effect
+    declares."""
+    return await _call("set_pre_drop_look", scene=scene, target=target,
+                       kind=kind, look=look)
 
 
 @mcp.tool()

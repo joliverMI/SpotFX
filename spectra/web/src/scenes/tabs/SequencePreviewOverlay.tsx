@@ -47,15 +47,24 @@
  * the scene it names, the lull told what is coming. The cut's moment is the
  * server's cut_s.
  *
+ * THE PRE-DROP (predrop plan step 5): a kind switch (Off / Spike / Vocal
+ * intro) and a gap slider held inside this scene's DRAFT window for that
+ * kind try a pre-drop against the scene. The request carries the draft's
+ * windows and every entry's looks (the drop timing's own overlay rule), the
+ * server says whether the scene plays it, and the ruler draws it orange at
+ * the server's mark_s — dashed when this scene would not play it.
+ *
  * Every time here is server-computed (marks[].mark_s / fire_at_s /
  * ramp_*_s, cues[].at_s); this file derives none of them. */
 import { useEffect, useState } from 'react';
+import Icon from '../../components/Icon';
 import HelpLink from '../../help/HelpLink';
 import {
   closeFlarePreview, closeFlarePreviewBeacon, fireSequencePreview, openSequencePreview,
-  useScenes,
+  useRegistry, useScenes,
 } from '../../queries';
 import type { PhasePreviewTimeline } from '../../queries';
+import { PRE_DROP_COLOR, PRE_DROP_KIND_NAME, type PreDropKind } from '../../timeline/dropSequences';
 import type { SceneV2 } from '../../types';
 import PreviewRuler from './PreviewRuler';
 import type { RulerBand, RulerDragMark, RulerMark } from './PreviewRuler';
@@ -65,6 +74,10 @@ import {
 } from './dropMarkDrag';
 import { useCueLoop, useHeartbeat } from './usePreviewLoop';
 import { programBands } from './programStages';
+import {
+  DEFAULT_PREVIEW_GAP_MS, KIND_ICON, clampGap, kindMeta, preDropSentence, previewPreDropRequest,
+  windowFor,
+} from './preDropWindows';
 
 const DEFAULT_CHARGE_GAP_MS = 4444;   // phase_preview.DEFAULT_GAP_MS
 const DEFAULT_LULL_GAP_MS = 2778;
@@ -89,11 +102,20 @@ export default function SequencePreviewOverlay({ scene, onClose, onDropOffsetCha
   const [timeline, setTimeline] = useState<PhasePreviewTimeline | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { holdExpired, onHoldExpired, clearExpired } = useHeartbeat();
+  // THE PRE-DROP to try: its kind (null = none) and, per kind, the gap the
+  // slider last set — always read back clamped into the draft's window.
+  const { data: registry } = useRegistry();
+  const [preKind, setPreKind] = useState<PreDropKind | null>(null);
+  const [preGaps, setPreGaps] = useState<Record<PreDropKind, number>>(DEFAULT_PREVIEW_GAP_MS);
+  const preWin = windowFor(scene, preKind ?? 'spike', registry);
+  const preGapMs = clampGap(preGaps[preKind ?? 'spike'], preWin);
+  const preDrop = previewPreDropRequest(scene, preKind, preGapMs, registry);
+  const preDropKey = JSON.stringify(preDrop);
 
   useEffect(() => {
     let cancelled = false;
     const t = setTimeout(() => {
-      openSequencePreview(scene.id, intensity, chargeGapMs, lullGapMs, dropSwitch, draftDropMs)
+      openSequencePreview(scene.id, intensity, chargeGapMs, lullGapMs, dropSwitch, draftDropMs, preDrop)
         .then((tl) => {
           if (cancelled) return;
           setTimeline(tl);
@@ -104,12 +126,12 @@ export default function SequencePreviewOverlay({ scene, onClose, onDropOffsetCha
     }, 200);
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scene.id, intensity, chargeGapMs, lullGapMs, dropSwitch, draftDropMs]);
+  }, [scene.id, intensity, chargeGapMs, lullGapMs, dropSwitch, draftDropMs, preDropKey]);
 
   const { playheadS, playing, setPlaying, scrubTo } = useCueLoop({
     timeline,
     fire: (step) => fireSequencePreview(scene.id, intensity, chargeGapMs, lullGapMs, step,
-      dropSwitch, draftDropMs)
+      dropSwitch, draftDropMs, preDrop)
       .then((res) => { if (res.expired) onHoldExpired(); })
       .catch((e) => setError(String(e))),
   });
@@ -184,6 +206,11 @@ export default function SequencePreviewOverlay({ scene, onClose, onDropOffsetCha
     // cut, muted under the phase bands they overlap
     bands.push(...programBands(sw.program, false));
   }
+  const pre = timeline?.pre_drop ?? null;
+  if (pre) {
+    marks.push({ at_s: pre.mark_s, label: PRE_DROP_KIND_NAME[pre.kind], tone: 'predrop',
+                 dashed: !pre.plays });
+  }
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 300,
@@ -216,6 +243,48 @@ export default function SequencePreviewOverlay({ scene, onClose, onDropOffsetCha
             onChange={(e) => setLullGapMs(Number(e.target.value))} style={{ flex: 1 }} />
           <span style={{ fontVariantNumeric: 'tabular-nums', width: 56 }}>{lullGapMs} ms</span>
         </label>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, margin: '4px 0',
+                      flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--text-muted)', width: 110 }}>Pre-drop</span>
+          <span role="group" aria-label="Pre-drop to try" style={{ display: 'inline-flex', gap: 4 }}>
+            {([null, 'spike', 'intro'] as const).map((k) => {
+              const on = preKind === k;
+              return (
+                <button key={k ?? 'off'} type="button" data-pre-drop-kind={k ?? 'off'} aria-pressed={on}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12,
+                           borderColor: on ? PRE_DROP_COLOR : undefined,
+                           color: on && k ? PRE_DROP_COLOR : undefined,
+                           background: on ? 'rgba(251,146,60,0.14)' : undefined }}
+                  title={k ? `Try a ${PRE_DROP_KIND_NAME[k]} before this drop` : 'No pre-drop'}
+                  onClick={() => setPreKind(k)}>
+                  {k && <Icon name={KIND_ICON[k]} size={14} />}
+                  {k ? kindMeta(registry, k).label : 'Off'}
+                </button>
+              );
+            })}
+          </span>
+          <HelpLink topic="pre-drop-scene-window" title="Pre-drops on this scene" />
+        </div>
+        {preKind && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, margin: '4px 0' }}>
+            <span style={{ color: 'var(--text-muted)', width: 110 }}>Pre-drop → drop gap</span>
+            <input type="range" data-testid="pre-drop-gap" min={preWin.min_ms} max={preWin.max_ms} step={10}
+              value={preGapMs} style={{ flex: 1 }}
+              onChange={(e) => setPreGaps({ ...preGaps, [preKind]: Number(e.target.value) })} />
+            <span style={{ fontVariantNumeric: 'tabular-nums', width: 56 }}>{preGapMs} ms</span>
+          </label>
+        )}
+        {pre && (
+          <div data-testid="pre-drop-line" style={{ fontSize: 12, padding: '6px 8px', borderRadius: 6,
+                        marginBottom: 4, background: 'var(--panel-bg, #1a1024)' }}>
+            <b style={{ color: PRE_DROP_COLOR }}>Pre-drop:</b> {preDropSentence(pre)}
+            {pre.member_lull && (
+              <> The effects that play pre-drops build their lull to it over <b>{pre.member_lull.ramp_ms} ms</b>,
+                holding their breath <b>{pre.member_lull.breath_s.toFixed(2)} s</b> right before it.</>
+            )}
+          </div>
+        )}
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, margin: '4px 0' }}>
           <input type="checkbox" checked={dropSwitch}

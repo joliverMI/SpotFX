@@ -14,7 +14,8 @@ import type { DropTimingInfo } from './scenes/tabs/dropMarkDrag';
 import type {
   AmbientHueGroup, ColorWheelPosition, DeviceListing, DevicePreviewFavorites, DevicePreviewStatus,
   DeviceWriteResult, DriftProfile,
-  EngineStatus, FeedbackCapture, FeedbackEntry, FireResult, IntensityScaleMark, Registry,
+  EngineStatus, FeedbackCapture, FeedbackEntry, FireResult, IntensityScaleMark,
+  PreDropLooks, PreDropWindow, Registry,
   ReviewSession, ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult,
   SceneV2, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
   Liveness, SonicUsageSummary, SpectraTrigger, SpotColorSetCard, TestSessionStatus,
@@ -376,6 +377,40 @@ export interface PhasePreviewTimeline {
    * moment, hand-off, what the lull is told, and where on this ruler the
    * cut lands (cut_s). Null when the preview was asked not to show it. */
   drop_switch: SequencePreviewSwitch | null;
+  /** THE PRE-DROP this preview was asked to try (predrop plan step 5) —
+   * null when its kind switch is off, absent from an older server. */
+  pre_drop?: SequencePreviewPreDrop | null;
+}
+
+/** The pre-drop on the drop-sequence preview's ruler: its kind and gap,
+ * where it sits (mark_s), the scene's window for that kind, whether this
+ * scene plays it and why, and — for an effect that plays pre-drops — the
+ * lull those effects build to it (null while none does). */
+export interface SequencePreviewPreDrop {
+  kind: 'spike' | 'intro';
+  gap_ms: number;
+  mark_s: number;
+  /** null when the scene has no window for the kind */
+  window: PreDropWindow | null;
+  plays: boolean;
+  /** pre_drop_play's reason word: plays, kind_off, gap_below_min,
+   * gap_above_max, too_soon_after_lull, no_scene or unknown_kind */
+  reason: string;
+  sentence: string;
+  told: string[];
+  member_lull: { ramp_ms: number; breath_at_s: number; breath_s: number } | null;
+}
+
+/** What the drop-sequence preview sends about the pre-drop: which kind to
+ * try (null = none) and how far before the drop, plus the scene DRAFT's own
+ * windows and per-entry looks, so an unsaved Phase-tab edit plays at once —
+ * the drop timing's own overlay rule. */
+export interface SequencePreviewPreDropRequest {
+  pre_drop_kind: 'spike' | 'intro' | null;
+  pre_drop_gap_ms: number;
+  pre_drop_spike: PreDropWindow;
+  pre_drop_intro: PreDropWindow;
+  pre_drop_looks: Record<string, PreDropLooks>;
 }
 
 export interface SequencePreviewSwitch {
@@ -409,22 +444,25 @@ export const fireTransitionPreview = (
 
 /** `dropTimingMs`: the scene DRAFT's own drop timing offset (a number, or
  * null for the room's) — sent so the preview shows an unsaved drag of the
- * drop mark; `undefined` = the stored scene's value. */
+ * drop mark; `undefined` = the stored scene's value. `preDrop`: the
+ * pre-drop to try and the draft's windows and looks (absent = none sent). */
 export const openSequencePreview = (
   sceneId: string, intensity: number, chargeGapMs: number, lullGapMs: number,
-  dropSwitch = true, dropTimingMs?: number | null) =>
+  dropSwitch = true, dropTimingMs?: number | null, preDrop?: SequencePreviewPreDropRequest) =>
   apiPost<PhasePreviewTimeline>('/preview/sequence/open',
     { scene_id: sceneId, intensity, charge_gap_ms: chargeGapMs, lull_gap_ms: lullGapMs,
       drop_switch: dropSwitch,
-      ...(dropTimingMs !== undefined ? { drop_timing_offset_ms: dropTimingMs } : {}) });
+      ...(dropTimingMs !== undefined ? { drop_timing_offset_ms: dropTimingMs } : {}),
+      ...(preDrop ?? {}) });
 
 export const fireSequencePreview = (
   sceneId: string, intensity: number, chargeGapMs: number, lullGapMs: number, step: string,
-  dropSwitch = true, dropTimingMs?: number | null) =>
+  dropSwitch = true, dropTimingMs?: number | null, preDrop?: SequencePreviewPreDropRequest) =>
   apiPost<PreviewFireResult>('/preview/sequence/fire',
     { scene_id: sceneId, intensity, charge_gap_ms: chargeGapMs,
       lull_gap_ms: lullGapMs, step, drop_switch: dropSwitch,
-      ...(dropTimingMs !== undefined ? { drop_timing_offset_ms: dropTimingMs } : {}) });
+      ...(dropTimingMs !== undefined ? { drop_timing_offset_ms: dropTimingMs } : {}),
+      ...(preDrop ?? {}) });
 
 export const closeFlarePreviewBeacon = (): void => {
   try {

@@ -9,11 +9,17 @@
  * because this tab already IS the page for those two things: the sentence
  * above describes the transition's crossfade and anchor, and the Override
  * Blend sentence below describes the charge/lull stretch. A preview is the
- * same statement, shown instead of said. */
+ * same statement, shown instead of said.
+ *
+ * THE PRE-DROPS CARD (predrop plan step 5, PreDropControls.tsx) sits under
+ * the Drop Shockwave block: per kind its power button and window, per
+ * device entry its look — direct controls like the Shockwave switch, by
+ * the plan. The drop-sequence preview tries a pre-drop against them. */
 import { useState } from 'react';
 import PowerButton from '../../components/PowerButton';
 import HelpLink from '../../help/HelpLink';
 import type { SceneV2 } from '../../types';
+import PreDropControls from './PreDropControls';
 import SequencePreviewOverlay from './SequencePreviewOverlay';
 import TransitionPreviewOverlay from './TransitionPreviewOverlay';
 
@@ -90,6 +96,7 @@ export default function PhaseTab({ scene, setScene, scenes }: {
         {' '}— drag the drop's red line on <i>▶ Preview drop sequence</i> to change it for this
         scene. <HelpLink topic="drop-mark-drag" />
       </div>
+      <PreDropControls scene={scene} setScene={setScene} />
       <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
         <button onClick={() => setPreviewing('transition')}>
           ▶ Preview transition into this scene

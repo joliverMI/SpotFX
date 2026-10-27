@@ -137,6 +137,7 @@ from fx import device_model
 from spectra import config
 from spectra.models.binding import is_binding
 from spectra.models.scene import (DEFAULT_MIN_INTENSITY, FlareKind, PhaseChoreography,
+                                  PreDropIntroWindow, PreDropSpikeWindow,
                                   SceneColorJourney, SceneDeviceConfig, SceneV2)
 from spectra.services import scene_store
 from spectra.services.sonic_ops import SonicOperation
@@ -234,6 +235,15 @@ _ACCESSORS: dict[str, tuple[Callable[[SceneV2], Any], Callable[[SceneV2, Any], N
         lambda s: s.drop_timing_offset_ms,
         lambda s, v: setattr(s, "drop_timing_offset_ms", v)),
 }
+# THE PRE-DROP WINDOWS (SceneV2.pre_drop_spike / pre_drop_intro, predrop
+# step 5): three scalar keys per kind, each a field of that kind's window.
+for _kind in ("spike", "intro"):
+    for _field in ("enabled", "min_ms", "max_ms"):
+        _ACCESSORS[f"pre_drop_{_kind}_{_field}"] = (
+            (lambda k, f: lambda s: getattr(getattr(s, f"pre_drop_{k}"), f))(
+                _kind, _field),
+            (lambda k, f: lambda s, v: setattr(getattr(s, f"pre_drop_{k}"), f, v))(
+                _kind, _field))
 
 SCENE_SETTINGS_REGISTRY: dict[str, SceneSettingSpec] = {
     "entry_ramp_ms": _spec(
@@ -304,6 +314,44 @@ SCENE_SETTINGS_REGISTRY: dict[str, SceneSettingSpec] = {
         "drop_timing_offset_ms, not this one.",
         unit="ms", nullable=True),
 }
+
+
+def _pre_drop_specs() -> dict[str, SceneSettingSpec]:
+    """The six PRE-DROP WINDOW settings (SceneV2.pre_drop_spike /
+    pre_drop_intro; spectra/services/pre_drop_play.py is the rule they
+    feed). Bounds read off each kind's own window model, like every entry
+    above."""
+    out: dict[str, SceneSettingSpec] = {}
+    for kind, model, name in (("spike", PreDropSpikeWindow, "spike"),
+                              ("intro", PreDropIntroWindow, "vocal intro")):
+        out[f"pre_drop_{kind}_enabled"] = _spec(
+            f"pre_drop_{kind}_enabled", model, "enabled",
+            f"Pre-drop ({name}) on this scene", "bool",
+            f"Whether this scene plays a {name} pre-drop — a {name} shortly "
+            "before a drop whose gap to the drop falls inside this scene's "
+            f"{name} window. Off = every {name} pre-drop is ignored on this "
+            "scene: the lull runs as before and the drop's colour change is "
+            "instant.",
+            "true/false only.")
+        out[f"pre_drop_{kind}_min_ms"] = _spec(
+            f"pre_drop_{kind}_min_ms", model, "min_ms",
+            f"Pre-drop ({name}) shortest gap", "int",
+            f"The shortest gap, pre-drop to drop, at which a {name} pre-drop "
+            "plays on this scene, in ms.",
+            "Integer ms; must stay below the longest gap (read it with "
+            "get_scene_settings first). Convert spoken seconds yourself.",
+            unit="ms")
+        out[f"pre_drop_{kind}_max_ms"] = _spec(
+            f"pre_drop_{kind}_max_ms", model, "max_ms",
+            f"Pre-drop ({name}) longest gap", "int",
+            f"The longest gap, pre-drop to drop, at which a {name} pre-drop "
+            "plays on this scene, in ms.",
+            "Integer ms; must stay above the shortest gap. Convert spoken "
+            "seconds yourself.", unit="ms")
+    return out
+
+
+SCENE_SETTINGS_REGISTRY.update(_pre_drop_specs())
 
 
 # ═══ atomic JSON log — its own small helper, deliberately not imported
@@ -734,6 +782,100 @@ async def apply_scene_entry_param(scene: str, target: str, name: str, value: Any
         "summary": f'Set {label} to {_fmt_value(new_value)} on "{candidate.name}"\'s '
                    f'{target_label} entry{bound_note}.',
         "backup_id": backup["id"], "preview": _diff_scenes(sc, candidate), "source": source,
+    }
+    _append_log(entry_log)
+    return {"status": "applied", **entry_log}
+
+
+# ═══ the PRE-DROP LOOK of one entry (predrop step 5) ════════════════════
+# SceneDeviceConfig.pre_drop_looks: which look an entry plays for each
+# pre-drop kind — "auto" (the effect's recommendation), "same" (the vocal
+# intro wears the spike's), or a look the effect declares in its
+# `pre_drop_looks` registry block (fx/effects/pre_drop.py). Read only by a
+# fx.device_model.PRE_DROP_EFFECTS member, none of which exists before
+# predrop step 6.
+
+_PRE_DROP_KINDS = ("spike", "intro")
+
+
+def _one_entry(sc: SceneV2, target: str) -> SceneDeviceConfig:
+    matches = _find_target_entries(sc, target)
+    if not matches:
+        raise SceneOpError(
+            f"scene {sc.name!r} has no device entry for {target!r}",
+            known_targets=sorted({d.target for d in sc.devices if d.target}))
+    if len(matches) > 1:
+        raise SceneOpError(
+            f"{target!r} matches more than one device entry on {sc.name!r}",
+            matches=[{"target_kind": d.target_kind, "target": d.target} for d in matches])
+    return matches[0]
+
+
+def get_pre_drop_looks(scene: str, target: str) -> dict:
+    """One entry's pre-drop looks: its choice per kind, what that choice
+    plays now (resolved), the looks its effect declares, and the scene's
+    window per kind."""
+    from fx.effects import pre_drop as fx_pre_drop
+    sc = _resolve_scene_ref(scene)
+    entry = _one_entry(sc, target)
+    declared = device_model.pre_drop_looks(entry.effect_type) or {}
+    chosen = {"spike": entry.pre_drop_looks.spike,
+              "intro": entry.pre_drop_looks.intro}
+    return {
+        "scene_id": sc.id, "scene_name": sc.name, "target": entry.target,
+        "effect_type": entry.effect_type, "chosen": chosen,
+        "plays": {k: fx_pre_drop.resolve_look(declared, k, chosen) or None
+                  for k in _PRE_DROP_KINDS},
+        "declared": declared.get("looks") or {},
+        "auto": declared.get("auto") or {},
+        "has_looks": bool(declared),
+        "windows": {k: sc.pre_drop_window(k).model_dump() for k in _PRE_DROP_KINDS},
+    }
+
+
+def _validate_set_pre_drop_look(scene: str, target: str, kind: str, look: str
+                                ) -> tuple[SceneV2, SceneV2, SceneDeviceConfig]:
+    if kind not in _PRE_DROP_KINDS:
+        raise SceneOpError(f"{kind!r} is not a pre-drop kind",
+                           allowed_kinds=list(_PRE_DROP_KINDS))
+    look = (look or "").strip()
+    sc = _resolve_scene_ref(scene)
+    entry = _one_entry(sc, target)
+    declared = (device_model.pre_drop_looks(entry.effect_type) or {}).get("looks") or {}
+    allowed = ["auto"] + (["same"] if kind == "intro" else []) + sorted(
+        name for name, meta in declared.items()
+        if kind in (meta or {}).get("kinds", []))
+    if look not in allowed:
+        raise SceneOpError(
+            f"{look!r} is not a {kind} pre-drop look the {entry.effect_type!r} "
+            f"effect offers", allowed_looks=allowed)
+    candidate = sc.model_copy(deep=True)
+    dest = next(d for d in candidate.devices if d.id == entry.id)
+    setattr(dest.pre_drop_looks, kind, look)
+    try:
+        candidate = SceneV2.model_validate(candidate.model_dump(mode="json"))
+    except ValidationError as exc:
+        raise SceneOpError(f"not a legal pre-drop look: {_errs(exc)}",
+                           pydantic_errors=_errs(exc)) from exc
+    return sc, candidate, entry
+
+
+async def apply_pre_drop_look(scene: str, target: str, kind: str, look: str,
+                              source: str = "agent") -> dict:
+    sc, candidate, entry = _validate_set_pre_drop_look(scene, target, kind, look)
+    backup = _write_and_verify_backup(sc.id, sc, op="set_pre_drop_look")
+    scene_store.save(candidate)
+    target_label = entry.target or "All Devices"
+    name = {"spike": "spike", "intro": "vocal intro"}[kind]
+    entry_log = {
+        "id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
+        "op": "set_pre_drop_look", "scene_id": sc.id, "scene_name": candidate.name,
+        "target": entry.target, "effect_type": entry.effect_type, "kind": kind,
+        "old_value": getattr(entry.pre_drop_looks, kind), "new_value": look.strip(),
+        "summary": f'Set the {name} pre-drop look to "{look.strip()}" on '
+                   f'"{candidate.name}"\'s {target_label} entry.',
+        "backup_id": backup["id"], "preview": _diff_scenes(sc, candidate),
+        "source": source,
     }
     _append_log(entry_log)
     return {"status": "applied", **entry_log}
@@ -1327,6 +1469,20 @@ async def _op_set_scene_entry_param(scene: str, target: str, name: str, value: A
         return exc.payload()
 
 
+def _op_get_pre_drop_looks(scene: str, target: str) -> dict:
+    try:
+        return get_pre_drop_looks(scene, target)
+    except SceneOpError as exc:
+        return exc.payload()
+
+
+async def _op_set_pre_drop_look(scene: str, target: str, kind: str, look: str) -> dict:
+    try:
+        return await apply_pre_drop_look(scene, target, kind, look)
+    except SceneOpError as exc:
+        return exc.payload()
+
+
 async def _op_create_scene(name: str, labels: Optional[list[str]] = None) -> dict:
     try:
         return await apply_create_scene(name, labels)
@@ -1549,6 +1705,51 @@ OPERATIONS: dict[str, SonicOperation] = {
             },
             "required": ["scene", "target", "name", "value"], "additionalProperties": False},
         handler=_op_set_scene_entry_param),
+    "get_pre_drop_looks": SonicOperation(
+        name="get_pre_drop_looks", domain="scene", kind="read",
+        summary="Read one scene device entry's PRE-DROP looks — what it "
+                "plays for a spike and for a vocal intro pre-drop, the looks "
+                "its effect offers, and the scene's window for each kind.",
+        instructions=(
+            "scene/target as in get_scene_entry_params. `chosen` is what is "
+            "stored (\"auto\" = the effect's recommendation, \"same\" = the "
+            "vocal intro wears the spike's look), `plays` what that resolves "
+            "to now (null when the effect has no pre-drop look yet — no "
+            "effect has one before Fireworks/Pulse/Orbits get theirs), "
+            "`declared` the effect's own looks with the kinds each suits. "
+            "`windows` are the scene's per-kind on/min/max — change those "
+            "with set_scene_setting (pre_drop_spike_enabled, "
+            "pre_drop_spike_min_ms, ..._max_ms, and the pre_drop_intro_* "
+            "trio)."),
+        input_schema={
+            "type": "object",
+            "properties": {"scene": {"type": "string"}, "target": {"type": "string"}},
+            "required": ["scene", "target"], "additionalProperties": False},
+        handler=_op_get_pre_drop_looks),
+    "set_pre_drop_look": SonicOperation(
+        name="set_pre_drop_look", domain="scene", kind="write",
+        summary="Choose which PRE-DROP look one scene device entry plays for "
+                "one kind of pre-drop (a spike or a vocal intro).",
+        instructions=(
+            "scene/target as in get_scene_entry_params; kind is \"spike\" or "
+            "\"intro\"; look is \"auto\" (the effect's recommendation), "
+            "\"same\" (intro only: wear the spike's look — how a scene treats "
+            "both kinds alike), or one of the look names get_pre_drop_looks "
+            "lists for that kind. Anything else is refused with the allowed "
+            "names. Only effects with a pre-drop look play one; on any other "
+            "entry the choice is stored and does nothing until that effect "
+            "gets a look."),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "scene": {"type": "string"},
+                "target": {"type": "string"},
+                "kind": {"type": "string", "enum": list(_PRE_DROP_KINDS)},
+                "look": {"type": "string"},
+            },
+            "required": ["scene", "target", "kind", "look"],
+            "additionalProperties": False},
+        handler=_op_set_pre_drop_look),
     "create_scene": SonicOperation(
         name="create_scene", domain="scene", kind="write",
         summary="Create a new, empty scene shell with a name.",

@@ -239,14 +239,22 @@ def late_cut_after_s(plan) -> Optional[float]:
 
 async def build_timeline(scene: SceneV2, intensity: float, *,
                          gaps: Optional[dict[str, int]] = None,
-                         drop_switch_enabled: bool = True) -> dict[str, Any]:
+                         drop_switch_enabled: bool = True,
+                         pre_drop_kind: Optional[str] = None,
+                         pre_drop_gap_ms: Optional[int] = None) -> dict[str, Any]:
     """The three-mark sequence timeline. `gaps` is how far each stretching
     class's next mark sits ahead of it — the very thing the ramp stretches
     to fill, so it is the one control that changes the drawn shape.
 
     `drop_switch` in the result is the drop-led switch the resolver would
     make here (switch_for): the target, the moment, the hand-off, what the
-    lull is told, and `cut_s` — where on this ruler the cut lands."""
+    lull is told, and `cut_s` — where on this ruler the cut lands.
+
+    `pre_drop_kind` / `pre_drop_gap_ms` (THE PRE-DROP, the kind switch and
+    the gap slider): a pre-drop `pre_drop_gap_ms` before the drop's mark,
+    moved with it. `pre_drop` in the result is where it sits on the ruler
+    and the verdict the lull would reach for it on this scene
+    (pre_drop_for_ruler) — the same rule the show runs."""
     resolved_gaps = {**DEFAULT_GAP_MS, **(gaps or {})}
 
     # A scratch pair, purely so the lead functions can read the effect
@@ -333,6 +341,8 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
         late_cut_s = round(drop_mark["fire_at_s"] + late_s, 4)
         end_s = max(end_s, late_cut_s + LATE_CUT_SHOW_S)
     duration_s = max(MIN_TIMELINE_S, end_s + TAIL_PAD_S)
+    pre_drop_out = pre_drop_for_ruler(scene, intensity, marks, virtuals,
+                                      pre_drop_kind, pre_drop_gap_ms)
     cues = [{"step": m["event_class"], "at_s": m["fire_at_s"],
              "label": f"{m['event_class']} fires"} for m in marks]
     if late_cut_s is not None:
@@ -386,6 +396,7 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
                             slots["drop"], drop_timing.MIN_OFFSET_MS, slots["lull"])},
         "hang_fraction": PHASE_RAMP_HANG_FRACTION,
         "marks": marks,
+        "pre_drop": pre_drop_out,
         "cues": cues,
         # Which virtuals the vendored phase machinery will actually reach —
         # empty means this scene has no phase-capable effect live and the
@@ -393,6 +404,86 @@ async def build_timeline(scene: SceneV2, intensity: float, *,
         # rather than looping an invisible preview.
         "phase_targets": _phase_targets(virtuals),
     }
+
+
+DEFAULT_PRE_DROP_GAP_MS = {"spike": 800, "intro": 2000}
+
+
+def pre_drop_gap_for(scene: SceneV2, kind: str, gap_ms: Optional[int]) -> int:
+    """The gap the preview plays a `kind` pre-drop at: the slider's value,
+    else the kind's default — held inside this scene's window for it, so
+    the preview shows a pre-drop the scene would play (a kind that is OFF
+    still gets a gap: the verdict then says why it does not play)."""
+    window = scene.pre_drop_window(kind)
+    gap = int(gap_ms if gap_ms is not None else DEFAULT_PRE_DROP_GAP_MS.get(kind, 800))
+    if window is None:
+        return gap
+    return max(int(window.min_ms), min(int(window.max_ms), gap))
+
+
+def pre_drop_candidate(scene: SceneV2, intensity: float, kind: Optional[str],
+                       gap_ms: Optional[int], lull_build_gap_ms: Optional[int],
+                       virtuals: dict):
+    """The candidate the preview's LULL carries for a `kind` pre-drop
+    `gap_ms` before the drop — timed from where the lull FIRES (its mark
+    less its own lead) to the pre-drop, as the trigger clock times a real
+    one (pre_drop_play.py). None for no kind."""
+    from fx.effects import pre_drop as fx_pre_drop
+    from spectra.services import pre_drop_play
+    if kind not in fx_pre_drop.KINDS or lull_build_gap_ms is None:
+        return None
+    gap = pre_drop_gap_for(scene, kind, gap_ms)
+    lead = class_lead_ms(scene, "lull", intensity, virtuals)
+    return pre_drop_play.PreDropCandidate(
+        at_ms=int(lull_build_gap_ms + lead - gap), gap_ms=gap, kind=kind,
+        key="preview")
+
+
+def pre_drop_for_ruler(scene: SceneV2, intensity: float, marks: list[dict],
+                       virtuals: dict, kind: Optional[str],
+                       gap_ms: Optional[int]) -> Optional[dict]:
+    """THE PRE-DROP on the drop-sequence ruler: its mark (the drop's mark
+    less the gap — moved with the drop), the verdict the lull would reach
+    on this scene (pre_drop_play.decide, the show's own rule), which
+    virtuals would be told (fx.device_model.PRE_DROP_EFFECTS — none yet),
+    and their lull measured to the pre-drop. None when no kind is asked."""
+    from fx import device_model
+    from fx.effects import phase_grammar
+    from spectra.services import pre_drop_play
+    from spectra.services.scene_response import _phase_ramp_ms
+    by = {m["event_class"]: m for m in marks}
+    lull, drop = by.get("lull"), by.get("drop")
+    if kind is None or lull is None or drop is None:
+        return None
+    cand = pre_drop_candidate(scene, intensity, kind, gap_ms, lull["gap_ms"],
+                              virtuals)
+    if cand is None:
+        return None
+    verdict = pre_drop_play.decide(scene, cand)
+    told = [vid for vid, st in virtuals.items()
+            if getattr(st, "effect_type", None) in device_model.PRE_DROP_EFFECTS
+            and getattr(st, "effect_type", None) in device_model.PHASE_EFFECTS]
+    out = {**verdict.as_dict(),
+           "mark_s": round(drop["mark_s"] - cand.gap_ms / 1000.0, 4),
+           "sentence": pre_drop_play.sentence(verdict.as_dict()),
+           "told": told if verdict.plays else [],
+           "member_lull": None}
+    if verdict.plays and told:
+        try:
+            from spectra.services.room_controls import load_room_controls
+            room = load_room_controls()
+            breath_s, max_dark = room.lull_breath_hold_s, room.lull_dark_max_s
+        except Exception:                                # noqa: BLE001
+            from fx.effects import lull_dark
+            breath_s = phase_grammar.DEFAULT_BREATH_S
+            max_dark = lull_dark.DEFAULT_MAX_DARK_S
+        breath = phase_grammar.breath_keys_for(cand.at_ms / 1000.0, breath_s,
+                                               max_dark)
+        out["member_lull"] = {
+            "ramp_ms": _phase_ramp_ms("lull", cand.at_ms),
+            "breath_at_s": breath[phase_grammar.BREATH_AT_KEY],
+            "breath_s": breath[phase_grammar.BREATH_KEY]}
+    return out
 
 
 def _switch_program(plan, cut_s: Optional[float]) -> Optional[dict]:
@@ -446,8 +537,11 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
     steps = SEQUENCE + ("switch", "release")
 
     def __init__(self, scene: SceneV2, gaps: Optional[dict[str, int]] = None,
-                 switch: Optional[tuple[Any, Optional[SceneV2]]] = None) -> None:
+                 switch: Optional[tuple[Any, Optional[SceneV2]]] = None,
+                 pre_drop: Optional[tuple[str, Optional[int]]] = None) -> None:
         self.hold_scene = scene
+        # THE PRE-DROP the lull carries (kind, gap ms) — or None
+        self.pre_drop = pre_drop
         # the gaps each member BUILDS over: the lull's ends on the drop's
         # shifted mark (build_gaps), the same as the drawn ruler
         self.gaps = build_gaps({**DEFAULT_GAP_MS, **(gaps or {})},
@@ -530,8 +624,21 @@ class PhaseSequenceProgram(flare_preview_hold.PreviewProgram):
         if step not in SEQUENCE:
             raise ValueError(f"unknown drop-sequence step: {step!r}")
         gap_ms = self.gaps.get(step) if step in PHASE_RAMP_STRETCH_CLASSES else None
-        record = await ctx.responder.on_event(step, ctx.intensity, gap_ms,
-                                              anchor_relocated=True)
+        cand = None
+        if step == "lull" and self.pre_drop is not None:
+            # the scene the lull runs on (an early cut already moved the
+            # scratch conductor to it), as the show decides it
+            showing = getattr(ctx.conductor, "scene", None) or self.hold_scene
+            cand = pre_drop_candidate(showing, ctx.intensity, self.pre_drop[0],
+                                      self.pre_drop[1], gap_ms,
+                                      ctx.conductor.virtuals)
+        if cand is None:
+            record = await ctx.responder.on_event(step, ctx.intensity, gap_ms,
+                                                  anchor_relocated=True)
+        else:
+            record = await ctx.responder.on_event(step, ctx.intensity, gap_ms,
+                                                  anchor_relocated=True,
+                                                  pre_drop=cand)
         out = {"result": "phase_fired", "event_class": step,
                "gap_ms": gap_ms, "record": record}
         if cut is not None:

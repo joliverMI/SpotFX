@@ -411,13 +411,14 @@ from typing import Any, Awaitable, Callable, Mapping, NamedTuple, Optional
 
 from fx import device_model
 from fx.effects import lull_dark, lull_handoff, phase_grammar, strip_phase
+from fx.effects import pre_drop as fx_pre_drop
 from spectra.models.binding import ValueBinding
 from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
                                   ResponseClass, SceneV2)
 from spectra.models.sequencer import CurvePoint
 from spectra.services import binding_resolver, color_journey, color_rotate
 from spectra.services import selection_kernel as kernel
-from spectra.services import drop_colour
+from spectra.services import drop_colour, pre_drop_play
 from spectra.services.binding_resolver import FireContext
 
 logger = logging.getLogger(__name__)
@@ -1308,8 +1309,15 @@ class ResponseEngine:
 
     async def on_event(self, event_class: ResponseClass,
                        intensity: float, gap_ms: Optional[int] = None, *,
-                       anchor_relocated: bool = False) -> dict:
-        """`anchor_relocated` is True only for a fire whose start the caller
+                       anchor_relocated: bool = False,
+                       pre_drop: Optional[pre_drop_play.PreDropCandidate] = None
+                       ) -> dict:
+        """`pre_drop` (a lull only): the sequence's pre-drop that may play
+        (spectra/services/pre_drop_play.py) — decided in _drive_phase
+        against the scene showing, named in the record's
+        `phase.pre_drop`.
+
+        `anchor_relocated` is True only for a fire whose start the caller
         already moved to the band's anchor (module docstring, "ONLY A FIRE
         ALREADY RELOCATED BY THE ANCHOR STAGGERS") — the one path whose
         kinds each land at their own moment. False fires the band
@@ -1340,7 +1348,8 @@ class ResponseEngine:
         phase_driven = False
         if event_class in PHASE_RAMP_MS:
             record["phase"] = await self._drive_phase(event_class, gap_ms,
-                                                      intensity)
+                                                      intensity,
+                                                      pre_drop=pre_drop)
             phase_driven = bool(record["phase"]["targets"])
         spec = scene.responses.get(event_class)
         band = select_band(spec.bands, intensity) if spec else None
@@ -2879,7 +2888,9 @@ class ResponseEngine:
 
     async def _drive_phase(self, event_class: str,
                            gap_ms: Optional[int] = None,
-                           intensity: Optional[float] = None) -> dict:
+                           intensity: Optional[float] = None,
+                           pre_drop: Optional[pre_drop_play.PreDropCandidate]
+                           = None) -> dict:
         """Arm + ramp the vendored phase machinery on every phase-capable
         virtual — the exact drive the original program used: the instant
         arm write must land before the ramp (jump, then glide — in-process
@@ -2930,7 +2941,22 @@ class ResponseEngine:
         may paint (`drop_shock_on` — the room's switch, the scene's, and the
         top-bar Energy against the room's floor), named in the record as
         `drop_shock`. The effect's own drop (and a strip's colour and
-        activity burst) is driven exactly the same either way."""
+        activity burst) is driven exactly the same either way.
+
+        THE PRE-DROP (fx/effects/pre_drop.py; spectra/services/
+        pre_drop_play.py is the one rule): a lull arm handed a `pre_drop`
+        candidate decides, against the scene showing, whether it plays
+        (named in the record's `pre_drop`, which the trigger clock reads to
+        fade the drop's colour change across it). Every PRE_DROP_EFFECTS
+        virtual is then told the four pre-drop keys — the pre-drop's when
+        it plays, NOT_TOLD's zeros when it does not — and, when it plays,
+        its lull measured to the pre-drop instead of the drop: its progress
+        ramp, its dark point (a LULL_DARK member) and its breath-hold
+        (always told to a member, so `lull_breath_at_s + lull_breath_s ==
+        pre_drop_at_s`; zeros for a member that is no breath-hold effect
+        when its pre-drop does not play). Every other virtual's arm is
+        exactly what it was — with the set empty (predrop step 5) every
+        arm write is byte-identical to before the engine existed."""
         ramp_ms = _phase_ramp_ms(event_class, gap_ms)
         lull_keys: dict = {}
         if event_class == "lull" and any(
@@ -2962,6 +2988,12 @@ class ResponseEngine:
                 st.effect_type in device_model.DROP_SHOCK_TOLD_EFFECTS
                 for st in self.conductor.virtuals.values()):
             shock_keys, shock_verdict = self._drop_shock_keys()
+        verdict: Optional[pre_drop_play.Verdict] = None
+        if event_class == "lull" and pre_drop is not None:
+            verdict = pre_drop_play.decide(self.conductor.scene, pre_drop)
+        member = self._pre_drop_member_lull(event_class, verdict, gap_ms,
+                                            ramp_ms, lull_keys)
+        pre_told: list[str] = []
         targets: list[str] = []
         withheld: list[str] = []
         house_reason: Optional[str] = None
@@ -3008,9 +3040,15 @@ class ResponseEngine:
             if (shock_keys and state.effect_type
                     in device_model.DROP_SHOCK_TOLD_EFFECTS):
                 arm.update(shock_keys)
+            vid_ramp_ms = ramp_ms
+            if (member is not None
+                    and state.effect_type in device_model.PRE_DROP_EFFECTS):
+                vid_ramp_ms = self._tell_pre_drop(arm, state, member, verdict)
+                if verdict is not None and verdict.plays:
+                    pre_told.append(vid)
             await self._jump(vid, state.effect_type, arm)
             await self._glide(
-                vid, state.effect_type, {"phase_progress": 1.0}, ramp_ms)
+                vid, state.effect_type, {"phase_progress": 1.0}, vid_ramp_ms)
             targets.append(vid)
         if targets:
             self._phase_armed = (event_class
@@ -3043,7 +3081,72 @@ class ResponseEngine:
             record["withheld"] = {"virtuals": withheld, "reason": house_reason}
         if flares_off:
             record["flares_off"] = flares_off
+        if verdict is not None:
+            told = verdict.as_dict()
+            told["told"] = pre_told
+            if member is not None and verdict.plays:
+                told["member_lull"] = {
+                    "ramp_ms": member["ramp_ms"],
+                    "breath_at_s": member["breath"][phase_grammar.BREATH_AT_KEY],
+                    "breath_s": member["breath"][phase_grammar.BREATH_KEY]}
+            record["pre_drop"] = told
         return record
+
+    def _pre_drop_member_lull(self, event_class: str,
+                              verdict: Optional[pre_drop_play.Verdict],
+                              gap_ms: Optional[int], ramp_ms: int,
+                              lull_keys: dict) -> Optional[dict]:
+        """THE PRE-DROP's member lull (the _drive_phase docstring): None
+        unless this is a lull arm and a PRE_DROP_EFFECTS virtual is among
+        the conductor's virtuals. Otherwise the ramp, dark keys and breath
+        keys a member is told — measured to the pre-drop when it plays,
+        the lull's own (zeros for the breath when the member is no
+        breath-hold effect, decided per virtual in _tell_pre_drop) when it
+        does not."""
+        if event_class != "lull" or not any(
+                st.effect_type in device_model.PRE_DROP_EFFECTS
+                for st in self.conductor.virtuals.values()):
+            return None
+        max_dark = self._lull_dark_max_s()
+        if verdict is not None and verdict.plays:
+            to_pre_ms = int(verdict.at_ms)
+            m_ramp = _phase_ramp_ms("lull", to_pre_ms)
+            return {"ramp_ms": m_ramp,
+                    "dark": _lull_dark_keys(m_ramp, to_pre_ms, max_dark),
+                    "breath": phase_grammar.breath_keys_for(
+                        to_pre_ms / 1000.0, self._lull_breath_hold_s(),
+                        max_dark),
+                    "plays": True}
+        return {"ramp_ms": ramp_ms,
+                "dark": (lull_keys or _lull_dark_keys(ramp_ms, gap_ms,
+                                                      max_dark)),
+                "breath": phase_grammar.breath_keys_for(
+                    gap_ms / 1000.0 if gap_ms is not None and gap_ms > 0
+                    else None, self._lull_breath_hold_s(), max_dark),
+                "plays": False}
+
+    def _tell_pre_drop(self, arm: dict, state, member: dict,
+                       verdict: Optional[pre_drop_play.Verdict]) -> int:
+        """Fold one PRE_DROP_EFFECTS virtual's pre-drop keys into its lull
+        `arm` (every key, every lull arm — fx/effects/pre_drop.py's rule 2)
+        and return the ramp its phase_progress glides over."""
+        et = state.effect_type
+        if et in device_model.LULL_DARK_EFFECTS:
+            arm.update(member["dark"])
+        if member["plays"]:
+            arm.update(member["breath"])
+            look = pre_drop_play.look_for(self.conductor.scene,
+                                          getattr(state, "entry_id", ""),
+                                          et, verdict.kind)
+            arm.update(fx_pre_drop.keys_for(
+                verdict.at_ms / 1000.0, verdict.gap_ms / 1000.0,
+                verdict.kind, look))
+        else:
+            arm.update(member["breath"] if et in device_model.BREATH_HOLD_EFFECTS
+                       else {phase_grammar.BREATH_AT_KEY: 0.0,
+                             phase_grammar.BREATH_KEY: 0.0})
+            arm.update(fx_pre_drop.NOT_TOLD)
+        return int(member["ramp_ms"])
 
     async def rearm_phase(self, event_class: str, progress: float,
                           remaining_ms: int) -> dict:

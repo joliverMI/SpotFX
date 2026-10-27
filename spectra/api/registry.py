@@ -33,11 +33,19 @@ async def get_registry():
         }
         for c in device_model.list_categories()
     }
-    effects = {
-        etype: {"params": device_model.effect_params(etype)}
-        for etype in device_model.effect_types()
-    }
-    return {"categories": cats, "effects": effects}
+    effects = {}
+    for etype in device_model.effect_types():
+        entry = {"params": device_model.effect_params(etype)}
+        # THE PRE-DROP LOOKS an effect declares (fx/effects/pre_drop.py) —
+        # what the Phase tab's per-entry picker offers; absent = none yet
+        looks = device_model.pre_drop_looks(etype)
+        if looks:
+            entry["pre_drop_looks"] = looks
+        effects[etype] = entry
+    from spectra.services import pre_drop_play
+    # each pre-drop kind's window bounds and defaults, read off the model
+    return {"categories": cats, "effects": effects,
+            "pre_drop": pre_drop_play.window_bounds()}
 
 
 @router.get("/color-sets")

@@ -21,8 +21,8 @@
  * — and stays inside its kind's lead range before the drop. One tap on the
  * glyph beside its ◀ ▶ switches its kind; ＋ Pre-drop places one where the
  * rules pick when the drop has none. On his own drop it moves the same way
- * (the server keeps it in the drop store, never his song profile). Nothing
- * plays from a pre-drop yet. */
+ * (the server keeps it in the drop store, never his song profile). One that
+ * plays fades the drop's colour change across it (PRE_DROP_IN_THE_ROOM). */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Icon from '../components/Icon';
@@ -35,7 +35,7 @@ import {
 } from '../timeline/dropEdit';
 import {
   clampPreDrop, fmtDropTime, PART_COLOR, PART_LABEL, PRE_DROP_KIND_WORD, PRE_DROP_LEAD_MS,
-  PRE_DROPS_DO_NOT_PLAY, preDropRail, snapPreDrop, stepPreDrop, type PanelRow,
+  PRE_DROP_IN_THE_ROOM, preDropRail, snapPreDrop, stepPreDrop, type PanelRow,
 } from './dropsPanel';
 
 const STRIP_H = 96;
@@ -283,7 +283,7 @@ export default function HomeDropEditor({ row, uri, beatMs, editor, onClose }: {
             data-kind={preKind}
             style={{ left: `${pct(preAt!)}%`, ['--part' as string]: preColor }}
             aria-label={`Pre-drop (${preWord}) at ${fmtDropTime(preAt!)}, ${row.dropMs - preAt!} ms before the drop — drag, or use the arrow keys`}
-            title={`Pre-drop (${preWord}) ${fmtDropTime(preAt!)} — drag to move (it snaps to ${preKind === 'intro' ? 'the vocal entries' : 'the hits'}); ${PRE_DROPS_DO_NOT_PLAY}`}
+            title={`Pre-drop (${preWord}) ${fmtDropTime(preAt!)} — drag to move (it snaps to ${preKind === 'intro' ? 'the vocal entries' : 'the hits'}); ${PRE_DROP_IN_THE_ROOM}`}
             onPointerDown={dragPre}
             onKeyDown={(e) => {
               if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -336,7 +336,7 @@ export default function HomeDropEditor({ row, uri, beatMs, editor, onClose }: {
       <div className="home-drop-editor-actions">
         {preAbsent && savedPre == null && row.preDropWas == null && (
           <button type="button" className="home-drop-editor-act add-pre-drop"
-            title={`Add a pre-drop where the rules find the strongest hit or vocal entry before this drop; ${PRE_DROPS_DO_NOT_PLAY}`}
+            title={`Add a pre-drop where the rules find the strongest hit or vocal entry before this drop; ${PRE_DROP_IN_THE_ROOM}`}
             onClick={() => void editor.fill(row.key, 'pre_drop')}>
             <Icon name="preDrop" size={14} /> ＋ Pre-drop
           </button>

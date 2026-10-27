@@ -117,7 +117,11 @@ the room already allows — on Black Hole, whose lull is already dark there,
 it changes nothing. A gap SpotFX cannot know (no partner trigger) tells 0:
 there is no mark to breathe before. If the drop never comes, the panel
 comes back BREATH_OVERRUN_S after the breath should have ended rather than
-staying black until the orphan watchdog.
+staying black until the orphan watchdog — unless the breath ends on a told
+PRE-DROP (fx/effects/pre_drop.py: a member's lull is measured to its
+pre-drop, so the breath is the black right before the clap or the entry):
+the pre-drop is on the effect's own clock and cannot be lost, so the black
+lifts exactly on it and the pre-drop's look starts there.
 
 WHO BREATHES (2026-10-12, the Admiral: "I want orbits and fish to
 specifically not go dark completely on the crystal or the strips. I do
@@ -224,6 +228,15 @@ def _breath_gain(config: Mapping, phase_t: float) -> float:
     t = float(phase_t)
     if t >= at + b + BREATH_OVERRUN_S:
         return 1.0
+    if t >= at + b:
+        # past the breath's end with no drop yet: the black holds a little
+        # longer in case the drop is late — unless the breath ended on a
+        # told PRE-DROP, which is on the effect's own clock and cannot be
+        # lost (fx/effects/pre_drop.py): its look starts there.
+        from fx.effects import pre_drop
+        if pre_drop.breath_ends_on_pre_drop(config):
+            return 1.0
+        return 0.0
     if t >= at:
         return 0.0
     fade_from = at - BREATH_FADE_S

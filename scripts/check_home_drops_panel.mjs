@@ -478,7 +478,7 @@ console.log('EIGHT the pre-drop button: its look, its glyph, one call a tap');
     'a waiting spike pre-drop: dashed, and it can be tapped');
   ok(pathOf(pb) === H.ICONS.preDrop, 'a spike wears the spike glyph (preDrop)');
   ok(/a spike/.test(pb.title) && /waiting for you/.test(pb.title)
-    && /do not play in the room yet/.test(pb.title),
+    && /colour fades across it/.test(pb.title),
     `its tooltip names the kind, the state, and that it does not play yet ("${pb.title}")`);
   ok(/spike pre-drop/.test(b.querySelector('.home-drops-state')?.textContent ?? ''),
     'the row\'s state line names the pre-drop\'s kind');

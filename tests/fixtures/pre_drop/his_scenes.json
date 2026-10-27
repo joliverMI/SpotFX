@@ -1,0 +1,4976 @@
+{
+ "_source": "GET /spectra/api/scenes on his live SPECTRA (read-only), 2026-10-26 \u2014 his real scene list, verbatim, for the pre-drop engine's byte-identical arm-write test (tests/test_pre_drop_engine.py)",
+ "scenes": [
+  {
+   "accept_all_sets": true,
+   "accepted_set_ids": [],
+   "choreography": {
+    "anchor_frac": 0.45,
+    "enabled": false,
+    "transition_mode": "Add",
+    "transition_ms": 800
+   },
+   "color_journey": {
+    "journey": null,
+    "mode": "inherit",
+    "pace_factor": 1.0
+   },
+   "devices": [
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "blackhole",
+     "id": "5debcb5e-5451-4a85-b764-3295bdb065e8",
+     "params": {
+      "accel": 5,
+      "base_speed": 2,
+      "beat_burst": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 2.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 6.0,
+       "out_min": 0.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "blob_size": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 1.75,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 2.0,
+       "out_min": 1.5,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "edge_speed": 0.2,
+      "horizon_audio": 0.3,
+      "horizon_hold": 2.8,
+      "horizon_scale": 0.2,
+      "impulse_decay": 0.06,
+      "max_blobs": 50,
+      "reverse": false,
+      "spawn_audio": 1.5,
+      "spawn_rate": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 1.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 2.0,
+       "out_min": 0.5,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "speed_audio": 2,
+      "swirl": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 0.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 6.0,
+       "out_min": -6.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "x_offset": 0.5,
+      "y_offset": 0.5
+     },
+     "target": "Matrix",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "blackhole1d",
+     "id": "7618c7bb-a07e-48d2-a643-31953369880c",
+     "params": {
+      "accel": 5,
+      "approach_width": 0.16,
+      "base_speed": 1,
+      "beat_burst": 2,
+      "blob_size": 0.5,
+      "edge_speed": 1,
+      "impulse_decay": 0.06,
+      "max_blobs": 50,
+      "radius_scale": 1,
+      "reverse": true,
+      "spawn_audio": 1,
+      "spawn_rate": 1,
+      "speed_audio": 2.3,
+      "swirl": 3.1,
+      "x_offset": 0.5
+     },
+     "target": "Strips",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "pulse",
+     "id": "a43eb3fa-e1a2-4f4b-9914-5f559bece699",
+     "params": {},
+     "target": "Singles",
+     "target_kind": "category"
+    }
+   ],
+   "disabled": false,
+   "display_availability": "default",
+   "drop_shock_enabled": true,
+   "drop_timing_offset_ms": null,
+   "dwell_curve": null,
+   "entry_ramp_ms": 0,
+   "flare_kinds": [
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "dice",
+     "min_intensity": null,
+     "name": "Dice Re-roll",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "color_set",
+     "min_intensity": null,
+     "name": "Colour Jump",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0\u20130.35",
+     "params": {
+      "beat_burst": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      },
+      "spawn_rate": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.7
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 0.7,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0\u20130.35",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.35\u20130.7",
+     "params": {
+      "beat_burst": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 3.0
+      },
+      "spawn_rate": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.25
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.7\u20131",
+     "params": {
+      "beat_burst": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 6.0
+      },
+      "spawn_rate": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 2.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.4,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0.7\u20131",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": 500,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Reverse Momentarily (500ms)",
+     "params": {
+      "reverse": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Colour Rotate & Back",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "color_rotate"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Blob rush",
+     "params": {},
+     "trigger_offset_ms": -349,
+     "type": "blob_rush"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Pulse Flash",
+     "params": {},
+     "trigger_offset_ms": -92,
+     "type": "pulse_flash"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": 0.4,
+     "name": "Pulse Colour Flip",
+     "params": {},
+     "trigger_offset_ms": -355,
+     "type": "pulse_flip"
+    }
+   ],
+   "id": "e9b44a88-77b9-4eb9-ae2a-859d3ecd6dc1",
+   "labels": [
+    "mid-group",
+    "particle"
+   ],
+   "name": "Black Hole V2",
+   "preferred_color_set_mode": "dark",
+   "responses": {
+    "flare": {
+     "bands": [
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.35,
+       "intensity_min": 0.0,
+       "kind_lanes": {
+        "Blob rush": "Shape flare",
+        "Reverse Momentarily (500ms)": "Shape flare"
+       },
+       "kinds": {
+        "Blob rush": 1.0,
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0\u20130.35": 1.0,
+        "Flare patch 0\u20130.35": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.7,
+       "intensity_min": 0.35,
+       "kind_lanes": {
+        "Blob rush": "Shape flare",
+        "Reverse Momentarily (500ms)": "Shape flare"
+       },
+       "kinds": {
+        "Blob rush": 1.0,
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare patch 0.35\u20130.7": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "pulse",
+       "gain": 1.0,
+       "intensity_max": 1.0,
+       "intensity_min": 0.7,
+       "kind_lanes": {
+        "Blob rush": "Shape flare",
+        "Reverse Momentarily (500ms)": "Shape flare"
+       },
+       "kinds": {
+        "Blob rush": 1.0,
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0.7\u20131": 1.0,
+        "Flare patch 0.7\u20131": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      }
+     ],
+     "color_set_jump": false,
+     "reroll_dice": false
+    }
+   },
+   "trigger_offset_ms": 0,
+   "update_kind": null
+  },
+  {
+   "accept_all_sets": true,
+   "accepted_set_ids": [],
+   "choreography": {
+    "anchor_frac": 0.45,
+    "enabled": false,
+    "transition_mode": "Add",
+    "transition_ms": 800
+   },
+   "color_journey": {
+    "journey": null,
+    "mode": "inherit",
+    "pace_factor": 1.0
+   },
+   "devices": [
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "orbits",
+     "id": "a7756ddf-ab48-4cff-9bcc-c8315acad8f2",
+     "params": {
+      "base_speed": 0.3,
+      "blob_size": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 2.5,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 1.0,
+       "out_min": 4.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "brightness_audio": 0.5,
+      "color_shift": 1,
+      "horizon_scale": 0.19,
+      "impulse_decay": 0.06,
+      "jiggle": 0.15,
+      "particle_count": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 3.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 8.0,
+       "out_min": 1.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "radius_scale": 1.8,
+      "reactivity_scale": 1,
+      "reverse": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": false,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "steps",
+       "out_max": 1.0,
+       "out_min": 0.0,
+       "random_sign": false,
+       "signal": "random",
+       "steps": [
+        {
+         "threshold": 0.0,
+         "value": false
+        },
+        {
+         "threshold": 0.5,
+         "value": true
+        }
+       ],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "size_audio": 0.5,
+      "speed_jog": 1,
+      "speed_jump": 1,
+      "spin": 0.37,
+      "tether_scatter": 0,
+      "x_offset": 0.5,
+      "y_offset": 0.5
+     },
+     "target": "Matrix",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "orbits1d",
+     "id": "39c5b02b-7754-49b6-b223-c43a48903fc1",
+     "params": {
+      "base_speed": 0.5,
+      "blob_size": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 2.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 1.0,
+       "out_min": 3.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "bounce_chance": 0.2,
+      "brightness_audio": 0.8,
+      "color_shift": 1,
+      "implode_fade": 0.5,
+      "implode_reach": 0.4,
+      "impulse_decay": 0.06,
+      "jiggle": 0.2,
+      "overlap_blend": 1,
+      "particle_count": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 3.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 6.0,
+       "out_min": 2.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "reactivity_scale": 0.5,
+      "size_audio": 0.5,
+      "speed_jog": 0.3,
+      "speed_jump": 1,
+      "spin": 0.15,
+      "tether_scatter": 0.1,
+      "x_offset": 0.5
+     },
+     "target": "Strips",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "pulse",
+     "id": "a24b4fa1-6ed8-4f8a-a944-39d1c8606a97",
+     "params": {},
+     "target": "Singles",
+     "target_kind": "category"
+    }
+   ],
+   "disabled": false,
+   "display_availability": "default",
+   "drop_shock_enabled": true,
+   "drop_timing_offset_ms": null,
+   "dwell_curve": null,
+   "entry_ramp_ms": 0,
+   "flare_kinds": [
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "dice",
+     "min_intensity": null,
+     "name": "Dice Re-roll",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "color_set",
+     "min_intensity": null,
+     "name": "Colour Jump",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0\u20130.35",
+     "params": {
+      "blob_size": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 3.5
+      },
+      "particle_count": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 2.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 0.7,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0\u20130.35",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.35\u20130.7",
+     "params": {
+      "blob_size": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 2.5
+      },
+      "particle_count": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 4.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.7\u20131",
+     "params": {
+      "blob_size": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      },
+      "particle_count": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 8.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.4,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0.7\u20131",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": 500,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Reverse Momentarily (500ms)",
+     "params": {
+      "reverse": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Colour Rotate & Back",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "color_rotate"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Pulse Flash",
+     "params": {},
+     "trigger_offset_ms": -92,
+     "type": "pulse_flash"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": 0.4,
+     "name": "Pulse Colour Flip",
+     "params": {},
+     "trigger_offset_ms": -355,
+     "type": "pulse_flip"
+    }
+   ],
+   "id": "85d0724d-407f-45a0-9dac-48da21b4c5fb",
+   "labels": [
+    "mid-group",
+    "star"
+   ],
+   "name": "Orbits V2",
+   "preferred_color_set_mode": "default",
+   "responses": {
+    "flare": {
+     "bands": [
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.35,
+       "intensity_min": 0.0,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0\u20130.35": 1.0,
+        "Flare patch 0\u20130.35": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.7,
+       "intensity_min": 0.35,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare patch 0.35\u20130.7": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "pulse",
+       "gain": 1.0,
+       "intensity_max": 1.0,
+       "intensity_min": 0.7,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0.7\u20131": 1.0,
+        "Flare patch 0.7\u20131": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      }
+     ],
+     "color_set_jump": false,
+     "reroll_dice": false
+    }
+   },
+   "trigger_offset_ms": 0,
+   "update_kind": null
+  },
+  {
+   "accept_all_sets": true,
+   "accepted_set_ids": [],
+   "choreography": {
+    "anchor_frac": 0.45,
+    "enabled": false,
+    "transition_mode": "Add",
+    "transition_ms": 800
+   },
+   "color_journey": {
+    "journey": null,
+    "mode": "inherit",
+    "pace_factor": 1.0
+   },
+   "devices": [
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "radial",
+     "id": "93385d09-a352-4f16-9678-ce3760d93eac",
+     "params": {
+      "edges": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 3.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "steps",
+       "out_max": 1.0,
+       "out_min": 0.0,
+       "random_sign": false,
+       "signal": "random",
+       "steps": [
+        {
+         "threshold": 0.0,
+         "value": 3.0
+        },
+        {
+         "threshold": 0.25,
+         "value": 4.0
+        },
+        {
+         "threshold": 0.5,
+         "value": 5.0
+        },
+        {
+         "threshold": 0.75,
+         "value": 6.0
+        }
+       ],
+       "sticky": true,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "polygon": true,
+      "spin": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 0.55,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 1.0,
+       "out_min": 0.4,
+       "random_sign": true,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "star": {
+       "bind": "signal",
+       "dice": "a",
+       "fallback": 0.3,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "steps",
+       "out_max": 1.0,
+       "out_min": 0.0,
+       "random_sign": true,
+       "signal": "random",
+       "steps": [
+        {
+         "threshold": 0.0,
+         "value": 0.3
+        },
+        {
+         "threshold": 0.5,
+         "value": 0.5
+        }
+       ],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "twist": 0,
+      "x_offset": 0.5,
+      "y_offset": 0.5
+     },
+     "target": "Matrix",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "melt",
+     "id": "039e4e68-0337-4401-8ef1-10610abbfc1a",
+     "params": {},
+     "target": "Strips",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": {
+      "bind": "signal",
+      "dice": null,
+      "fallback": 0.76,
+      "in_max": 1.0,
+      "in_min": 0.0,
+      "mode": "steps",
+      "out_max": 1.0,
+      "out_min": 0.0,
+      "random_sign": false,
+      "signal": "trigger_intensity",
+      "steps": [
+       {
+        "threshold": 0.0,
+        "value": 0.76
+       },
+       {
+        "threshold": 0.7,
+        "value": 0.58
+       }
+      ],
+      "sticky": false,
+      "window_beats": 0,
+      "window_dir": "past"
+     },
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "pulse",
+     "id": "dc2da156-e5b7-45c0-9087-7944f204facc",
+     "params": {},
+     "target": "Singles",
+     "target_kind": "category"
+    }
+   ],
+   "disabled": true,
+   "display_availability": "default",
+   "drop_shock_enabled": true,
+   "drop_timing_offset_ms": null,
+   "dwell_curve": null,
+   "entry_ramp_ms": 0,
+   "flare_kinds": [
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "dice",
+     "min_intensity": null,
+     "name": "Dice Re-roll",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "color_set",
+     "min_intensity": null,
+     "name": "Colour Jump",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0\u20130.35",
+     "params": {
+      "spin": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.25
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 0.7,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0\u20130.35",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.35\u20130.7",
+     "params": {
+      "spin": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.55
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.7\u20131",
+     "params": {
+      "spin": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.55
+      },
+      "star": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.4,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0.7\u20131",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Drop patch 0.7\u20131",
+     "params": {
+      "spin": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.55
+      },
+      "star": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.5,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Drop gain 0.7\u20131",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Reverse Direction",
+     "params": {
+      "spin_sign": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": false,
+     "gain": 1.0,
+     "hold_ms": 500,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Reverse Momentarily (500ms)",
+     "params": {
+      "spin_sign": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Colour Rotate & Back",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "color_rotate"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Pulse Flash",
+     "params": {},
+     "trigger_offset_ms": -92,
+     "type": "pulse_flash"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": 0.4,
+     "name": "Pulse Colour Flip",
+     "params": {},
+     "trigger_offset_ms": -355,
+     "type": "pulse_flip"
+    }
+   ],
+   "id": "d3aab04c-7e23-4693-bd26-16bad45792a6",
+   "labels": [
+    "mid-group",
+    "drop-group",
+    "chill-scenes",
+    "star"
+   ],
+   "name": "STAR",
+   "preferred_color_set_mode": "default",
+   "responses": {
+    "drop": {
+     "bands": [
+      {
+       "curve": "pulse",
+       "gain": 1.0,
+       "intensity_max": 1.0,
+       "intensity_min": 0.7,
+       "kind_lanes": {},
+       "kinds": {
+        "Drop gain 0.7\u20131": 1.0,
+        "Drop patch 0.7\u20131": 1.0
+       },
+       "param_patch": {}
+      }
+     ],
+     "color_set_jump": false,
+     "reroll_dice": false
+    },
+    "flare": {
+     "bands": [
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.35,
+       "intensity_min": 0.0,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Flare gain 0\u20130.35": 1.0,
+        "Flare patch 0\u20130.35": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Direction": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.7,
+       "intensity_min": 0.35,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Flare patch 0.35\u20130.7": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Direction": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "pulse",
+       "gain": 1.0,
+       "intensity_max": 1.0,
+       "intensity_min": 0.7,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Flare gain 0.7\u20131": 1.0,
+        "Flare patch 0.7\u20131": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Direction": 1.0
+       },
+       "param_patch": {}
+      }
+     ],
+     "color_set_jump": false,
+     "reroll_dice": false
+    }
+   },
+   "trigger_offset_ms": 0,
+   "update_kind": "Flare patch 0.7\u20131"
+  },
+  {
+   "accept_all_sets": true,
+   "accepted_set_ids": [],
+   "choreography": {
+    "anchor_frac": 0.45,
+    "enabled": false,
+    "transition_mode": "Add",
+    "transition_ms": 800
+   },
+   "color_journey": {
+    "journey": null,
+    "mode": "inherit",
+    "pace_factor": 1.0
+   },
+   "devices": [
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "fireworks",
+     "id": "2c55196e-564c-4942-8071-d9a2834a83aa",
+     "params": {
+      "beat_burst": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 4.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 6.0,
+       "out_min": 1.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "blob_size": 2,
+      "brightness_audio": 2,
+      "burst_audio": 1,
+      "burst_life": 1.9,
+      "burst_size": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 8.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 14.0,
+       "out_min": 5.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "burst_speed": 1.8,
+      "drag": 0.69,
+      "impulse_decay": 0.06,
+      "max_blobs": 100,
+      "radius_scale": 1,
+      "reverse": false,
+      "spawn_audio": 2,
+      "spawn_rate": 0.5,
+      "speed_audio": 3.2,
+      "trail_decay": 0.27,
+      "x_offset": 0.5,
+      "y_offset": 0.5
+     },
+     "target": "Matrix",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "fireworks1d",
+     "id": "fa3c44bf-3480-4fa7-9631-40b31a6a27bb",
+     "params": {
+      "beat_burst": 2,
+      "blob_size": 3.03,
+      "brightness_audio": 2,
+      "burst_life": 1.2,
+      "burst_speed": 0.5,
+      "drag": 0.85,
+      "impulse_decay": 0.06,
+      "max_blobs": 6,
+      "reverse": false,
+      "spawn_audio": 2,
+      "spawn_rate": 0.5,
+      "speed_audio": 2.5,
+      "trail_decay": 0.24
+     },
+     "target": "Strips",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "pulse",
+     "id": "237f3b96-4e07-44ae-825b-67d6c033167b",
+     "params": {},
+     "target": "Singles",
+     "target_kind": "category"
+    }
+   ],
+   "disabled": false,
+   "display_availability": "default",
+   "drop_shock_enabled": true,
+   "drop_timing_offset_ms": null,
+   "dwell_curve": null,
+   "entry_ramp_ms": 0,
+   "flare_kinds": [
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "dice",
+     "min_intensity": null,
+     "name": "Dice Re-roll",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "color_set",
+     "min_intensity": null,
+     "name": "Colour Jump",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0\u20130.35",
+     "params": {
+      "beat_burst": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.5
+      },
+      "burst_size": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 6.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 0.7,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0\u20130.35",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.35\u20130.7",
+     "params": {
+      "beat_burst": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 4.0
+      },
+      "burst_size": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 9.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.7\u20131",
+     "params": {
+      "beat_burst": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 6.0
+      },
+      "burst_size": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 14.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.4,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0.7\u20131",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": 500,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Reverse Direction",
+     "params": {
+      "reverse": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Colour Rotate & Back",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "color_rotate"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Firework Burst",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "firework_burst"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Firework Burst 2",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "firework_burst"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Pulse Flash",
+     "params": {},
+     "trigger_offset_ms": -92,
+     "type": "pulse_flash"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": 0.4,
+     "name": "Pulse Colour Flip",
+     "params": {},
+     "trigger_offset_ms": -355,
+     "type": "pulse_flip"
+    }
+   ],
+   "id": "af0ba83b-c037-4d04-a037-0c2615e8d74b",
+   "labels": [
+    "mid-group",
+    "particle"
+   ],
+   "name": "Fireworks V2",
+   "preferred_color_set_mode": "dark",
+   "responses": {
+    "flare": {
+     "bands": [
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.35,
+       "intensity_min": 0.0,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Firework Burst": 1.0,
+        "Flare gain 0\u20130.35": 1.0,
+        "Flare patch 0\u20130.35": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.7,
+       "intensity_min": 0.35,
+       "kind_lanes": {
+        "Firework Burst": "Shape flare",
+        "Firework Burst 2": "Shape flare",
+        "Reverse Direction": "Shape flare"
+       },
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Firework Burst": 1.0,
+        "Firework Burst 2": 1.0,
+        "Flare patch 0.35\u20130.7": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Direction": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "pulse",
+       "gain": 1.0,
+       "intensity_max": 1.0,
+       "intensity_min": 0.7,
+       "kind_lanes": {
+        "Firework Burst": "Shape flare",
+        "Firework Burst 2": "Shape flare",
+        "Reverse Direction": "Shape flare"
+       },
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Firework Burst": 1.0,
+        "Firework Burst 2": 1.0,
+        "Flare patch 0.7\u20131": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Direction": 1.0
+       },
+       "param_patch": {}
+      }
+     ],
+     "color_set_jump": false,
+     "reroll_dice": false
+    }
+   },
+   "trigger_offset_ms": 0,
+   "update_kind": null
+  },
+  {
+   "accept_all_sets": true,
+   "accepted_set_ids": [],
+   "choreography": {
+    "anchor_frac": 0.45,
+    "enabled": false,
+    "transition_mode": "Add",
+    "transition_ms": 800
+   },
+   "color_journey": {
+    "journey": null,
+    "mode": "inherit",
+    "pace_factor": 1.0
+   },
+   "devices": [
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "squiggles",
+     "id": "091d0db6-a8ce-4a9c-bb7d-cb5377428499",
+     "params": {
+      "base_speed": 38,
+      "beat_burst": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 2.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 5.0,
+       "out_min": 1.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "blob_size": 2,
+      "brightness_audio": 1,
+      "horizontal_gap": 10,
+      "impulse_decay": 0.06,
+      "jiggle": 0.24,
+      "length_audio": 1,
+      "max_blobs": 8,
+      "reverse": false,
+      "spawn_audio": 0.5,
+      "spawn_rate": 0,
+      "speed_audio": 2.7,
+      "step_count": 4,
+      "step_size": 3,
+      "x_offset": 0.5,
+      "y_offset": 0.5
+     },
+     "target": "Matrix",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": 0.6,
+     "brightness": 0.35,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "orbits1d",
+     "id": "0a489db4-379b-407d-b0b7-354ec05ac97f",
+     "params": {},
+     "target": "Strips",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": 0.23,
+     "brightness": 1.0,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "pulse",
+     "id": "457fb55b-8e70-487f-af08-a7a012ec9ca5",
+     "params": {},
+     "target": "Singles",
+     "target_kind": "category"
+    }
+   ],
+   "disabled": false,
+   "display_availability": "default",
+   "drop_shock_enabled": true,
+   "drop_timing_offset_ms": null,
+   "dwell_curve": null,
+   "entry_ramp_ms": 0,
+   "flare_kinds": [
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": 500,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Reverse Momentarily (500ms)",
+     "params": {
+      "reverse": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Colour Rotate & Back",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "color_rotate"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Pulse Flash",
+     "params": {},
+     "trigger_offset_ms": -92,
+     "type": "pulse_flash"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": 0.4,
+     "name": "Pulse Colour Flip",
+     "params": {},
+     "trigger_offset_ms": -355,
+     "type": "pulse_flip"
+    }
+   ],
+   "id": "970db454-5f1d-4f11-b7ee-5fcf5d7d2812",
+   "labels": [
+    "mid-group",
+    "particle"
+   ],
+   "name": "Squiggles V2",
+   "preferred_color_set_mode": "default",
+   "responses": {
+    "flare": {
+     "bands": [
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.35,
+       "intensity_min": 0.0,
+       "kind_lanes": {},
+       "kinds": {
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.7,
+       "intensity_min": 0.35,
+       "kind_lanes": {},
+       "kinds": {
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "pulse",
+       "gain": 1.0,
+       "intensity_max": 1.0,
+       "intensity_min": 0.7,
+       "kind_lanes": {},
+       "kinds": {
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      }
+     ],
+     "color_set_jump": false,
+     "reroll_dice": false
+    }
+   },
+   "trigger_offset_ms": 0,
+   "update_kind": null
+  },
+  {
+   "accept_all_sets": true,
+   "accepted_set_ids": [],
+   "choreography": {
+    "anchor_frac": 0.45,
+    "enabled": false,
+    "transition_mode": "Add",
+    "transition_ms": 800
+   },
+   "color_journey": {
+    "journey": null,
+    "mode": "inherit",
+    "pace_factor": 1.0
+   },
+   "devices": [
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "dancer",
+     "id": "84e2c044-3565-4082-8e7f-5ad6ccf2b4b7",
+     "params": {
+      "base_speed": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 0.8,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 1.0,
+       "out_min": 0.6,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "blob_size": 1.8,
+      "brightness_audio": 0.6,
+      "burst_audio": 1,
+      "burst_size": 0,
+      "burst_threshold": 1,
+      "dance_intensity": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 1.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 1.7,
+       "out_min": 0.7,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "dance_type": "ballet",
+      "impulse_decay": 0.15,
+      "jiggle": 0.25,
+      "radius_scale": 1,
+      "reverse": false,
+      "rotation": 180,
+      "trail_decay": 0.3,
+      "y_offset": 0.4
+     },
+     "target": "Matrix",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "orbits1d",
+     "id": "d6e0e805-1bd2-428e-a768-9ee9e1b459d1",
+     "params": {
+      "base_speed": 0.3,
+      "blob_size": 2.5,
+      "brightness_audio": 0.5,
+      "color_shift": 1,
+      "impulse_decay": 0.06,
+      "jiggle": 0.15,
+      "particle_count": 3,
+      "reactivity_scale": 1,
+      "size_audio": 0.5,
+      "speed_jog": 1,
+      "speed_jump": 1,
+      "spin": 0.37,
+      "tether_scatter": 0,
+      "x_offset": 0.5
+     },
+     "target": "Strips",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "pulse",
+     "id": "cf865b9d-f823-47a3-9bf2-56f111e6d443",
+     "params": {},
+     "target": "Singles",
+     "target_kind": "category"
+    }
+   ],
+   "disabled": true,
+   "display_availability": "dark",
+   "drop_shock_enabled": true,
+   "drop_timing_offset_ms": null,
+   "dwell_curve": null,
+   "entry_ramp_ms": 0,
+   "flare_kinds": [
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "dice",
+     "min_intensity": null,
+     "name": "Dice Re-roll",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "color_set",
+     "min_intensity": null,
+     "name": "Colour Jump",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0\u20130.35",
+     "params": {
+      "base_speed": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.7
+      },
+      "burst_threshold": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      },
+      "dance_intensity": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.8
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 0.7,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0\u20130.35",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.35\u20130.7",
+     "params": {
+      "base_speed": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.2
+      },
+      "burst_threshold": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      },
+      "dance_intensity": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.2
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.7\u20131",
+     "params": {
+      "base_speed": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.8
+      },
+      "burst_threshold": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      },
+      "dance_intensity": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.7
+      },
+      "trail_decay": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.5
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.4,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0.7\u20131",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Colour Rotate & Back",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "color_rotate"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Pulse Flash",
+     "params": {},
+     "trigger_offset_ms": -92,
+     "type": "pulse_flash"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": 0.4,
+     "name": "Pulse Colour Flip",
+     "params": {},
+     "trigger_offset_ms": -355,
+     "type": "pulse_flip"
+    }
+   ],
+   "id": "b1f9a85a-273d-482b-8ad4-c0f30a51c59e",
+   "labels": [
+    "mid-group"
+   ],
+   "name": "Dancers V2",
+   "preferred_color_set_mode": "dark",
+   "responses": {
+    "flare": {
+     "bands": [
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.35,
+       "intensity_min": 0.0,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0\u20130.35": 1.0,
+        "Flare patch 0\u20130.35": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.7,
+       "intensity_min": 0.35,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare patch 0.35\u20130.7": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "pulse",
+       "gain": 1.0,
+       "intensity_max": 1.0,
+       "intensity_min": 0.7,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0.7\u20131": 1.0,
+        "Flare patch 0.7\u20131": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      }
+     ],
+     "color_set_jump": false,
+     "reroll_dice": false
+    }
+   },
+   "trigger_offset_ms": 0,
+   "update_kind": null
+  },
+  {
+   "accept_all_sets": true,
+   "accepted_set_ids": [],
+   "choreography": {
+    "anchor_frac": 0.45,
+    "enabled": false,
+    "transition_mode": "Add",
+    "transition_ms": 800
+   },
+   "color_journey": {
+    "journey": null,
+    "mode": "inherit",
+    "pace_factor": 1.0
+   },
+   "devices": [
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "eye",
+     "id": "6cc214ad-e549-43c6-8df0-85bc23e8a0da",
+     "params": {
+      "drift_speed": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 0.5,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 0.8,
+       "out_min": 0.35,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "flame_audio": 2,
+      "flames": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 0.35,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 0.6,
+       "out_min": 0.2,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "gaze_radius": 0.5,
+      "impulse_decay": 0.06,
+      "iris_size": 0.54,
+      "pupil_size": 0.36,
+      "snap_hold": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 0.2,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 0.5,
+       "out_min": 0.15,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "snap_threshold": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 0.6,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 0.45,
+       "out_min": 0.75,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "speed_audio": 2.9,
+      "spin": 0.08,
+      "spin_audio": 0,
+      "x_offset": 0.5,
+      "y_offset": 0.5
+     },
+     "target": "Matrix",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "blackhole1d",
+     "id": "3502f413-cd2e-4cf4-8f87-53aca4d44439",
+     "params": {
+      "accel": 5,
+      "approach_width": 0.16,
+      "base_speed": 1,
+      "beat_burst": 2,
+      "blob_size": 0.5,
+      "edge_speed": 1,
+      "impulse_decay": 0.06,
+      "max_blobs": 50,
+      "radius_scale": 1,
+      "reverse": true,
+      "spawn_audio": 1,
+      "spawn_rate": 1,
+      "speed_audio": 2.3,
+      "swirl": 3.1,
+      "x_offset": 0.5
+     },
+     "target": "Strips",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "pulse",
+     "id": "727f2596-2567-47d3-8e48-68a386328b46",
+     "params": {},
+     "target": "Singles",
+     "target_kind": "category"
+    }
+   ],
+   "disabled": true,
+   "display_availability": "dark",
+   "drop_shock_enabled": true,
+   "drop_timing_offset_ms": null,
+   "dwell_curve": null,
+   "entry_ramp_ms": 0,
+   "flare_kinds": [
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "dice",
+     "min_intensity": null,
+     "name": "Dice Re-roll",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "color_set",
+     "min_intensity": null,
+     "name": "Colour Jump",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0\u20130.35",
+     "params": {
+      "drift_speed": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.35
+      },
+      "flames": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.2
+      },
+      "snap_threshold": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.75
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 0.7,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0\u20130.35",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.35\u20130.7",
+     "params": {
+      "drift_speed": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.55
+      },
+      "flames": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.4
+      },
+      "snap_threshold": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.6
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.7\u20131",
+     "params": {
+      "drift_speed": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.8
+      },
+      "flame_audio": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 2.0
+      },
+      "flames": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      },
+      "snap_threshold": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.45
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.4,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0.7\u20131",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Colour Rotate & Back",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "color_rotate"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Pulse Flash",
+     "params": {},
+     "trigger_offset_ms": -92,
+     "type": "pulse_flash"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": 0.4,
+     "name": "Pulse Colour Flip",
+     "params": {},
+     "trigger_offset_ms": -355,
+     "type": "pulse_flip"
+    }
+   ],
+   "id": "6072f6af-0c2c-4162-8f03-e6ff1d31d9da",
+   "labels": [
+    "mid-group"
+   ],
+   "name": "Eye V2",
+   "preferred_color_set_mode": "default",
+   "responses": {
+    "flare": {
+     "bands": [
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.35,
+       "intensity_min": 0.0,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0\u20130.35": 1.0,
+        "Flare patch 0\u20130.35": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.7,
+       "intensity_min": 0.35,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare patch 0.35\u20130.7": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "pulse",
+       "gain": 1.0,
+       "intensity_max": 1.0,
+       "intensity_min": 0.7,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0.7\u20131": 1.0,
+        "Flare patch 0.7\u20131": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      }
+     ],
+     "color_set_jump": false,
+     "reroll_dice": false
+    }
+   },
+   "trigger_offset_ms": 0,
+   "update_kind": null
+  },
+  {
+   "accept_all_sets": true,
+   "accepted_set_ids": [],
+   "choreography": {
+    "anchor_frac": 0.45,
+    "enabled": false,
+    "transition_mode": "Add",
+    "transition_ms": 800
+   },
+   "color_journey": {
+    "journey": null,
+    "mode": "inherit",
+    "pace_factor": 1.0
+   },
+   "devices": [
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "blackhole",
+     "id": "0c567c43-0e11-4df7-8c7f-63686f038bdb",
+     "params": {
+      "accel": 5,
+      "base_speed": 2,
+      "beat_burst": 2,
+      "blob_size": 1.75,
+      "edge_speed": 0.2,
+      "horizon_audio": 0.3,
+      "horizon_hold": 2.8,
+      "horizon_scale": 0.2,
+      "impulse_decay": 0.06,
+      "max_blobs": 50,
+      "spawn_audio": 1.5,
+      "spawn_rate": 1,
+      "speed_audio": 2
+     },
+     "target": "Particles",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "blackhole1d",
+     "id": "d92e3eba-fc6a-435e-b471-918125db27c3",
+     "params": {
+      "accel": 5,
+      "approach_width": 0.16,
+      "base_speed": 1,
+      "beat_burst": 2,
+      "blob_size": 0.5,
+      "edge_speed": 1,
+      "impulse_decay": 0.06,
+      "max_blobs": 50,
+      "radius_scale": 1,
+      "reverse": true,
+      "spawn_audio": 1,
+      "spawn_rate": 1,
+      "speed_audio": 2.3,
+      "swirl": 3.1
+     },
+     "target": "Strips",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "pulse",
+     "id": "09dac558-123a-48d4-8a6e-888bb843380f",
+     "params": {},
+     "target": "Singles",
+     "target_kind": "category"
+    }
+   ],
+   "disabled": true,
+   "display_availability": "default",
+   "drop_shock_enabled": true,
+   "drop_timing_offset_ms": null,
+   "dwell_curve": null,
+   "entry_ramp_ms": 0,
+   "flare_kinds": [
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "dice",
+     "min_intensity": null,
+     "name": "Dice Re-roll",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "color_set",
+     "min_intensity": null,
+     "name": "Colour Jump",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 0.7,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0\u20130.35",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.4,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0.7\u20131",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Colour Rotate & Back",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "color_rotate"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Pulse Flash",
+     "params": {},
+     "trigger_offset_ms": -92,
+     "type": "pulse_flash"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": 0.4,
+     "name": "Pulse Colour Flip",
+     "params": {},
+     "trigger_offset_ms": -355,
+     "type": "pulse_flip"
+    }
+   ],
+   "id": "aaede34e-2922-4caa-8571-ad2257b0e6ec",
+   "labels": [
+    "mid-group",
+    "particle",
+    "ui-build"
+   ],
+   "name": "Black Hole V2 UI",
+   "preferred_color_set_mode": "dark",
+   "responses": {
+    "flare": {
+     "bands": [
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.35,
+       "intensity_min": 0.0,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0\u20130.35": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.7,
+       "intensity_min": 0.35,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "pulse",
+       "gain": 1.0,
+       "intensity_max": 1.0,
+       "intensity_min": 0.7,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0.7\u20131": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      }
+     ],
+     "color_set_jump": false,
+     "reroll_dice": false
+    }
+   },
+   "trigger_offset_ms": 0,
+   "update_kind": null
+  },
+  {
+   "accept_all_sets": false,
+   "accepted_set_ids": [
+    "35d31a19-851b-5ece-8a36-73abd80f3c1a",
+    "7dc5af44-8403-56fa-bc97-6f9f2f3304f7",
+    "b531ca59-0dad-505c-a33a-63b1c213ef19",
+    "e3d1b2ba-d33e-5e9f-97ac-6dac644645b8",
+    "60a532a8-63b3-5561-82da-6e657ffebb3b",
+    "fe9417bc-0d3f-5f27-861a-f7c6e6119010",
+    "eb20371a-5e16-5b65-ab18-76418a40574c"
+   ],
+   "choreography": {
+    "anchor_frac": 0.45,
+    "enabled": false,
+    "transition_mode": "Add",
+    "transition_ms": 800
+   },
+   "color_journey": {
+    "journey": null,
+    "mode": "inherit",
+    "pace_factor": 1.0
+   },
+   "devices": [
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "pacman",
+     "id": "1cfdacca-90c2-4a96-a436-d72231a0427b",
+     "params": {
+      "base_speed": 2,
+      "beat_jump": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 1.5,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 3.0,
+       "out_min": 0.8,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "dot_brightness": 0.78,
+      "entity_size": 4,
+      "fright_time": 6,
+      "ghost_count": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 4.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 4.0,
+       "out_min": 2.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "ghost_speed": 0.73,
+      "impulse_decay": 0.09,
+      "reverse": false,
+      "speed_audio": 3.3,
+      "trail_decay": 0.35,
+      "wall_audio": 1.3,
+      "wall_brightness": 0.34,
+      "wall_cycle": 0.41
+     },
+     "target": "Matrix",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": 0.6,
+     "brightness": 0.35,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "orbits1d",
+     "id": "efab3e61-57af-4e85-9cf8-e92ce1129c9f",
+     "params": {},
+     "target": "Strips",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": 0.23,
+     "brightness": 1.0,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "pulse",
+     "id": "ba1f9f56-a97d-4b45-a03c-ab0f05ab9110",
+     "params": {},
+     "target": "Singles",
+     "target_kind": "category"
+    }
+   ],
+   "disabled": true,
+   "display_availability": "default",
+   "drop_shock_enabled": true,
+   "drop_timing_offset_ms": null,
+   "dwell_curve": null,
+   "entry_ramp_ms": 0,
+   "flare_kinds": [
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "dice",
+     "min_intensity": null,
+     "name": "Dice Re-roll",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "color_set",
+     "min_intensity": null,
+     "name": "Colour Jump",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0\u20130.35",
+     "params": {
+      "beat_jump": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.2
+      },
+      "ghost_count": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 2.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 0.7,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0\u20130.35",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.35\u20130.7",
+     "params": {
+      "beat_jump": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 2.0
+      },
+      "ghost_count": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 3.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.7\u20131",
+     "params": {
+      "beat_jump": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 3.0
+      },
+      "ghost_count": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 4.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.4,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0.7\u20131",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Colour Rotate & Back",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "color_rotate"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Pulse Flash",
+     "params": {},
+     "trigger_offset_ms": -92,
+     "type": "pulse_flash"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": 0.4,
+     "name": "Pulse Colour Flip",
+     "params": {},
+     "trigger_offset_ms": -355,
+     "type": "pulse_flip"
+    }
+   ],
+   "id": "7f1f39a2-5b7e-4bd0-9f3a-2f6a1c1c8a55",
+   "labels": [
+    "drop-group",
+    "pacman"
+   ],
+   "name": "Pacman V2",
+   "preferred_color_set_mode": "default",
+   "responses": {
+    "flare": {
+     "bands": [
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.35,
+       "intensity_min": 0.0,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0\u20130.35": 1.0,
+        "Flare patch 0\u20130.35": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.7,
+       "intensity_min": 0.35,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare patch 0.35\u20130.7": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "pulse",
+       "gain": 1.0,
+       "intensity_max": 1.0,
+       "intensity_min": 0.7,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0.7\u20131": 1.0,
+        "Flare patch 0.7\u20131": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      }
+     ],
+     "color_set_jump": false,
+     "reroll_dice": false
+    }
+   },
+   "trigger_offset_ms": 0,
+   "update_kind": null
+  },
+  {
+   "accept_all_sets": true,
+   "accepted_set_ids": [],
+   "choreography": {
+    "anchor_frac": 0.45,
+    "enabled": false,
+    "transition_mode": "Add",
+    "transition_ms": 800
+   },
+   "color_journey": {
+    "journey": null,
+    "mode": "inherit",
+    "pace_factor": 1.0
+   },
+   "devices": [
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "fish",
+     "id": "b997c5a4-3f8d-53bd-8866-7547003f5b06",
+     "params": {
+      "base_speed": 0.3,
+      "big_fish_avoid": 0.0,
+      "big_fish_cross_fast_s": 0.8333333333333334,
+      "big_fish_cross_slow_s": 2.333,
+      "blob_size": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 2.5,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 1.0,
+       "out_min": 4.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "brightness_audio": 0.5,
+      "color_shift": 1,
+      "flap_amount": 0.45,
+      "horizon_scale": 0.3,
+      "impulse_decay": 0.06,
+      "jiggle": 0.5,
+      "particle_count": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 3.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 8.0,
+       "out_min": 1.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "quiet_rest": 1.0,
+      "radius_scale": 1.8,
+      "reactivity_scale": 1,
+      "reverse": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": false,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "steps",
+       "out_max": 1.0,
+       "out_min": 0.0,
+       "random_sign": false,
+       "signal": "random",
+       "steps": [
+        {
+         "threshold": 0.0,
+         "value": false
+        },
+        {
+         "threshold": 0.5,
+         "value": true
+        }
+       ],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "roam_scale": 0.75,
+      "rush_chaos": 0.3,
+      "school_variation": 0.08,
+      "size_audio": 0.5,
+      "speed_jog": 1,
+      "speed_jump": 1,
+      "spin": 0.37,
+      "tail_drive": 1.0,
+      "tether_scatter": 0,
+      "x_offset": 0.5,
+      "y_offset": 0.5
+     },
+     "target": "Matrix",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "fireworks1d",
+     "id": "8821971c-ebdc-55c7-95d1-ae550ab5e9b2",
+     "params": {
+      "beat_burst": 2,
+      "blob_size": 3.03,
+      "brightness_audio": 2,
+      "burst_life": 1.2,
+      "burst_speed": 0.5,
+      "drag": 0.85,
+      "impulse_decay": 0.06,
+      "max_blobs": 6,
+      "reverse": false,
+      "spawn_audio": 2,
+      "spawn_rate": 0.5,
+      "speed_audio": 2.5,
+      "trail_decay": 0.24
+     },
+     "target": "Strips",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "pulse",
+     "id": "56a1d1be-43bf-58a9-82c7-fc334232a422",
+     "params": {},
+     "target": "Singles",
+     "target_kind": "category"
+    }
+   ],
+   "disabled": false,
+   "display_availability": "default",
+   "drop_shock_enabled": false,
+   "drop_timing_offset_ms": null,
+   "dwell_curve": null,
+   "entry_ramp_ms": 0,
+   "flare_kinds": [
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "dice",
+     "min_intensity": null,
+     "name": "Dice Re-roll",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "color_set",
+     "min_intensity": null,
+     "name": "Colour Jump",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0\u20130.35",
+     "params": {
+      "blob_size": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 3.5
+      },
+      "particle_count": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 2.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 0.7,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0\u20130.35",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.35\u20130.7",
+     "params": {
+      "blob_size": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 2.5
+      },
+      "particle_count": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 4.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.7\u20131",
+     "params": {
+      "blob_size": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      },
+      "particle_count": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 8.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.4,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0.7\u20131",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": 500,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Reverse Momentarily (500ms)",
+     "params": {
+      "reverse": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Colour Rotate & Back",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "color_rotate"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": 300,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Fish Swim Burst",
+     "params": {
+      "swim_burst": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Pulse Flash",
+     "params": {},
+     "trigger_offset_ms": -92,
+     "type": "pulse_flash"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": 0.4,
+     "name": "Pulse Colour Flip",
+     "params": {},
+     "trigger_offset_ms": -355,
+     "type": "pulse_flip"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Big Fish",
+     "params": {},
+     "trigger_offset_ms": -1327,
+     "type": "big_fish"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Big Fish 2",
+     "params": {},
+     "trigger_offset_ms": -1252,
+     "type": "big_fish"
+    }
+   ],
+   "id": "80811c53-56ad-552e-bdb5-12028448accc",
+   "labels": [
+    "mid-group",
+    "star"
+   ],
+   "name": "Fish",
+   "preferred_color_set_mode": "default",
+   "responses": {
+    "flare": {
+     "bands": [
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.35,
+       "intensity_min": 0.0,
+       "kind_lanes": {
+        "Big Fish": "Shape",
+        "Big Fish 2": "Shape",
+        "Fish Swim Burst": "Shape",
+        "Reverse Momentarily (500ms)": "Shape"
+       },
+       "kinds": {
+        "Big Fish": 1.0,
+        "Big Fish 2": 1.0,
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Fish Swim Burst": 1.0,
+        "Flare gain 0\u20130.35": 1.0,
+        "Flare patch 0\u20130.35": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.7,
+       "intensity_min": 0.35,
+       "kind_lanes": {
+        "Big Fish": "Shape",
+        "Big Fish 2": "Shape",
+        "Fish Swim Burst": "Shape",
+        "Reverse Momentarily (500ms)": "Shape"
+       },
+       "kinds": {
+        "Big Fish": 1.0,
+        "Big Fish 2": 1.0,
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Fish Swim Burst": 1.0,
+        "Flare patch 0.35\u20130.7": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "pulse",
+       "gain": 1.0,
+       "intensity_max": 1.0,
+       "intensity_min": 0.7,
+       "kind_lanes": {
+        "Big Fish": "Shape",
+        "Big Fish 2": "Shape",
+        "Fish Swim Burst": "Shape",
+        "Reverse Momentarily (500ms)": "Shape"
+       },
+       "kinds": {
+        "Big Fish": 1.0,
+        "Big Fish 2": 1.0,
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Fish Swim Burst": 1.0,
+        "Flare gain 0.7\u20131": 1.0,
+        "Flare patch 0.7\u20131": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      }
+     ],
+     "color_set_jump": false,
+     "reroll_dice": false
+    }
+   },
+   "trigger_offset_ms": 0,
+   "update_kind": null
+  },
+  {
+   "accept_all_sets": true,
+   "accepted_set_ids": [],
+   "choreography": {
+    "anchor_frac": 0.45,
+    "enabled": false,
+    "transition_mode": "Add",
+    "transition_ms": 800
+   },
+   "color_journey": {
+    "journey": null,
+    "mode": "inherit",
+    "pace_factor": 1.0
+   },
+   "devices": [
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "radial",
+     "id": "8a75bff1-61e0-5f53-8167-0ef63f46dd0d",
+     "params": {
+      "base_rotation": 0,
+      "edges": 6,
+      "polygon": true,
+      "spin": 0,
+      "star": 0.3,
+      "x_offset": 0.5,
+      "y_offset": 0.5
+     },
+     "target": "Matrix",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "melt",
+     "id": "da438ba1-8109-5f19-9e0d-316cdb693c84",
+     "params": {
+      "blur": 1,
+      "flip": false,
+      "reactivity": 0.3,
+      "speed": 0.12
+     },
+     "target": "Strips",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "gradient",
+     "id": "80bcafcd-59b5-5cfd-9478-b0078ddc5d01",
+     "params": {
+      "gradient_roll": 0,
+      "modulate": true,
+      "modulation_effect": "sine",
+      "modulation_speed": 0.8,
+      "speed": 2
+     },
+     "target": "single-color-effect",
+     "target_kind": "virtual"
+    }
+   ],
+   "disabled": true,
+   "display_availability": "default",
+   "drop_shock_enabled": true,
+   "drop_timing_offset_ms": null,
+   "dwell_curve": null,
+   "entry_ramp_ms": 0,
+   "flare_kinds": [],
+   "id": "18a7dc94-b968-56fb-9267-e169c3f28036",
+   "labels": [
+    "house"
+   ],
+   "name": "House Star",
+   "preferred_color_set_mode": "default",
+   "responses": {},
+   "trigger_offset_ms": 0,
+   "update_kind": null
+  },
+  {
+   "accept_all_sets": true,
+   "accepted_set_ids": [],
+   "choreography": {
+    "anchor_frac": 0.45,
+    "enabled": false,
+    "transition_mode": "Add",
+    "transition_ms": 800
+   },
+   "color_journey": {
+    "journey": null,
+    "mode": "inherit",
+    "pace_factor": 1.0
+   },
+   "devices": [
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "fish",
+     "id": "ba615baa-772e-5bb1-bc93-1c04f943212f",
+     "params": {
+      "avoid_strength": 0.24,
+      "base_speed": 0.16,
+      "blob_size": 6,
+      "brightness_audio": 0,
+      "camera_follow": 0,
+      "color_shift": 0,
+      "flap_rate": 0.2,
+      "jiggle": 0.15,
+      "particle_count": 5,
+      "reactivity_scale": 0,
+      "ripple_amount": 0.11,
+      "ripple_life": 4,
+      "ripple_spread": 1.23,
+      "ripple_width": 0.885,
+      "roam_scale": 1.136,
+      "size_audio": 0,
+      "solo_burst_rate": 4,
+      "solo_burst_speed": 2.5,
+      "solo_burst_time": 0.8,
+      "speed_jog": 0,
+      "speed_jump": 0,
+      "spin": 0.28,
+      "tether_scatter": 0
+     },
+     "target": "Matrix",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "melt",
+     "id": "01a8049e-4b21-5456-9159-4900c06f5167",
+     "params": {
+      "blur": 1,
+      "flip": false,
+      "reactivity": 0.3,
+      "speed": 0.08
+     },
+     "target": "Strips",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "gradient",
+     "id": "c81e0d85-36f0-5ac9-a561-7140efe11cc9",
+     "params": {
+      "gradient_roll": 0,
+      "modulate": true,
+      "modulation_effect": "sine",
+      "modulation_speed": 0.5,
+      "speed": 2
+     },
+     "target": "single-color-effect",
+     "target_kind": "virtual"
+    }
+   ],
+   "disabled": true,
+   "display_availability": "default",
+   "drop_shock_enabled": true,
+   "drop_timing_offset_ms": null,
+   "dwell_curve": null,
+   "entry_ramp_ms": 0,
+   "flare_kinds": [],
+   "id": "3bf5672d-a233-5b06-9f37-01cf3f006d64",
+   "labels": [
+    "house"
+   ],
+   "name": "House Fish",
+   "preferred_color_set_mode": "default",
+   "responses": {},
+   "trigger_offset_ms": 0,
+   "update_kind": null
+  },
+  {
+   "accept_all_sets": true,
+   "accepted_set_ids": [],
+   "choreography": {
+    "anchor_frac": 0.45,
+    "enabled": false,
+    "transition_mode": "Add",
+    "transition_ms": 800
+   },
+   "color_journey": {
+    "journey": null,
+    "mode": "inherit",
+    "pace_factor": 1.0
+   },
+   "devices": [
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "orbits",
+     "id": "df00cedd-ce2f-5655-9716-6d3209955e27",
+     "params": {
+      "base_speed": 0.3,
+      "blob_size": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 2.5,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 1.0,
+       "out_min": 4.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "brightness_audio": 0.5,
+      "color_shift": 1,
+      "horizon_scale": 0.19,
+      "impulse_decay": 0.06,
+      "jiggle": 0.15,
+      "particle_count": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 3.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 8.0,
+       "out_min": 1.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "radius_scale": 1.8,
+      "reactivity_scale": 1,
+      "reverse": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": false,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "steps",
+       "out_max": 1.0,
+       "out_min": 0.0,
+       "random_sign": false,
+       "signal": "random",
+       "steps": [
+        {
+         "threshold": 0.0,
+         "value": false
+        },
+        {
+         "threshold": 0.5,
+         "value": true
+        }
+       ],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "size_audio": 0.5,
+      "speed_jog": 1,
+      "speed_jump": 1,
+      "spin": 0.37,
+      "tether_scatter": 0,
+      "x_offset": 0.5,
+      "y_offset": 0.5
+     },
+     "target": "Matrix",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "orbits1d",
+     "id": "dab9d484-6dad-5b03-871e-34135cd3a4e1",
+     "params": {
+      "base_speed": 0.5,
+      "blob_size": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 2.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 1.0,
+       "out_min": 3.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "bounce_chance": 0.2,
+      "brightness_audio": 0.8,
+      "color_shift": 1,
+      "implode_fade": 0.5,
+      "implode_reach": 0.4,
+      "impulse_decay": 0.06,
+      "jiggle": 0.2,
+      "overlap_blend": 1,
+      "particle_count": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 3.0,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 6.0,
+       "out_min": 2.0,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "reactivity_scale": 0.5,
+      "size_audio": 0.5,
+      "speed_jog": 0.3,
+      "speed_jump": 1,
+      "spin": 0.15,
+      "tether_scatter": 0.1,
+      "x_offset": 0.5
+     },
+     "target": "Strips",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "pulse",
+     "id": "4917bc3c-a916-5436-9dac-e48be3db46cf",
+     "params": {},
+     "target": "Singles",
+     "target_kind": "category"
+    }
+   ],
+   "disabled": true,
+   "display_availability": "default",
+   "drop_shock_enabled": true,
+   "drop_timing_offset_ms": null,
+   "dwell_curve": null,
+   "entry_ramp_ms": 0,
+   "flare_kinds": [
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "dice",
+     "min_intensity": null,
+     "name": "Dice Re-roll",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "color_set",
+     "min_intensity": null,
+     "name": "Colour Jump",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0\u20130.35",
+     "params": {
+      "blob_size": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 3.5
+      },
+      "particle_count": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 2.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 0.7,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0\u20130.35",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.35\u20130.7",
+     "params": {
+      "blob_size": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 2.5
+      },
+      "particle_count": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 4.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.7\u20131",
+     "params": {
+      "blob_size": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      },
+      "particle_count": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 8.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.4,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0.7\u20131",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": 500,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Reverse Momentarily (500ms)",
+     "params": {
+      "reverse": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Colour Rotate & Back",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "color_rotate"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Pulse Flash",
+     "params": {},
+     "trigger_offset_ms": -92,
+     "type": "pulse_flash"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": 0.4,
+     "name": "Pulse Colour Flip",
+     "params": {},
+     "trigger_offset_ms": -355,
+     "type": "pulse_flip"
+    }
+   ],
+   "id": "5bc0f728-25b3-527e-af80-d34c7ab78409",
+   "labels": [
+    "mid-group",
+    "star",
+    "pulse-test"
+   ],
+   "name": "Pulse Test (Orbits V2)",
+   "preferred_color_set_mode": "default",
+   "responses": {
+    "flare": {
+     "bands": [
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.35,
+       "intensity_min": 0.0,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0\u20130.35": 1.0,
+        "Flare patch 0\u20130.35": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.7,
+       "intensity_min": 0.35,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare patch 0.35\u20130.7": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "pulse",
+       "gain": 1.0,
+       "intensity_max": 1.0,
+       "intensity_min": 0.7,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0.7\u20131": 1.0,
+        "Flare patch 0.7\u20131": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0,
+        "Reverse Momentarily (500ms)": 1.0
+       },
+       "param_patch": {}
+      }
+     ],
+     "color_set_jump": false,
+     "reroll_dice": false
+    }
+   },
+   "trigger_offset_ms": 0,
+   "update_kind": null
+  },
+  {
+   "accept_all_sets": true,
+   "accepted_set_ids": [],
+   "choreography": {
+    "anchor_frac": 0.45,
+    "enabled": false,
+    "transition_mode": "Add",
+    "transition_ms": 800
+   },
+   "color_journey": {
+    "journey": null,
+    "mode": "inherit",
+    "pace_factor": 1.0
+   },
+   "devices": [
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "sauron",
+     "id": "5e60f1aa-14cb-5f36-bc04-e89fbd74a53c",
+     "params": {
+      "drift_speed": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 0.5,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 0.8,
+       "out_min": 0.35,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "flame_audio": 2,
+      "flames": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 0.35,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 0.6,
+       "out_min": 0.2,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "impulse_decay": 0.06,
+      "snap_hold": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 0.2,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 0.5,
+       "out_min": 0.15,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "snap_threshold": {
+       "bind": "signal",
+       "dice": null,
+       "fallback": 0.6,
+       "in_max": 1.0,
+       "in_min": 0.0,
+       "mode": "map",
+       "out_max": 0.45,
+       "out_min": 0.75,
+       "random_sign": false,
+       "signal": "trigger_intensity",
+       "steps": [],
+       "sticky": false,
+       "window_beats": 0,
+       "window_dir": "past"
+      },
+      "speed_audio": 2.9,
+      "x_offset": 0.5,
+      "y_offset": 0.5
+     },
+     "target": "Matrix",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "blackhole1d",
+     "id": "b2e27bc5-78d8-5a01-815b-34d2d386f0c6",
+     "params": {
+      "accel": 5,
+      "approach_width": 0.16,
+      "base_speed": 1,
+      "beat_burst": 2,
+      "blob_size": 0.5,
+      "edge_speed": 1,
+      "impulse_decay": 0.06,
+      "max_blobs": 50,
+      "radius_scale": 1,
+      "reverse": true,
+      "spawn_audio": 1,
+      "spawn_rate": 1,
+      "speed_audio": 2.3,
+      "swirl": 3.1,
+      "x_offset": 0.5
+     },
+     "target": "Strips",
+     "target_kind": "category"
+    },
+    {
+     "background_brightness": null,
+     "brightness": null,
+     "color": {
+      "bg_color": null,
+      "bg_mode": null,
+      "color_kind": null,
+      "color_value": null,
+      "mode": "set"
+     },
+     "drift": {},
+     "effect_steps": [],
+     "effect_type": "pulse",
+     "id": "54b794af-06b4-516d-84ee-7463af3d019b",
+     "params": {},
+     "target": "Singles",
+     "target_kind": "category"
+    }
+   ],
+   "disabled": true,
+   "display_availability": "dark",
+   "drop_shock_enabled": true,
+   "drop_timing_offset_ms": null,
+   "dwell_curve": null,
+   "entry_ramp_ms": 0,
+   "flare_kinds": [
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "dice",
+     "min_intensity": null,
+     "name": "Dice Re-roll",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": "color_set",
+     "min_intensity": null,
+     "name": "Colour Jump",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "drift_jump"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0\u20130.35",
+     "params": {
+      "drift_speed": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.35
+      },
+      "flames": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.2
+      },
+      "snap_threshold": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.75
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 0.7,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0\u20130.35",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.35\u20130.7",
+     "params": {
+      "drift_speed": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.55
+      },
+      "flames": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.4
+      },
+      "snap_threshold": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.6
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare patch 0.7\u20131",
+     "params": {
+      "drift_speed": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.8
+      },
+      "flame_audio": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 2.0
+      },
+      "flames": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 1.0
+      },
+      "snap_threshold": {
+       "hi": null,
+       "lo": null,
+       "mode": "absolute",
+       "offset": null,
+       "value": 0.45
+      }
+     },
+     "trigger_offset_ms": 0,
+     "type": "permanent"
+    },
+    {
+     "enabled": true,
+     "gain": 1.4,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Flare gain 0.7\u20131",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "momentary"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Colour Rotate & Back",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "color_rotate"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Pulse Flash",
+     "params": {},
+     "trigger_offset_ms": -92,
+     "type": "pulse_flash"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": 0.4,
+     "name": "Pulse Colour Flip",
+     "params": {},
+     "trigger_offset_ms": -355,
+     "type": "pulse_flip"
+    },
+    {
+     "enabled": true,
+     "gain": 1.0,
+     "hold_ms": null,
+     "jump": null,
+     "min_intensity": null,
+     "name": "Sauron Surge",
+     "params": {},
+     "trigger_offset_ms": 0,
+     "type": "sauron_surge"
+    }
+   ],
+   "id": "4874012c-709b-511d-aad4-d3455532a1cd",
+   "labels": [
+    "mid-group"
+   ],
+   "name": "Sauron",
+   "preferred_color_set_mode": "default",
+   "responses": {
+    "flare": {
+     "bands": [
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.35,
+       "intensity_min": 0.0,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0\u20130.35": 1.0,
+        "Flare patch 0\u20130.35": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "linear",
+       "gain": 1.0,
+       "intensity_max": 0.7,
+       "intensity_min": 0.35,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare patch 0.35\u20130.7": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      },
+      {
+       "curve": "pulse",
+       "gain": 1.0,
+       "intensity_max": 1.0,
+       "intensity_min": 0.7,
+       "kind_lanes": {},
+       "kinds": {
+        "Colour Jump": 1.0,
+        "Dice Re-roll": 1.0,
+        "Flare gain 0.7\u20131": 1.0,
+        "Flare patch 0.7\u20131": 1.0,
+        "Pulse Colour Flip": 1.0,
+        "Pulse Flash": 1.0
+       },
+       "param_patch": {}
+      }
+     ],
+     "color_set_jump": false,
+     "reroll_dice": false
+    }
+   },
+   "trigger_offset_ms": 0,
+   "update_kind": null
+  }
+ ]
+}
