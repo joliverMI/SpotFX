@@ -29,9 +29,13 @@ the simulator is a model night that writes nothing.
 
 What stays off-limits, each named so an audit can tell "considered and
 excluded" from "forgotten":
-  * giving credits, guests, phones and approvals — a night has no guests
-    yet (the guest page is phase 2 of the plan); when guests arrive, giving
-    credits joins this domain and asks first;
+  * giving credits, guests, phones and approvals — the guest page (phase
+    2.1, SpotFX's services/jukebox/guests.py) has no credits yet and no host
+    controls over phones yet; when credits arrive, giving them joins this
+    domain and asks first;
+  * a guest's own acts on the guest page — joining, the name a phone picks,
+    its votes — are the guests', never the host's to make by voice
+    (`jukebox_status` reads how many phones are on the page);
   * the jukebox LINE — adding, removing and moving songs is the guests'
     turn and the host's page;
   * reordering the SET PLAYLIST — it rewrites his playlist's order in
@@ -270,6 +274,10 @@ def _status_summary(st: dict) -> str:
         parts.append(f"Playing: {now['title']}{f' — {kind}' if kind else ''}.")
     parts.append(f"{waiting} song{'' if waiting == 1 else 's'} waiting in the jukebox line; "
                  f"{n.get('played', 0)} played so far ({n.get('jukebox_played', 0)} from the jukebox).")
+    g = st.get("guests") or {}
+    if g.get("phones"):
+        parts.append(f"{g['phones']} phone{'' if g['phones'] == 1 else 's'} on the guest page "
+                     f"({g.get('joined', 0)} joined).")
     return " ".join(parts)
 
 
@@ -294,7 +302,7 @@ async def _op_jukebox_status() -> dict:
     return {"status": "ok", "summary": _status_summary(st), "running": bool(st.get("running")),
             "night": st.get("night"), "now": st.get("now"), "next": nxt,
             "line": st.get("line") or [], "warnings": st.get("warnings") or [],
-            "spotify_sign_in": st.get("spotify_auth")}
+            "spotify_sign_in": st.get("spotify_auth"), "guests": st.get("guests")}
 
 
 async def _op_get_jukebox_settings() -> dict:

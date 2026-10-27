@@ -2357,7 +2357,19 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Read-only. It shows whether a night is running and since when, the song playing (a set song, a jukebox song, or something off the set — the Jukebox then waits until the set plays again), the next 20 program items with when each starts, and the jukebox line.',
           '"Sent to Spotify" marks the one song already in Spotify\'s queue. If it is removed, it is skipped the moment it starts and the next waiting song takes its slot.',
-          'A night never starts while the house is sleeping (or while that can\'t be read), ends if sleeping comes on, and never runs while Absorb Music has a window open. In this phase a night is started for the daytime test; the guest page and the host\'s own controls come later.',
+          'A night never starts while the house is sleeping (or while that can\'t be read), ends if sleeping comes on, and never runs while Absorb Music has a window open. The line under the night says how many phones are on the guest page tonight.',
+        ],
+      },
+      {
+        id: 'jukebox-guest-page',
+        title: 'The guest page',
+        keywords: 'guest page phones guests vote up down party link token qr name welcome house rules queue your song next banner add to home screen iphone android free play',
+        body: [
+          'The page guests open on their phones. It is its own small app on its own port (8020), separate from SpotFX and SPECTRA, and it answers nothing but the guest page: none of your controls can be reached through it.',
+          'A phone joins only through tonight\'s party link (the token in it is new for every party). It gets a fun name it can change (shuffled freely on the welcome screen, then three changes a night), reads the house rules, and taps Let\'s go. No sign-in and no account: the page keeps a random code for the phone, for tonight only.',
+          'Now shows the song playing (its own album art from Spotify, who added it, "Music from Spotify" and an Open Spotify link) with two big buttons: Up and Down. One vote per phone per song; tap it again to take it back. Nobody votes on their own song. Queue shows everything coming up, with the host\'s set locked and the song already sent to Spotify marked.',
+          'The strip under the header tells a guest about their own songs: its place, and when it plays (by their phone\'s clock). When it is next, the strip turns purple and a banner says so; Android phones also buzz. iPhones can\'t buzz from a web page, so they get a hint to add the page to the Home Screen instead, which keeps the same name.',
+          'Free play only for now: no credits, and guests can\'t add songs yet (that comes next). The page is rate-limited, and while no night runs it just says the Jukebox isn\'t playing.',
         ],
       },
       {

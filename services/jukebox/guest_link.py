@@ -39,10 +39,11 @@ THREE THINGS IT KEEPS TRUE:
     address for the master's and SPECTRA's own paths, which must not answer.
 
 THE PARTY TOKEN is in every printed card (N2), so it is made when first
-needed and lives through the night; it is replaced when a night that used
+needed — at the latest when a night starts, link on or off, since the guest
+page (phase 2.1) admits a new phone only with it — and lives through the night; it is replaced when a night that used
 the link ends (the next party gets a fresh one), or by his Rotate press
-between nights. `token_matches` is what the guest app (phase 2) will check
-a phone's link against.
+between nights. `token_matches` is what services/jukebox/guests.py checks a
+new phone's link against.
 
 Every outcome is recorded (`last_action`, the night's own log line) and a
 failure never stops the music: a link that would not open is a warning on a
@@ -349,9 +350,12 @@ class GuestLink:
     async def on_night_start(self, night_id: str) -> Optional[tuple[bool, str]]:
         """Open the link for this night when it is switched on. Returns
         (live, the sentence for the night's log), or None when the link is
-        off (nothing was run). Never raises."""
+        off (nothing was run). Never raises. Either way the night has a party
+        token from here on: the guest page (phase 2.1) admits a new phone
+        only with it, link on or off."""
         try:
             async with self._get_lock():
+                self.ensure_token()
                 cfg, st = store.load_guest_link()
                 if not cfg.enabled:
                     return None

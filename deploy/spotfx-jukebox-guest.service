@@ -1,0 +1,33 @@
+# The Jukebox's GUEST PAGE — its own small process (jukebox_guest/, the plan's
+# PR 2.1), never inside SpotFX's main.py, whose event loop runs the music.
+# It answers nothing but the guest page on 127.0.0.1:8020 and forwards a short
+# allowlist of calls to SpotFX over loopback (jukebox_guest/__init__.py is the
+# binding statement). Tailscale Funnel publishes that port, and only that
+# port, while a night runs — services/jukebox/guest_link.py, switched OFF
+# until G4 (his). With Funnel off nothing outside Serenity reaches it.
+#
+# NOT INSTALLED BY ANY BUILD. Deploying it is the owner's word:
+#   cd spectra/web && npx vite build --config vite.guest.config.ts
+#   cp deploy/spotfx-jukebox-guest.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now spotfx-jukebox-guest
+#
+# It plays nothing, drives no light and calls no Spotify API itself; with no
+# night running every phone is told the Jukebox isn't playing. Its access log
+# is off (the page's own address carries the party token).
+
+[Unit]
+Description=SpotFX Jukebox guest page
+# Loose coupling: it answers "the Jukebox isn't answering" while SpotFX is
+# down, and never takes SpotFX down with it.
+After=spotfx.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/javi/SpotFX
+ExecStart=/home/javi/SpotFX/.venv/bin/python -m jukebox_guest --host 127.0.0.1 --port 8020
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

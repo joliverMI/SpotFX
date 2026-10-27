@@ -1,5 +1,5 @@
 """
-SpotFX — the Jukebox's two stores (models/jukebox.py says what each holds).
+SpotFX — the Jukebox's stores (models/jukebox.py says what each holds).
 
 Every write is tmp + os.replace, so a reader (or a crash) only ever sees a
 whole file. Every read tolerates a missing or unreadable file by returning
@@ -18,8 +18,8 @@ from pathlib import Path
 from typing import Optional
 
 from config import BASE_DIR
-from models.jukebox import (GuestLinkConfig, GuestLinkState, JukeboxNight, JukeboxNights,
-                            ProgramConfig, ShowConfig)
+from models.jukebox import (GuestBook, GuestLinkConfig, GuestLinkState, JukeboxNight,
+                            JukeboxNights, ProgramConfig, ShowConfig)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ CONFIG_FILE = BASE_DIR / "storage" / "jukebox.json"
 NIGHT_FILE = BASE_DIR / "storage" / "jukebox_night.json"
 SHOW_FILE = BASE_DIR / "storage" / "jukebox_show.json"
 GUEST_LINK_FILE = BASE_DIR / "storage" / "jukebox_guest_link.json"
+GUESTS_FILE = BASE_DIR / "storage" / "jukebox_guests.json"
 
 HISTORY_MAX = 20       # earlier nights kept (as briefs) beside the current one
 LOG_MAX = 300          # the night's own log lines
@@ -120,6 +121,24 @@ def save_guest_link(cfg: GuestLinkConfig, st: GuestLinkState) -> None:
     with _lock:
         _write(GUEST_LINK_FILE, {"config": cfg.model_dump(mode="json"),
                                  "state": st.model_dump(mode="json")})
+
+
+# ── tonight's guests (phase 2.1: services/jukebox/guests.py) ────────────────
+
+def load_guests() -> GuestBook:
+    raw = _read(GUESTS_FILE)
+    if not isinstance(raw, dict):
+        return GuestBook()
+    try:
+        return GuestBook.model_validate(raw)
+    except Exception as exc:
+        logger.warning("Jukebox: guests file invalid (%s) — starting clean", exc)
+        return GuestBook()
+
+
+def save_guests(data: dict) -> None:
+    with _lock:
+        _write(GUESTS_FILE, data)
 
 
 # ── nights ───────────────────────────────────────────────────────────────────

@@ -467,7 +467,13 @@ def _isolated_jukebox(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "NIGHT_FILE", tmp_path / "jukebox_night.json")
     monkeypatch.setattr(store, "SHOW_FILE", tmp_path / "jukebox_show.json")
     monkeypatch.setattr(store, "GUEST_LINK_FILE", tmp_path / "jukebox_guest_link.json")
+    monkeypatch.setattr(store, "GUESTS_FILE", tmp_path / "jukebox_guests.json")
     monkeypatch.setattr(night, "runner", night.JukeboxRunner())
+    # tonight's phones (services/jukebox/guests.py) and the guest app's key
+    from services.jukebox import guests
+    from routers import jukebox_guest_router
+    monkeypatch.setattr(guests, "book", guests.Guests())
+    monkeypatch.setattr(jukebox_guest_router, "KEY_FILE", tmp_path / "jukebox_guest_key")
     # The guest link publishes a port on the internet through Tailscale
     # Funnel. No test may ever run `tailscale`: the real command runner is
     # replaced by one that fails loudly; a test that needs one injects a fake.

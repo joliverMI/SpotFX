@@ -29,7 +29,7 @@ from services.websocket_manager import ws_manager
 from services.profile_manager import load_profile_by_uri, load_profile_by_title_artist, save_profile
 from services.audio_shape_service import audio_shape_service
 from models.song_profile import SongProfile
-from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager, setlist_router, timing_viz_router, debug_router, morph_router, color_sets_router, lock_history_router, gif_assets_router, scenes_v2_router, shape_map_router, sequencer_router, absorb_router, jukebox_router
+from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager, setlist_router, timing_viz_router, debug_router, morph_router, color_sets_router, lock_history_router, gif_assets_router, scenes_v2_router, shape_map_router, sequencer_router, absorb_router, jukebox_router, jukebox_guest_router
 from services import absorb
 from services.jukebox import guest_link as jukebox_guest_link
 from services.jukebox import night as jukebox
@@ -296,6 +296,7 @@ app.include_router(shape_map_router.router)
 app.include_router(sequencer_router.router)
 app.include_router(absorb_router.router)
 app.include_router(jukebox_router.router)
+app.include_router(jukebox_guest_router.router)
 
 # ── SPECTRA (her OWN process since the S3 split) ──────────────────────────────
 # SPECTRA runs standalone (python -m spectra under spectra.service) so this

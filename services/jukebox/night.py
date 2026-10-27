@@ -920,6 +920,7 @@ class JukeboxRunner:
             entry = LineEntry(id=uuid.uuid4().hex[:10], uri=meta["uri"], title=meta["title"],
                               artist=meta.get("artist", ""),
                               duration_ms=int(meta.get("duration_ms") or 0),
+                              image=meta.get("image") or "", thumb=meta.get("thumb") or "",
                               added_ms=self.deps.now_ms(), added_by=added_by)
             self.night.line.append(entry)
             self._log(f"{added_by} added {entry.title or entry.uri}")
@@ -1034,6 +1035,27 @@ class JukeboxRunner:
                         "unbounded": lap.unbounded, "notes": lap.notes},
                 "warnings": account + list(n.warnings), "spotify_auth": sign_in,
                 "log": n.log[-60:], "history": self.history[:5]}
+
+    def guest_state(self, count: int = 12) -> dict:
+        """What the guest page needs (services/jukebox/guests.py) and nothing
+        more: the night, what is playing with its progress, and the next
+        `count` program items with their start times. Reads only — no
+        Spotify call, no lock (one event loop; the projection is pure), no
+        sign-in read — because every phone at the party asks every few
+        seconds."""
+        self._ensure_loaded()
+        n = self.night
+        if n is None or n.state != "running":
+            return {"running": False}
+        track = self.deps.current_track()
+        on = track is not None and str(getattr(track, "spotify_uri", "")) == n.now.uri
+        remaining = self._remaining_ms(track, self.deps.clock()) if on else 0
+        items = program.with_start_times(self._project(count), remaining)
+        duration = int(getattr(track, "duration_ms", 0) or 0) if on else 0
+        return {"running": True, "night_id": n.id, "now": n.now,
+                "is_playing": bool(on and getattr(track, "is_playing", False)),
+                "duration_ms": duration, "remaining_ms": remaining,
+                "next": items, "line": list(n.line), "set_items": n.set_items}
 
     async def read_set(self, cfg: ProgramConfig, refresh: bool = False) -> tuple[dict, list[SetItem]]:
         """The set for `cfg`: the running night's own copy when the night is

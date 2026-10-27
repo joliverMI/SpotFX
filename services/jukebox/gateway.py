@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 MIN_CALL_SPACING_S = 0.5
 PAGE = 100                        # Spotify's cap for a playlist page
 ITEM_FIELDS = ("items(track(uri,name,duration_ms,is_local,type,"
-               "artists(name))),next,total")
+               "artists(name),album(images))),next,total")
 
 _TRACK_ID = "spotify:track:"
 
@@ -61,6 +61,27 @@ def parse_track_uri(link: str) -> Optional[str]:
 
 def _artists(obj: dict) -> str:
     return ", ".join(a.get("name", "") for a in (obj.get("artists") or []) if a)
+
+
+# The album art the guest page shows, straight from Spotify's image servers
+# (never copied or altered: report §2.3). Spotify lists an album's images
+# largest first, usually 640, 300 and 64 px square.
+IMAGE_MAX_PX = 640
+THUMB_MIN_PX = 64
+
+
+def art(obj: dict) -> tuple[str, str]:
+    """(image, thumb) for a track: the largest image no wider than
+    IMAGE_MAX_PX, and the smallest at least THUMB_MIN_PX wide (each falls
+    back to whatever there is; ("", "") when Spotify gave none)."""
+    images = [i for i in ((obj.get("album") or {}).get("images") or [])
+              if isinstance(i, dict) and i.get("url")]
+    if not images:
+        return "", ""
+    by_size = sorted(images, key=lambda i: int(i.get("width") or 0))
+    big = [i for i in by_size if int(i.get("width") or 0) <= IMAGE_MAX_PX] or by_size
+    small = [i for i in by_size if int(i.get("width") or 0) >= THUMB_MIN_PX] or by_size
+    return big[-1]["url"], small[0]["url"]
 
 
 class JukeboxGateway:
@@ -187,7 +208,7 @@ class JukeboxGateway:
 
     def playlist_items(self, pid: str) -> list[dict]:
         """Every playable track in the playlist, in playlist order,
-        duplicates kept: [{uri, title, artist, duration_ms}]."""
+        duplicates kept: [{uri, title, artist, duration_ms, image, thumb}]."""
         sp = self._client()
         out: list[dict] = []
         offset = 0
@@ -200,9 +221,11 @@ class JukeboxGateway:
                 uri = tr.get("uri") or ""
                 if tr.get("is_local") or not uri.startswith(_TRACK_ID):
                     continue
+                image, thumb = art(tr)
                 out.append({"uri": uri, "title": tr.get("name") or "",
                             "artist": _artists(tr),
-                            "duration_ms": int(tr.get("duration_ms") or 0)})
+                            "duration_ms": int(tr.get("duration_ms") or 0),
+                            "image": image, "thumb": thumb})
             if not page.get("next") or not items:
                 break
             offset += len(items)
@@ -213,10 +236,12 @@ class JukeboxGateway:
         data = self._call(self._client().track, tid) or {}
         if not data.get("uri"):
             return None
+        image, thumb = art(data)
         return {"uri": data["uri"], "title": data.get("name") or "",
                 "artist": _artists(data),
                 "duration_ms": int(data.get("duration_ms") or 0),
-                "explicit": bool(data.get("explicit"))}
+                "explicit": bool(data.get("explicit")),
+                "image": image, "thumb": thumb}
 
 
 READ_ONLY_METHODS = frozenset({"resolve_playlist", "playlist_snapshot", "playlist_items",
