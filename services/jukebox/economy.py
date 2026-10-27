@@ -7,7 +7,7 @@ THE SIMULATOR IS THE SPEC. Each function is the planning simulator's own
 formula (the report's Appendix A, `jukesim2.py`), rounding included —
 Python's `round` (half to even) where it rounds, a ceiling where it counts
 "per 4 songs" or "per 4 minutes", so a single song behind already costs the
-+1. tests/jukebox_economy_sim.py is that simulator with its prices replaced
++1. services/jukebox/simulator.py is that simulator with its prices replaced
 by THESE functions, and tests/test_jukebox_economy.py holds it to the plan's
 §3.2 results at 4, 8, 15 and 30 guests: a price function that drifts from
 the tuned one moves the night it produces, and the test sees it.

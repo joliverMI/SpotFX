@@ -5,7 +5,7 @@ data/jukebox-plan/report.md.
 Three things held:
   1. the rulebook's worked prices (§1, with the D4 re-tune's numbers);
   2. the plan's simulator, run against the REAL price functions under the
-     SHIPPED settings (tests/jukebox_economy_sim.py), lands on the plan's
+     SHIPPED settings (services/jukebox/simulator.py), lands on the plan's
      own §3.2 results at 4, 8, 15 and 30 guests — and a drifted setting
      moves it off them (the spec bites);
   3. the ledger's invariants: no balance below zero, every credit traceable
@@ -157,7 +157,7 @@ PRINTED = dict(afford_rate=0.005, wait_to_play_median=0.5, price_mid=0.05, held_
 
 @pytest.fixture(scope="module")
 def sim():
-    from tests import jukebox_economy_sim as J
+    from services.jukebox import simulator as J
     return J
 
 

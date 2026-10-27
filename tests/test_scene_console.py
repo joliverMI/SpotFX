@@ -521,10 +521,12 @@ def test_dispatch_recognizes_exactly_the_declared_operation_set():
     from spectra.services import drop_console as drc
     from spectra.services import lock_console as lc
     from spectra.services import absorb_console as abc
+    from spectra.services import jukebox_console as jbc
 
     expected = {"list_operations", *stc.OPERATIONS, *sc.OPERATIONS,
                 *dc.OPERATIONS, *rec.OPERATIONS, *ac.OPERATIONS, *shc.OPERATIONS,
-                *hc.OPERATIONS, *drc.OPERATIONS, *lc.OPERATIONS, *abc.OPERATIONS}
+                *hc.OPERATIONS, *drc.OPERATIONS, *lc.OPERATIONS, *abc.OPERATIONS,
+                *jbc.OPERATIONS}
     assert {t["name"] for t in sa.TOOLS} == expected
     assert set(sa.ALL_OPERATIONS) == expected
 

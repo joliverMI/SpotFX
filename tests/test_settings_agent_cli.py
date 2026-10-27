@@ -597,3 +597,18 @@ def test_the_absorb_domain_widening_parses_from_its_structured_tool_result():
     assert [c["new"] for c in result["changes"]] == [{"max_attempts": 4}]
     assert [r["status"] for r in result["rejected"]] == ["needs_confirmation"]
     assert result["rejected"][0]["op"] == "start_absorb"
+
+
+def test_the_jukebox_domain_widening_parses_from_its_structured_tool_result():
+    """The Jukebox's Sonic reach (spectra/services/jukebox_console.py,
+    data/jukebox-plan/report.md PR 3.4) on the CURRENT manifest. Every
+    jukebox change asks first, and the fixture's SECOND call is an
+    unconfirmed night start: it answers needs_confirmation and must never
+    be parsed as a change, whatever the reply's prose says."""
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(
+        _load("cli_transcript_synthetic_jukebox_asks_first.json"))
+    assert [c["new"] for c in result["changes"]] == [{"add_base": 5}]
+    assert [r["status"] for r in result["rejected"]] == ["needs_confirmation"]
+    assert result["rejected"][0]["op"] == "start_jukebox_night"

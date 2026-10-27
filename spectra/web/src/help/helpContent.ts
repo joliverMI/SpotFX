@@ -2326,7 +2326,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Jukebox — the set list with jukebox slots',
     keywords: 'jukebox set list party playlist slots queue guests spotify program',
     intro:
-      'The Jukebox (Engine ▾ Jukebox, /jukebox) plays your set playlist as Spotify\'s own context, in order, and puts jukebox slots between set songs. Spotify never sees a slot: about 45 seconds before the song in front of a slot ends, the top waiting jukebox song is sent into Spotify\'s queue and the queue is read back to confirm it is next; after it, the set carries on where it was. Only that one sent song is locked in place — everything still waiting can be moved or removed. This page is the master view: the Set list tab edits the program, the Live tab shows a running night (read-only), and the Credits tab holds the party-size presets, the price check and every credits setting. The guest page comes in a later phase.',
+      'The Jukebox (Engine ▾ Jukebox, /jukebox) plays your set playlist as Spotify\'s own context, in order, and puts jukebox slots between set songs. Spotify never sees a slot: about 45 seconds before the song in front of a slot ends, the top waiting jukebox song is sent into Spotify\'s queue and the queue is read back to confirm it is next; after it, the set carries on where it was. Only that one sent song is locked in place — everything still waiting can be moved or removed. This page is the master view: the Set list tab edits the program, the Live tab shows a running night (read-only), the Credits tab holds the party-size presets, the price check and every credits setting, and the Simulate tab plays a model party night so you can watch the credits work before a party. The guest page comes in a later phase. Sonic can do most of this by voice from the 💬 button on this page — it asks before it changes anything.',
     entries: [
       {
         id: 'jukebox-set-list',
@@ -2395,6 +2395,16 @@ export const HELP_SECTIONS: HelpSection[] = [
           'The price check works the current settings on real examples: what a song costs to add at different waits, a long song, one the lights haven\'t learned, skips by line length and net ▼, play next by how far it jumps, bumps, the jail bar and the free credits — for a room of the size you pick (skip and jail follow the room). It is the same rule set a guest\'s page will charge, so changing a setting changes it at once.',
         ],
       },
+      {
+        id: 'jukebox-simulator',
+        title: 'The party simulator',
+        keywords: 'simulate simulator model night watch economy credits before a party guests play back five minutes tuned compare promises preset',
+        body: [
+          'The Simulate tab plays a model party night under your saved credits settings so you can watch the economy before a party: pick how many guests, run the night, and it plays back the whole four hours in five minutes (or one or two). You see the clock, the song playing, the line and the wait at the back of it, the price to add a song there, every guest\'s credits and songs, who is in jail, and a running list of what people do — add a song, skip, tip, bump, buy play next, go to jail and break out. The chart shows the add price at the back of the line and the credits each guest holds over the whole night; click it to jump.',
+          'Below the night are twenty nights like it, averaged, beside the same twenty nights under the tuned settings — same guests, same program — so anything you changed shows as a difference, and the plan\'s promises are checked: everyone who asks gets a song, a median wait to play of 30 minutes or less, the back of the line under 75 minutes, quiet guests get a song, and skips stay under two an hour. "Your program" plays the program you saved; "The preset for this size" plays the plan\'s preset for that many guests. A Manual program is played as the plan\'s mix for the size (a model night has no playlist to hang hand-placed slots on), and it says so.',
+          'It is a model: the guests and the songs are the plan\'s model of how people behave and his library\'s song lengths, while every price is the real rule under your settings. Nothing reaches Spotify, the lights or the house, and nothing is saved. "Another night" plays a different night with the same settings.',
+        ],
+      },
     ],
   },
   {
@@ -2451,6 +2461,17 @@ export const HELP_SECTIONS: HelpSection[] = [
           'It ASKS FIRST, and nothing happens until you say yes, before starting a window, turning force recapture on, letting the schedule open windows on its own (or changing which ones), changing the linked playlist while the schedule is on, switching "keep going while the house sleeps" back on, and lowering Recently Captured\'s cap (the oldest songs are taken out of it). A yes covers exactly the question as it was asked: if a setting changed in between, it asks again. Stop, Skip this song, Retry and the plain numbers happen at once, as they do here.',
           'A playlist is linked only by its exact name in your Spotify library (or its link): a close but different name is answered with the closest one, never linked on a guess, because Absorb takes captured songs out of that playlist. A playlist you follow but do not own is refused — Absorb could not take songs out of it.',
           'The head report counts only captures that committed, and a window with none has no head rate — it never says 0%. The head bar itself, the queue order, the warm-up song, the quiet rules and the silence re-check are your plan\'s decisions: Sonic reads them but does not change them by voice.',
+        ],
+      },
+      {
+        id: 'sonic-jukebox',
+        title: 'Sonic on the Jukebox page: the night, the settings, the simulator',
+        keywords: 'sonic jukebox chat popup pop-up start the jukebox stop the night is the jukebox on what is playing line credits setting price preset small medium large simulate party confirm yes',
+        body: [
+          'The Jukebox page has the same floating 💬 button, scoped to the Jukebox. Ask it "is the jukebox on?", "what\'s playing?", "how much is a skip with 20 people?", "what are the jukebox settings?", "make the add price start at 5", "use the large preset", "simulate a party of 25", "start the jukebox", or "stop the night".',
+          'It ASKS FIRST before every change — a setting, a preset, starting a night and stopping one — and nothing happens until you say yes. A yes covers exactly the question as it was asked: if a setting changed in between, or (for a stop) a different night is running, it asks again, and a question left unanswered expires after five minutes. A setting is checked by SpotFX before you are asked, so a value outside its range is refused with its reason and you are never asked about a change that would not be made.',
+          'It goes through the very same routes as this page, so a start through Sonic is the same Start, refused for the same reasons — no set playlist linked, the house asleep, Absorb running, Spotify failing — and it tells you the reason in the page\'s own words. A night it starts is recorded as started by Sonic. The simulator through Sonic is the same model nights as the Simulate tab, reported as numbers; to watch one, use the tab.',
+          'Some things stay on this page: linking the set playlist and placing Manual slots (the editor shows the set song by song), reordering the set playlist (it rewrites your playlist in Spotify), and the jukebox line. There are no guests or credits to give yet — that arrives with the guest page.',
         ],
       },
       {

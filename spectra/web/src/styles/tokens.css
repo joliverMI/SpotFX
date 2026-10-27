@@ -4042,3 +4042,55 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .jukebox-field input[type='number'] { width: 84px; min-width: 0; }
 .jukebox-field-range { grid-column: 1 / -1; font-size: 11px; }
 .jukebox-field.jukebox-check { display: flex; }
+/* the party simulator (SimulateTab.tsx). Two series on one credits axis;
+   colours checked with the dataviz palette validator against --surface. */
+.jukebox-page { --sim-price: #9085e9; --sim-held: #d95926; }
+.jukebox-sim-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.jukebox-sim-controls > button { height: 32px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; }
+.jukebox-sim-run { border-color: var(--accent); }
+.jukebox-sim-clock { margin-left: auto; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.jukebox-sim-transport { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; min-width: 0; }
+.jukebox-sim-transport button { width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.jukebox-sim-transport input[type='range'] { flex: 1; min-width: 0; }
+.jukebox-sim-transport select { flex: none; max-width: 40%; }
+.jukebox-sim-song { margin-bottom: 8px; }
+.jukebox-sim-legend { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--text-muted); margin-left: auto; }
+.jukebox-sim-key { display: inline-block; width: 14px; height: 2px; border-radius: 1px; vertical-align: middle; }
+.jukebox-sim-key.price { background: var(--sim-price); }
+.jukebox-sim-key.held { background: var(--sim-held); }
+.jukebox-sim-legend .jukebox-sim-key + * { margin-right: 6px; }
+.jukebox-sim-chart-wrap { position: relative; }
+.jukebox-sim-svg { width: 100%; height: auto; display: block; cursor: crosshair; }
+.jukebox-sim-grid { stroke: var(--border); stroke-width: 1; }
+.jukebox-sim-axis { fill: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.jukebox-sim-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.jukebox-sim-line.price { stroke: var(--sim-price); }
+.jukebox-sim-line.held { stroke: var(--sim-held); }
+.jukebox-sim-label { fill: var(--text-muted); font-size: 10px; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+.jukebox-sim-playhead { stroke: var(--text); stroke-width: 1.5; }
+.jukebox-sim-hover { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 2 2; }
+.jukebox-sim-lastcall { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 4 3; }
+.jukebox-sim-tip { position: absolute; top: 4px; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 8px; font-size: 12px; pointer-events: none; white-space: nowrap; display: flex; flex-direction: column; gap: 2px; }
+.jukebox-sim-guestgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+.jukebox-sim-guest { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 4px 2px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--surface); font-variant-numeric: tabular-nums; min-width: 0; }
+.jukebox-sim-guest.regular { border-color: var(--accent); }
+.jukebox-sim-guest.away { opacity: 0.35; }
+.jukebox-sim-guest.jailed { border-style: dashed; border-color: var(--warning); }
+.jukebox-sim-guest-name { font-size: 11px; color: var(--text-muted); }
+.jukebox-sim-guest-credits { font-size: 16px; font-weight: 700; }
+.jukebox-sim-guest-songs { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.jukebox-sim-checks { list-style: none; margin: 0 0 10px; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 4px 14px; font-size: 13px; }
+.jukebox-sim-check { overflow-wrap: anywhere; }
+.jukebox-sim-check.ok > span { color: var(--ok); }
+.jukebox-sim-check.bad > span { color: var(--danger); }
+.jukebox-sim-check.bad { color: #fecaca; }
+.jukebox-sim-hint { font-size: 13px; border-left: 2px solid var(--warning); padding-left: 8px; margin: 0 0 10px; overflow-wrap: anywhere; }
+.jukebox-sim-table { display: flex; flex-direction: column; font-size: 13px; }
+.jukebox-sim-tr { display: grid; grid-template-columns: minmax(0, 1fr) 72px 72px; gap: 10px; padding: 3px 0; border-bottom: 1px solid var(--border); }
+.jukebox-sim-table.one .jukebox-sim-tr { grid-template-columns: minmax(0, 1fr) 72px; }
+.jukebox-sim-tr > span:first-child { overflow-wrap: anywhere; }
+.jukebox-sim-tr.head { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+.jukebox-sim-tr.head > span:not(:first-child) { text-align: right; }
+.jukebox-sim-tr.moved > span:nth-child(2) { color: var(--accent); }

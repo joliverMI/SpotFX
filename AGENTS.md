@@ -10997,7 +10997,7 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   plan's §1 (D4 re-tune: two songs in line, 8 starting credits, the add
   price doubling every 15 min), pure, with the planning simulator's own
   rounding; the shipped values are `models.jukebox.EconomyConfig`'s
-  defaults. `tests/jukebox_economy_sim.py` is the plan's simulator with its
+  defaults. `services/jukebox/simulator.py` is the plan's simulator with its
   prices replaced by those functions, and `tests/test_jukebox_economy.py`
   holds it to the plan's §3.2 numbers at 4/8/15/30 guests (it reproduces
   them exactly; a drifted setting moves them — the red control). Change a
@@ -11015,7 +11015,27 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   approval, never a price (§3.5: one set of prices fits 4-30 guests). The
   Credits tab's harness mocks a SNAPSHOT of those answers
   (`spectra/web/harness/jukeboxShowSnapshot.json`) — regenerate it when they
-  change. Sonic's `jukebox` domain is still owed (plan PR 3.4).
+  change.
+- **THE PARTY SIMULATOR AND SONIC (PR 3.4)**: the simulator moved from
+  tests into `services/jukebox/simulator.py` — ONE copy is both the
+  economy's executable spec and the master view's Simulate tab
+  (`POST /api/jukebox/simulate`: one model night under the SAVED economy,
+  recorded for playback, plus N nights beside the tuned defaults on the
+  same seeds; reads only, off the loop, one at a time). Recording
+  (`Party(record=True)`) only appends — it draws nothing from the random
+  stream (asserted), so never add a recording hook that calls `rng`. The
+  night is the model's FOUR hours (its arrivals are timed for that length;
+  not a setting). The tab's harness mock is a snapshot
+  (`spectra/web/harness/jukeboxSimSnapshot.json`, held to the route by
+  `tests/test_jukebox_simulator.py`) — regenerate it when the model or a
+  default changes. Sonic's `jukebox` domain is
+  `spectra/services/jukebox_console.py` (its docstring is the binding
+  statement and names what stays off-limits): HTTP to these routes only,
+  and EVERY change asks first (absorb's two-call `confirm_id`, bound to the
+  op, its arguments and the state asked about — a stop's yes covers only
+  THAT night). Starting and stopping a night always ask; never test either
+  anywhere but `tests/jukebox_world.py`'s fake world. A new jukebox
+  setting or action owes this domain an op or a named exclusion.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his program settings, one validator:

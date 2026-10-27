@@ -95,6 +95,7 @@ from spectra.services import (  # noqa: E402
     device_console,
     drop_console,  # noqa: F401 — its operations are wrapped below
     house_console,
+    jukebox_console,
     lock_console,
     room_effect_console,
     scene_console,
@@ -134,6 +135,8 @@ _PreDropPlaceEnum = Literal[tuple(drop_console.PRE_DROP_PLACES)]
 _PreDropKindEnum = Literal[tuple(drop_console.PRE_DROP_KINDS)]
 _LockKeyEnum = Literal[tuple(lock_console.KEYS)]
 _AbsorbKeyEnum = Literal[tuple(absorb_console.SETTING_KEYS)]
+_JukeboxPresetEnum = Literal[tuple(jukebox_console.PRESETS)]
+_JukeboxSimProgramEnum = Literal[tuple(jukebox_console.SIM_PROGRAMS)]
 
 mcp = MCPServer("settings-console")
 
@@ -1164,6 +1167,67 @@ async def set_absorb_window(windows: Optional[list[dict]] = None,
 async def set_absorb_playlist(playlist: str, confirm_id: Optional[str] = None) -> dict:
     """Link the Spotify playlist Absorb captures from, by its exact name."""
     return await _call("set_absorb_playlist", playlist=playlist, confirm_id=confirm_id)
+
+
+# Jukebox (spectra/services/jukebox_console.py): the host's set list with
+# jukebox slots and the show's credits, run by the SpotFX process. EVERY
+# change answers needs_confirmation with a confirm_id first; only a second
+# call carrying that id acts. Starting and stopping a night always ask.
+
+
+@mcp.tool()
+async def jukebox_status() -> dict:
+    """Is a Jukebox night running, what is playing, the line, warnings."""
+    return await _call("jukebox_status")
+
+
+@mcp.tool()
+async def get_jukebox_settings() -> dict:
+    """The Jukebox's program, preset, phone approval and every credits
+    setting with its range."""
+    return await _call("get_jukebox_settings")
+
+
+@mcp.tool()
+async def jukebox_price_check(guests: int = 15) -> dict:
+    """What things cost under the current settings, for a room of `guests`."""
+    return await _call("jukebox_price_check", guests=guests)
+
+
+@mcp.tool()
+async def simulate_jukebox_party(guests: int = 20, program: _JukeboxSimProgramEnum = "saved",
+                                 nights: int = 20, seed: int = 1) -> dict:
+    """Model party nights under the saved credits settings, beside the
+    tuned settings (writes nothing)."""
+    return await _call("simulate_jukebox_party", guests=guests, program=program,
+                       nights=nights, seed=seed)
+
+
+@mcp.tool()
+async def set_jukebox_setting(key: str, value: Union[bool, int, float, str],
+                              confirm_id: Optional[str] = None) -> dict:
+    """Change one Jukebox setting (the first call asks; pass its
+    confirm_id only after he says yes)."""
+    return await _call("set_jukebox_setting", key=key, value=value, confirm_id=confirm_id)
+
+
+@mcp.tool()
+async def apply_jukebox_preset(preset: _JukeboxPresetEnum,
+                               confirm_id: Optional[str] = None) -> dict:
+    """Apply a party-size preset (the first call asks)."""
+    return await _call("apply_jukebox_preset", preset=preset, confirm_id=confirm_id)
+
+
+@mcp.tool()
+async def start_jukebox_night(from_song: int = 1, confirm_id: Optional[str] = None) -> dict:
+    """Start a Jukebox night on the linked set playlist (always asks first)."""
+    return await _call("start_jukebox_night", from_song=from_song, confirm_id=confirm_id)
+
+
+@mcp.tool()
+async def stop_jukebox_night(pause: bool = False, confirm_id: Optional[str] = None) -> dict:
+    """Stop the running Jukebox night (always asks first)."""
+    return await _call("stop_jukebox_night", pause=pause, confirm_id=confirm_id)
 
 
 if __name__ == "__main__":

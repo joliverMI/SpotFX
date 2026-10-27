@@ -183,3 +183,103 @@ export interface PriceCheck {
   tips: { on: boolean; max_per_song: number; double_first: number };
   songs_in_line: number;
 }
+
+// ── the party simulator (phase 3.4; services/jukebox/simulator.py) ──────────
+
+export type SimEventKind = 'add' | 'skip' | 'jail' | 'jail_out' | 'tip' | 'next' | 'bump_up' | 'bump_down'
+  | 'too_late' | 'refund';
+
+export interface SimEvent {
+  t: number;
+  kind: SimEventKind;
+  g?: number;
+  price?: number;
+  wait?: number;
+  rnd?: number;
+  payers?: number[];
+  of?: number | null;
+  to?: number;
+  amt?: number;
+  bonus?: number;
+  fee?: number;
+  jump?: number;
+  downs?: number;
+}
+
+/** The state of the night at a moment: every guest's credits, the line,
+ * the wait and the add price at the back of it, who is in jail. */
+export interface SimFrame {
+  t: number;
+  song: number;
+  cr: number[];
+  back: number;
+  price: number;
+  line: number;
+  jailed: number[];
+}
+
+export interface SimSong {
+  t: number;
+  dur: number;
+  by: number | null;
+  ups?: number;
+  downs?: number;
+  skipped?: number | null;
+}
+
+export interface SimGuest {
+  id: number;
+  kind: 'regular' | 'middle' | 'quiet';
+  arrive: number;
+  leave: number;
+  played: number;
+  added: number;
+  earned: number;
+  spent: number;
+  tips_given: number;
+  jails: number;
+  end_credits: number;
+}
+
+export interface SimNight {
+  minutes: number;
+  last_call: number;
+  guests: SimGuest[];
+  songs: SimSong[];
+  frames: SimFrame[];
+  events: SimEvent[];
+  summary: Record<string, unknown>;
+}
+
+export type SimUnit = 'share' | 'count' | 'min' | 'credits' | 'rate';
+
+export interface SimRow {
+  key: string;
+  label: string;
+  unit: SimUnit;
+  yours: number | null;
+  tuned: number | null;
+}
+
+export interface SimCheck {
+  key: string;
+  label: string;
+  target: string;
+  value: number | null;
+  ok: boolean | null;
+}
+
+export interface SimResult {
+  guests: number;
+  nights: number;
+  seed: number;
+  program: string;
+  program_source: 'saved' | 'preset';
+  mix: { set_per_slot: number; juke_per_slot: number };
+  plan_preset: Preset;
+  mix_is_plans: boolean;
+  same_as_tuned: boolean;
+  night: SimNight;
+  rows: SimRow[];
+  checks: SimCheck[];
+}
