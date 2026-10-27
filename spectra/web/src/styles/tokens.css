@@ -4145,3 +4145,38 @@ body.jukebox-tv-body { background: var(--bg); }
 .jukebox-bonus-codes code { font-size: 14px; letter-spacing: 0.06em; }
 .jukebox-bonus-codes li .jukebox-muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jukebox-bonus-codes li button { padding: 2px 8px; font-size: 12px; }
+/* The printable guest cards (/jukebox/cards; N2) */
+.jukebox-cards-page { max-width: 8.5in; margin: 0 auto; padding: 24px 16px; box-sizing: border-box; }
+.jukebox-cards-head { display: flex; align-items: center; gap: 10px; }
+.jukebox-cards-head h1 { font-size: 22px; margin: 0; }
+.jukebox-cards-controls { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+.jukebox-cards-fields { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.jukebox-cards-fields legend { padding: 0 6px; color: var(--text-muted); font-size: 13px; }
+.jukebox-cards-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; min-width: 0; }
+.jukebox-cards-field input[type='text'], .jukebox-cards-field input[type='password'] { width: 15em; max-width: 100%; }
+.jukebox-cards-field input[type='password'] { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 7px 10px; font-size: 13px; font-family: var(--font); outline: none; }
+.jukebox-cards-field input[type='number'] { width: 84px; }
+.jukebox-cards-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.jukebox-cards-fields .jukebox-check { align-self: center; }
+.jukebox-cards-problems { margin: 0; padding-left: 18px; color: var(--warn, #fbbf24); font-size: 14px; }
+.jukebox-cards-print { align-self: flex-start; font-weight: 600; }
+.jukebox-cards-sheet { display: grid; grid-template-columns: repeat(2, 3.6in); gap: 0.1in; justify-content: center; background: #fff; padding: 0.2in; border-radius: 6px; }
+.jukebox-card-print { width: 3.6in; height: 2.45in; box-sizing: border-box; border: 1px dashed #999; border-radius: 6px; padding: 0.1in 0.12in; color: #111; background: #fff; display: flex; flex-direction: column; gap: 0.04in; break-inside: avoid; page-break-inside: avoid; font-family: system-ui, sans-serif; }
+.jukebox-card-print-title { display: flex; justify-content: space-between; align-items: baseline; gap: 0.08in; font-weight: 700; font-size: 11pt; line-height: 1.2; }
+.jukebox-card-print-qrs { display: flex; gap: 0.12in; justify-content: space-around; margin-block: auto; }
+.jukebox-card-print-qrs figure { margin: 0; display: flex; flex-direction: column; gap: 0.03in; align-items: center; flex: 1; min-width: 0; }
+.jukebox-card-qr { width: 1.1in; height: 1.1in; flex: none; }
+.jukebox-card-print-qrs figcaption { display: flex; flex-direction: column; align-items: center; text-align: center; font-size: 7pt; line-height: 1.2; max-width: 100%; overflow-wrap: anywhere; }
+.jukebox-card-print-qrs figcaption strong { font-size: 8pt; }
+.jukebox-card-print-pw { font-size: 7pt; line-height: 1.2; text-align: center; overflow-wrap: anywhere; }
+.jukebox-card-print-pw code { font-family: ui-monospace, monospace; font-size: 7pt; }
+.jukebox-card-print-bonus { font-size: 8.5pt; font-weight: 600; line-height: 1.2; text-align: center; }
+.jukebox-card-print-bonus code { font-size: 9.5pt; letter-spacing: 0.06em; }
+.jukebox-card-print-small { font-size: 6.5pt; font-weight: 400; line-height: 1.2; color: #555; text-align: right; }
+@media print {
+  @page { size: letter; margin: 0.35in; }
+  body { background: #fff !important; }
+  .no-print { display: none !important; }
+  .jukebox-cards-page { padding: 0; max-width: none; }
+  .jukebox-cards-sheet { padding: 0; border-radius: 0; }
+}

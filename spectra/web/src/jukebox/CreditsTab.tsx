@@ -170,6 +170,9 @@ function BonusCards({ amount }: { amount: number }) {
         <span className="jukebox-muted">
           {data ? `${data.unused} unused · ${data.used} used · +${amount} credits each` : q.isError ? "The codes couldn't be read." : 'Reading the codes…'}
         </span>
+        <InfoTip topic="jukebox-cards" text="The printable guest card: the Wi-Fi QR (typed at print time, never stored), the Jukebox QR and a bonus code on each card.">
+          <button type="button" onClick={() => window.open('/spectra/jukebox/cards', 'jukebox-cards')}>Print the cards</button>
+        </InfoTip>
       </div>
       <div className="jukebox-bonus-make">
         <label className="jukebox-field">

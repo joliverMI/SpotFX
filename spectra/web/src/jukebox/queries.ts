@@ -8,7 +8,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { spotfxDel, spotfxGet, spotfxPost, spotfxPut } from '../api/client';
 import type {
-  BonusCodesRead, GuestsRead, JukeboxBoardRead, JukeboxPreview, JukeboxStatus, NightReport, PriceCheck,
+  BonusCodesRead, CardRead, GuestsRead, JukeboxBoardRead, JukeboxPreview, JukeboxStatus, NightReport, PriceCheck,
   ProgramConfig, SetMoveResult, ShowRead, SimResult,
 } from './types';
 
@@ -192,6 +192,22 @@ export function useGift() {
 }
 
 const BONUS_KEY = ['jukebox-bonus-codes'];
+const CARD_KEY = ['jukebox-card'];
+
+/** The printable card's link and unused codes (the token is made if missing). */
+export function useJukeboxCard() {
+  return useQuery({ queryKey: CARD_KEY, queryFn: () => spotfxGet<CardRead>('/jukebox/card') });
+}
+
+/** Set the guest link's public address (serenity.<tailnet>.ts.net) — the one
+ *  guest-link validator; it never switches the link on. */
+export function useSaveLinkHost() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (host: string) => spotfxPut<unknown>('/jukebox/guest-link', { public_host: host }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: CARD_KEY }),
+  });
+}
 
 /** The printed bonus cards' codes, unused first. */
 export function useBonusCodes() {

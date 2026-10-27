@@ -44,6 +44,9 @@ process on its own port (phase 2) and never reaches these routes.
   POST   /api/jukebox/guest-link/self-test  the plan alone while closed (no
                                       Tailscale call); Funnel's own status and
                                       the public address while live
+  GET    /api/jukebox/card            the printable card (N2): the join link
+                                      (making the party token if there is none
+                                      yet), the unused bonus codes, the bonus
   GET    /api/jukebox/report          the post-party report of the latest night
                                       (services/jukebox/night_report.py): what
                                       it played, its line, its credits ledger
@@ -436,6 +439,32 @@ async def post_guest_link_rotate() -> dict:
 @router.post("/guest-link/self-test")
 async def post_guest_link_self_test() -> dict:
     return await guest_link.controller.self_test()
+
+
+# ── the printed card (N2): the join link, the unused bonus codes ─────────────
+
+def _card_read() -> dict:
+    guest_link.controller.ensure_token()
+    st = guest_link.controller.status()
+    try:
+        codes = bonus_codes.summary()
+        err = None
+    except ValueError as exc:
+        codes, err = {"codes": []}, str(exc)
+    show_cfg = store.load_show()
+    return {"link": st["link"], "host": st["host"], "state": st["state"],
+            "public_port": st["config"]["public_port"], "token_created_ms": st["token_created_ms"],
+            "unused": [c["code"] for c in codes["codes"] if not c["used"]], "codes_error": err,
+            "qr_bonus": show_cfg.economy.qr_bonus, "play_mode": show_cfg.play_mode}
+
+
+@router.get("/card")
+async def get_card() -> dict:
+    """What the printable card (report §9's N2) needs: the join link with the
+    party token — made now if there is none yet, since the cards carry it —
+    the unused bonus codes and the QR bonus. The Wi-Fi name and password are
+    typed on the card page and never reach SpotFX."""
+    return await asyncio.to_thread(_card_read)
 
 
 # ── the post-party report (PR 3.3's report, a skeleton) ─────────────────────

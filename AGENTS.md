@@ -11237,6 +11237,23 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   gift test, `check_jukebox_editor.mjs` §2b/§2d, the guest logic check's
   bonus section, the render's credits pass (it arrives by a card's link);
   help `jukebox-gifts`, `jukebox-bonus-cards`.
+- **THE PRINTED CARD (N2)** is SPECTRA's `/jukebox/cards` (chrome-less, like
+  `/jukebox/tv`; "Print the cards" on the Credits tab's Bonus cards card):
+  two cards across, four down on Letter, each with the guest Wi-Fi's QR, the
+  party link's QR carrying that card's bonus code (`?b=`) and the code as
+  text. **THE WI-FI PASSWORD IS TYPED THERE AND NEVER LEAVES THE PAGE** —
+  React state only, QRs drawn in the browser (`jukebox/cardQr.ts`); never
+  add it to a request, a store or the URL (the check asserts all three).
+  `GET /api/jukebox/card` hands the page the link, the unused codes and the
+  QR bonus, MAKING the party token if there is none (the cards carry it) but
+  never switching the link on. The QR encoder is `qrcode-generator` (MIT,
+  pinned; told to encode UTF-8 — its default keeps a character's low 8
+  bits); `jsqr` is dev-only, for decoding every code back — a deploy needs
+  `npm ci` in spectra/web. Sonic: a named exclusion (`jukebox_console`).
+  Specs: `scripts/check_jukebox_cards.mjs` (every QR decoded, the password
+  never leaving), `scripts/render_jukebox_cards.py` (printed to a Letter
+  PDF: one page, QRs ≥ 1 in, the longest Wi-Fi still fitting; `--out`),
+  both run by `tests/test_jukebox_cards.py`; help `jukebox-cards`.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his program settings, one validator:

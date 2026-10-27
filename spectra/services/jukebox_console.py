@@ -32,6 +32,10 @@ excluded" from "forgotten":
   * the printed BONUS CARDS' codes (making, listing, voiding them) — they
     are for printing on cards, on the Credits tab's Bonus cards card and the
     printable card page; a code read aloud is a code given away;
+  * PRINTING THE CARDS (/jukebox/cards, the plan's N2) — the guest Wi-Fi's
+    password is typed on that page at print time and never leaves it, so
+    there is nothing for a voice to set; and printing is a sheet of paper
+    in his hand, not a setting;
   * a guest's own acts on the guest page — joining, the name a phone picks,
     its votes, the songs it adds — are the guests', never the host's to make
     by voice (`jukebox_status` reads how many phones are on the page);
