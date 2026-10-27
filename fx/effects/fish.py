@@ -6,6 +6,7 @@ import voluptuous as vol
 from PIL import Image
 
 import fx.effects.particle_handoff as particle_handoff
+import fx.effects.pre_drop as pre_drop
 from fx.effects import lull_handoff, phase_grammar
 from fx.color import validate_gradient
 from fx.effects.audio import AudioReactiveEffect
@@ -988,6 +989,35 @@ SEARCH_LOOK_EASE_S = 0.15  # ... eased in and out
 PHASE_RAMP_SHARE = 0.9    # SpotFX's ramp covers this much of the gap (scene_
                           # response.PHASE_RAMP_HANG_FRACTION's complement):
                           # how an UNTOLD lull's length is read off its ramp
+# THE PRE-DROP (fx/effects/pre_drop.py is the binding statement; predrop
+# plan step 8, the plan's 3.5: "the searching fish darts to the centre on
+# the pre-drop, then waits there poised, its head quivering, until the
+# drop"). Told one, the searching lull is measured to the pre-drop — the
+# half-way keep mark is half the way to it and the search's legs end on
+# it, the rule the engine already applies to every member's ramp, dark
+# point and breath — so the lone searcher is there to go. On the pre-drop
+# each keeper turns sharply (its turn circle PRE_DROP_TURN of its own for
+# the whole gap) and darts to its place at the centre of view, at the
+# speed that arrives in PRE_DROP_DART_S; arrived (or PRE_DROP_DART_MAX_S
+# on), it waits there poised: a tight coil round its place, fast at first
+# and settling, its head quivering harder toward the drop — the plan's
+# approved prototype, number for number (its contact sheet: the fish loops
+# at the centre, its wake curling in the new colours). The drop is today's
+# rush. Fish takes no breath (BREATH_HOLD below), so the lull is never
+# dark. A lull told to keep several fish moves them the same way, each to
+# its own place in the row.
+PRE_DROP_LOOK = "dart"
+PRE_DROP_TURN = 0.25           # the keepers' turn circle x their own, the gap
+PRE_DROP_DART_S = 0.28         # the dart's speed is sized to arrive in this ...
+PRE_DROP_DART_SPEED = (1.0, 7.0)   # ... held to this range, x cruise
+PRE_DROP_ARRIVE_BODIES = 1.2   # arrived within this many body lengths (2 px
+PRE_DROP_DART_MAX_S = 0.45     # at least), or this long after the pre-drop
+PRE_DROP_COIL_BODIES = 0.9     # the poised coil's radius, body lengths
+PRE_DROP_COIL_REV = (2.2, 0.8)     # its turns a second, settling ...
+PRE_DROP_COIL_SETTLE_S = 0.5   # ... over this long after arriving
+PRE_DROP_COIL_LEAD = 0.6       # radians ahead on the circle a keeper aims
+PRE_DROP_QUIVER = (0.15, 0.45)     # the head's quiver, radians, rising to
+PRE_DROP_QUIVER_HZ = 8.0       # the drop, this many times a second
 #
 # HIS LULL CLOCK (2026-08-28) — now only `lull_keep = 0` — in THIRDS of the
 # lull's own duration, and the duration is the dynamic ramp gap SpotFX
@@ -1602,6 +1632,7 @@ class Fish2d(Twod, GradientEffect):
         "big_fish",
         *phase_grammar.BREATH_KEYS,
         phase_grammar.SHOCK_ON_KEY,
+        *pre_drop.KEYS,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -2126,6 +2157,9 @@ class Fish2d(Twod, GradientEffect):
             **phase_grammar.shock_schema_fields(),
             **phase_grammar.shock_on_schema_fields(),
             **phase_grammar.breath_schema_fields(),
+            # THE PRE-DROP's told keys (ride only the lull arm; zeros on a
+            # lull that plays none) — fx/effects/pre_drop.py
+            **pre_drop.schema_fields(),
         }
     )
 
@@ -2271,6 +2305,10 @@ class Fish2d(Twod, GradientEffect):
         self._burst_tail = 0.0   # s of fast speed-ease left after a burst
         self._scatter = None     # outgoing-crossfade latch (see draw)
         self._keep = None        # the lull keepers' targets (_keep_targets)
+        # THE PRE-DROP: its clock (None on every frame of a lull not told
+        # one) and the dart's own state (PRE_DROP_* above)
+        self._pd_clk = None
+        self._pd_dart = None
         self._wall = None        # the lit silhouette's distance field
         self._wall_key = None    # ... and what it was read from
         self._solo_due = 0.0     # solo bursts owed but not yet placed
@@ -3389,6 +3427,8 @@ class Fish2d(Twod, GradientEffect):
             # among them — a watchdog release, a reset), they rejoin the
             # ordinary population on the very next frame
             self._keep = None
+            self._pd_clk = None
+            self._pd_dart = None
             keepers = np.flatnonzero(self.p_mode[:n] == 5)
             if keepers.size:
                 self.p_mode[keepers] = np.where(
@@ -3465,6 +3505,7 @@ class Fish2d(Twod, GradientEffect):
     def _lull_step(self, p, dt):
         """Advance the lull: the searching lull (_lull_keep_step) unless it
         was told `lull_keep = 0`, which runs his 2026-08-28 clock."""
+        self._pre_drop_step()
         st = self._lull_state
         if st is None:
             self._start_lull()
@@ -3485,6 +3526,11 @@ class Fish2d(Twod, GradientEffect):
         cfg = self._config
         if lull_handoff.told(cfg):
             total = lull_handoff.lull_s(cfg)
+            if self._pd_clk is not None:
+                # THE PRE-DROP: the searching lull ends on it (PRE_DROP_*)
+                total = min(total, pre_drop.at_s(cfg))
+                h = max(0.0, self._phase_t) / max(total / 2.0, 1e-6)
+                return f, h, 2.0 / max(total, 1e-6), total
             h = lull_handoff.keep_mark(cfg, f, self._phase_t)
             return f, h, 2.0 / max(total, 1e-6), total
         h = lull_handoff.keep_mark(cfg, f, self._phase_t)
@@ -3637,6 +3683,71 @@ class Fish2d(Twod, GradientEffect):
             "speed": float(speed), "seek": seek,
             "look": swing.astype(np.float32),
         }
+        self._pre_drop_dart(keepers, ox, oy)
+
+    def _pre_drop_step(self):
+        """THE PRE-DROP's clock: read only on a lull TOLD a pre-drop —
+        every other frame clears it, so a lull without one is today's,
+        byte for byte."""
+        if self._phase != "lull" or not pre_drop.told(self._config):
+            self._pd_clk = None
+            self._pd_dart = None
+            return
+        self._pd_clk = pre_drop.phase_clock(
+            self._config, self._phase, self.phase_progress, self._phase_t,
+            prev=self._pd_clk)
+
+    def _pre_drop_dart(self, keepers, ox, oy):
+        """On the pre-drop, overwrite the keepers' targets with the dart
+        and then the poised coil (PRE_DROP_* above): each keeper's place is
+        the centre of view plus its own offset in the row (`ox`, `oy`)."""
+        clk = self._pd_clk
+        if clk is None or clk.segment != "pre_drop" or self._keep is None:
+            return
+        k = keepers.size
+        sx, sy = max(self.sx, 1e-6), max(self.sy, 1e-6)
+        px = self.cam_nx + ox
+        py = self.cam_ny + oy
+        d_px = np.hypot((px - self.p_x[keepers]) * sx,
+                        (py - self.p_y[keepers]) * sy)
+        cruise = self.cruise_px
+        body = self._body_len_px()
+        st = self._pd_dart
+        if st is None:
+            lo, hi = PRE_DROP_DART_SPEED
+            st = self._pd_dart = {
+                "t0": self._phase_t, "arrived": None, "phi": None,
+                "speed": float(np.clip(float(d_px.max()) / PRE_DROP_DART_S,
+                                       lo * cruise, hi * cruise)),
+            }
+        if st["arrived"] is None and (
+                float(d_px.max()) <= max(PRE_DROP_ARRIVE_BODIES * body, 2.0)
+                or self._phase_t - st["t0"] > PRE_DROP_DART_MAX_S):
+            st["arrived"] = self._phase_t
+            st["phi"] = np.arctan2((self.p_y[keepers] - py) * sy,
+                                   (self.p_x[keepers] - px) * sx)
+        if st["arrived"] is None:
+            tx, ty, speed = px, py, st["speed"]
+            look = np.zeros(k, np.float32)
+        else:
+            ea = self._phase_t - st["arrived"]
+            r0, r1 = PRE_DROP_COIL_REV
+            rev = r0 + (r1 - r0) * min(ea / PRE_DROP_COIL_SETTLE_S, 1.0)
+            st["phi"] = st["phi"] + 2.0 * np.pi * rev * float(self.passed_dt)
+            rad_px = PRE_DROP_COIL_BODIES * body
+            ahead = st["phi"] + PRE_DROP_COIL_LEAD
+            tx = px + rad_px * np.cos(ahead) / sx
+            ty = py + rad_px * np.sin(ahead) / sy
+            speed = 2.0 * np.pi * rad_px * rev
+            q0, q1 = PRE_DROP_QUIVER
+            amp = q0 + (q1 - q0) * clk.frac
+            idx = np.arange(k, dtype=np.float64)
+            look = (amp * np.sin(2.0 * np.pi * PRE_DROP_QUIVER_HZ * self._phase_t
+                                 + 0.9 * idx)).astype(np.float32)
+        self._keep.update(tx=np.asarray(tx, np.float64) * np.ones(k),
+                          ty=np.asarray(ty, np.float64) * np.ones(k),
+                          speed=float(speed), seek=True, look=look,
+                          turn=PRE_DROP_TURN)
 
     def _start_leg(self, search, gx, gy, left, v, half_px, first):
         """A search leg toward `search["side"]`: the reach point on that
@@ -6224,6 +6335,9 @@ class Fish2d(Twod, GradientEffect):
         swirl = direction * self.spin * 2 * np.pi * self.base_speed
 
         omega_max = self.p_spd[:n] / self.turn_radius_px
+        if kst is not None and "turn" in kst:
+            # THE PRE-DROP: the keepers turn on PRE_DROP_TURN of their circle
+            omega_max[kidx] = omega_max[kidx] / max(float(kst["turn"]), 1e-3)
         if big_urg is not None:
             # a startled fish that has to come about turns the way that
             # swings it AWAY from the big fish's line, never the shorter way

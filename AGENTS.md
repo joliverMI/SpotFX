@@ -12218,14 +12218,17 @@ has the cold-start detail. Four things:
   drop-sequence view/edit and Home panel check scripts.
 
 **THE PRE-DROP ENGINE (2026-10-26, predrop plan step 5; the looks:
-Fireworks and Pulse, step 6; Orbits and Black Hole, step 7).** `fx/effects/pre_drop.py` (the told keys, the looks,
+Fireworks and Pulse, step 6; Orbits and Black Hole, step 7; the Fish, Star
+and Sauron, step 8).** `fx/effects/pre_drop.py` (the told keys, the looks,
 `phase_clock`) and `spectra/services/pre_drop_play.py` (the one rule) are
 the binding statements; times are in `docs/SPECTRA_TIMING_CONVENTIONS.md`.
 Five things:
 
 - **NOT A PHASE — FOUR KEYS ON THE LULL ARM**, told only to
   `fx.device_model.PRE_DROP_EFFECTS` members — Fireworks and Pulse since
-  step 6, Orbits and Black Hole since step 7. Every non-member arm write over his 14 real scenes is
+  step 6, Orbits and Black Hole since step 7, the Fish, Star (radial) and
+  Sauron since step 8 (the strips' twinkle is next; never Squiggles). Every
+  non-member arm write over his 14 real scenes is
   byte-identical to the pre-engine golden, and a member's lull arm differs
   only by the told keys (`tests/test_pre_drop_arm_identity.py`,
   `tests/fixtures/pre_drop/` — recapture only with a deliberate reason).
@@ -12238,8 +12241,19 @@ Five things:
   full on the pre-drop, jittering harder and growing to the drop; Black
   Hole is dark from its dark point and black through the breath, then its
   infall ring falls from the hex edge to the centre over the gap, in the
-  set's colours. A longer gap adds light to Orbits (+1% at a 2 s spike,
-  +14% at a 3.3 s vocal intro — named, the test bounds it at +20%). An
+  set's colours; the Fish's searching lull ends on the pre-drop (its keep
+  mark is measured to it), then the lone searcher darts to the centre and
+  coils there, its head quivering harder to the drop, never dark; Star is
+  black from its dark point, then a thin, dim outline in its own shape grows
+  out of the centre as it spins up, full size on the drop, and the drop's
+  pieces wear the set as it is at the drop (a drop with no pre-drop keeps
+  today's colours — re-sampling there would change untold drops); Sauron
+  is black through the breath, then its lids part to the iris's edge, the
+  flames held down, a glare dimmer than the prototype (0.20 -> 0.36), and
+  the drop opens it without its half-open slam. A longer gap adds light to
+  Orbits (+1% at a 2 s spike, +14% at a 3.3 s vocal intro — named, the test
+  bounds it at +20%); the Fish stays within the plan's named +4%; every
+  other look's lull is below today's. An
   untold effect is today's frame for frame against its pinned pre-look
   module (`tests/test_pre_drop_looks.py`, rig `tests/
   pre_drop_look_harness.py`; storyboards `scripts/

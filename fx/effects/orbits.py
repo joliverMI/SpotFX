@@ -1678,7 +1678,7 @@ class Orbits2d(Twod, GradientEffect):
         # ── render ──────────────────────────────────────────────────────
         half_life = 0.02 + self.trail_decay * 0.5
         self.trail *= np.float32(0.5 ** (dt / half_life))
-        jit = self._pd_jit if self._pre_drop_grow() is not None else None
+        jit = self._pd_jit if grow is not None else None
         if jit is not None:
             self.trail *= np.float32(PRE_DROP_TRAIL_KEEP)
 

@@ -190,6 +190,9 @@ invariants not visible cold:
 - **IT GROWS INSTEAD OF SHRINKING**: on the pre-drop the lull's shrink is
   skipped and the size runs 2.0x -> 2.6x over the gap (still capped at
   `KERNEL_R`); the blob stays at the centre (`_pos_scale` is the lull's).
+  The growth and the jitter's trail cut share ONE read of the clock a frame
+  (`grow = self._pre_drop_grow()`, reused for the jitter's gate since step
+  8), so they can never disagree about whether the pre-drop is on.
 - **A LONGER GAP ADDS LIGHT** — back at full and growing for the whole gap:
   -9% against today's lull at the plan's 0.8 s spike, +1% at 2 s, +14% at a
   3.3 s vocal intro (named; `tests/test_pre_drop_looks.py` bounds it at

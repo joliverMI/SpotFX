@@ -27,7 +27,8 @@ keys — the way the dark point (lull_dark.py), the hand-off
 
 WHO IS TOLD: only effects in `fx.device_model.PRE_DROP_EFFECTS` (empty at
 step 5; Fireworks and Pulse joined at step 6, Orbits and Black Hole at step
-7 — each member's own PRE_DROP constants are its look). SpotFX decides
+7, the Fish, Star (radial) and Sauron at step 8 — each member's own PRE_DROP
+constants are its look). SpotFX decides
 (spectra/services/pre_drop_play.py is the one rule): on a lull arm whose
 sequence has a pre-drop that may play, that lands at least
 pre_drop_play.MIN_AFTER_LULL_MS after the lull actually fired, whose kind

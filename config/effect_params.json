@@ -1097,6 +1097,12 @@
       }
     },
     "radial": {
+      "pre_drop_looks": {
+        "looks": {
+          "outline": {"label": "Outline grows from the centre on the pre-drop", "kinds": ["spike", "intro"]}
+        },
+        "auto": {"spike": "outline", "intro": "outline"}
+      },
       "no_background_color": true,
       "params": {
         "polygon": {
@@ -2328,6 +2334,12 @@
       }
     },
     "fish": {
+      "pre_drop_looks": {
+        "looks": {
+          "dart": {"label": "Darts to the centre on the pre-drop", "kinds": ["spike", "intro"]}
+        },
+        "auto": {"spike": "dart", "intro": "dart"}
+      },
       "params": {
         "particle_count": {
           "label": "Fish",
@@ -5830,6 +5842,12 @@
       }
     },
     "sauron": {
+      "pre_drop_looks": {
+        "looks": {
+          "glare": {"label": "Dim glare on the slit on the pre-drop", "kinds": ["spike", "intro"]}
+        },
+        "auto": {"spike": "glare", "intro": "glare"}
+      },
       "params": {
         "iris_size": {
           "label": "Iris Size",

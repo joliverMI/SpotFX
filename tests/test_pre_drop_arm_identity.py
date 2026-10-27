@@ -1,19 +1,20 @@
 """ONLY THE MEMBERS' LULL ARMS CHANGE — every other arm write is
 byte-identical to before the pre-drop engine existed, over his real scene
-list (predrop plan steps 5 and 6).
+list (predrop plan steps 5-8).
 
 Every phase arm write `scene_response._drive_phase` makes — charge, lull
 and drop, every one of his 14 scenes, every gap and intensity in
 tests/pre_drop_arm_harness.py — is compared with what the code wrote before
 the engine existed (tests/fixtures/pre_drop/arm_writes_golden.json,
-captured on origin/master 0dd0828e). Since steps 6-7 `fx.device_model.
-PRE_DROP_EFFECTS` holds Fireworks, Pulse, Orbits and Black Hole, so:
+captured on origin/master 0dd0828e). Since steps 6-8 `fx.device_model.
+PRE_DROP_EFFECTS` holds Fireworks, Pulse, Orbits, Black Hole, Fish, Star
+(radial) and Sauron, so:
 
 - with no pre-drop, a member's lull arm is today's plus the four told keys
   at NOT_TOLD (and a zero breath for a member that is no breath-hold effect:
-  Fireworks) — fx/effects/pre_drop.py's rule 2, so a pre-drop told for one
-  lull never survives into the next — and every other write is today's,
-  byte for byte;
+  Fireworks, the Fish) — fx/effects/pre_drop.py's rule 2, so a pre-drop
+  told for one lull never survives into the next — and every other write
+  is today's, byte for byte;
 - with a pre-drop that plays, every non-member write is still today's, and
   a member's lull arm carries the told kind, moment, gap and its own
   resolved look, its breath ending exactly on the pre-drop.
@@ -38,7 +39,12 @@ ZERO_BREATH = {phase_grammar.BREATH_AT_KEY: 0.0, phase_grammar.BREATH_KEY: 0.0}
 AUTO_LOOK = {("fireworks", "spike"): "rockets", ("fireworks", "intro"): "rockets",
              ("pulse", "spike"): "burst", ("pulse", "intro"): "swell",
              ("orbits", "spike"): "jitter", ("orbits", "intro"): "jitter",
-             ("blackhole", "spike"): "ring", ("blackhole", "intro"): "ring"}
+             ("blackhole", "spike"): "ring", ("blackhole", "intro"): "ring",
+             ("fish", "spike"): "dart", ("fish", "intro"): "dart",
+             ("radial", "spike"): "outline", ("radial", "intro"): "outline",
+             ("sauron", "spike"): "glare", ("sauron", "intro"): "glare"}
+MEMBERS = {"fireworks", "pulse", "orbits", "blackhole", "fish", "radial",
+           "sauron"}
 
 
 def _dump(writes) -> str:
@@ -62,9 +68,9 @@ def _untold(golden_writes):
     return out
 
 
-def test_the_members_are_fireworks_pulse_orbits_and_black_hole():
-    assert device_model.PRE_DROP_EFFECTS == frozenset(
-        {"fireworks", "pulse", "orbits", "blackhole"})
+def test_the_members_are_the_looks_built_so_far():
+    assert device_model.PRE_DROP_EFFECTS == frozenset(MEMBERS)
+    assert "squiggles" not in device_model.PRE_DROP_EFFECTS   # his word
     for et in device_model.PRE_DROP_EFFECTS:
         assert device_model.pre_drop_looks(et), et
 
@@ -123,11 +129,12 @@ def test_with_a_pre_drop_that_plays_only_the_members_lull_arms_change(case):
 
 def test_every_member_was_told_on_his_scenes():
     """Run last (file order): his scenes carry Pulse on the Singles and
-    Fireworks, Orbits and Black Hole on their V2 scenes' crystal, so every
-    member was told."""
+    every other member on a scene's crystal (Fireworks, Orbits and Black Hole
+    on their V2 scenes, the Fish on Fish and House Fish, Star on STAR and
+    House Star, Sauron on Sauron), so every member was told."""
     if not SEEN_TOLD:
         pytest.skip("run with the parametrised test above")
-    assert SEEN_TOLD == {"fireworks", "pulse", "orbits", "blackhole"}
+    assert SEEN_TOLD == MEMBERS
 
 
 def test_the_engine_decides_on_his_scenes():
