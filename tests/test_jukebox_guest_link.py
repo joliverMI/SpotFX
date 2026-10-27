@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import subprocess
 import json
 
 import pytest
@@ -263,6 +264,26 @@ def test_a_close_that_fails_stays_marked_open_and_is_retried(world):
     del world.ts.fail["funnel --https=8443"]
     _run(world.link.reconcile())
     assert not store.load_guest_link()[1].funnel_open and world.ts.published() == []
+
+
+def test_an_open_that_times_out_after_publishing_is_taken_down(world):
+    """`tailscale funnel --bg` published the port and then never answered:
+    the link must not be left on the internet with no marker to close it."""
+    _enable()
+    real = world.ts.run
+
+    def slow(argv, timeout):
+        out = real(argv, timeout)
+        if "--bg" in argv:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return out
+    world.link.deps.run = slow
+    _run(world.runner.start())
+    assert world.runner.running
+    assert world.ts.published() == []                               # taken down again
+    _, st = store.load_guest_link()
+    assert not st.funnel_open and st.last_action.what == "open" and not st.last_action.ok
+    assert any("didn't open" in w for w in world.runner.night.warnings)
 
 
 def test_a_crash_right_after_the_open_command_leaves_it_marked_open_and_restart_closes_it(world):

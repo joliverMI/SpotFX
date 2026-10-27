@@ -483,9 +483,18 @@ class GuestLink:
         except Exception as exc:                                  # noqa: BLE001
             rc, out, err = -1, "", f"{type(exc).__name__}: {exc}"
         if rc != 0:
-            st.funnel_open, st.opened_ms, st.opened_for_night = False, None, ""
-            return self._record(cfg, st, "open", False,
-                                f"the guest link didn't open: {(err or out or f'exit {rc}').strip()}")
+            # A command that failed — or never answered (a timeout) — may
+            # still have published the port, and a marker cleared on a guess
+            # would leave it on the internet with nothing to ever close it.
+            # So it is taken down; the close itself clears the marker when
+            # Funnel's status shows nothing went out.
+            said = f"the guest link didn't open: {(err or out or f'exit {rc}').strip()}"
+            self._record(cfg, st, "open", False, said)
+            await self._close_locked("its open failed")
+            cfg, st = store.load_guest_link()
+            if not st.funnel_open:
+                st.opened_ms, st.opened_for_night = None, ""
+            return self._record(cfg, st, "open", False, said)
         after, _ = await self._status(cfg)
         checks = judge_status(after, cfg)
         if not all(c["ok"] for c in checks):
