@@ -12018,6 +12018,38 @@ precedence; `engine.fire_drop_colour_event` the choke point. Four things:
   sets, the precedence, the show-side sweep with a red control); help
   `drop-colour-change`.
 
+**PRE-DROPS ARE DETECTED, TWO KINDS (2026-10-26, predrop plan step 3 —
+nothing plays from them yet).** `spectra/services/predrop_detector.py` is
+the binding statement; the `drop-detection` skill has the cold-start
+detail. Four things:
+
+- **THE RULES ARE THE STUDY'S, LINE FOR LINE** — a SPIKE (one loud short
+  hit in the high band) and a VOCAL INTRO (a mid-band line entering out of
+  a hush and holding). `scripts/check_predrop_detector.py` (read-only, on
+  copies of his storage) holds the report's numbers over the moments
+  frozen in `tests/fixtures/predrop/study_moments.json`; bump
+  `PREDROP_VERSION` (in every detection's stamp) when an unchanged song
+  would find differently. Every detected sequence carries `pre_drop`; the
+  view names it (`pre_drop_ms/_kind/_auto/_tier/_score`) while
+  `parts["pre_drop"]` stays `absent` until step 4 gives it a button.
+- **THE RE-ANCHOR** moves a drop sitting ON its own pre-drop hit to the
+  sustained bass return 0.5-2 s later, only when that hit passes the spike
+  test against it — exactly Eyes Cut Deeper drop 1 in his store, to where
+  he moved it by hand. Its lull and charge stay placed against the HIT;
+  `reanchored_from` + `drop_sequences._det_distance` keep his overrides
+  pairing with it (view AND `_resolve_detected_key`).
+- **HIS OWN DROPS' PRE-DROPS ARE WORKED OUT ONLY OFF THE LOOP**
+  (`view_with_detection` → `view(compute_pre_drops=True)`), memoised per
+  song, stamp and drop time; a plain `view()` — the trigger clock's — never
+  analyses, and leaves `authored[].pre_drop` OUT where nothing is
+  memoised. The step that plays them must fill that memo off the loop.
+- **A CAPTURE'S FRAME TIMES CAN STEP BACK**, so `np.searchsorted` over a
+  cut window can land a frame from where it lands over the whole song: a
+  weak verdict's score may differ in a cut (never a found one). The rules
+  keep the study's raw search on purpose. Help: `testbed-predrops` (the
+  test bed's Pre-drops lane, a glyph per kind). Specs:
+  `tests/test_predrop_detector.py`, `tests/test_predrop_view.py`.
+
 ## Touch panning + Light Show flag touch precision (2026-10-08)
 
 The Admiral: "i want to be able to drag the audio shape graph somehow on a

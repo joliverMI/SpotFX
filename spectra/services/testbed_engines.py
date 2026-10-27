@@ -4,10 +4,11 @@ engine normalizes to the SAME mark shape
 (`{"time_ms", "kind", "label", "score"}`) so the comparison/metrics/render
 code never branches on which engine produced a mark.
 
-Five engines ship with this build (report Phase 0 + Phase 1 item 1, the
+Six engines ship with this build (report Phase 0 + Phase 1 item 1, the
 Admiral's 2026-09-08 generation-alignment sharpening,
 data/transition-alignment-plan/report.md section 4's tuning-loop lanes,
-and the drop-detection plan's phase 2 Drops lane):
+the drop-detection plan's phase 2 Drops lane, and the predrop plan's step
+3 Pre-drops lane):
 
   librosa   — "current" / the production baseline. Derived LIVE from the
               already-computed `.librosa.json` (spectra.services.
@@ -63,6 +64,18 @@ and the drop-detection plan's phase 2 Drops lane):
               the stored audio shape, which is already in SONG time, so it
               is NOT shifted by _estimate_for (the generator's exception).
 
+  predrops  — the pre-drop rules (spectra.services.predrop_detector, the
+              predrop plan's step 3): the pre-drop the two rules find
+              before every drop the drop detector finds (at the page's own
+              drop thresholds, as the Drops lane) and before every one of
+              his own drop triggers no detection sits within two beats of.
+              kinds pre_drop (both kinds), spike and intro; every mark
+              carries `glyph` (its kind, drawn as that kind's own glyph)
+              and `tier`. His marks hold no pre-drops, so its score is not
+              a measure: the lane is there to look at. Song time, so NOT
+              shifted by _estimate_for; it reads his triggers (one parse,
+              like the generator's stored kind).
+
 `librosa`'s "interior boundaries" (report's own Part 1.2 term) are every
 section's start_ms EXCEPT the first section's (the song's own opening
 boundary is not a "transition" — nothing precedes it), matching the
@@ -75,18 +88,23 @@ from typing import Optional
 
 from spectra import config
 from spectra.services import (analysis_reader, drop_detector, midsong_generator,
-                              rhythmic_edges, testbed_cache, trigger_store)
+                              predrop_detector, rhythmic_edges, testbed_cache,
+                              trigger_store)
 
 ENGINE_LIBROSA = "librosa"
 ENGINE_BEAT_THIS = "beat_this"
 ENGINE_GENERATOR = "generator"
 ENGINE_EDGES = "edges"
 ENGINE_DROPS = "drops"
+ENGINE_PREDROPS = "predrops"
 
 DROPS_KIND_DROP = "drop"
 DROPS_KIND_CONFIDENT = "drop_confident"
 DROPS_KIND_LULL = "lull"
 DROPS_KIND_CHARGE = "charge"
+
+PREDROPS_KIND_ALL = "pre_drop"
+PREDROPS_KINDS = [PREDROPS_KIND_ALL, predrop_detector.KIND_SPIKE, predrop_detector.KIND_INTRO]
 
 GENERATOR_KIND_STORED = "stored"
 GENERATOR_KIND_PREVIEW = "preview"
@@ -117,12 +135,17 @@ ENGINES: dict[str, dict] = {
         "kinds": [DROPS_KIND_DROP, DROPS_KIND_CONFIDENT, DROPS_KIND_LULL, DROPS_KIND_CHARGE],
         "live": True,
     },
+    ENGINE_PREDROPS: {
+        "label": "Pre-drops (spike and vocal intro)",
+        "kinds": PREDROPS_KINDS,
+        "live": True,
+    },
 }
 
 # Engines whose marks are already in SONG time — spectra/api/testbed.py's
 # _estimate_for shifts every other engine's WAV-time marks by the capture
 # offset and must leave these alone.
-SONG_TIME_ENGINES = frozenset({ENGINE_GENERATOR, ENGINE_DROPS})
+SONG_TIME_ENGINES = frozenset({ENGINE_GENERATOR, ENGINE_DROPS, ENGINE_PREDROPS})
 
 
 @dataclass(frozen=True)
@@ -131,6 +154,8 @@ class EngineMark:
     kind: str
     label: Optional[str] = None
     score: Optional[float] = None
+    glyph: Optional[str] = None     # draw this mark as that kind's glyph (pre-drops)
+    tier: Optional[str] = None      # "confident" | "suggested", where an engine has tiers
 
 
 def librosa_marks_for_stem(stem: Optional[str]) -> Optional[list[EngineMark]]:
@@ -277,6 +302,45 @@ def _drops_marks(uri: str, *, confident_score: Optional[float],
     return sorted(out, key=lambda m: m.time_ms)
 
 
+PREDROP_WORD = {predrop_detector.KIND_SPIKE: "spike", predrop_detector.KIND_INTRO: "vocal intro"}
+
+
+def _predrops_marks(uri: str, *, confident_score: Optional[float],
+                    suggested_score: Optional[float],
+                    floor_score: Optional[float] = None) -> Optional[list[EngineMark]]:
+    """Every pre-drop the rules find: before each drop the detector finds
+    (the page's own drop thresholds) and before each of his own drop
+    triggers no detection sits within two beats of (drop_sequences.
+    MATCH_BEATS). Each pre-drop twice — as `pre_drop` and as its own kind."""
+    from spectra.services import drop_sequences
+    confident, suggested, floor = drop_thresholds(confident_score, suggested_score, floor_score)
+    try:
+        analysis = drop_detector.analyse(uri)
+    except drop_detector.Unavailable:
+        return None
+    det = drop_detector.detect(analysis, confident_score=confident,
+                               suggested_score=suggested, drop_floor=floor)
+    anchors = [(int(q.drop_ms), "detected", q.pre_drop) for q in det.sequences]
+    reach = drop_sequences.MATCH_BEATS * analysis.song.beat_len
+    detected = [a for a, _, _ in anchors]
+    for m in drop_sequences.his_marks(trigger_store.list_for_song(uri)):
+        if m.kind != "drop" or any(abs(m.timestamp_ms - d) <= reach for d in detected):
+            continue
+        pre = predrop_detector.detect(analysis.shape, int(m.timestamp_ms))
+        anchors.append((int(m.timestamp_ms), "your", pre.stored() if pre else None))
+    out: list[EngineMark] = []
+    for drop_ms, whose, pre in anchors:
+        if not pre:
+            continue
+        text = (f"{PREDROP_WORD.get(pre['kind'], pre['kind'])} {pre['score']:.2f} "
+                f"({pre['tier']}), {pre['lead_ms']} ms before the {whose} drop at "
+                f"{drop_ms} ms")
+        for kind in (PREDROPS_KIND_ALL, pre["kind"]):
+            out.append(EngineMark(time_ms=float(pre["ms"]), kind=kind, label=text,
+                                  score=pre["score"], glyph=pre["kind"], tier=pre["tier"]))
+    return sorted(out, key=lambda m: m.time_ms)
+
+
 def _drops_available(stem: Optional[str]) -> bool:
     """A stat, never a detection: the shape and the beat analysis exist."""
     return (stem is not None and analysis_reader.has_librosa_analysis(stem)
@@ -301,8 +365,8 @@ def marks_for(
     only by the `generator` engine's preview kind (the density rate has
     no meaning for `edges`, which only detects edges, never ranks
     candidates); `confident_score`/`suggested_score`/`floor_score` only by
-    `drops` (None = the room's own setting). Every engine ignores the
-    knobs it does not use."""
+    `drops` and `predrops` (None = the room's own setting). Every engine
+    ignores the knobs it does not use."""
     if engine == ENGINE_LIBROSA:
         return _librosa_marks(uri)
     if engine == ENGINE_GENERATOR:
@@ -315,6 +379,9 @@ def marks_for(
     if engine == ENGINE_DROPS:
         return _drops_marks(uri, confident_score=confident_score,
                             suggested_score=suggested_score, floor_score=floor_score)
+    if engine == ENGINE_PREDROPS:
+        return _predrops_marks(uri, confident_score=confident_score,
+                               suggested_score=suggested_score, floor_score=floor_score)
     cached = testbed_cache.load(engine, uri)
     if cached is None:
         return None
@@ -414,8 +481,9 @@ def availability_for(uri: str, *,
                 "computed_at": None,
                 "mark_count": len(marks) if marks else 0,
             }
-        elif key == ENGINE_DROPS:
-            marks = (_drops_marks(uri, confident_score=None, suggested_score=None)
+        elif key in (ENGINE_DROPS, ENGINE_PREDROPS):
+            fn = _drops_marks if key == ENGINE_DROPS else _predrops_marks
+            marks = (fn(uri, confident_score=None, suggested_score=None)
                      if count_marks and _drops_available(stem) else None)
             out[key] = {
                 "label": meta["label"], "kinds": meta["kinds"],

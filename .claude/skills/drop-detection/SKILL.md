@@ -2,7 +2,8 @@
 name: drop-detection
 description: >
   Drop sequence detection, editing and firing (drop-detection plan,
-  phases 1-5): spectra/services/drop_detector.py (the detector),
+  phases 1-5): spectra/services/drop_detector.py (the detector, with the
+  pre-drop rules in predrop_detector.py),
   drop_sequences.py (the stored overrides/additions a song carries and
   the merged view the Timeline draws), drop_console.py (Sonic's own
   reach), drop_firing.py (what actually fires) and drop_panel.py (Home's
@@ -303,6 +304,70 @@ limit: Star's drop pieces keep the colours they sampled at the lull's start
 Proofs: `tests/test_drop_colour.py` (the pick over his 46 single-hue sets,
 the precedence, and the show-side sweep with a red control).
 
+## Pre-drops — the spike and the vocal intro (2026-10-26)
+
+Predrop plan step 3 (detection only: nothing plays from a pre-drop yet,
+`drop_firing.PRE_DROPS_PLAY`). `spectra/services/predrop_detector.py` is
+the binding statement for both rules. Six things:
+
+- **TWO RULES, PORTED LINE FOR LINE FROM THE STUDY** (pd_detect3 and
+  pd_intro, plan evidence/tools): a SPIKE (one loud short hit in the high
+  band, five tests / seven margins) and a VOCAL INTRO (a mid-band line
+  entering out of a hush and holding, six tests). Score = the weakest
+  margin, found at >= 1.0. The arithmetic is the measured thing:
+  `scripts/check_predrop_detector.py` holds the report's numbers (spike 11
+  of 330 / 7 of 498 / 15 of 6,131, intro 8 / 18 / 2) over the moments
+  frozen in `tests/fixtures/predrop/study_moments.json`. Change a bar and
+  that script tells you what moved; bump `PREDROP_VERSION` (part of every
+  detection's stamp) whenever an unchanged song would find differently.
+- **SEARCH WIDE, PLAY NARROW**: each kind searches the scene bounds'
+  extremes (spike 250-3000 ms, intro 350-4500); a scene's own window is
+  applied at play time (step 5). At most one pre-drop per drop: the higher
+  score names the kind, a spike on an exact tie. Tiers: a spike is
+  confident at 1.07, an intro at 1.18 AND entering within 3.5 s.
+- **THE RE-ANCHOR** (in `drop_detector.detect`, after the first-spike
+  rule): a drop sitting ON its own pre-drop hit moves to the sustained bass
+  return 0.5-2 s later — only when that hit passes the spike test against
+  the return (within `SAME_HIT_MS`). The blanket rule ("a short bass hit,
+  then a sustained return") would move 26 of 613 detections, seven of them
+  drops he had confirmed in place; restricted, it moves exactly Eyes Cut
+  Deeper drop 1, to exactly where he moved it (70,350). Its lull and charge
+  stay placed against the HIT (`place_sequence(p, found_ms)`) — the break
+  leads into the pre-drop — or they land in the gap after the clap.
+  `reanchored_from` keeps where it was found, and `_det_distance` pairs an
+  override made against the old place with the new one (view pairing AND
+  `_resolve_detected_key`, or an edit on the moved drop would mint a second
+  override). A confirmed/edited drop does not ask for review when the
+  analysis moved TO his own drop.
+- **THE VIEW** names it (`pre_drop_ms`, `_kind`, `_auto`, `_tier`,
+  `_score`; an automatic pre-drop his drop has moved past is left out, as
+  an automatic lull is). `parts["pre_drop"]` stays `absent` — its button,
+  handle, drag and `moved.pre_drop` are step 4.
+- **HIS OWN DROPS' PRE-DROPS** (`authored[].pre_drop`) are computed against
+  his drop's moment and memoised per (song, detection stamp, drop ms) —
+  ONLY on the read-through path (`view_with_detection`, a worker thread).
+  A plain `view()` is the trigger clock's own read and must never analyse:
+  it shows what is memoised and leaves the key OUT where nothing is (absent
+  = not worked out, `None` = none). Step 5, which needs them on the tick
+  path, must fill the memo off the loop (e.g. on the song-change edge).
+- **A CUT WINDOW IS A FAITHFUL FIXTURE, EXCEPT ACROSS JITTERED FRAMES.**
+  The capture's frame times sometimes step back (~30 ms); np.searchsorted
+  over such a stretch can land a frame apart in a cut from where it lands
+  over the whole song, so a WEAK verdict's score can differ there (70 of
+  6,960 moments; 0 with the timestamps made monotonic; never a found
+  verdict, a status or a pre-drop). The check names that class and fails
+  on any other. The rules keep the study's raw searchsorted on purpose:
+  "fixing" it changes the measured arithmetic.
+
+The test bed's Pre-drops lane (`testbed_engines.ENGINE_PREDROPS`, kinds
+`pre_drop` / `spike` / `intro`, every mark carrying `glyph` and `tier`) runs
+the rules before every detected drop (the drop sliders' thresholds) and
+before each of his drop triggers no detection sits within two beats of. Help
+topic `testbed-predrops`. Proofs: `tests/test_predrop_detector.py`
+(synthetic envelopes for every test of both rules, the re-anchor, the
+committed cut cases, Eyes Cut Deeper whole), `tests/test_predrop_view.py`,
+`scripts/check_predrop_detector.py`.
+
 ## A LIGHT SHOW SET CAN BE ARMED ON A PHASE (2026-10-19)
 
 The Admiral: "add a button for next drop, lull, and charge. make it one
@@ -412,4 +477,6 @@ Millones' real detection), `tests/test_drop_panel_his_rows.py` (his own
 drops across both stores, on copies of his real Pop Off and Dopamine),
 `scripts/check_home_drops_panel.mjs`, `scripts/
 check_timeline_changed_elsewhere.mjs`, `scripts/check_home_drops_layout.py`.
-The drop colour change's: `tests/test_drop_colour.py`.
+The drop colour change's: `tests/test_drop_colour.py`. Pre-drops':
+`tests/test_predrop_detector.py`, `tests/test_predrop_view.py`,
+`scripts/check_predrop_detector.py`.

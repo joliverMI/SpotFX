@@ -116,6 +116,18 @@ each sequence so nothing is silently moved:
   before its first sample; `captured_from_ms` says where it starts so a
   surface can say "not captured" there instead of showing nothing.
 
+PRE-DROPS AND THE RE-ANCHOR (predrop plan step 3; spectra/services/
+predrop_detector.py is the binding statement for both rules). After the
+first-spike rule a drop sitting ON its own pre-drop hit moves to the
+sustained bass return 0.5-2 s later — only when that hit passes the spike
+test against the return (`reanchored_from` keeps where it was found, and a
+note says so; it moves exactly Eyes Cut Deeper drop 1 in his store). Its
+lull and charge stay placed against the hit (the break leads into the
+pre-drop, and the pre-drop into the drop), so only the drop moves. Every
+detected sequence then carries the pre-drop the two rules find before its
+drop (`pre_drop`: ms, kind, lead_ms, score, tier) or None. Nothing plays
+from it yet: drop_firing.PRE_DROPS_PLAY.
+
 Pure: analyse() reads the two files (through analysis_reader and the
 config paths, nothing else), detect() is arithmetic over that. The store,
 the stamp and the merge with his edits are spectra/services/
@@ -132,11 +144,11 @@ from typing import Optional
 import numpy as np
 
 from spectra import config
-from spectra.services import analysis_reader
+from spectra.services import analysis_reader, predrop_detector
 
 logger = logging.getLogger(__name__)
 
-DETECTOR_VERSION = "1"
+DETECTOR_VERSION = "2"     # "2": the re-anchor and the stored pre-drop
 """Bump whenever detection or placement changes what an unchanged song
 would produce: it is part of every stored detection's stamp, so a bump
 re-detects every song on its next play (drop_sequences.py)."""
@@ -177,6 +189,7 @@ class SongData:
     tempo: float
     beat_ms: np.ndarray      # song ms (float)
     duration_ms: int
+    mid: Optional[np.ndarray] = None   # the pre-drop rules' vocal intro reads it
 
     @property
     def beat_len(self) -> float:
@@ -210,6 +223,7 @@ def load_song(uri: str) -> SongData:
         low = z["rms_low"].astype(np.float64)
         high = z["rms_high"].astype(np.float64)
         total = z["rms_total"].astype(np.float64)
+        mid = z["rms_mid"].astype(np.float64) if "rms_mid" in z.files else None
     except Exception as exc:                             # noqa: BLE001
         raise Unavailable(f"this song's audio shape could not be read ({exc})") from exc
     if len(t) < MIN_FRAMES:
@@ -229,7 +243,7 @@ def load_song(uri: str) -> SongData:
     except (TypeError, ValueError):
         duration = int(t[-1])
     return SongData(uri=uri, stem=stem, t=t, low=low, high=high, total=total,
-                    tempo=tempo, beat_ms=beat_ms, duration_ms=duration)
+                    tempo=tempo, beat_ms=beat_ms, duration_ms=duration, mid=mid)
 
 
 # ── the shape, prepared (dd_feat.prep) ─────────────────────────────────────
@@ -395,6 +409,7 @@ class SongAnalysis:
     song: SongData
     prep: Prep
     candidates: list[Candidate]
+    shape: Optional[predrop_detector.Shape] = None   # the pre-drop rules' bands
 
     @property
     def cand_ms(self) -> np.ndarray:
@@ -410,7 +425,8 @@ def analyse_song(song: SongData) -> SongAnalysis:
     keep = p.att_rise >= CANDIDATE_MIN_RISE
     cands = [score_candidate(p, float(a), float(r))
              for a, r in zip(p.att_ms[keep], p.att_rise[keep])]
-    return SongAnalysis(song=song, prep=p, candidates=cands)
+    return SongAnalysis(song=song, prep=p, candidates=cands,
+                        shape=predrop_detector.shape_of(song))
 
 
 _memo: "OrderedDict[tuple, SongAnalysis]" = OrderedDict()
@@ -600,6 +616,8 @@ class DetectedSequence:
     loud_before: bool
     capped: bool = False
     notes: list[str] = field(default_factory=list)
+    pre_drop: Optional[dict] = None          # predrop_detector.PreDrop.stored()
+    reanchored_from: Optional[int] = None    # the first-spike drop the re-anchor moved
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -786,10 +804,16 @@ def detect(analysis: SongAnalysis, *, confident_score: float = CONFIDENT_SCORE,
         captured_from_ms=int(song.t[0]), captured_to_ms=int(song.t[-1]),
         duration_ms=int(song.duration_ms))
     score_floor = min(confident_score, suggested_score)
-    for drop_ms, cand in raw_drops(analysis, score_floor):
+    placed: set[int] = set()
+    for found_ms, cand in raw_drops(analysis, score_floor):
         tier = tier_for(cand.score, confident_score, suggested_score)
         if tier is None:
             continue
+        moved = predrop_detector.reanchor(analysis.shape, p.att_ms, p.att_rise, found_ms)
+        drop_ms = moved if moved is not None else found_ms
+        if drop_ms in placed:
+            continue
+        placed.add(drop_ms)
         if drop_ms < EDGE_MS or drop_ms > song.duration_ms - EDGE_MS:
             out.excluded.append(Excluded(
                 drop_ms=int(drop_ms), score=round(cand.score, 3),
@@ -802,12 +826,22 @@ def detect(analysis: SongAnalysis, *, confident_score: float = CONFIDENT_SCORE,
                 reason=f"post-drop energy {energy:.2f} is below the drop "
                        f"floor {drop_floor:.2f}"))
             continue
-        lull, charge, brk = place_sequence(p, drop_ms)
-        out.sequences.append(DetectedSequence(
+        # the lull and charge lead into the hit the drop was found on — its
+        # pre-drop, when the re-anchor moved the drop — so they stay put
+        lull, charge, brk = place_sequence(p, found_ms)
+        pre = predrop_detector.detect(analysis.shape, drop_ms)
+        seq = DetectedSequence(
             key=drop_key(drop_ms), drop_ms=int(drop_ms), lull_ms=lull, charge_ms=charge,
             score=round(cand.score, 3), tier=tier, break_beats=brk,
             step=round(cand.step, 3), rise=round(cand.rise, 3), path=cand.path,
-            loud_before=cand.loud_before))
+            loud_before=cand.loud_before, pre_drop=pre.stored() if pre else None,
+            reanchored_from=int(found_ms) if moved is not None else None)
+        if moved is not None:
+            seq.notes.append(
+                f"drop moved from {int(found_ms)} ms to the bass return at {int(drop_ms)} ms: "
+                f"the hit at {int(found_ms)} ms is its pre-drop")
+        out.sequences.append(seq)
+    out.sequences.sort(key=lambda q: q.drop_ms)   # a moved drop keeps time order
     _apply_cap(out.sequences, song.duration_ms)
     apply_spacing(out.sequences, B, song)
     return out

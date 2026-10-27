@@ -69,6 +69,9 @@ const MARK_KIND_LABEL: Record<string, string> = {
   drop_confident: 'Drops (confident only)',
   lull: 'Lulls',
   charge: 'Charges',
+  pre_drop: 'Pre-drops (both kinds)',
+  spike: 'Pre-drops: spikes',
+  intro: 'Pre-drops: vocal intros',
 };
 
 /** The reference sets, with what each is called in the picker. */
@@ -559,8 +562,11 @@ export default function TestbedPage() {
                   if (!v) return;
                   setEngineA(v);
                   // Engine A tints his marks, so a Drops lane picked there
-                  // brings the matching reference set with it.
+                  // brings the matching reference set with it; a Pre-drops
+                  // lane brings his drops (his marks hold no pre-drops, so
+                  // the lane is read beside the drops they lead into).
                   if (v.engine === 'drops') setReference(referenceForDropKind(v.kind));
+                  if (v.engine === 'predrops') setReference('drops');
                 }}
                 song={song}
               />
@@ -596,6 +602,16 @@ export default function TestbedPage() {
                 });
               }}
             />
+            {(engineA?.engine === 'predrops' || engineB?.engine === 'predrops') && (
+              <p className="empty-note" style={{ fontSize: 12, marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>
+                  Pre-drops: a spike and a vocal intro each have their own glyph; a suggested one is
+                  fainter. Your marks hold no pre-drops, so their score is not a measure — read them
+                  beside your drops.
+                </span>
+                <HelpLink topic="testbed-predrops" title="The Pre-drops lane" />
+              </p>
+            )}
           </div>
 
           <div className="card">
