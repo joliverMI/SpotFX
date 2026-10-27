@@ -238,7 +238,6 @@ class JukeboxGateway:
             return None
         return self._song(data)
 
-
     def search(self, query: str, limit: int = 10, offset: int = 0) -> list[dict]:
         """Spotify's own song search, `limit` a page: [{uri, title, artist,
         duration_ms, explicit, image, thumb}]."""
