@@ -447,7 +447,8 @@ def pre_drop_for_ruler(scene: SceneV2, intensity: float, marks: list[dict],
     on this scene (pre_drop_play.decide, the show's own rule), which
     virtuals would be told (fx.device_model.PRE_DROP_EFFECTS — Fireworks
     and Pulse since predrop step 6, Orbits and Black Hole since step 7,
-    the Fish, Star and Sauron since step 8), and their lull measured to the
+    the Fish, Star and Sauron since step 8, the strips since step 9), and
+    their lull measured to the
     pre-drop. None when no kind is asked."""
     from fx import device_model
     from fx.effects import phase_grammar

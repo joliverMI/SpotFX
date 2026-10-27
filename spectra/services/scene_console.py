@@ -794,7 +794,7 @@ async def apply_scene_entry_param(scene: str, target: str, name: str, value: Any
 # `pre_drop_looks` registry block (fx/effects/pre_drop.py). Read only by a
 # fx.device_model.PRE_DROP_EFFECTS member — Fireworks and Pulse since
 # predrop step 6, Orbits and Black Hole since step 7, the Fish, Star and
-# Sauron since step 8.
+# Sauron since step 8, the strips since step 9.
 
 _PRE_DROP_KINDS = ("spike", "intro")
 

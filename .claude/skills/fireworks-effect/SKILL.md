@@ -158,6 +158,26 @@ Proofs: `tests/test_pre_drop_looks.py` (rig `tests/pre_drop_look_harness.py`,
 the engine's own lull arm on his crystal's real mask),
 `scripts/render_predrop_storyboards.py` -> `docs/evidence/predrop-storyboards/`.
 
+### On the strip (`fireworks1d`, predrop plan step 9, `fx/VENDOR.md` #90)
+
+The crystal's idea on the strip: the Fireworks strip's look is `rockets`
+too (its own `pre_drop_looks` block; the shared layer's twinkle is not its
+look). Told a pre-drop, `_strip_phase_enter("lull")` launches NO rockets,
+the strip goes dark under the layer's fade, `_pre_drop_step` makes the
+breath TRUE black (clears particles and trail on its first frame, swallows
+a flare burst landing in it), and on the pre-drop the same two rockets
+fire from the strip's ends (`_launch_rockets`), guided over the gap by the
+layer's clock (`_strip_phase_pre_drop()`), bursting on the drop
+(`_rocket_payoff`, unchanged). Two things not visible cold:
+
+- **The layer lifts the lull's 12% ember for the gap**
+  (`_strip_phase_pre_drop_lift`), so the rockets fly bright as the
+  crystal's do; untold, the lull's two rockets still cross the dark at the
+  ember, as before.
+- **They dim by the crystal's own rule** (`pre_drop_rocket_fade`, 0.3125/s
+  capped at 0.75 — the strip's own lull dimming was retired, so in the lit
+  gap this is the one dimmer), keeping the whole lull's light below today's.
+
 ## Thematic transitions (2026-10-11, transitions-drop plan phase 3)
 
 Fireworks' `_handoff_snapshot` carries `vx`/`vy` = `p_vx`/`p_vy` in px/s +

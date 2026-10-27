@@ -1,8 +1,10 @@
-"""THE PRE-DROP LOOKS (predrop plan steps 6-8): Fireworks' rockets and
+"""THE PRE-DROP LOOKS (predrop plan steps 6-9): Fireworks' rockets and
 Pulse's burst and dim swell (step 6), Orbits' jitter-and-grow return and
 Black Hole's infall ring (step 7), the Fish's dart, Star's outline growing
-out of the centre and Sauron's dimmed glare (step 8), on the real effects,
-driven by the lull arm the real engine writes (tests/pre_drop_look_harness.py).
+out of the centre and Sauron's dimmed glare (step 8), and the strips (step
+9: the shared layer's twinkle, the Fireworks strip's rockets), on the real
+effects, driven by the lull arm the real engine writes
+(tests/pre_drop_look_harness.py).
 
 The acceptance (report 3.7, step 6): without a pre-drop each effect is
 today's, frame for frame, against its own module before the looks (pinned
@@ -27,6 +29,13 @@ black through the breath, its outline grows out of the centre as it spins
 up, in the set's colours, and the drop's pieces wear the set as it is at the
 drop; Sauron is black through the breath, its lids part to the glare and
 hold, flames held down, brightening, and the drop opens them without a slam.
+Step 9 (the same shape): untold, every strip is today's frame for frame
+against itself AND the shared strip phase layer before step 9; told, a
+twinkle strip is its own lull up to the pre-drop, then a sparse twinkle in
+the set's colours, each at the effect's own brightness, thickening toward
+the drop; the Fireworks strip is dark until the pre-drop, black through the
+breath, and its two rockets fire from the ends on it, bright, and burst on
+the drop; every strip's light over the lull is below today's.
 """
 from __future__ import annotations
 
@@ -719,3 +728,235 @@ def test_sauron_light_over_the_lull_is_below_todays(tmp_path, lull_s, gap_s,
     today = _run8(tmp_path, "sauron", H.engine_arms("sauron", lull_s),
                   lull_s=lull_s)
     assert _lull_light(told) < _lull_light(today)
+
+
+# ═══ Step 9: the strips ════════════════════════════════════════════════════
+
+from fx.effects import fireworks1d as fw1d_mod  # noqa: E402
+from fx.effects import pre_drop as pre_drop_mod  # noqa: E402
+from fx.effects import strip_phase as strip_mod  # noqa: E402
+
+GAPS9 = GAPS7
+# an ordinary write and a flare punch in the lull: the untold path carries
+# both, the punch through the layer's own envelope
+STRIP_POKES = {**FLARE_WRITE,
+               ("lull", 90): {"flare_punch": 1, "flare_punch_hold_s": 0.3}}
+
+
+def _pinned9(module):
+    try:
+        return H.load_pinned_strip(module, f"{module}_prelook9")
+    except RuntimeError as exc:
+        pytest.skip(str(exc))
+
+
+def _run9(tmp_path, effect_type, arms, effect=None, config=None, **kw):
+    cfg = {**H.STEP9_CFG[effect or effect_type], **(config or {})}
+    return H.run_async(H.strip_run(tmp_path, effect_type, arms, cfg, **kw))
+
+
+def _told9(tmp_path, effect, lull_s=3.2, gap_s=0.8, kind="spike", look=None,
+           strength=None, **kw):
+    arms = H.strip_arms(effect, lull_s, at_s=lull_s - gap_s, gap_s=gap_s,
+                        kind=kind)
+    if look is not None:
+        arms["lull"].params[pre_drop_mod.LOOK_KEY] = look
+    if strength is not None:
+        for arm in arms.values():
+            arm.params[strip_mod.STRENGTH_KEY] = strength
+    return _run9(tmp_path, effect, arms, lull_s=lull_s, **kw)
+
+
+def _strip_lull_light(run):
+    return sum(H.light(f) for (ph, _t), f in zip(run.phase, run.frames)
+               if ph == "lull") * DT
+
+
+def _twinkle_lit(inf, level=0.25):
+    tw = inf["twinkle"]
+    return 0.0 if tw is None else float((tw > level).mean())
+
+
+@pytest.mark.parametrize("effect", H.STRIPS)
+def test_an_untold_strip_is_todays_frame_for_frame(tmp_path, effect):
+    """Against the strip AND the shared layer as they were before step 9
+    (both pinned out of git): no clock, no twinkle, no lift."""
+    pinned = _pinned9(effect)
+    arms = H.strip_arms(effect, 3.2)               # no pre-drop: NOT_TOLD
+    now = _run9(tmp_path, effect, arms, pokes=STRIP_POKES)
+    then = _run9(tmp_path, pinned, _today(arms, effect), effect=effect,
+                 pokes=STRIP_POKES)
+    assert len(now.frames) == len(then.frames)
+    assert max(float(f.max()) for f in now.frames) > 0.0
+    for i, (a, b) in enumerate(zip(now.frames, then.frames)):
+        assert np.array_equal(a, b), (effect, i, now.phase[i])
+
+
+# ── the twinkle (the shared layer: Melt, Power, the Black Hole and Orbits
+# strips) ─────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("effect", H.TWINKLE_STRIPS)
+def test_a_strip_keeps_its_own_lull_until_the_pre_drop_then_twinkles(
+        tmp_path, effect):
+    """Told the same pre-drop with a look the layer does not draw, the
+    strip is the same frame for frame up to the pre-drop: the twinkle is
+    the only thing that changes, and only from the pre-drop on."""
+    tw = _told9(tmp_path, effect)
+    plain = _told9(tmp_path, effect, look="none-such")
+    added = 0.0
+    for (ph, t), a, b, inf in zip(tw.phase, tw.frames, plain.frames,
+                                  tw.info):
+        if ph != "lull":
+            continue
+        if inf["segment"] != "pre_drop":
+            assert inf["twinkle"] is None, (effect, t)
+            assert np.array_equal(a, b), (effect, t)
+        else:
+            added += float(np.maximum(a - b, 0.0).sum())
+    assert added > 0.0
+    assert max(_twinkle_lit(inf) for _t, _f, inf in _segment(tw, "pre_drop")) > 0.0
+
+
+@pytest.mark.parametrize("bright", [1.0, 0.5])
+@pytest.mark.parametrize("effect", ["power", "blackhole1d", "orbits1d"])
+def test_each_twinkle_peaks_at_the_effects_own_brightness(tmp_path, effect,
+                                                          bright):
+    """His approval: "make the twinkles max brightness match the effect
+    brightness (don't dim, just use twinkle to "dim")". A twinkle born this
+    frame shows the set's own colour at its place times the effect's own
+    brightness, never less; every colour of this set has a channel at full,
+    so the gap's brightest pixel is 255 x the effect's brightness. (Melt is
+    left out: its own blur, applied after the layer to everything it draws,
+    softens a one-pixel twinkle's peak.)"""
+    run = _told9(tmp_path, effect, config={"brightness": bright})
+    born = 0
+    peak = 0.0
+    for (ph, _t), f, inf in zip(run.phase, run.frames, run.info):
+        if ph != "lull" or inf["segment"] != "pre_drop" or inf["twinkle"] is None:
+            continue
+        peak = max(peak, float(f.max()))
+        for j in np.flatnonzero(inf["twinkle"] >= 1.0 - EPS):
+            born += 1
+            assert np.all(f[j] >= run.palette[j] * bright - 0.6), (j, f[j])
+    assert born > 10
+    assert peak == pytest.approx(255.0 * bright, abs=0.6)
+
+
+@pytest.mark.parametrize("effect", H.TWINKLE_STRIPS)
+def test_the_twinkle_is_sparse_and_thickens_toward_the_drop(tmp_path, effect):
+    """"A few pixels twinkle ... thickening slightly toward the drop":
+    under an eighth of the strip lit (above a quarter of full) on average
+    over a vocal intro's long gap, never a fifth, and the last third
+    clearly denser than the first."""
+    run = _told9(tmp_path, effect, lull_s=6.0, gap_s=3.3, kind="intro")
+    lit = np.array([_twinkle_lit(inf) for _t, _f, inf
+                    in _segment(run, "pre_drop")])
+    third = len(lit) // 3
+    assert 0.0 < lit.mean() < 0.125
+    assert lit.max() < 0.2
+    assert lit[-third:].mean() > 1.3 * lit[:third].mean()
+
+
+@pytest.mark.parametrize("effect", H.TWINKLE_STRIPS)
+def test_the_twinkle_wears_the_sets_colours_never_white(tmp_path, effect):
+    from strip_phase_harness import whiter_than_set
+    run = _told9(tmp_path, effect)
+    gap = _segment(run, "pre_drop")
+    assert gap
+    for t, f, _inf in gap:
+        assert whiter_than_set(f, run.palette) == 0, (effect, t)
+
+
+def test_at_strength_zero_no_twinkle_is_born(tmp_path):
+    """The room's master at 0 is today's effect exactly (the rollback
+    lever): its strength scales the twinkle's birth rate, so none is born
+    and the strip is the same as one told no look at all."""
+    tw = _told9(tmp_path, "melt", strength=0.0)
+    plain = _told9(tmp_path, "melt", look="none-such", strength=0.0)
+    for (ph, t), a, b, inf in zip(tw.phase, tw.frames, plain.frames,
+                                  tw.info):
+        assert inf["twinkle"] is None or float(inf["twinkle"].max()) == 0.0
+        assert np.array_equal(a, b), (ph, t)
+
+
+def test_the_strip_star_reads_never_twinkles(tmp_path):
+    """The strip a Radial reads leaves its lull to Star (strip_phase's THE
+    STRIP STAR READS), so it is "none" through it: Star draws its own
+    pre-drop, the strip no twinkle."""
+    run = _star(tmp_path, "radial", gap_s=0.8)
+    lull = [inf for (ph, _t), inf in zip(run.phase, run.info) if ph == "lull"]
+    assert any(inf["segment"] == "pre_drop" for inf in lull)
+    assert not any(inf["strip_twinkle"] for inf in lull)
+
+
+# ── the Fireworks strip: the crystal's idea on the strip ──────────────────
+
+@pytest.mark.parametrize("lull_s,gap_s,kind", GAPS9)
+def test_the_fireworks_strip_is_dark_until_the_pre_drop_and_black_in_the_breath(
+        tmp_path, lull_s, gap_s, kind):
+    run = _told9(tmp_path, "fireworks1d", lull_s, gap_s, kind)
+    breath = _segment(run, "breath")
+    assert breath, "a breath before the pre-drop"
+    for (ph, t), f, inf in zip(run.phase, run.frames, run.info):
+        if ph != "lull" or inf["segment"] == "pre_drop":
+            continue
+        assert inf["rockets"] == 0, ("no rockets at the lull's start", t)
+    for t, f, _inf in breath:
+        assert float(f.max()) == 0.0, ("black through the breath", t)
+    # the control: today's lull launches its two rockets at its start
+    today = _run9(tmp_path, "fireworks1d", H.strip_arms("fireworks1d", lull_s),
+                  lull_s=lull_s)
+    first = next(inf for (ph, _t), inf in zip(today.phase, today.info)
+                 if ph == "lull")
+    assert first["rockets"] == 2
+
+
+@pytest.mark.parametrize("lull_s,gap_s,kind", [(3.2, 0.8, "spike"),
+                                               (6.0, 3.3, "intro")])
+def test_the_strip_rockets_fire_from_the_ends_on_the_pre_drop_and_burst_on_the_drop(
+        tmp_path, lull_s, gap_s, kind):
+    run = _told9(tmp_path, "fireworks1d", lull_s, gap_s, kind)
+    gap = _segment(run, "pre_drop")
+    first, last = gap[0][2], gap[-1][2]
+    assert first["rockets"] == 2
+    lo, hi = sorted(first["rocket_pos"])
+    assert lo < 0.1 and hi > 0.9, "from the strip's ends"
+    assert all(0.3 < p < 0.7 for p in last["rocket_pos"]), "past the middle"
+    # bright: the layer lifts the lull's 12% ember for them (today's rockets
+    # fly the dark at the ember, under a fifth of full)
+    assert max(float(f.max()) for _t, f, _i in gap) > 0.5 * 255.0
+    drop = [inf for (ph, _t), inf in zip(run.phase, run.info) if ph == "drop"]
+    assert drop[0]["rockets"] == 0 and drop[0]["particles"] >= 8, \
+        "each rocket bursts into the payoff's two pairs on the drop"
+
+
+def test_a_flare_burst_in_the_strips_breath_is_swallowed(tmp_path):
+    at = 3.2 - 0.8
+    k = int(round((at - 0.2) / DT))                # inside the 0.4 s breath
+    run = _told9(tmp_path, "fireworks1d",
+                 pokes={("lull", k): {"burst_rockets": 2}})
+    for t, f, inf in _segment(run, "breath"):
+        assert float(f.max()) == 0.0, t
+        assert inf["particles"] == 0, t
+
+
+@pytest.mark.parametrize("gap_s", [0.8, 2.0, 3.3])
+def test_a_strip_rocket_dims_by_the_crystals_rule(gap_s):
+    assert fw1d_mod.pre_drop_rocket_fade(gap_s) == pytest.approx(
+        fw_mod.pre_drop_rocket_fade(gap_s))
+
+
+# ── the light over the lull (his "keep the total lighting output low") ────
+
+@pytest.mark.parametrize("lull_s,gap_s,kind", GAPS9)
+@pytest.mark.parametrize("effect", H.STRIPS)
+def test_a_strips_light_over_the_lull_is_below_todays(tmp_path, effect,
+                                                      lull_s, gap_s, kind):
+    """The plan measured the twinkle at a 15% peak and set its sparseness
+    here, at the effect's full brightness, to keep the strip's whole lull
+    at or below today's: it is below at every gap, as is the Fireworks
+    strip's."""
+    told = _told9(tmp_path, effect, lull_s, gap_s, kind)
+    today = _run9(tmp_path, effect, H.strip_arms(effect, lull_s),
+                  lull_s=lull_s)
+    assert _strip_lull_light(told) < _strip_lull_light(today)

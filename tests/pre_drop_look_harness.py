@@ -1,11 +1,12 @@
-"""THE PRE-DROP LOOKS' RIG (predrop plan steps 6-8): every member driven
+"""THE PRE-DROP LOOKS' RIG (predrop plan steps 6-9): every member driven
 through a whole charge -> lull -> drop with the LULL ARM THE REAL ENGINE
 WRITES — read off the production scene_response._drive_phase through
 tests/pre_drop_arm_harness.py, never retyped — and, beside them, the same
 two modules as they were before their looks (pinned out of git), driven with
-today's arm. Shared by tests/test_pre_drop_looks.py and
-scripts/render_predrop_storyboards.py, so the proofs and the storyboards
-measure one thing.
+today's arm. A strip (step 9) runs on a 300-pixel strip beside the shared
+strip phase layer AS IT WAS (load_pinned_strip pins both). Shared by
+tests/test_pre_drop_looks.py and scripts/render_predrop_storyboards.py, so
+the proofs and the storyboards measure one thing.
 
 Times are the effect's own: frame k of a phase sits k x DT into it.
 """
@@ -38,6 +39,9 @@ PRE_REF = "34ce2b14f319a5c4af6a6b8d1bbf5e7f10dcdda0"
 STEP7_REF = "29778cf327f50268408b433fc4f8067ea9afacae"
 # ... and just before step 8's: fish.py, radial.py and sauron.py without theirs
 STEP8_REF = "ed8b20087520d2b78ddd8f4c0248d946b9ecb09c"
+# ... and just before step 9's: the strips and their shared layer without
+# theirs
+STEP9_REF = "619172e88fe16fb38aa5a1b809d846d191b1584b"
 NEW_KEYS = set(pre_drop.KEYS)
 
 
@@ -150,6 +154,7 @@ class Run:
     frames: list = field(default_factory=list)   # rendered output per frame
     phase: list = field(default_factory=list)    # (phase, seconds into it)
     info: list = field(default_factory=list)     # per-frame effect state
+    palette: Optional[np.ndarray] = None         # a strip's own gradient
 
 
 def schedule(charge_s: float, lull_s: float, drop_s: float,
@@ -400,8 +405,186 @@ async def star_run(tmp: Path, star_type: str, arms: dict[str, Arm],
                 run.frames.append(np.asarray(room.frames[STAR][-1],
                                              dtype=np.float32))
                 run.phase.append((ph, i * DT))
-                run.info.append(_star_info(eff))
+                run.info.append({**_star_info(eff), "strip_twinkle": (
+                    getattr(strip, "_sp_tw", None) is not None)})
     return run
+
+
+# ── a strip (step 9) ────────────────────────────────────────────────────
+
+STRIP_PX = 300                      # the plan's strip (report 3.5)
+PINNED_LAYER = "strip_phase_prelook9"
+STRIP_GRADIENT = FIREWORKS_CFG["gradient"]
+# each strip's own settings: his scenes' Strips entries (Fireworks V2, Black
+# Hole V2, Orbits V2 with its two bindings at fixed values; STAR's Melt as
+# Star's rig runs it; Power at its defaults), in the clips' set
+STEP9_CFG = {
+    "melt": {**STAR_STRIP_CFG},
+    "power": {"gradient": STRIP_GRADIENT, "brightness": 1.0,
+              "background_brightness": 0.0},
+    "blackhole1d": {"gradient": STRIP_GRADIENT, "accel": 5,
+                    "approach_width": 0.16, "base_speed": 1, "beat_burst": 2,
+                    "blob_size": 0.5, "edge_speed": 1, "impulse_decay": 0.06,
+                    "max_blobs": 50, "radius_scale": 1, "reverse": True,
+                    "spawn_audio": 1, "spawn_rate": 1, "speed_audio": 2.3,
+                    "swirl": 3.1, "x_offset": 0.5},
+    "orbits1d": {"gradient": STRIP_GRADIENT, "base_speed": 0.5,
+                 "bounce_chance": 0.2, "brightness_audio": 0.8,
+                 "color_shift": 1, "implode_fade": 0.5, "implode_reach": 0.4,
+                 "impulse_decay": 0.06, "jiggle": 0.2, "overlap_blend": 1,
+                 "reactivity_scale": 0.5, "size_audio": 0.5,
+                 "speed_jog": 0.3, "speed_jump": 1, "spin": 0.15,
+                 "tether_scatter": 0.1, "x_offset": 0.5,
+                 "particle_count": 6, "blob_size": 2.5},
+    "fireworks1d": {"gradient": STRIP_GRADIENT, "beat_burst": 2,
+                    "blob_size": 3.03, "brightness_audio": 2,
+                    "burst_life": 1.2, "burst_speed": 0.5, "drag": 0.85,
+                    "impulse_decay": 0.06, "max_blobs": 6, "reverse": False,
+                    "spawn_audio": 2, "spawn_rate": 0.5, "speed_audio": 2.5,
+                    "trail_decay": 0.24},
+}
+STRIPS = tuple(STEP9_CFG)
+TWINKLE_STRIPS = ("melt", "power", "blackhole1d", "orbits1d")
+
+
+def _git_source(ref: str, module: str) -> str:
+    try:
+        return subprocess.run(
+            ["git", "show", f"{ref}:fx/effects/{module}.py"], cwd=REPO,
+            capture_output=True, text=True, check=True, timeout=60).stdout
+    except Exception as exc:                              # noqa: BLE001
+        raise RuntimeError(f"cannot read {ref} out of git: {exc}") from exc
+
+
+def _exec_source(name: str, src: str) -> None:
+    path = Path(tempfile.mkdtemp()) / f"{name}.py"
+    path.write_text(src)
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+
+
+def load_pinned_strip(module: str, name: str, ref: str = STEP9_REF) -> str:
+    """A strip effect as it was at `ref` BESIDE the shared strip phase layer
+    as it was at `ref` (pinned too, as PINNED_LAYER, and imported in place of
+    today's), registered as `name` — so a strip's "today" is today's layer
+    and effect together, not today's effect on the new layer. Raises
+    RuntimeError when git cannot give either, or either already has a
+    pre-drop."""
+    import re
+    if name in sys.modules:
+        return name
+    if PINNED_LAYER not in sys.modules:
+        layer = _git_source(ref, "strip_phase")
+        if "pre_drop" in layer:
+            raise RuntimeError("the pinned strip_phase.py already has a pre-drop")
+        _exec_source(PINNED_LAYER, layer)
+    src = _git_source(ref, module)
+    if "pre_drop" in src:
+        raise RuntimeError(f"the pinned {module}.py already has a pre-drop")
+    src = src.replace("from fx.effects.strip_phase import",
+                      f"from {PINNED_LAYER} import")
+    src = re.sub(r"^from fx\.effects import strip_phase$",
+                 f"import {PINNED_LAYER} as strip_phase", src,
+                 flags=re.MULTILINE)
+    if re.search(r"fx\.effects\.strip_phase|^from fx\.effects import .*strip_phase",
+                 src, flags=re.MULTILINE):
+        raise RuntimeError(f"the pinned {module}.py still reaches today's layer")
+    _exec_source(name, src)
+    return name
+
+
+def _strip_info(eff) -> dict:
+    clk = getattr(eff, "_sp_pd_clk", None)
+    tw = getattr(eff, "_sp_tw", None)
+    out = {"segment": clk.segment if clk is not None else None,
+           "pd_frac": clk.frac if clk is not None else None,
+           "twinkle": None if tw is None else tw.copy(),
+           "sp_phase": eff._sp_phase}
+    if hasattr(eff, "f_rocket"):
+        n = eff.n
+        rock = eff.f_rocket[:n] > 0.0
+        out.update(rockets=int(np.count_nonzero(rock)),
+                   rocket_pos=[float(p) for p in eff.f_pos[:n][rock]],
+                   particles=int(n))
+    return out
+
+
+async def strip_run(tmp: Path, effect_type: str, arms: dict[str, Arm],
+                    config: dict, seed: int = 7, lull_s: float = 3.2,
+                    pokes: Optional[dict] = None, n_px: int = STRIP_PX,
+                    info=_strip_info) -> Run:
+    """One strip effect (or its pinned copy) on an `n_px` strip with
+    `config` through settle -> charge -> lull -> drop, fed the strip
+    harness's deterministic audio (tests/strip_phase_harness.py) behind a
+    fake clock that also stands behind time.time_ns (Melt reads it)."""
+    import time
+    from fx import headless
+    from strip_phase_harness import _AudioFrame
+    _TAG[0] += 1
+    tag = f"pdt{_TAG[0]}"
+    host = await headless.start_headless_host(
+        str(tmp / tag), pixel_count=n_px, rows=1, device_id=tag)
+    virtual = host.virtuals.get(tag)
+    cm = headless.fake_clock()
+    clock = cm.__enter__()
+    real_ns = time.time_ns
+    time.time_ns = lambda: int(clock.now * 1e9)
+    np.random.seed(seed)
+    run = Run()
+    try:
+        eff = headless.attach_effect(host, virtual, effect_type, dict(config))
+        if hasattr(eff, "_rng"):
+            eff._rng = np.random.default_rng(seed)
+        if hasattr(eff, "_sp_tw_rng"):
+            eff._sp_tw_rng = np.random.default_rng(seed + 1)
+        run.palette = np.asarray(eff.get_gradient_color_vectorized1d(
+            np.linspace(0.0, 1.0, n_px)), dtype=float)
+        if hasattr(eff, "melbank"):
+            frame_i = [0]
+            eff.melbank = (lambda filtered=True, size=None:
+                           0.2 + 0.2 * np.sin(np.linspace(0, 6, size or n_px)
+                                              + frame_i[0] / 7.0))
+        else:
+            frame_i = [0]
+        for ph, secs in schedule(3.0, lull_s, 1.6):
+            arm = arms.get(ph)
+            if arm is not None:
+                eff.update_config(dict(arm.params))
+            n = int(round(secs / DT))
+            ramp_n = max(1, int(round(arm.ramp_s / DT))) if arm else 0
+            for i in range(1, n + 1):
+                if arm is not None and i <= ramp_n:
+                    eff.update_config({"phase_progress": min(1.0, i / ramp_n)})
+                for (pph, k), poke in (pokes or {}).items():
+                    if pph == ph and k == i:
+                        eff.update_config(dict(poke))
+                clock.advance(DT)
+                frame_i[0] += 1
+                if hasattr(eff, "audio_data_updated"):
+                    with eff.lock:
+                        eff.audio_data_updated(_AudioFrame(frame_i[0]))
+                out = virtual.assemble_frame()
+                if out is not None:
+                    virtual.flush(out)
+                run.frames.append(np.asarray(out, dtype=np.float32).copy())
+                run.phase.append((ph, i * DT))
+                run.info.append(info(eff))
+    finally:
+        time.time_ns = real_ns
+        cm.__exit__(None, None, None)
+        await host.shutdown()
+    return run
+
+
+def strip_arms(effect_type: str, lull_s: float, at_s: Optional[float] = None,
+               gap_s: Optional[float] = None,
+               kind: str = "spike") -> dict[str, Arm]:
+    """engine_arms for a strip: the effect on a scene's Strips entry (beside
+    Fireworks on the crystal), its own arms."""
+    return engine_arms(effect_type, lull_s, at_s=at_s, gap_s=gap_s, kind=kind,
+                       scene=_scene_dict("fireworks", strips=effect_type))
 
 
 def light(frame: np.ndarray, mask: Optional[np.ndarray] = None) -> float:

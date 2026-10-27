@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""THE PRE-DROP STORYBOARDS (predrop plan steps 6-8, report 3.4-3.5):
-Fireworks, Pulse, Orbits, Black Hole, the Fish, Star and Sauron rendered
-offline through the shipped effects, today and with each kind of pre-drop,
-driven by the lull arm the real engine writes (tests/pre_drop_look_harness.py
-— the same rig the tests use).
+"""THE PRE-DROP STORYBOARDS (predrop plan steps 6-9, report 3.4-3.5):
+Fireworks, Pulse, Orbits, Black Hole, the Fish, Star, Sauron and the strips
+rendered offline through the shipped effects, today and with each kind of
+pre-drop, driven by the lull arm the real engine writes
+(tests/pre_drop_look_harness.py — the same rig the tests use).
 
 It is the tuning loop and a proof at once. It writes to
 docs/evidence/predrop-storyboards/:
@@ -15,6 +15,11 @@ docs/evidence/predrop-storyboards/:
                                sauron_<clip>, the same clips, plus
                                star_spike_0.8s_newset: the set changing at
                                the pre-drop);
+  strip_<effect>_<clip>.png / .gif  a 300-pixel strip (Melt, Power, the
+                               Black Hole, Orbits and Fireworks strips) through
+                               the lull and the drop: time runs down the
+                               sheet, the strip across it, with the breath,
+                               pre-drop and drop marked in the margin;
   pulse_levels.png             Pulse's level on one light over the lull and
                                the drop, today (dashed) and with a pre-drop,
                                for Winny's spike gap, his 2 s maximum and
@@ -32,7 +37,10 @@ through the breath and its light is below today's at the plan's 0.8 s gap
 through the breath and its light is below today's at every gap; the Fish is
 never dark and its light is within the plan's own named +4%; Star and Sauron
 are black through the breath and their light is below today's at every gap;
-Star's drop wears the set as it is at the drop.
+Star's drop wears the set as it is at the drop; every strip without a
+pre-drop is today's frame for frame against itself and the shared strip
+phase layer before step 9, its light over the lull below today's at every
+gap, and the Fireworks strip black through the breath.
 
 Run from the repo root: .venv/bin/python scripts/render_predrop_storyboards.py
 """
@@ -114,13 +122,60 @@ def fw_sheet(name, run, lull, gap, prefix="fireworks") -> None:
                    append_images=frames[1:], duration=66, loop=0)
 
 
-def light_split(run, lull, gap):
-    rows = [(t, H.light(f, MASK)) for t, f, _ in H.lull_frames(run)]
+def light_split(run, lull, gap, mask=MASK):
+    rows = [(t, H.light(f, mask)) for t, f, _ in H.lull_frames(run)]
     at = lull - (gap if gap is not None else 0.8)
     before = [v for t, v in rows if t < at - EPS]
     after = [v for t, v in rows if t >= at - EPS]
     return (float(np.mean(before)), float(np.mean(after)),
             sum(v for _, v in rows) * H.DT)
+
+
+STRIP_ROW = 2          # pixels per frame down the sheet
+STRIP_GUTTER = 44
+
+
+def strip_sheet(name, run, lull, gap, prefix) -> None:
+    """A strip's lull and drop as one picture: a row per frame (time runs
+    down), the strip across it at its true brightness, the breath, the
+    pre-drop and the drop marked in the left margin; and a GIF of the strip
+    itself."""
+    rows = [(ph, t, f) for (ph, t), f in zip(run.phase, run.frames)
+            if ph in ("lull", "drop")]
+    n = rows[0][2].shape[0]
+    w = STRIP_GUTTER + n * 2
+    img = Image.new("RGB", (w, len(rows) * STRIP_ROW + 16), (8, 4, 14))
+    d = ImageDraw.Draw(img)
+    at = None if gap is None else lull - gap
+    for k, (ph, t, f) in enumerate(rows):
+        line = np.clip(np.asarray(f, dtype=np.float32), 0, 255).astype(np.uint8)
+        strip = Image.fromarray(line.reshape(1, n, 3), "RGB").resize(
+            (n * 2, STRIP_ROW), Image.NEAREST)
+        y = 16 + k * STRIP_ROW
+        img.paste(strip, (STRIP_GUTTER, y))
+        mark = None
+        if ph == "lull" and at is not None:
+            if at - 0.4 - EPS <= t < at - EPS:
+                mark = (120, 120, 140)          # the breath
+            elif t >= at - EPS:
+                mark = (251, 146, 60)           # the pre-drop (orange)
+        elif ph == "drop":
+            mark = (236, 72, 153)               # the drop (magenta)
+        if mark is not None:
+            d.rectangle((STRIP_GUTTER - 8, y, STRIP_GUTTER - 3,
+                         y + STRIP_ROW - 1), fill=mark)
+        if ph == "lull" and abs((t / 0.5) - round(t / 0.5)) < 0.5 * H.DT / 0.5:
+            d.text((2, y - 5), f"{t:.1f}s", fill=(200, 190, 230))
+    d.text((2, 2), f"{prefix} {name}: lull then drop, time down",
+           fill=(200, 190, 230))
+    img.save(OUT / f"{prefix}_{name}.png")
+    frames = []
+    for ph, _t, f in rows[::4]:
+        line = np.clip(np.asarray(f, dtype=np.float32), 0, 255).astype(np.uint8)
+        frames.append(Image.fromarray(line.reshape(1, n, 3), "RGB").resize(
+            (n * 2, 24), Image.NEAREST))
+    frames[0].save(OUT / f"{prefix}_{name}.gif", save_all=True,
+                   append_images=frames[1:], duration=66, loop=0)
 
 
 def pulse_chart(results) -> None:
@@ -163,7 +218,7 @@ def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix="predrop_storyboards_"))
     problems: list[str] = []
-    lines = ["# Pre-drop storyboards (predrop plan steps 6-8)", "",
+    lines = ["# Pre-drop storyboards (predrop plan steps 6-9)", "",
              "Rendered by `scripts/render_predrop_storyboards.py` through the "
              "shipped effects, driven by the lull arm the real engine writes. "
              "Light: each real cell's brightest channel / 255, summed over the "
@@ -401,6 +456,65 @@ def main() -> int:
               "below today's. Sauron ships at the plan's dimmer setting "
               "(the glare at 20% rising to 36%, the prototype's 35% to 60%).",
               ""]
+
+    # the strips (step 9): today unchanged against the strip and the shared
+    # layer before step 9, then each clip on a 300-pixel strip
+    for effect, title in (("melt", "Melt"), ("power", "Power"),
+                          ("blackhole1d", "Black Hole strip"),
+                          ("orbits1d", "Orbits strip"),
+                          ("fireworks1d", "Fireworks strip")):
+        lines += [f"## {title}", "",
+                  "| Clip | Lull before the pre-drop | Pre-drop to drop | "
+                  "Whole lull | vs today |", "|---|---:|---:|---:|---:|"]
+        cfg = H.STEP9_CFG[effect]
+        pinned = H.load_pinned_strip(effect, f"{effect}_prelook9")
+        plain = H.strip_arms(effect, 3.2)
+        now = H.run_async(H.strip_run(tmp, effect, plain, cfg))
+        then = H.run_async(H.strip_run(
+            tmp, pinned, {k: H.todays_arm(a, effect) for k, a in plain.items()},
+            cfg))
+        same9 = (len(now.frames) == len(then.frames) and all(
+            np.array_equal(a, b) for a, b in zip(now.frames, then.frames)))
+        if not same9:
+            problems.append(f"{title} without a pre-drop is not today's")
+        today = {}
+        for name, lull, gap, kind in FW_CLIPS:
+            arms = (H.strip_arms(effect, lull) if gap is None else
+                    H.strip_arms(effect, lull, at_s=lull - gap, gap_s=gap,
+                                 kind=kind))
+            run = H.run_async(H.strip_run(tmp, effect, arms, cfg,
+                                          lull_s=lull))
+            strip_sheet(name, run, lull, gap, prefix=f"strip_{effect}")
+            a, b, whole = light_split(run, lull, gap, mask=None)
+            if gap is None:
+                today[lull] = whole
+                vs = ""
+            else:
+                ratio = whole / today[lull]
+                vs = f"{100 * (ratio - 1):+.0f}%"
+                if ratio >= 1.0:
+                    problems.append(f"{title} {name}: lull light not below "
+                                    "today's")
+                if effect == "fireworks1d":
+                    breath = [float(f.max()) for (ph, t), f, i in zip(
+                        run.phase, run.frames, run.info)
+                        if ph == "lull" and i["segment"] == "breath"]
+                    if not breath or max(breath) > 0.0:
+                        problems.append(f"{title} {name}: not black through "
+                                        "the breath")
+            lines.append(f"| {name} (lull {lull} s) | {a:.1f} | {b:.1f} | "
+                         f"{whole:.0f} | {vs} |")
+        lines += ["", f"Without a pre-drop, frame for frame against the strip "
+                  f"and the shared layer before step 9 ({H.STEP9_REF[:8]}): "
+                  f"{'unchanged' if same9 else 'CHANGED'}.", ""]
+    lines += ["A strip's light is each pixel's brightest channel / 255, "
+              "summed over the 300 pixels. The twinkle (Melt, Power, the "
+              "Black Hole and Orbits strips) peaks at the effect's own "
+              "brightness; only its sparseness keeps the light low (Melt's "
+              "own blur softens a one-pixel twinkle's peak). The Fireworks "
+              "strip is the crystal's idea: dark, black through the breath, "
+              "then two rockets fire from the ends on the pre-drop and burst "
+              "on the drop.", ""]
     (OUT / "README.md").write_text("\n".join(lines))
     print("\n".join(lines))
     if problems:
@@ -409,8 +523,8 @@ def main() -> int:
             print(f"  - {p}")
         return 1
     print("OK: unchanged without a pre-drop; black where it must be; the "
-          "Fireworks, Black Hole, Star and Sauron lulls below today's, Orbits' "
-          "at the plan's gap, the Fish's within the plan's +4%.")
+          "Fireworks, Black Hole, Star, Sauron and strip lulls below today's, "
+          "Orbits' at the plan's gap, the Fish's within the plan's +4%.")
     return 0
 
 

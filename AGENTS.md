@@ -9897,6 +9897,14 @@ output stage, HOW AN EFFECT JOINS). Eight things:
   (`_sp_skip`), the key tracked apart in `_sp_seen` so it never re-edges.
   Charge and drop unchanged; Star darkens its own lull. Proof:
   `tests/test_star_strip_lull.py`.
+- **EVERY MEMBER IS A PRE-DROP MEMBER** (2026-10-27, predrop plan step 9;
+  `fx.device_model.PRE_DROP_EFFECTS` includes `STRIP_PHASE_EFFECTS`): the
+  pre-drop's keys and the breath told with them are PUSHED keys (the lull
+  arm stays passive), and the layer draws the TWINKLE from the pre-drop to
+  the drop — the module docstring's THE PRE-DROP. A new member must declare
+  a look in `config/effect_params.json` (`pre_drop_looks`: the twinkle, or
+  one of its own drawn through `_strip_phase_pre_drop()`, as the Fireworks
+  strip's rockets are), or `tests/test_pre_drop_arm_identity.py` fails.
 Proofs: `tests/test_strip_phase.py` (harness `tests/strip_phase_harness.py`:
 the real pipeline + production ResponseEngine/FacadeExecutor, fake clock
 behind `time.time_ns` too, since Melt reads it), `scripts/
@@ -12219,7 +12227,7 @@ has the cold-start detail. Four things:
 
 **THE PRE-DROP ENGINE (2026-10-26, predrop plan step 5; the looks:
 Fireworks and Pulse, step 6; Orbits and Black Hole, step 7; the Fish, Star
-and Sauron, step 8).** `fx/effects/pre_drop.py` (the told keys, the looks,
+and Sauron, step 8; the strips, step 9).** `fx/effects/pre_drop.py` (the told keys, the looks,
 `phase_clock`) and `spectra/services/pre_drop_play.py` (the one rule) are
 the binding statements; times are in `docs/SPECTRA_TIMING_CONVENTIONS.md`.
 Five things:
@@ -12227,7 +12235,8 @@ Five things:
 - **NOT A PHASE — FOUR KEYS ON THE LULL ARM**, told only to
   `fx.device_model.PRE_DROP_EFFECTS` members — Fireworks and Pulse since
   step 6, Orbits and Black Hole since step 7, the Fish, Star (radial) and
-  Sauron since step 8 (the strips' twinkle is next; never Squiggles). Every
+  Sauron since step 8, every strip phase member since step 9 (never
+  Squiggles). Every
   non-member arm write over his 14 real scenes is
   byte-identical to the pre-engine golden, and a member's lull arm differs
   only by the told keys (`tests/test_pre_drop_arm_identity.py`,
@@ -12250,7 +12259,18 @@ Five things:
   today's colours — re-sampling there would change untold drops); Sauron
   is black through the breath, then its lids part to the iris's edge, the
   flames held down, a glare dimmer than the prototype (0.20 -> 0.36), and
-  the drop opens it without its half-open slam. A longer gap adds light to
+  the drop opens it without its half-open slam; the strips keep their own
+  lull up to the pre-drop, then Melt, Power and the Black Hole and Orbits
+  strips TWINKLE — drawn once in the shared layer (`fx/effects/
+  strip_phase.py`'s THE PRE-DROP): a few pixels in the set's colours, each
+  at the effect's own brightness, never dimmed (his "use twinkle to dim"),
+  thickening to the drop, painted brighter-wins after the lull's fade — and
+  the Fireworks strip is the crystal's idea: dark, black through the breath,
+  two rockets fired from the strip's ends on the pre-drop at full (the
+  layer lifts its 12% ember for them, `_strip_phase_pre_drop_lift`), bursting
+  on the drop. A strip the Radial reads skips its lull, so it gets neither.
+  A strip's "today" pins the effect AND the layer
+  (`pre_drop_look_harness.load_pinned_strip`). A longer gap adds light to
   Orbits (+1% at a 2 s spike, +14% at a 3.3 s vocal intro — named, the test
   bounds it at +20%); the Fish stays within the plan's named +4%; every
   other look's lull is below today's. An

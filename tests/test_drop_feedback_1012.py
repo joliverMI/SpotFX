@@ -107,13 +107,12 @@ def test_a_lull_arm_tells_the_breath_to_pulse_and_orbits_but_not_the_fish():
     told = {vid: p for vid, _et, p in ex.jumps}
     for vid in ("orbits", "blackhole", "p"):
         assert told[vid][pg.BREATH_KEY] == pytest.approx(0.4), vid
-    for vid in ("strip", "melt", "fw"):
-        assert pg.BREATH_KEY not in told[vid], vid
-    # Fireworks and the Fish are pre-drop members (predrop steps 6 and 8),
-    # told every key on every lull arm: on a lull whose pre-drop does not
-    # play, their breath is the zero one — no breath, and a previous
-    # pre-drop's breath forgotten (the Fish takes none anyway: BREATH_HOLD)
-    for vid in ("fireworks", "fish"):
+    # Fireworks, the Fish and every strip are pre-drop members (predrop
+    # steps 6, 8 and 9), told every key on every lull arm: on a lull whose
+    # pre-drop does not play, their breath is the zero one — no breath, and
+    # a previous pre-drop's breath forgotten (none of them is a breath-hold
+    # effect: the Fish takes none, BREATH_HOLD; the strips never did)
+    for vid in ("fireworks", "fish", "strip", "melt", "fw"):
         assert told[vid][pg.BREATH_AT_KEY] == 0.0, vid
         assert told[vid][pg.BREATH_KEY] == 0.0, vid
     assert rec["lull_breath_s"] == pytest.approx(0.4)

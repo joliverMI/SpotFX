@@ -43,12 +43,16 @@ def _cand(at_ms=2400, gap_ms=800, kind="spike"):
 def members(monkeypatch):
     """Black Hole (a lull-dark AND breath-hold effect) and its strip
     blackhole1d (lull-dark, no breath-hold) as stub members; Black Hole
-    declares two looks. Pulse, on the same scene, is not a member."""
+    declares two looks and the strip none (its real twinkle, predrop step 9,
+    is stubbed away so a member declaring no looks is still covered). Pulse,
+    on the same scene, is not a member."""
     monkeypatch.setattr(device_model, "PRE_DROP_EFFECTS",
                         frozenset({"blackhole", "blackhole1d"}))
     real = device_model.pre_drop_looks
-    monkeypatch.setattr(device_model, "pre_drop_looks",
-                        lambda et: LOOKS if et == "blackhole" else real(et))
+    monkeypatch.setattr(
+        device_model, "pre_drop_looks",
+        lambda et: (LOOKS if et == "blackhole"
+                    else None if et == "blackhole1d" else real(et)))
 
 
 def _by_vid(writes):
