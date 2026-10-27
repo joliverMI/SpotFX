@@ -246,6 +246,14 @@ export interface BonusCodeRow {
 }
 export interface BonusCodesRead { unused: number; used: number; codes: BonusCodeRow[]; made?: string[] }
 
+/** What the printable card needs (SpotFX GET /api/jukebox/card). The Wi-Fi
+ *  details are never here: they are typed on the card page and stay there. */
+export interface CardRead {
+  link: string | null; host: string | null; state: string; public_port: number;
+  token_created_ms: number | null; unused: string[]; codes_error: string | null;
+  qr_bonus: number; play_mode: 'free' | 'credits';
+}
+
 export interface GuestsRead {
   running: boolean;
   phones: GuestPhone[];

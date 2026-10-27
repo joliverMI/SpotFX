@@ -24,6 +24,7 @@ export default defineConfig({
       fidelity: resolve(__dirname, 'harness/fidelity.html'),
       absorb: resolve(__dirname, 'harness/absorb.html'),
       jukebox: resolve(__dirname, 'harness/jukebox.html'),
+      jukeboxcards: resolve(__dirname, 'harness/jukeboxcards.html'),
       homedrops: resolve(__dirname, 'harness/homedrops.html'),
     } },
   },

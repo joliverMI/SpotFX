@@ -2428,6 +2428,16 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'jukebox-cards',
+        title: 'The printed guest cards',
+        keywords: 'print cards card qr code wifi password guest network join link bonus code party printable',
+        body: [
+          'Print the cards opens /jukebox/cards (from the Credits tab\'s Bonus cards card): a sheet of cards, each with the guest Wi-Fi\'s QR code, the Jukebox\'s QR code — tonight\'s party link carrying that card\'s one-time bonus code, used when the guest taps Let\'s go — and the code as text for typing into the Shop. Two cards across, four down, on Letter paper; the controls don\'t print.',
+          'Type the guest Wi-Fi\'s name and password at print time. The password stays on that page: nothing sends or saves it, and the QR codes are drawn in the browser. The Wi-Fi QR code IS the password (anyone who photographs a card can join), so hand the cards out at the party and change or expire the guest password afterwards. "Print the password as text too" is off unless you want it, for a phone that can\'t scan.',
+          'The party link changes after a party that used it, so print fresh cards for each party. If the guest link has no address yet the page asks for Serenity\'s public address (serenity.<your tailnet>.ts.net) — saving it never switches the link on. Codes come from the Bonus cards card; when there are fewer unused codes than cards, the rest print without one, and in free play the cards carry none.',
+        ],
+      },
+      {
         id: 'jukebox-skip-lock',
         title: 'Keeping a song from skips',
         keywords: 'keep from skips skip lock no skip protect song vote skip paid skip allow skips',

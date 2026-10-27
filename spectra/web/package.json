@@ -14,6 +14,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@tanstack/react-query": "^5.62.0",
     "immer": "^10.2.0",
+    "qrcode-generator": "2.0.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-gcolor-picker": "^1.3.5",
@@ -24,6 +25,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "jsqr": "1.4.0",
     "typescript": "~5.6.3",
     "vite": "^6.0.3"
   }

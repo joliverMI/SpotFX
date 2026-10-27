@@ -14,6 +14,7 @@ import ScenesPage from './scenes/ScenesPage';
 import TestbedPage from './testbed/TestbedPage';
 import AbsorbPage from './absorb/AbsorbPage';
 import JukeboxPage from './jukebox/JukeboxPage';
+import JukeboxCardsPage from './jukebox/JukeboxCardsPage';
 import JukeboxTvPage from './jukebox/JukeboxTvPage';
 import SettingsConsolePage from './settings/SettingsConsolePage';
 import StatusPage from './status/StatusPage';
@@ -39,6 +40,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/testbed', 'Test Bed'],
   ['/absorb', 'Absorb Music'],
   ['/jukebox/tv', 'Jukebox board'],
+  ['/jukebox/cards', 'Jukebox cards'],
   ['/jukebox', 'Jukebox'],
   ['/timing', 'Timing'],
   ['/avsync', 'AV Sync'],
@@ -94,6 +96,15 @@ export default function App() {
   }
   // The Jukebox board for his TV (/jukebox/tv): the board alone, full
   // screen — none of the app's bars on a TV across the room.
+  // The printable guest cards (/jukebox/cards): the sheet alone, so what
+  // prints is the cards and their controls (hidden in print), no app bars.
+  if (pathname === '/jukebox/cards') {
+    return (
+      <ToastProvider>
+        <JukeboxCardsPage />
+      </ToastProvider>
+    );
+  }
   if (pathname === '/jukebox/tv') {
     return (
       <ToastProvider>
