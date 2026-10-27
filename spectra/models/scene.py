@@ -170,7 +170,8 @@ class PreDropLooks(BaseModel):
     name the effect declares = that look; "same" (the vocal intro only) =
     whatever the spike resolves to, which is how a scene combines the two
     kinds. Read only by an effect in fx.device_model.PRE_DROP_EFFECTS
-    (Fireworks and Pulse since predrop step 6), resolved at the lull arm
+    (Fireworks and Pulse since predrop step 6, Orbits and Black Hole
+    since step 7), resolved at the lull arm
     (pre_drop.resolve_look),
     so the told `pre_drop_look` is always a concrete name."""
     spike: str = "auto"

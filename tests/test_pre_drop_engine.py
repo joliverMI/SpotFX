@@ -280,7 +280,7 @@ def test_the_registry_serves_the_bounds_and_only_declared_looks(monkeypatch):
         "default_min_ms": 350, "default_max_ms": 2000}
     assert body["pre_drop"]["kinds"]["intro"]["max_bound"] == 4500
     assert body["effects"]["blackhole"]["pre_drop_looks"] == LOOKS
-    assert "pre_drop_looks" not in body["effects"]["orbits"]
+    assert "pre_drop_looks" not in body["effects"]["squiggles"]
 
 
 # ── 5. the lull arm, with stub members ───────────────────────────────────────

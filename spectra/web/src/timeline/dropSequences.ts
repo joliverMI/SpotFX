@@ -774,14 +774,15 @@ export function handleRows(s: DisplaySeq): HandleRow[] {
 /** A pre-drop's kind as a noun ("a spike", "a vocal intro" in a sentence). */
 export const PRE_DROP_KIND_NAME: Record<PreDropKind, string> = { spike: 'spike', intro: 'vocal intro' };
 
-/** What a pre-drop does in the room (predrop steps 5-6): when it plays —
+/** What a pre-drop does in the room (predrop steps 5-7): when it plays —
  * its kind on and its gap inside the showing scene's window — every effect
- * with a pre-drop look plays it (Fireworks and Pulse, fx.device_model.
- * PRE_DROP_EFFECTS) and the drop's colour change fades across it. The one
+ * with a pre-drop look plays it (Fireworks, Pulse, Orbits and Black Hole,
+ * fx.device_model.PRE_DROP_EFFECTS) and the drop's colour change fades
+ * across it. The one
  * wording, shared by the Home Drops panel. */
-export const PRE_DROP_IN_THE_ROOM = 'When a pre-drop plays, every effect with a pre-drop look (Fireworks and Pulse) plays it, and the drop\'s colour change fades across it, landing on the drop. Each scene chooses which kinds play, and each device\'s look, on its Phase tab.';
+export const PRE_DROP_IN_THE_ROOM = 'When a pre-drop plays, every effect with a pre-drop look (Fireworks, Pulse, Orbits and Black Hole) plays it, and the drop\'s colour change fades across it, landing on the drop. Each scene chooses which kinds play, and each device\'s look, on its Phase tab.';
 /** The same, as a tooltip's tail. */
-export const PRE_DROP_IN_THE_ROOM_SHORT = 'when it plays, Fireworks and Pulse play their looks and the drop\'s colour fades across it';
+export const PRE_DROP_IN_THE_ROOM_SHORT = 'when it plays, the effects with a pre-drop look play it and the drop\'s colour fades across it';
 
 /** How a pre-drop is drawn, following its part state the way a member's look
  * follows its tier: `his` — approved (or, from an older server with no part

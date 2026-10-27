@@ -207,6 +207,32 @@ Untold reads True. It is an overlay, so nothing in this effect's own drop
 changes; `drop_shock` (the per-effect strength) is a separate knob. Help
 `drop-shockwave-switches`; proof `tests/test_drop_shock_switches.py`.
 
+## THE PRE-DROP — idea 1, the infall ring (2026-10-27)
+
+His words (the predrop plan, 2026-10-26): "do idea 1 on the black hole."
+Black Hole is in `fx.device_model.PRE_DROP_EFFECTS` since predrop step 7,
+one look for both kinds ("ring", `pre_drop_looks` in
+config/effect_params.json). `fx/effects/pre_drop.py` is the binding
+statement for the told keys; the PRE_DROP block beside `HEX_FILL_RADIUS`
+for the look. Three invariants not visible cold:
+
+- **THE DARK IS THE ARM'S, NOT THE LOOK'S.** SpotFX measures the lull's
+  dark point and the breath to the pre-drop (the shared rule), so the hex
+  is dark early and black through the breath with no code of the look's
+  own; the look only adds the ring, ON the pre-drop.
+- **THE RING IS PAINTED AFTER THE DISC.** The black disc covers the whole
+  hex from the dark point (`_disc_radius` = the horizon at its fill top),
+  so `_pre_drop_ring` max-composes over it as the composite's last step —
+  painted under the disc like the halo, it would be swallowed. It falls
+  from the horizon's own fill top (`HEX_FILL_RADIUS + LULL_FILL_MARGIN`)
+  to the centre, eased out (`1 - (1 - frac)^2`), brightening 55% -> full,
+  coloured round the set by angle in the particles' own projection, and
+  lands on the drop, where the burst follows unchanged.
+- **IT LOWERS THE LULL'S LIGHT** (-17% at a 0.8 s spike, -42% at 2 s, -37%
+  at a 3.3 s vocal intro), because the dark point moves earlier. Untold,
+  `_pre_drop_step` clears the clock first, so the lull is today's frame for
+  frame (proven against the module at the step-7 base).
+
 ## Thematic transitions in and out (2026-10-11, transitions-drop plan phase 3)
 
 A scene change between the Black Hole and Orbits / Fish / Squiggles (and
@@ -271,7 +297,9 @@ registered on `blackhole1d`. Flare kinds go through `set_flare_kind`.
 ## Executable proofs
 
 `tests/test_lull_dark.py` (the dark-point rule and this effect's lull on
-the real pipeline). The strip on the strip phase layer:
+the real pipeline). The pre-drop's infall ring, and the untold lull against
+the step-7 base: `tests/test_pre_drop_looks.py`, storyboards
+`scripts/render_predrop_storyboards.py`. The strip on the strip phase layer:
 `scripts/check_blackhole_strip_phase.py` (before/after on his own Black
 Hole V2 strip entry, the pinned pre-change module as red control) +
 `tests/test_blackhole_strip_phase.py`; the strip's drop onset on rendered

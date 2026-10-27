@@ -26,8 +26,8 @@ keys — the way the dark point (lull_dark.py), the hand-off
   "same" -> the spike's look), so the effect needs no registry.
 
 WHO IS TOLD: only effects in `fx.device_model.PRE_DROP_EFFECTS` (empty at
-step 5; Fireworks and Pulse joined at step 6 — fireworks.py's and
-pulse.py's PRE_DROP constants are their looks). SpotFX decides
+step 5; Fireworks and Pulse joined at step 6, Orbits and Black Hole at step
+7 — each member's own PRE_DROP constants are its look). SpotFX decides
 (spectra/services/pre_drop_play.py is the one rule): on a lull arm whose
 sequence has a pre-drop that may play, that lands at least
 pre_drop_play.MIN_AFTER_LULL_MS after the lull actually fired, whose kind

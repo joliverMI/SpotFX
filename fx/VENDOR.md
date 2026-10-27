@@ -2586,7 +2586,8 @@ against that commit.
     (`pre_drop_at_s`, `pre_drop_s`, `pre_drop_kind`, `pre_drop_look`), the
     lull_dark / lull_handoff / breath-hold way, told only to
     `fx.device_model.PRE_DROP_EFFECTS` members (empty at this step; step
-    6, #87, adds Fireworks and Pulse). The module
+    6, #87, adds Fireworks and Pulse; step 7, #88, Orbits and Black
+    Hole). The module
     holds the keys, their schema fields, `resolve_look` (an entry's "auto" /
     "same" / named choice against the effect's declared `pre_drop_looks`
     registry block) and `phase_clock`, one object per frame naming the
@@ -2634,4 +2635,44 @@ against that commit.
     `tests/test_pre_drop_arm_identity.py` (members' arms are the golden
     plus the told keys), storyboards `scripts/render_predrop_storyboards.py`
     -> `docs/evidence/predrop-storyboards/`. Unverified against his live
+    room.
+88. `effects/orbits.py` + `effects/blackhole.py` (SpotFX-authored, #86's
+    step-7 members): THE PRE-DROP LOOKS, continued (2026-10-27, predrop
+    plan step 7, report §3.5; Orbits approved in step 6, shipped one PR
+    later so each look stayed separately reviewable).
+    `fx.device_model.PRE_DROP_EFFECTS` is `{fireworks, pulse, orbits,
+    blackhole}`; both declare one look for both kinds in
+    config/effect_params.json. ORBITS ("jitter", his "make it jitter like
+    it's full of energy and is about to burst ... grow in size as it does
+    slightly"): on a lull TOLD a pre-drop, `_pre_drop_gain` multiplies the
+    output so that, with the base render's breath (`Twod.render`, floored
+    at `BREATH_FLOOR`), the frame gain is ONE curve — smoothstepping from
+    full to `BREATH_FLOOR_DIM` by the breath's start, held there through it
+    (never black, never dimmed twice), full again on the pre-drop; on the
+    pre-drop the blob skips the lull's shrink and grows
+    `PRE_DROP_GROW_FROM` -> `PRE_DROP_GROW_TO` (2.0x -> 2.6x) over the gap
+    while its render position jitters (a fresh `self._rng` offset every
+    1/`PRE_DROP_JITTER_HZ` s, 0.4 -> 1.8 px, `frac ** 1.3`), its trail cut
+    to `PRE_DROP_TRAIL_KEEP` each frame (a crisp twitch); kept blobs
+    (`lull_keep`) share the offset. BLACK HOLE ("ring", idea 1, his "do
+    idea 1 on the black hole"): the dark point and breath come from the
+    arm (measured to the pre-drop), so the hex is dark and then black; on
+    the pre-drop `_pre_drop_ring` max-composes a ring over the black disc,
+    falling from the horizon's own fill top (`HEX_FILL_RADIUS +
+    LULL_FILL_MARGIN`) to the centre on the drop, eased out
+    (`1 - (1 - frac)^2`), `PRE_DROP_RING_W` wide, brightening from
+    `PRE_DROP_RING_GAIN0` to full, coloured round the set by angle
+    (`get_gradient_color_vectorized1d`, so the colour fade across the
+    pre-drop shows in it); the drop's burst follows unchanged. Every new
+    branch returns before touching state (or the rng) when nothing is
+    told, so an untold lull is today's. Evidence:
+    `tests/test_pre_drop_looks.py` (both untold against their modules at
+    the step-7 base frame for frame; the one-curve gain, never black in
+    the breath, the jitter's rise and cadence, the growth; black through
+    the breath, the ring's fall from the hex edge to the centre, its
+    colours, no white; the light over the lull: below today's for Black
+    Hole at every gap and for Orbits at the plan's 0.8 s, Orbits +1% at a
+    2 s spike and +14% at a 3.3 s vocal intro, named and bounded at
+    +20%), storyboards `scripts/render_predrop_storyboards.py` ->
+    `docs/evidence/predrop-storyboards/`. Unverified against his live
     room.
