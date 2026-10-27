@@ -44,7 +44,7 @@ KEY = "tail_drive"
 ON = 1.0
 
 
-def find_entry(store: dict) -> tuple[dict, str]:
+def find_entry(store: dict, key: str = KEY) -> tuple[dict, str]:
     """(the raw device entry, a description of what was found). Raises
     SystemExit unless the Fish scene and exactly one Matrix fish entry are
     there."""
@@ -63,14 +63,21 @@ def find_entry(store: dict) -> tuple[dict, str]:
                          f"{EFFECT!r}, found {len(entries)} — refusing to "
                          "guess")
     entry = entries[0]
-    current = (entry.get("params") or {}).get(KEY)
+    current = (entry.get("params") or {}).get(key)
     return entry, (f"{scene.name} ({FISH_SCENE_ID}) {TARGET} entry "
-                   f"{entry.get('id')}: {KEY}={current!r}")
+                   f"{entry.get('id')}: {key}={current!r}")
 
 
 def main(argv: list[str] | None = None) -> int:
+    return run(argv, KEY, ON, "tail-drive", __doc__)
+
+
+def run(argv: list[str] | None, key: str, value: float, tag: str,
+        doc: str) -> int:
+    """Set (or, with --revert, remove) one param on the music Fish scene's
+    Matrix entry. scripts/set_fish_pond_rest.py runs this for quiet_rest."""
     parser = argparse.ArgumentParser(
-        description=__doc__,
+        description=doc,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--apply", action="store_true",
                         help="write the store (default: dry run)")
@@ -83,19 +90,19 @@ def main(argv: list[str] | None = None) -> int:
     if not args.scenes_file.exists():
         raise SystemExit(f"no {args.scenes_file} — nothing to migrate")
     store = json.loads(args.scenes_file.read_text(encoding="utf-8"))
-    entry, found = find_entry(store)
+    entry, found = find_entry(store, key)
     print(found)
     params = entry.get("params") or {}
     if args.revert:
-        if KEY not in params:
-            print(f"no {KEY} on the entry — nothing to do")
+        if key not in params:
+            print(f"no {key} on the entry — nothing to do")
             return 0
-        action = f"remove {KEY}"
+        action = f"remove {key}"
     else:
-        if params.get(KEY) == ON:
-            print(f"already {KEY}={ON} — nothing to do")
+        if params.get(key) == value:
+            print(f"already {key}={value} — nothing to do")
             return 0
-        action = f"set {KEY}={ON}"
+        action = f"set {key}={value}"
     if not args.apply:
         print(f"DRY RUN — would {action} on the Fish scene's {TARGET} entry "
               "(use --apply). Only that param changes.")
@@ -104,14 +111,14 @@ def main(argv: list[str] | None = None) -> int:
     backup_dir = args.scenes_file.parent / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    backup = backup_dir / f"scenes-tail-drive-{stamp}.json"
+    backup = backup_dir / f"scenes-{tag}-{stamp}.json"
     shutil.copy2(args.scenes_file, backup)
     print(f"backed up {args.scenes_file} -> {backup}")
 
     if args.revert:                            # the ONLY param touched
-        del entry["params"][KEY]
+        del entry["params"][key]
     else:
-        entry.setdefault("params", {})[KEY] = ON
+        entry.setdefault("params", {})[key] = value
     fd, tmp = tempfile.mkstemp(dir=str(args.scenes_file.parent),
                                prefix=".scenes-", suffix=".json")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:

@@ -156,6 +156,23 @@ old value until it next fires. Sonic reads and sets it per entry
 "Matrix"), with `glide_drag` and `glide_below` beside it. Help
 `fish-tail-drive`.
 
+## The pond rest is ON for this scene only (2026-10-26)
+
+The plan he approved: "a quiet pond rest with occasional darts", with the
+defaults "the pond rest is for the music Fish scene only; 'quiet' means
+the music's own level". The effect's own `quiet_rest` default is 0 (the
+fish-effect skill's POND REST section): House Fish is the house look and
+the house is usually quiet, so it would rest almost all the time.
+`scripts/set_fish_pond_rest.py` sets `quiet_rest = 1.0` on THIS scene's
+Matrix entry and nothing else, through the same entry finder, guards and
+raw single-param patch as `set_fish_tail_drive.py` (its shared `run()`);
+dry run default, `--apply` at deploy (backed up as
+`scenes-pond-rest-<stamp>.json`), `--revert` removes it. The rest works
+with the tail drive off too, but it was measured with both on, so run both
+scripts (`tests/test_fish_pond_rest.py`). Sonic reaches it and its three
+companions (`rest_calm_level`, `rest_full_level`, `dart_every_s`) per
+entry. Help `fish-pond-rest`.
+
 ## Executable proofs
 
 Shares the fish-effect skill's proof corpus in full
