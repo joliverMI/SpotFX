@@ -207,3 +207,16 @@ def test_as_manual_copies_the_auto_pattern():
 def test_as_manual_for_jukebox_first_is_a_slot_after_every_song():
     m = program.as_manual(_cfg(mode="jukebox_first"), _set(3))
     assert [x.count for x in m] == [1, 1, 1]
+
+
+def test_as_manual_matches_the_rule_and_the_lap_across_run_out_policies():
+    items = _set(4)
+    for run_out in ("again", "jukebox_only", "end"):
+        cfg = _cfg(every=2, run=2, run_out=run_out)
+        m = program.as_manual(cfg, items)
+        manual_cfg = _cfg(mode="manual", manual=m, run_out=run_out)
+        auto_out = program.project(cfg, items, Cursor(), _fills(24), 24)
+        manual_out = program.project(manual_cfg, items, Cursor(), _fills(24), 24)
+        assert _labels(auto_out) == _labels(manual_out)
+        if run_out in ("again", "end"):
+            assert program.lap(cfg, items).slots == sum(x.count for x in m)
