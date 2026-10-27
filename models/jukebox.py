@@ -2,7 +2,7 @@
 SpotFX — the Jukebox's data model (data/jukebox-plan/report.md, phase 1:
 the program engine). services/jukebox/ is the code that runs it.
 
-Two stores, each with one job (services/jukebox/store.py):
+Three stores, each with one job (services/jukebox/store.py):
 
   ProgramConfig  storage/jukebox.json        HIS program settings: which
                                              playlist is the set, where the
@@ -17,6 +17,13 @@ Two stores, each with one job (services/jukebox/store.py):
                                              queue, a bounded log — plus a
                                              short history of earlier nights.
                                              Churns on every song.
+  ShowConfig     storage/jukebox_show.json   the show settings (phase 3.3):
+                                             the last party-size preset, the
+                                             new-phone approval switch, and
+                                             every economy setting. Only an
+                                             edit writes it
+                                             (services/jukebox/show.py is
+                                             the one validator).
 
 The code says `program`, never `setlist`: SpotFX already has a feature
 called Set Lists (services/setlist_store.py, setlist_runtime.py: per-playlist
@@ -271,3 +278,18 @@ class EconomyConfig(_Model):
         if v != 0 and not 10 <= v <= 60:
             raise ValueError("the add price doubles every 10-60 minutes of wait, or 0 for flat")
         return v
+
+
+# ── the show: presets and the economy's saved settings (phase 3.3) ───────────
+
+Preset = Literal["small", "medium", "large"]
+
+
+class ShowConfig(_Model):
+    """The saved show settings this phase has: which party-size preset was
+    last applied, whether new phones need his approval (the Large preset
+    turns it on, report §3.5 and §12), and every economy setting. Only an
+    edit writes it (services/jukebox/show.py is the one validator)."""
+    preset: Optional[Preset] = None
+    approve_new_phones: bool = False
+    economy: EconomyConfig = Field(default_factory=EconomyConfig)

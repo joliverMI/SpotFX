@@ -16,7 +16,10 @@
  *
  * The mock's own little projection exists only to give the page plausible
  * `lap_items`; the real one is services/jukebox/program.py. A config PUT
- * merges in memory, so the editor can be clicked through. */
+ * merges in memory, so the editor can be clicked through. The Credits tab's
+ * field table, presets and price checks are a SNAPSHOT of the real server's
+ * answers (jukeboxShowSnapshot.json, written by `show.fields()` /
+ * `show.presets()` / `show.price_check()`); regenerate it if those change. */
 import '../src/styles/tokens.css';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -24,6 +27,7 @@ import { MemoryRouter } from 'react-router-dom';
 import AppChrome, { showsSongStrip } from '../src/components/AppChrome';
 import JukeboxPage from '../src/jukebox/JukeboxPage';
 import { ToastProvider } from '../src/components/Toast';
+import SNAP from './jukeboxShowSnapshot.json';
 import type {
   JukeboxPreview, JukeboxStatus, ManualSlot, ProgramConfig, ProgramItem, SetItem,
 } from '../src/jukebox/types';
@@ -91,6 +95,12 @@ function manualEquivalent(): ManualSlot[] {
   });
   return out;
 }
+
+let show = {
+  preset: RUNNING ? 'medium' : null,
+  approve_new_phones: false,
+  economy: Object.fromEntries(SNAP.fields.map((f: { key: string; default: number | boolean }) => [f.key, f.default])),
+};
 
 const preview = (): JukeboxPreview => {
   if (!config.playlist) return { status: 'refused', reason: 'no_playlist', detail: 'No set playlist is linked — link one first.' };
@@ -179,6 +189,18 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (url.includes('/api/jukebox/status')) return json(status());
   if (url.includes('/api/jukebox/preview')) return json(preview());
+  if (url.includes('/api/jukebox/show/preset')) {
+    show = { ...show, preset: body?.preset ?? null, approve_new_phones: body?.preset === 'large' };
+    return json({ show, fields: SNAP.fields, presets: SNAP.presets, config });
+  }
+  if (url.includes('/api/jukebox/show')) {
+    if (method === 'PUT') show = { ...show, economy: { ...show.economy, ...(body?.economy ?? {}) } };
+    return json({ show, fields: SNAP.fields, presets: SNAP.presets });
+  }
+  if (url.includes('/api/jukebox/price-check')) {
+    const g = new URL(url, 'http://x').searchParams.get('guests') ?? '15';
+    return json((SNAP.price_check as Record<string, unknown>)[g] ?? SNAP.price_check['15']);
+  }
   if (url.includes('/api/jukebox/set/move')) return json({ status: 'refused', reason: 'harness', detail: 'This is the mocked harness — nothing was moved.' });
   if (/\/api\/engine\/status/.test(url)) return json(STATUS);
   if (/\/api\/room-controls/.test(url)) return json(ROOM_CONTROLS);

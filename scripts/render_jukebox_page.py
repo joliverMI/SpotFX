@@ -6,7 +6,7 @@ jukebox/JukeboxPage.tsx against a mocked backend (see that file's header) —
 in a headless Chromium (data/jukebox-plan/report.md §9, PR 1.3's
 acceptance: the host tablet landscape and portrait, and a phone), three
 states (a night running, the shipped idle state, slots placed by hand), the
-Set list tab and the Live tab of the running night, and writes the PNGs to
+Set list tab, the Live tab and the Credits tab of the running night, and writes the PNGs to
 docs/evidence/jukebox-page/.
 
 It also FAILS, not just draws, on the two things a screenshot can hide:
@@ -60,7 +60,7 @@ READY = """(() => {
 
 OVERFLOW = """(() => {
   const de = document.documentElement;
-  const wide = [...document.querySelectorAll('.jukebox-card, .jukebox-row, .jukebox-item, .jukebox-head, .jukebox-sign-in')]
+  const wide = [...document.querySelectorAll('.jukebox-card, .jukebox-row, .jukebox-item, .jukebox-head, .jukebox-sign-in, .jukebox-field, .jukebox-price-row, .jukebox-preset')]
     .filter((el) => el.scrollWidth > el.clientWidth + 1)
     .map((el) => el.className + ' ' + el.scrollWidth + '>' + el.clientWidth);
   return { page: de.scrollWidth + 'x' + de.clientWidth, pageWide: de.scrollWidth > de.clientWidth + 1, wide };
@@ -143,6 +143,9 @@ async def run() -> int:
                     await render(state, size, f"{state}-set-{size[0]}x{size[1]}")
             for size in VIEWPORTS:
                 await render("running", size, f"running-live-{size[0]}x{size[1]}", after=live_tab)
+            credits_tab = live_tab.replace("'Live'", "'Credits'")
+            for size in VIEWPORTS:
+                await render("running", size, f"running-credits-{size[0]}x{size[1]}", after=credits_tab)
     finally:
         try:
             os.killpg(proc.pid, signal.SIGTERM)

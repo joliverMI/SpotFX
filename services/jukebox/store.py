@@ -18,12 +18,13 @@ from pathlib import Path
 from typing import Optional
 
 from config import BASE_DIR
-from models.jukebox import JukeboxNight, JukeboxNights, ProgramConfig
+from models.jukebox import JukeboxNight, JukeboxNights, ProgramConfig, ShowConfig
 
 logger = logging.getLogger(__name__)
 
 CONFIG_FILE = BASE_DIR / "storage" / "jukebox.json"
 NIGHT_FILE = BASE_DIR / "storage" / "jukebox_night.json"
+SHOW_FILE = BASE_DIR / "storage" / "jukebox_show.json"
 
 HISTORY_MAX = 20       # earlier nights kept (as briefs) beside the current one
 LOG_MAX = 300          # the night's own log lines
@@ -74,6 +75,24 @@ def load_config() -> ProgramConfig:
 def save_config(cfg: ProgramConfig) -> None:
     with _lock:
         _write(CONFIG_FILE, cfg.model_dump(mode="json"))
+
+
+# ── the show settings (presets, approval, the economy) ──────────────────────
+
+def load_show() -> ShowConfig:
+    raw = _read(SHOW_FILE)
+    if not isinstance(raw, dict):
+        return ShowConfig()
+    try:
+        return ShowConfig.model_validate(raw)
+    except Exception as exc:
+        logger.warning("Jukebox: show settings invalid (%s) — using defaults", exc)
+        return ShowConfig()
+
+
+def save_show(show: ShowConfig) -> None:
+    with _lock:
+        _write(SHOW_FILE, show.model_dump(mode="json"))
 
 
 # ── nights ───────────────────────────────────────────────────────────────────

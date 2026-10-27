@@ -2312,7 +2312,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Jukebox — the set list with jukebox slots',
     keywords: 'jukebox set list party playlist slots queue guests spotify program',
     intro:
-      'The Jukebox (Engine ▾ Jukebox, /jukebox) plays your set playlist as Spotify\'s own context, in order, and puts jukebox slots between set songs. Spotify never sees a slot: about 45 seconds before the song in front of a slot ends, the top waiting jukebox song is sent into Spotify\'s queue and the queue is read back to confirm it is next; after it, the set carries on where it was. Only that one sent song is locked in place — everything still waiting can be moved or removed. This page is the master view: the Set list tab edits the program, the Live tab shows a running night (read-only). The guest page comes in a later phase.',
+      'The Jukebox (Engine ▾ Jukebox, /jukebox) plays your set playlist as Spotify\'s own context, in order, and puts jukebox slots between set songs. Spotify never sees a slot: about 45 seconds before the song in front of a slot ends, the top waiting jukebox song is sent into Spotify\'s queue and the queue is read back to confirm it is next; after it, the set carries on where it was. Only that one sent song is locked in place — everything still waiting can be moved or removed. This page is the master view: the Set list tab edits the program, the Live tab shows a running night (read-only), and the Credits tab holds the party-size presets, the price check and every credits setting. The guest page comes in a later phase.',
     entries: [
       {
         id: 'jukebox-set-list',
@@ -2353,6 +2353,32 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Spotify\'s sign-in for SpotFX runs out six months after it was made, and when it does SpotFX\'s polling, Absorb and every Jukebox night stop at once. SpotFX now records when you sign in (at /api/spotify/login) and this line appears from 14 days before the end, naming the date.',
           'A sign-in from before that record existed has no known date, so the line asks you to sign in again before a party — that starts a known clock. If Spotify refuses the sign-in outright, the line says so.',
+        ],
+      },
+      {
+        id: 'jukebox-credits',
+        title: 'The credits settings',
+        keywords: 'credits settings economy prices free credits top up tips add price bump play next skip jail range show settings',
+        body: [
+          'The Credits tab holds every credits setting, grouped as the plan\'s cards: Free credits, Earning, Add a song, Bumps, Play next, Skip and Jail. Each shows its range; press Enter or leave the field to save it. A value outside its range is refused, named, and nothing changes.',
+          'The starting values are the tuned ones: 8 credits on a first visit (4 at once, 4 after 20 minutes), +1 every 45 minutes paused at 10 held, +1 a vote, +1 per ▲ on your song, tips up to 3 a song with the first 5 given counting double, two songs in line per guest, the add price doubling every 15 minutes of wait. Credits are free and worth nothing outside the night — no money is involved anywhere.',
+        ],
+      },
+      {
+        id: 'jukebox-presets',
+        title: 'Party size presets',
+        keywords: 'preset small medium large party size guests program approval new phones',
+        body: [
+          'One set of prices works from 4 to 30 guests: the add price follows the line, the skip price follows the room, the jail bar follows the voters. What changes with the crowd is how many slots the jukebox gets, so a preset sets the program.',
+          'Small (4-8 guests): every other song is the jukebox\'s. Medium (9-16): two jukebox songs per set song. Large (17-30): jukebox first, the set fills any gap — and new phones need your approval. Hand-placed slots are kept for when you switch back to Manual, and any setting can be changed after picking a preset.',
+        ],
+      },
+      {
+        id: 'jukebox-price-check',
+        title: 'The price check',
+        keywords: 'price check examples cost add skip play next bump jail room size guests',
+        body: [
+          'The price check works the current settings on real examples: what a song costs to add at different waits, a long song, one the lights haven\'t learned, skips by line length and net ▼, play next by how far it jumps, bumps, the jail bar and the free credits — for a room of the size you pick (skip and jail follow the room). It is the same rule set a guest\'s page will charge, so changing a setting changes it at once.',
         ],
       },
     ],

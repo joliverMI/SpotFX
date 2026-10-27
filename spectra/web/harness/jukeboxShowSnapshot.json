@@ -1,0 +1,913 @@
+{
+ "fields": [
+  {
+   "key": "start_credits",
+   "card": "Free credits",
+   "label": "Starting credits",
+   "unit": "credits",
+   "kind": "int",
+   "default": 8,
+   "min": 0,
+   "max": 20
+  },
+  {
+   "key": "start_rest_after_min",
+   "card": "Free credits",
+   "label": "The second half arrives after",
+   "unit": "min",
+   "kind": "float",
+   "default": 20.0,
+   "min": 0,
+   "max": 60
+  },
+  {
+   "key": "topup_every_min",
+   "card": "Free credits",
+   "label": "Top-up every (0 = off)",
+   "unit": "min",
+   "kind": "float",
+   "default": 45.0,
+   "min": 0,
+   "max": 90
+  },
+  {
+   "key": "topup_cap",
+   "card": "Free credits",
+   "label": "Top-ups pause at",
+   "unit": "credits held",
+   "kind": "int",
+   "default": 10,
+   "min": 6,
+   "max": 40
+  },
+  {
+   "key": "qr_bonus",
+   "card": "Free credits",
+   "label": "QR bonus card",
+   "unit": "credits",
+   "kind": "int",
+   "default": 5,
+   "min": 1,
+   "max": 10
+  },
+  {
+   "key": "vote_reward",
+   "card": "Earning",
+   "label": "Per vote",
+   "unit": "credits",
+   "kind": "int",
+   "default": 1,
+   "min": 0,
+   "max": 3
+  },
+  {
+   "key": "adder_up_reward",
+   "card": "Earning",
+   "label": "Per ▲ on your song",
+   "unit": "credits",
+   "kind": "int",
+   "default": 1,
+   "min": 0,
+   "max": 3
+  },
+  {
+   "key": "tips",
+   "card": "Earning",
+   "label": "Tips",
+   "unit": "",
+   "kind": "bool",
+   "default": true,
+   "min": null,
+   "max": null
+  },
+  {
+   "key": "tip_unit",
+   "card": "Earning",
+   "label": "Credits a tip tap",
+   "unit": "credits",
+   "kind": "int",
+   "default": 1,
+   "min": 1,
+   "max": 3
+  },
+  {
+   "key": "tip_max_per_song",
+   "card": "Earning",
+   "label": "Most tips per song (per tipper)",
+   "unit": "taps",
+   "kind": "int",
+   "default": 3,
+   "min": 1,
+   "max": 10
+  },
+  {
+   "key": "gift_double_first",
+   "card": "Earning",
+   "label": "First credits given count double (0 = off)",
+   "unit": "credits",
+   "kind": "int",
+   "default": 5,
+   "min": 0,
+   "max": 20
+  },
+  {
+   "key": "add_base",
+   "card": "Add a song",
+   "label": "Base price",
+   "unit": "credits",
+   "kind": "int",
+   "default": 4,
+   "min": 1,
+   "max": 20
+  },
+  {
+   "key": "add_free_min",
+   "card": "Add a song",
+   "label": "Base price while the wait is under",
+   "unit": "min",
+   "kind": "float",
+   "default": 15.0,
+   "min": 0,
+   "max": 30
+  },
+  {
+   "key": "add_double_min",
+   "card": "Add a song",
+   "label": "Then doubles every (0 = flat)",
+   "unit": "min of wait",
+   "kind": "float",
+   "default": 15.0,
+   "min": 0,
+   "max": 60
+  },
+  {
+   "key": "add_cap",
+   "card": "Add a song",
+   "label": "Price cap",
+   "unit": "credits",
+   "kind": "int",
+   "default": 60,
+   "min": 10,
+   "max": 99
+  },
+  {
+   "key": "long_over_min",
+   "card": "Add a song",
+   "label": "Long songs: over",
+   "unit": "min",
+   "kind": "float",
+   "default": 5.0,
+   "min": 4,
+   "max": 8
+  },
+  {
+   "key": "long_extra_per_min",
+   "card": "Add a song",
+   "label": "Long songs: extra per started minute",
+   "unit": "credits",
+   "kind": "int",
+   "default": 1,
+   "min": 0,
+   "max": 5
+  },
+  {
+   "key": "learn_first_extra",
+   "card": "Add a song",
+   "label": "Not learned yet",
+   "unit": "credits",
+   "kind": "int",
+   "default": 1,
+   "min": 0,
+   "max": 5
+  },
+  {
+   "key": "max_waiting",
+   "card": "Add a song",
+   "label": "Songs in line per guest",
+   "unit": "songs",
+   "kind": "int",
+   "default": 2,
+   "min": 1,
+   "max": 3
+  },
+  {
+   "key": "fair_order",
+   "card": "Add a song",
+   "label": "1st songs before 2nd songs",
+   "unit": "",
+   "kind": "bool",
+   "default": true,
+   "min": null,
+   "max": null
+  },
+  {
+   "key": "bump_up_base",
+   "card": "Bumps",
+   "label": "Up one place: base",
+   "unit": "credits",
+   "kind": "int",
+   "default": 2,
+   "min": 1,
+   "max": 10
+  },
+  {
+   "key": "bump_up_per_behind",
+   "card": "Bumps",
+   "label": "Up: per song behind it",
+   "unit": "credits",
+   "kind": "float",
+   "default": 0.25,
+   "min": 0,
+   "max": 2
+  },
+  {
+   "key": "bump_down_base",
+   "card": "Bumps",
+   "label": "Down one place: base",
+   "unit": "credits",
+   "kind": "int",
+   "default": 3,
+   "min": 1,
+   "max": 10
+  },
+  {
+   "key": "bump_down_per_ahead",
+   "card": "Bumps",
+   "label": "Down: per song ahead of it",
+   "unit": "credits",
+   "kind": "float",
+   "default": 0.25,
+   "min": 0,
+   "max": 2
+  },
+  {
+   "key": "bump_down_max_places",
+   "card": "Bumps",
+   "label": "Most places a song can be pushed back",
+   "unit": "places",
+   "kind": "int",
+   "default": 3,
+   "min": 0,
+   "max": 10
+  },
+  {
+   "key": "next_base",
+   "card": "Play next",
+   "label": "Base price",
+   "unit": "credits",
+   "kind": "int",
+   "default": 8,
+   "min": 1,
+   "max": 50
+  },
+  {
+   "key": "next_per_min",
+   "card": "Play next",
+   "label": "Per minute it jumps",
+   "unit": "credits",
+   "kind": "float",
+   "default": 0.25,
+   "min": 0,
+   "max": 2
+  },
+  {
+   "key": "next_min_away_min",
+   "card": "Play next",
+   "label": "Only for songs at least",
+   "unit": "min away",
+   "kind": "float",
+   "default": 10.0,
+   "min": 0,
+   "max": 30
+  },
+  {
+   "key": "skip_max",
+   "card": "Skip",
+   "label": "With nothing waiting",
+   "unit": "credits",
+   "kind": "int",
+   "default": 40,
+   "min": 10,
+   "max": 99
+  },
+  {
+   "key": "skip_half_min",
+   "card": "Skip",
+   "label": "Halves at a line of",
+   "unit": "min",
+   "kind": "float",
+   "default": 20.0,
+   "min": 10,
+   "max": 60
+  },
+  {
+   "key": "skip_floor",
+   "card": "Skip",
+   "label": "Never below",
+   "unit": "credits",
+   "kind": "int",
+   "default": 16,
+   "min": 4,
+   "max": 40
+  },
+  {
+   "key": "skip_crowd",
+   "card": "Skip",
+   "label": "Scales with the room (√ guests ÷ 8)",
+   "unit": "",
+   "kind": "bool",
+   "default": true,
+   "min": null,
+   "max": null
+  },
+  {
+   "key": "skip_down_pct",
+   "card": "Skip",
+   "label": "Each net ▼ takes off",
+   "unit": "%",
+   "kind": "float",
+   "default": 15.0,
+   "min": 0,
+   "max": 30
+  },
+  {
+   "key": "skip_min",
+   "card": "Skip",
+   "label": "Lowest price",
+   "unit": "credits",
+   "kind": "int",
+   "default": 4,
+   "min": 1,
+   "max": 20
+  },
+  {
+   "key": "chip_in",
+   "card": "Skip",
+   "label": "Chip in",
+   "unit": "",
+   "kind": "bool",
+   "default": true,
+   "min": null,
+   "max": null
+  },
+  {
+   "key": "skip_grace_s",
+   "card": "Skip",
+   "label": "No skip in the first",
+   "unit": "s",
+   "kind": "float",
+   "default": 20.0,
+   "min": 0,
+   "max": 60
+  },
+  {
+   "key": "jail_net_downs",
+   "card": "Jail",
+   "label": "Net ▼ to go to jail",
+   "unit": "▼",
+   "kind": "int",
+   "default": 5,
+   "min": 3,
+   "max": 15
+  },
+  {
+   "key": "jail_scale",
+   "card": "Jail",
+   "label": "Rise with the crowd (6 at 8, 8 at 15, 10 at 30)",
+   "unit": "",
+   "kind": "bool",
+   "default": true,
+   "min": null,
+   "max": null
+  },
+  {
+   "key": "jail_fee",
+   "card": "Jail",
+   "label": "Break-out price",
+   "unit": "credits",
+   "kind": "int",
+   "default": 10,
+   "min": 1,
+   "max": 40
+  }
+ ],
+ "presets": [
+  {
+   "name": "small",
+   "guests": "4-8",
+   "program": {
+    "mode": "auto",
+    "every": 1,
+    "run": 1
+   },
+   "approve_new_phones": false,
+   "why": "Every other song is the jukebox's: ~30 guest songs a night, the set stays the backbone."
+  },
+  {
+   "name": "medium",
+   "guests": "9-16",
+   "program": {
+    "mode": "auto",
+    "every": 1,
+    "run": 2
+   },
+   "approve_new_phones": false,
+   "why": "Two jukebox songs per set song: every other would leave a quarter fewer songs to share."
+  },
+  {
+   "name": "large",
+   "guests": "17-30",
+   "program": {
+    "mode": "jukebox_first"
+   },
+   "approve_new_phones": true,
+   "why": "Jukebox first, the set fills any gap — the only shape that fits ~2 songs a guest; new phones need your approval."
+  }
+ ],
+ "price_check": {
+  "4": {
+   "guests": 4,
+   "add": [
+    {
+     "wait_min": 0,
+     "price": 4
+    },
+    {
+     "wait_min": 15,
+     "price": 4
+    },
+    {
+     "wait_min": 20,
+     "price": 5
+    },
+    {
+     "wait_min": 30,
+     "price": 8
+    },
+    {
+     "wait_min": 45,
+     "price": 16
+    },
+    {
+     "wait_min": 60,
+     "price": 32
+    }
+   ],
+   "add_long": {
+    "duration_min": 6.5,
+    "price": 6
+   },
+   "add_not_learned": 5,
+   "skip": [
+    {
+     "line_min": 0,
+     "downs": 0,
+     "price": 30
+    },
+    {
+     "line_min": 10,
+     "downs": 2,
+     "price": 14
+    },
+    {
+     "line_min": 20,
+     "downs": 4,
+     "price": 8
+    },
+    {
+     "line_min": 40,
+     "downs": 4,
+     "price": 6
+    }
+   ],
+   "play_next": [
+    {
+     "jump_min": 10,
+     "price": 11
+    },
+    {
+     "jump_min": 20,
+     "price": 13
+    },
+    {
+     "jump_min": 30,
+     "price": 16
+    },
+    {
+     "jump_min": 60,
+     "price": 23
+    }
+   ],
+   "bump_up": [
+    {
+     "behind": 0,
+     "price": 2
+    },
+    {
+     "behind": 4,
+     "price": 3
+    },
+    {
+     "behind": 8,
+     "price": 4
+    }
+   ],
+   "bump_down": [
+    {
+     "ahead": 0,
+     "price": 3
+    },
+    {
+     "ahead": 4,
+     "price": 4
+    },
+    {
+     "ahead": 8,
+     "price": 5
+    }
+   ],
+   "jail": {
+    "threshold": 5,
+    "fee": 10
+   },
+   "start": {
+    "now": 4,
+    "later": 4,
+    "after_min": 20.0
+   },
+   "topup": {
+    "every_min": 45.0,
+    "pauses_at": 10
+   },
+   "tips": {
+    "on": true,
+    "max_per_song": 3,
+    "double_first": 5
+   },
+   "songs_in_line": 2
+  },
+  "8": {
+   "guests": 8,
+   "add": [
+    {
+     "wait_min": 0,
+     "price": 4
+    },
+    {
+     "wait_min": 15,
+     "price": 4
+    },
+    {
+     "wait_min": 20,
+     "price": 5
+    },
+    {
+     "wait_min": 30,
+     "price": 8
+    },
+    {
+     "wait_min": 45,
+     "price": 16
+    },
+    {
+     "wait_min": 60,
+     "price": 32
+    }
+   ],
+   "add_long": {
+    "duration_min": 6.5,
+    "price": 6
+   },
+   "add_not_learned": 5,
+   "skip": [
+    {
+     "line_min": 0,
+     "downs": 0,
+     "price": 40
+    },
+    {
+     "line_min": 10,
+     "downs": 2,
+     "price": 21
+    },
+    {
+     "line_min": 20,
+     "downs": 4,
+     "price": 12
+    },
+    {
+     "line_min": 40,
+     "downs": 4,
+     "price": 10
+    }
+   ],
+   "play_next": [
+    {
+     "jump_min": 10,
+     "price": 11
+    },
+    {
+     "jump_min": 20,
+     "price": 13
+    },
+    {
+     "jump_min": 30,
+     "price": 16
+    },
+    {
+     "jump_min": 60,
+     "price": 23
+    }
+   ],
+   "bump_up": [
+    {
+     "behind": 0,
+     "price": 2
+    },
+    {
+     "behind": 4,
+     "price": 3
+    },
+    {
+     "behind": 8,
+     "price": 4
+    }
+   ],
+   "bump_down": [
+    {
+     "ahead": 0,
+     "price": 3
+    },
+    {
+     "ahead": 4,
+     "price": 4
+    },
+    {
+     "ahead": 8,
+     "price": 5
+    }
+   ],
+   "jail": {
+    "threshold": 6,
+    "fee": 10
+   },
+   "start": {
+    "now": 4,
+    "later": 4,
+    "after_min": 20.0
+   },
+   "topup": {
+    "every_min": 45.0,
+    "pauses_at": 10
+   },
+   "tips": {
+    "on": true,
+    "max_per_song": 3,
+    "double_first": 5
+   },
+   "songs_in_line": 2
+  },
+  "15": {
+   "guests": 15,
+   "add": [
+    {
+     "wait_min": 0,
+     "price": 4
+    },
+    {
+     "wait_min": 15,
+     "price": 4
+    },
+    {
+     "wait_min": 20,
+     "price": 5
+    },
+    {
+     "wait_min": 30,
+     "price": 8
+    },
+    {
+     "wait_min": 45,
+     "price": 16
+    },
+    {
+     "wait_min": 60,
+     "price": 32
+    }
+   ],
+   "add_long": {
+    "duration_min": 6.5,
+    "price": 6
+   },
+   "add_not_learned": 5,
+   "skip": [
+    {
+     "line_min": 0,
+     "downs": 0,
+     "price": 55
+    },
+    {
+     "line_min": 10,
+     "downs": 2,
+     "price": 30
+    },
+    {
+     "line_min": 20,
+     "downs": 4,
+     "price": 18
+    },
+    {
+     "line_min": 40,
+     "downs": 4,
+     "price": 15
+    }
+   ],
+   "play_next": [
+    {
+     "jump_min": 10,
+     "price": 11
+    },
+    {
+     "jump_min": 20,
+     "price": 13
+    },
+    {
+     "jump_min": 30,
+     "price": 16
+    },
+    {
+     "jump_min": 60,
+     "price": 23
+    }
+   ],
+   "bump_up": [
+    {
+     "behind": 0,
+     "price": 2
+    },
+    {
+     "behind": 4,
+     "price": 3
+    },
+    {
+     "behind": 8,
+     "price": 4
+    }
+   ],
+   "bump_down": [
+    {
+     "ahead": 0,
+     "price": 3
+    },
+    {
+     "ahead": 4,
+     "price": 4
+    },
+    {
+     "ahead": 8,
+     "price": 5
+    }
+   ],
+   "jail": {
+    "threshold": 8,
+    "fee": 10
+   },
+   "start": {
+    "now": 4,
+    "later": 4,
+    "after_min": 20.0
+   },
+   "topup": {
+    "every_min": 45.0,
+    "pauses_at": 10
+   },
+   "tips": {
+    "on": true,
+    "max_per_song": 3,
+    "double_first": 5
+   },
+   "songs_in_line": 2
+  },
+  "30": {
+   "guests": 30,
+   "add": [
+    {
+     "wait_min": 0,
+     "price": 4
+    },
+    {
+     "wait_min": 15,
+     "price": 4
+    },
+    {
+     "wait_min": 20,
+     "price": 5
+    },
+    {
+     "wait_min": 30,
+     "price": 8
+    },
+    {
+     "wait_min": 45,
+     "price": 16
+    },
+    {
+     "wait_min": 60,
+     "price": 32
+    }
+   ],
+   "add_long": {
+    "duration_min": 6.5,
+    "price": 6
+   },
+   "add_not_learned": 5,
+   "skip": [
+    {
+     "line_min": 0,
+     "downs": 0,
+     "price": 77
+    },
+    {
+     "line_min": 10,
+     "downs": 2,
+     "price": 44
+    },
+    {
+     "line_min": 20,
+     "downs": 4,
+     "price": 28
+    },
+    {
+     "line_min": 40,
+     "downs": 4,
+     "price": 22
+    }
+   ],
+   "play_next": [
+    {
+     "jump_min": 10,
+     "price": 11
+    },
+    {
+     "jump_min": 20,
+     "price": 13
+    },
+    {
+     "jump_min": 30,
+     "price": 16
+    },
+    {
+     "jump_min": 60,
+     "price": 23
+    }
+   ],
+   "bump_up": [
+    {
+     "behind": 0,
+     "price": 2
+    },
+    {
+     "behind": 4,
+     "price": 3
+    },
+    {
+     "behind": 8,
+     "price": 4
+    }
+   ],
+   "bump_down": [
+    {
+     "ahead": 0,
+     "price": 3
+    },
+    {
+     "ahead": 4,
+     "price": 4
+    },
+    {
+     "ahead": 8,
+     "price": 5
+    }
+   ],
+   "jail": {
+    "threshold": 10,
+    "fee": 10
+   },
+   "start": {
+    "now": 4,
+    "later": 4,
+    "after_min": 20.0
+   },
+   "topup": {
+    "every_min": 45.0,
+    "pauses_at": 10
+   },
+   "tips": {
+    "on": true,
+    "max_per_song": 3,
+    "double_first": 5
+   },
+   "songs_in_line": 2
+  }
+ }
+}

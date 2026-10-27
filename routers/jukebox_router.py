@@ -19,6 +19,17 @@ process on its own port (phase 2) and never reaches these routes.
                                       Auto pattern as Manual slots, the
                                       playhead — reads the set (cached 60 s;
                                       `?refresh=true` reads again)
+  GET    /api/jukebox/show            the show settings (every economy setting,
+                                      the approval switch, the last preset), the
+                                      field table the page draws (ranges read off
+                                      the model) and the presets
+  PUT    /api/jukebox/show            a PARTIAL edit — {"economy": {...},
+                                      "approve_new_phones": bool}; a bad key or
+                                      value is a 422 naming it; `?dry_run=true`
+  POST   /api/jukebox/show/preset     {preset: small|medium|large} — sets the
+                                      program (and approval, for Large)
+  GET    /api/jukebox/price-check     the current rules on real examples,
+                                      `?guests=` the room size
   POST   /api/jukebox/set/move        {from_index, to_index} — reorders the
                                       SET PLAYLIST in Spotify; during a night
                                       only songs two or more ahead may move
@@ -40,7 +51,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 
 from models.jukebox import ProgramConfig
-from services.jukebox import night, store
+from services.jukebox import night, show, store
 from services.jukebox.night import sentence
 
 router = APIRouter(prefix="/api/jukebox", tags=["jukebox"])
@@ -159,3 +170,46 @@ async def post_move(entry_id: str, body: MoveBody) -> dict:
 @router.post("/set/move")
 async def post_set_move(body: SetMoveBody) -> dict:
     return await night.runner.move_set_song(body.from_index, body.to_index)
+
+
+@router.get("/show")
+async def get_show() -> dict:
+    return show.read()
+
+
+@router.put("/show")
+async def put_show(request: Request, dry_run: bool = False) -> dict:
+    try:
+        patch = await request.json()
+    except Exception:
+        raise HTTPException(status_code=422, detail="expected a JSON object")
+    try:
+        new = show.apply_patch(store.load_show(), patch)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not dry_run:
+        store.save_show(new)
+    return {"dry_run": dry_run, **show.read(new)}
+
+
+class PresetBody(BaseModel):
+    preset: str
+
+
+@router.post("/show/preset")
+async def post_preset(body: PresetBody) -> dict:
+    try:
+        new_show, new_program = show.apply_preset(body.preset, store.load_show(), store.load_config())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    refusal = night.runner.apply_config(new_program)
+    if refusal is not None:
+        raise HTTPException(status_code=409, detail=refusal[1])
+    store.save_config(new_program)
+    store.save_show(new_show)
+    return {"config": new_program.model_dump(mode="json"), **show.read(new_show)}
+
+
+@router.get("/price-check")
+async def get_price_check(guests: int = 15) -> dict:
+    return show.price_check(store.load_show().economy, max(1, min(int(guests), 100)))

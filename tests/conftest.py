@@ -465,6 +465,7 @@ def _isolated_jukebox(tmp_path, monkeypatch):
     monkeypatch.setattr(ledger, "LEDGER_DIR", tmp_path / "jukebox_ledger")
     monkeypatch.setattr(store, "CONFIG_FILE", tmp_path / "jukebox.json")
     monkeypatch.setattr(store, "NIGHT_FILE", tmp_path / "jukebox_night.json")
+    monkeypatch.setattr(store, "SHOW_FILE", tmp_path / "jukebox_show.json")
     monkeypatch.setattr(night, "runner", night.JukeboxRunner())
 
 

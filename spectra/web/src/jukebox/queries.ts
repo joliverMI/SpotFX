@@ -7,7 +7,9 @@
  * no Spotify call — `refresh` (his Reload) reads the playlist again. */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { spotfxGet, spotfxPost, spotfxPut } from '../api/client';
-import type { JukeboxPreview, JukeboxStatus, ProgramConfig, SetMoveResult } from './types';
+import type {
+  JukeboxPreview, JukeboxStatus, PriceCheck, ProgramConfig, SetMoveResult, ShowRead,
+} from './types';
 
 export const JUKEBOX_KEYS = {
   config: ['jukebox-config'],
@@ -70,6 +72,51 @@ export function useMoveSetSong() {
     mutationFn: (m: { from_index: number; to_index: number }) =>
       spotfxPost<SetMoveResult>('/jukebox/set/move', m),
     onSettled: () => {
+      qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.preview });
+      qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status });
+    },
+  });
+}
+
+// ── the show settings (phase 3.3) ───────────────────────────────────────────
+
+export const SHOW_KEYS = {
+  show: ['jukebox-show'],
+  priceCheck: (guests: number) => ['jukebox-price-check', guests],
+} as const;
+
+export function useJukeboxShow() {
+  return useQuery({ queryKey: SHOW_KEYS.show, queryFn: () => spotfxGet<ShowRead>('/jukebox/show') });
+}
+
+export function usePriceCheck(guests: number) {
+  return useQuery({
+    queryKey: SHOW_KEYS.priceCheck(guests),
+    queryFn: () => spotfxGet<PriceCheck>(`/jukebox/price-check?guests=${guests}`),
+  });
+}
+
+/** A PARTIAL edit — the server validates it whole and answers 422 naming a
+ * bad key; on success the price check is worked again. */
+export function useSaveShow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: { economy?: Record<string, number | boolean>; approve_new_phones?: boolean }) =>
+      spotfxPut<ShowRead>('/jukebox/show', patch),
+    onSuccess: (r) => {
+      qc.setQueryData(SHOW_KEYS.show, r);
+      qc.invalidateQueries({ queryKey: ['jukebox-price-check'] });
+    },
+  });
+}
+
+export function useApplyPreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (preset: string) => spotfxPost<ShowRead & { config: ProgramConfig }>('/jukebox/show/preset', { preset }),
+    onSuccess: (r) => {
+      qc.setQueryData(SHOW_KEYS.show, r);
+      qc.setQueryData(JUKEBOX_KEYS.config, r.config);
       qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.preview });
       qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status });
     },
