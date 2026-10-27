@@ -19,7 +19,7 @@ export function nightFacts(n: ReportNight): Fact[] {
     { label: 'Jukebox share', value: pct(n.jukebox_share) },
     { label: 'Songs an hour', value: num(n.songs_per_hour) },
     { label: 'Songs added to the line', value: `${n.line.added} (${n.line.by_guests} by guests)` },
-    { label: 'Removed / still waiting', value: `${n.line.removed} / ${n.line.waiting_at_end}` },
+    { label: 'Removed / playing / still waiting', value: `${n.line.removed} / ${n.line.playing_at_end} / ${n.line.waiting_at_end}` },
     { label: 'Add to play (median)', value: n.add_to_play_median_min == null ? '–' : `${Math.round(n.add_to_play_median_min)} min` },
   ];
 }

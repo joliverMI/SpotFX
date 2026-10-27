@@ -33,6 +33,7 @@ from services.jukebox.ledger import Entry
 HOST = "host"
 NO_GUESTS = "no guest credits were used this night (the guest page comes in phase 2)"
 NOT_RECORDED = "this night's records don't hold it yet"
+NOT_PLAYED_YET = "no guest song has played yet"
 
 
 def _median(xs: list[float]) -> Optional[float]:
@@ -71,6 +72,7 @@ def night_section(n: JukeboxNight, now_ms: int) -> dict:
                  "by_guests": sum(1 for e in n.line if e.added_by != HOST),
                  "played": line_by.get("played", 0), "removed": line_by.get("removed", 0),
                  "skipped": line_by.get("skipped", 0),
+                 "playing_at_end": line_by.get("playing", 0),
                  "waiting_at_end": sum(line_by.get(s, 0) for s in ("queued", "committed"))},
         "add_to_play_median_min": round(_median(waits), 1) if waits else None,
         "warnings_at_end": list(n.warnings),
@@ -110,7 +112,10 @@ def measures(n: JukeboxNight, entries: Optional[list[Entry]], now_ms: int) -> di
                           if entries else None, "why": None if entries else NO_GUESTS}
     waits = [(e.played_ms - e.added_ms) / 60_000 for e in guest_line
              if e.state == "played" and e.played_ms and e.added_ms]
-    out["wait_to_play_median"] = {"value": _median(waits), "why": None if waits else NO_GUESTS}
+    out["wait_to_play_median"] = {
+        "value": _median(waits),
+        "why": None if waits else (NOT_PLAYED_YET if entries else NO_GUESTS),
+    }
     if entries:
         cs = credits_section(entries, ns["hours"])
         guests_added = {e.added_by for e in guest_line}

@@ -65,6 +65,42 @@ def test_no_night_yet():
     assert r["status"] == "none"
 
 
+def test_a_song_still_playing_when_the_night_ends_counts_separately_from_waiting():
+    """night.py's `_end` never resolves a `playing` entry back to `played`
+    (that only happens when the next song starts), so a night stopped
+    mid-song stores one line entry stuck in `playing` forever — it must
+    still be counted, or `added` no longer equals the sum of the states."""
+    n = JukeboxNight(id="n-mid-song", state="ended", started_ms=T0, ended_ms=T0 + 60 * MIN)
+    n.line = [
+        LineEntry(id="a", uri="u:a", added_by="p1", added_ms=T0, state="played",
+                  played_ms=T0 + 10 * MIN),
+        LineEntry(id="b", uri="u:b", added_by="p2", added_ms=T0 + 5 * MIN, state="playing"),
+        LineEntry(id="c", uri="u:c", added_by="p1", added_ms=T0 + 8 * MIN, state="queued"),
+        LineEntry(id="d", uri="u:d", added_by="host", added_ms=T0 + 9 * MIN, state="removed"),
+    ]
+    line = R.night_section(n, T0 + 60 * MIN)["line"]
+    assert line["playing_at_end"] == 1
+    assert line["added"] == (line["played"] + line["removed"] + line["skipped"]
+                             + line["playing_at_end"] + line["waiting_at_end"])
+
+
+def test_wait_to_play_median_names_not_played_yet_when_the_ledger_has_no_finished_song():
+    """Credits already spent but no guest song finished playing yet (a
+    running night) is a different fact from no guest ever using credits —
+    it must not read as NO_GUESTS."""
+    n = JukeboxNight(id="n-running", state="running", started_ms=T0)
+    n.line = [LineEntry(id="x", uri="u:x", added_by="p1", added_ms=T0 + 5 * MIN, state="queued")]
+    led = ledger_mod.Ledger(n.id, EconomyConfig(), persist=False, now_ms=lambda: T0)
+    led.grant("p1", "start", 8)
+    led.spend("p1", "add", 4, "x")
+    m = R.measures(n, list(led.entries), T0 + 10 * MIN)
+    assert m["wait_to_play_median"]["value"] is None
+    assert m["wait_to_play_median"]["why"] == R.NOT_PLAYED_YET
+
+    m_no_ledger = R.measures(n, None, T0 + 10 * MIN)
+    assert m_no_ledger["wait_to_play_median"]["why"] == R.NO_GUESTS
+
+
 def test_a_night_without_guests_reports_what_played_and_names_the_rest():
     w = World()
 

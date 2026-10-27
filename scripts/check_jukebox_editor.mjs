@@ -232,6 +232,7 @@ const REP = JSON.parse(readFileSync(join(web, 'harness/jukeboxReportSnapshot.jso
   ok(facts['Jukebox songs played'] === '3' && facts['Set songs played'] === '4' && facts['Length'] === '2 h',
     `the night's facts read the server's numbers (${JSON.stringify(facts)})`);
   ok(facts['Add to play (median)'] === '30 min', 'the add-to-play median in minutes');
+  ok(facts['Removed / playing / still waiting'] === '1 / 0 / 1', 'removed, still-playing and still-waiting counts');
   const credits = Object.fromEntries(RW.creditFacts(REP.credits).map((f) => [f.label, f.value]));
   ok(credits['Held at the end'] === '8 (30%)' && credits['Guests who used credits'] === '3', 'the credits in words');
   const jail = REP.comparison.rows.find((r) => r.key === 'jails');

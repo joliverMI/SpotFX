@@ -299,7 +299,7 @@ export interface ReportNight {
   jukebox_share: number | null;
   songs_per_hour: number | null;
   line: { added: number; by_host: number; by_guests: number; played: number; removed: number;
-    skipped: number; waiting_at_end: number };
+    skipped: number; playing_at_end: number; waiting_at_end: number };
   add_to_play_median_min: number | null;
   warnings_at_end: string[];
 }
