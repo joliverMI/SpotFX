@@ -6,7 +6,8 @@ jukebox/JukeboxPage.tsx against a mocked backend (see that file's header) —
 in a headless Chromium (data/jukebox-plan/report.md §9, PR 1.3's
 acceptance: the host tablet landscape and portrait, and a phone), three
 states (a night running, the shipped idle state, slots placed by hand), the
-Set list tab, the Live tab and the Credits tab of the running night, and writes the PNGs to
+Set list tab, the Live tab, the Credits tab and the Simulate tab (a model night paused
+mid-party) of the running night, and writes the PNGs to
 docs/evidence/jukebox-page/.
 
 It also FAILS, not just draws, on the two things a screenshot can hide:
@@ -60,7 +61,7 @@ READY = """(() => {
 
 OVERFLOW = """(() => {
   const de = document.documentElement;
-  const wide = [...document.querySelectorAll('.jukebox-card, .jukebox-row, .jukebox-item, .jukebox-head, .jukebox-sign-in, .jukebox-field, .jukebox-price-row, .jukebox-preset')]
+  const wide = [...document.querySelectorAll('.jukebox-card, .jukebox-row, .jukebox-item, .jukebox-head, .jukebox-sign-in, .jukebox-field, .jukebox-price-row, .jukebox-preset, .jukebox-sim-tr, .jukebox-sim-guest, .jukebox-sim-transport, .jukebox-sim-controls')]
     .filter((el) => el.scrollWidth > el.clientWidth + 1)
     .map((el) => el.className + ' ' + el.scrollWidth + '>' + el.clientWidth);
   return { page: de.scrollWidth + 'x' + de.clientWidth, pageWide: de.scrollWidth > de.clientWidth + 1, wide };
@@ -106,7 +107,7 @@ async def run() -> int:
             await cdp(ws, nid, "Page.addScriptToEvaluateOnNewDocument", {"source": ERROR_TRAP})
 
             async def render(state: str, size: tuple[int, int], name: str,
-                             after: str | None = None) -> None:
+                             after: str | None = None, more: tuple[str, ...] = ()) -> None:
                 width, height = size
                 await cdp(ws, nid, "Emulation.setDeviceMetricsOverride", {
                     "width": width, "height": height, "deviceScaleFactor": 1,
@@ -115,10 +116,11 @@ async def run() -> int:
                 if not await goto(ws, nid, f"{base}?state={state}", READY):
                     failures.append(f"{name}: the page never finished loading")
                     return
-                if after:
-                    if not await evaluate(ws, nid, after):
+                for step in ((after,) if after else ()) + more:
+                    if not await evaluate(ws, nid, step):
                         failures.append(f"{name}: the interaction found nothing to press")
                         return
+                    await asyncio.sleep(0.6)
                 await asyncio.sleep(0.8)
                 o = await evaluate(ws, nid, OVERFLOW)
                 errs = await evaluate(ws, nid, "window.__jukeboxErrors")
@@ -146,6 +148,26 @@ async def run() -> int:
             credits_tab = live_tab.replace("'Live'", "'Credits'")
             for size in VIEWPORTS:
                 await render("running", size, f"running-credits-{size[0]}x{size[1]}", after=credits_tab)
+            simulate_tab = live_tab.replace("'Live'", "'Simulate'")
+            run_night = """(() => {
+              const b = [...document.querySelectorAll('.jukebox-sim-run')][0];
+              if (b) b.click();
+              return !!b;
+            })()"""
+            # pause the playback mid-party, at 2:10, so the shot shows a busy night
+            mid_party = """(() => {
+              const p = document.querySelector('[aria-label="Pause"]');
+              if (p) p.click();
+              const r = document.querySelector('input[aria-label="Party time"]');
+              if (!r) return false;
+              const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+              set.call(r, '130');
+              r.dispatchEvent(new Event('input', { bubbles: true }));
+              return true;
+            })()"""
+            for size in VIEWPORTS:
+                await render("running", size, f"running-simulate-{size[0]}x{size[1]}",
+                             after=simulate_tab, more=(run_night, mid_party))
     finally:
         try:
             os.killpg(proc.pid, signal.SIGTERM)

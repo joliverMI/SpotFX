@@ -30,10 +30,19 @@ process on its own port (phase 2) and never reaches these routes.
                                       program (and approval, for Large)
   GET    /api/jukebox/price-check     the current rules on real examples,
                                       `?guests=` the room size
+  POST   /api/jukebox/simulate        {guests, nights, seed, program:
+                                      "saved"|"preset"} — the party simulator:
+                                      one model night under the SAVED economy,
+                                      recorded for playback, and the average
+                                      of `nights` nights beside the tuned
+                                      defaults (services/jukebox/simulator.py).
+                                      Reads only; runs off the event loop, one
+                                      at a time (a second is a 409)
   POST   /api/jukebox/set/move        {from_index, to_index} — reorders the
                                       SET PLAYLIST in Spotify; during a night
                                       only songs two or more ahead may move
-  POST   /api/jukebox/night/start     {play: true, start_index: 0}
+  POST   /api/jukebox/night/start     {play: true, start_index: 0,
+                                      started_by: "press"|"sonic"}
   POST   /api/jukebox/night/stop      {pause: false}
   POST   /api/jukebox/line            {uri} — a song link, URI or id
   DELETE /api/jukebox/line/{id}       a waiting song leaves; a committed one
@@ -47,11 +56,14 @@ Absorb's convention.
 """
 from __future__ import annotations
 
+import asyncio
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from models.jukebox import ProgramConfig
-from services.jukebox import night, show, store
+from services.jukebox import night, show, simulator, store
 from services.jukebox.night import sentence
 
 router = APIRouter(prefix="/api/jukebox", tags=["jukebox"])
@@ -122,6 +134,7 @@ async def get_preview(count: int = 20, refresh: bool = False) -> dict:
 class StartBody(BaseModel):
     play: bool = True
     start_index: int = 0
+    started_by: Literal["press", "sonic"] = "press"   # Sonic's own start says so in the log
 
 
 class StopBody(BaseModel):
@@ -144,7 +157,7 @@ class SetMoveBody(BaseModel):
 @router.post("/night/start")
 async def post_start(body: StartBody = StartBody()) -> dict:
     return await night.runner.start(play=body.play, start_index=body.start_index,
-                              started_by="press")
+                                    started_by=body.started_by)
 
 
 @router.post("/night/stop")
@@ -213,3 +226,37 @@ async def post_preset(body: PresetBody) -> dict:
 @router.get("/price-check")
 async def get_price_check(guests: int = 15) -> dict:
     return show.price_check(store.load_show().economy, max(1, min(int(guests), 100)))
+
+
+class SimulateBody(BaseModel):
+    guests: int = Field(20, ge=simulator.GUESTS_MIN, le=simulator.GUESTS_MAX)
+    nights: int = Field(20, ge=simulator.NIGHTS_MIN, le=simulator.NIGHTS_MAX)
+    seed: int = Field(1, ge=1, le=1_000_000)
+    program: Literal["saved", "preset"] = "saved"
+
+
+_simulating = asyncio.Lock()
+
+
+def run_simulation(body: SimulateBody) -> dict:
+    """The simulation itself, synchronous (the route runs it in a thread):
+    the SAVED economy, and the saved program or the plan's preset for the
+    party size."""
+    cfg = store.load_config()
+    if body.program == "preset":
+        mix = simulator.program(body.guests)
+        mode = "auto" if mix["set_per_slot"] else "jukebox_first"
+        every, run = max(1, mix["set_per_slot"]), mix["juke_per_slot"]
+    else:
+        mode, every, run = cfg.mode, cfg.every, cfg.run
+    out = simulator.simulate(body.guests, store.load_show().economy, mode=mode, every=every,
+                             run=run, seed=body.seed, nights=body.nights)
+    return {"program_source": body.program, **out}
+
+
+@router.post("/simulate")
+async def post_simulate(body: SimulateBody = SimulateBody()) -> dict:
+    if _simulating.locked():
+        raise HTTPException(status_code=409, detail="a simulation is already running")
+    async with _simulating:
+        return await asyncio.to_thread(run_simulation, body)

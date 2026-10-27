@@ -17,7 +17,11 @@
 //      read-only (no control in it writes) and shows the night.
 //   3. Help: every topic is a real HELP_SECTIONS entry, the menu row's "?"
 //      maps /jukebox to `jukebox`, /jukebox is in the Engine menu — and,
-//      behaviourally, hovering the page's own controls opens each topic.
+//      behaviourally, hovering the page's own controls opens each topic,
+//      and the page's 💬 Sonic opens `sonic-jukebox`.
+// Plus the Credits tab (§1b, §2b, phase 3.3) and the party simulator's
+// playback (§1c pure, §2c mounted against the harness's own snapshot of the
+// server's answer, phase 3.4): it only ever POSTs /api/jukebox/simulate.
 //
 // Run: node scripts/check_jukebox_editor.mjs (tests/test_jukebox_editor.py).
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -154,6 +158,71 @@ const PC = {
   ok(groups.some((g) => g.title === 'Skip (a room of 15)'), 'the skip group names the room size');
 }
 
+// ── 1c. the party simulator's playback ──────────────────────────────────
+console.log('\n§1c jukeboxSim.ts — the playback arithmetic and its words');
+const S = await bundle(`export * from ${JSON.stringify(join(web, 'src/jukebox/jukeboxSim.ts'))};`, 'sim');
+const NIGHT = {
+  minutes: 240, last_call: 220,
+  guests: [
+    { id: 0, kind: 'regular', arrive: 0, leave: 241, played: 1, added: 1, earned: 10, spent: 4, tips_given: 0, jails: 0, end_credits: 6 },
+    { id: 1, kind: 'quiet', arrive: 30, leave: 120, played: 0, added: 0, earned: 2, spent: 0, tips_given: 0, jails: 1, end_credits: 2 },
+  ],
+  songs: [{ t: 0, dur: 4, by: null, ups: 1, downs: 0, skipped: null }, { t: 4, dur: 4, by: 0, ups: 0, downs: 3, skipped: 6 }],
+  frames: [
+    { t: 0, song: 0, cr: [8, 0], back: 0, price: 4, line: 0, jailed: [] },
+    { t: 5, song: 1, cr: [4, 0], back: 12, price: 4, line: 1, jailed: [] },
+    { t: 40, song: 1, cr: [6, 8], back: 30, price: 8, line: 2, jailed: [1] },
+  ],
+  events: [
+    { t: 2, kind: 'add', g: 0, price: 4, wait: 3.2, rnd: 1 },
+    { t: 6, kind: 'skip', price: 14, payers: [1, 0], of: 0 },
+    { t: 7, kind: 'tip', g: 1, to: 0, amt: 1, bonus: 1 },
+    { t: 41, kind: 'jail', g: 1, downs: 5 },
+  ],
+  summary: {},
+};
+{
+  ok(S.clock(0) === '0:00' && S.clock(130.7) === '2:10' && S.clock(-3) === '0:00', 'party minutes read as h:mm');
+  ok(S.frameAt(NIGHT.frames, 4.9).t === 0 && S.frameAt(NIGHT.frames, 5).t === 5 && S.frameAt(NIGHT.frames, 999).t === 40,
+    'the frame at a moment is the last one at or before it');
+  ok(S.eventLine(NIGHT.events[0]) === 'Guest 1 added a song for 4 credits (plays in about 3 min)', 'an add in words');
+  ok(S.eventLine(NIGHT.events[1]) === "2 guests chipped in 14 credits to skip Guest 1's song", 'a chip-in skip in words');
+  ok(S.eventLine(NIGHT.events[2]) === 'Guest 2 tipped Guest 1 1 credit (+1 bonus)', 'a tip, singular, with its bonus');
+  ok(S.eventLine({ t: 1, kind: 'skip', price: 20, payers: [1], of: null }) === 'Guest 2 skipped a set song for 20 credits',
+    'a lone skip of a set song');
+  ok(S.eventLine({ t: 1, kind: 'add', g: 1, price: 9, wait: 0.2, rnd: 2 }).includes('a 2nd song') , 'a 2nd song says so');
+  const recent = S.eventsUpTo(NIGHT.events, 7, 2);
+  ok(recent.length === 2 && recent[0].t === 7 && recent[1].t === 6, 'recent events are newest first, none from the future');
+  const now = S.nowView(NIGHT, 41);
+  ok(now.present === 2 && now.line === 2 && now.price === 8 && now.jailed === 1 && now.heldPerGuest === 7,
+    `what is true at 0:41 (${JSON.stringify(now)})`);
+  ok(S.nowView(NIGHT, 6.5).songLine === "Guest 1's song · 0 ▲ 3 ▼ · skipped", 'a skipped guest song is named and marked');
+  ok(S.nowView(NIGHT, 240).songLine === 'The party is over', 'after the last minute the party is over');
+  ok(S.playedBy(NIGHT, 0, 3) === 0 && S.playedBy(NIGHT, 0, 4) === 1, 'a guest\'s songs count once they start');
+  ok(S.fmtValue('share', 0.374) === '37%' && S.fmtValue('min', 29.4) === '29 min' && S.fmtValue('rate', 0.18) === '0.18'
+    && S.fmtValue('count', 41.5) === '41.5' && S.fmtValue('credits', null) === '–', 'values read in their units');
+  const row = { key: 'price_mid', label: 'Price', unit: 'credits', yours: 12, tuned: 18.2 };
+  const same = S.rowCells(row, true);
+  const diff = S.rowCells(row, false);
+  ok(same.tuned === null && !same.moved && diff.tuned === '18.2' && diff.moved, 'one column when tuned; a moved row is marked');
+  ok(S.checkLine({ key: 'wait_to_play_median', label: 'Wait', target: '≤ 30 min', value: 31.4, ok: false }).text
+    === 'Wait — 31 min (wanted ≤ 30 min)', 'a missed promise in words');
+  ok(S.checkLine({ key: 'songs_per_lurk', label: 'Quiet', target: '≥ 1 song', value: null, ok: null }).mark === 'none',
+    'a promise with nobody to measure is neither met nor missed');
+  const res = { guests: 20, plan_preset: 'large', mix_is_plans: false,
+    checks: [{ key: 'x', label: 'x', target: '', value: 1, ok: false }] };
+  ok(/Large \(jukebox first\)/.test(S.presetHint(res)), 'a miss on a mix that is not the plan\'s names the preset');
+  ok(S.presetHint({ ...res, mix_is_plans: true }) === null && S.presetHint({ ...res, checks: [] }) === null,
+    'no hint when the night ran the plan\'s mix or nothing was missed');
+  const pts = S.chartPoints(NIGHT);
+  const g = S.chartGeometry(pts, 240, 600, 200);
+  ok(Math.abs(g.tAt(g.x(130)) - 130) < 1e-9 && g.tAt(-50) === 0 && g.tAt(10_000) === 240, 'the chart\'s x and its minute are inverses, clamped');
+  ok(g.yMax >= 8 && g.ticks[0] === 0 && g.ticks.at(-1) === g.yMax, 'one credits axis from 0 to a round top');
+  const [a, b] = g.labels;
+  ok(g.labels.length === 2 && Math.abs(a.y - b.y) >= 12, 'the two line labels never sit on each other');
+  ok(S.pointAt(pts, 6).t === 5, 'the hover reads the point at or before the pointer');
+}
+
 // ── 2. the page, mounted ──────────────────────────────────────────────────
 let jsdomMod;
 try {
@@ -164,6 +233,9 @@ try {
 }
 const { JSDOM } = jsdomMod;
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/jukebox' });
+// jsdom lays nothing out, so it has no Element.scrollTo (the 💬 panel's
+// message list calls it) — check_absorb_page.mjs's own stand-in.
+if (!dom.window.HTMLElement.prototype.scrollTo) dom.window.HTMLElement.prototype.scrollTo = () => {};
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, 'navigator', { value: dom.window.navigator, configurable: true });
@@ -175,6 +247,9 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const SET = [setItem(0, 'Mr. Brightside'), setItem(1, 'Dancing Queen'), setItem(2, 'September'), setItem(3, 'Hey Ya!')];
 let world;
+// the Simulate tab's mock: the harness's own snapshot of the server's answer
+// (tests/test_jukebox_simulator.py holds it to the real route)
+const SIM = JSON.parse(readFileSync(join(web, 'harness/jukeboxSimSnapshot.json'), 'utf8'));
 function newWorld(kind) {
   const manual = kind === 'manual';
   const running = kind === 'running';
@@ -240,6 +315,7 @@ globalThis.fetch = async (url, init = {}) => {
     return json({ show: world.show, fields: FIELDS, presets: PRESETS });
   }
   if (u.startsWith('/api/jukebox/price-check')) return json(PC);
+  if (u.startsWith('/api/jukebox/simulate')) return json(SIM);
   if (u.startsWith('/api/jukebox/status')) return json(statusOf());
   if (u.startsWith('/api/jukebox/preview')) {
     return json({ status: 'ok', playlist_name: 'Saturday set', set_songs: SET.length, set: SET,
@@ -387,11 +463,46 @@ console.log('\n§2b the Credits tab, mounted — presets, the price check, each 
   P.unmount();
 }
 
+console.log('\n§2c the Simulate tab, mounted — run a night, play it back, compare');
+{
+  world = newWorld('auto');
+  const c = P.mount();
+  await P.settle();
+  await click(buttonByText(c, /^Simulate$/));
+  ok(!!$(c, '[data-testid="jukebox-sim-controls"]') && !$(c, '[data-testid="jukebox-sim-now"]'),
+    'the tab opens on its controls, with no night until one is run');
+  const sel = c.querySelector('select[aria-label="Simulated guests"]');
+  P.actSync(() => { sel.value = '15'; sel.dispatchEvent(new dom.window.Event('change', { bubbles: true })); });
+  await click(buttonByText(c, /Run the night/));
+  const sims = () => world.requests.filter((r) => r.url.startsWith('/api/jukebox/simulate'));
+  ok(JSON.stringify(sims().at(-1)?.body) === JSON.stringify({ nights: 20, guests: 15, seed: 1, program: 'saved' }),
+    `Run the night POSTs the party size and the saved program (${JSON.stringify(sims().at(-1)?.body)})`);
+  ok(!!$(c, '[data-testid="jukebox-sim-now"]') && !!c.querySelector('[aria-label="Pause"]'), 'the night plays back at once');
+  await click(c.querySelector('[aria-label="Pause"]'));
+  const range = c.querySelector('input[aria-label="Party time"]');
+  const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set;
+  P.actSync(() => { setter.call(range, '130'); range.dispatchEvent(new dom.window.Event('input', { bubbles: true })); });
+  await P.settle();
+  ok(text($(c, '[data-testid="jukebox-sim-clock"]')).startsWith('2:10'), 'the scrubber moves the clock');
+  ok(c.querySelectorAll('.jukebox-sim-guest').length === SIM.night.guests.length, 'every guest has a chip');
+  ok(c.querySelectorAll('[data-testid="jukebox-sim-events"] .jukebox-item').length === 8, 'the latest eight happenings show');
+  const rows = c.querySelectorAll('.jukebox-sim-tr:not(.head)');
+  ok(rows.length === SIM.rows.length && c.querySelector('.jukebox-sim-table.one'), 'the averages table: one column when the settings are the tuned ones');
+  ok(!!$(c, '[data-testid="jukebox-sim-hint"]'), 'a missed promise on a mix that is not the plan\'s names the preset');
+  await click(buttonByText(c, /Another night/));
+  ok(sims().at(-1)?.body?.seed === 2, 'Another night is the next seed');
+  await click(buttonByText(c, /preset for this size/));
+  await click(buttonByText(c, /Run the night/));
+  ok(sims().at(-1)?.body?.program === 'preset', 'the preset switch asks for the plan\'s mix');
+  ok(writes().every((r) => r.url.startsWith('/api/jukebox/simulate')), 'the Simulate tab never writes a setting or starts anything');
+  P.unmount();
+}
+
 // ── 3. help ───────────────────────────────────────────────────────────────
 console.log('\n§3 help — every topic is real and reachable from the page');
 {
   const topics = ['jukebox', 'jukebox-set-list', 'jukebox-slots', 'jukebox-live', 'jukebox-sign-in',
-    'jukebox-credits', 'jukebox-presets', 'jukebox-price-check'];
+    'jukebox-credits', 'jukebox-presets', 'jukebox-price-check', 'jukebox-simulator', 'sonic-jukebox'];
   const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
   const knownIds = new Set();
   for (const section of HELP_SECTIONS) {
@@ -429,8 +540,18 @@ console.log('\n§3 help — every topic is real and reachable from the page');
   await click(buttonByText(c, /^Credits$/));
   await P.settle();
   hoverAll(c);
+  await click(buttonByText(c, /^Simulate$/));
+  await click(buttonByText(c, /Run the night/));
+  hoverAll(c);
+  await click(c.querySelector('.sonic-popover-fab'));
+  // the panel's title link is the page's scope; its shared "↺ Undo last"
+  // button carries the chat's own sonic-scene-backups link on every page
+  for (const a of [...c.querySelectorAll('.sonic-popover-panel a.help-link')]) {
+    const id = new URLSearchParams((a.getAttribute('href') || '').split('?')[1] || '').get('topic');
+    if (id && id !== 'sonic-scene-backups') reached.add(id);
+  }
   ok(topics.every((id) => reached.has(id)) && reached.size === topics.length,
-    `hovering the page's own controls opens exactly the eight jukebox topics (${[...reached].sort().join(', ')})`);
+    `the page's own controls and its 💬 Sonic open exactly the ten jukebox topics (${[...reached].sort().join(', ')})`);
   P.unmount();
 }
 

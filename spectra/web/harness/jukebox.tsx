@@ -19,7 +19,11 @@
  * merges in memory, so the editor can be clicked through. The Credits tab's
  * field table, presets and price checks are a SNAPSHOT of the real server's
  * answers (jukeboxShowSnapshot.json, written by `show.fields()` /
- * `show.presets()` / `show.price_check()`); regenerate it if those change. */
+ * `show.presets()` / `show.price_check()`); regenerate it if those change.
+ * The Simulate tab's night is a snapshot too (jukeboxSimSnapshot.json, the
+ * real `POST /api/jukebox/simulate` answer for 20 guests under the shipped
+ * settings, seed 1) — tests/test_jukebox_simulator.py holds it to the
+ * server's own answer. */
 import '../src/styles/tokens.css';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -28,6 +32,7 @@ import AppChrome, { showsSongStrip } from '../src/components/AppChrome';
 import JukeboxPage from '../src/jukebox/JukeboxPage';
 import { ToastProvider } from '../src/components/Toast';
 import SNAP from './jukeboxShowSnapshot.json';
+import SIM from './jukeboxSimSnapshot.json';
 import type {
   JukeboxPreview, JukeboxStatus, ManualSlot, ProgramConfig, ProgramItem, SetItem,
 } from '../src/jukebox/types';
@@ -201,6 +206,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const g = new URL(url, 'http://x').searchParams.get('guests') ?? '15';
     return json((SNAP.price_check as Record<string, unknown>)[g] ?? SNAP.price_check['15']);
   }
+  if (url.includes('/api/jukebox/simulate')) return json(SIM);
   if (url.includes('/api/jukebox/set/move')) return json({ status: 'refused', reason: 'harness', detail: 'This is the mocked harness — nothing was moved.' });
   if (/\/api\/engine\/status/.test(url)) return json(STATUS);
   if (/\/api\/room-controls/.test(url)) return json(ROOM_CONTROLS);

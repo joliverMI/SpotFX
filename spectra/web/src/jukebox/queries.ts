@@ -8,7 +8,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { spotfxGet, spotfxPost, spotfxPut } from '../api/client';
 import type {
-  JukeboxPreview, JukeboxStatus, PriceCheck, ProgramConfig, SetMoveResult, ShowRead,
+  JukeboxPreview, JukeboxStatus, PriceCheck, ProgramConfig, SetMoveResult, ShowRead, SimResult,
 } from './types';
 
 export const JUKEBOX_KEYS = {
@@ -120,5 +120,22 @@ export function useApplyPreset() {
       qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.preview });
       qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status });
     },
+  });
+}
+
+// ── the party simulator (phase 3.4) ─────────────────────────────────────────
+
+export interface SimulateRequest {
+  guests: number;
+  nights?: number;
+  seed: number;
+  program: 'saved' | 'preset';
+}
+
+/** One model night under the SAVED settings (POST, since it runs a
+ * simulation — it writes nothing). */
+export function useSimulate() {
+  return useMutation({
+    mutationFn: (req: SimulateRequest) => spotfxPost<SimResult>('/jukebox/simulate', { nights: 20, ...req }),
   });
 }

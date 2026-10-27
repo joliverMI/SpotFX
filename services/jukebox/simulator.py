@@ -1,19 +1,30 @@
-"""The Jukebox's planning simulator, kept as the EXECUTABLE SPEC of the
-credits economy (data/jukebox-plan/report.md Appendix A, `jukesim2.py`;
-phase 3 PR 3.1). One party night, agent-based: guests arrive, vote, earn as
-Adders, tip, add songs, bump, buy play next, skip (alone or chipping in), go
-to jail and break out.
+"""
+SpotFX — the Jukebox's PARTY SIMULATOR (data/jukebox-plan/report.md
+Appendix A, `jukesim2.py`; phase 3 PRs 3.1 and 3.4). One party night,
+agent-based: guests arrive, vote, earn as Adders, tip, add songs, bump, buy
+play next, skip (alone or chipping in), go to jail and break out.
+
+ONE COPY, TWO USES:
+  * the EXECUTABLE SPEC of the credits economy — tests/test_jukebox_economy.py
+    runs it at 4, 8, 15 and 30 guests with the plan's own seeds and holds it
+    to the plan's §3.2 results, so a price function that drifts from the
+    tuned one moves the night and the test sees it;
+  * the master view's party simulator (`POST /api/jukebox/simulate`,
+    `simulate()` below): one night under HIS current settings recorded for
+    the page to play back, beside the same nights under the tuned defaults.
 
 The model is the plan's own, line for line, with ONE change: every price and
 every earning rule is the REAL one — services/jukebox/economy.py, under the
-shipped models.jukebox.EconomyConfig — instead of the planning formulas.
-tests/test_jukebox_economy.py runs it at 4, 8, 15 and 30 guests with the
-plan's own seeds and holds it to the plan's §3.2 results: a price function
-that drifts from the tuned one moves the night, and the test sees it.
+given models.jukebox.EconomyConfig — instead of the planning formulas.
+Recording (`Party(record=True)`) only appends what already happened; it
+draws nothing from the random stream, so a recorded night is the same night
+an unrecorded one is (asserted).
 
 Guest BEHAVIOUR (how often people want a song, tip, bump, skip) is the
 plan's model, held fixed; it is a model, not a measurement (report §12 risk
-3), which is why the post-party report measures the real night later.
+3), which is why the post-party report measures the real night later. The
+songs are synthetic too: his library's length distribution, no Spotify.
+Pure: numpy and the economy, no I/O, no clock.
 """
 from __future__ import annotations
 
@@ -155,8 +166,14 @@ class Guest:
 
 
 class Party:
-    def __init__(self, n: int, p: Params, seed: int):
+    def __init__(self, n: int, p: Params, seed: int, record: bool = False):
         self.n, self.p = n, p
+        # the master view's playback (simulate()): what happened, appended
+        # as it happens — never a draw from the random stream
+        self.record = record
+        self.frames: list[dict] = []
+        self.events: list[dict] = []
+        self.songs_log: list[dict] = []
         self.cfg = p.economy
         self.rng = rng = np.random.default_rng(seed)
         w = rng.lognormal(0.0, 0.9, n)
@@ -288,6 +305,23 @@ class Party:
     def skip_price(self, s: Song, queue_wait: float) -> int:
         return economy.skip_price(queue_wait, s.ups, s.downs, self.n_present(), self.cfg)
 
+    # recording (record=True only; draws nothing, changes nothing) ----------
+    def _ev(self, kind: str, **kw):
+        if self.record:
+            self.events.append(dict(t=round(self.t, 2), kind=kind, **kw))
+
+    def _frame(self):
+        if not self.record:
+            return
+        self.dirty()                      # leave the cache as cold as it was
+        _, back = self.etas()
+        self.dirty()
+        self.frames.append(dict(
+            t=round(self.t, 2), song=len(self.songs_log) - 1,
+            cr=[int(round(g.credits)) for g in self.guests],
+            back=round(back, 1), price=self.add_price(back, 3.6, True), line=len(self.live()),
+            jailed=[g.gid for g in self.guests if g.jailed]))
+
     def grant(self, g: Guest, amt: float, kind: str, ekind: str):
         g.credits += amt
         self.minted[kind] += amt
@@ -331,11 +365,17 @@ class Party:
             self.series.append((self.t, held, back, self.add_price(back, 3.6, True),
                                 sum(1 for g in self.guests if g.jailed),
                                 sum(1 for g in self.guests if self.present(g))))
+            if self.record:
+                self.songs_log.append(dict(t=round(self.t, 2), dur=round(song.dur, 2),
+                                           by=song.adder if song.adder >= 0 else None))
+                self._frame()
             self.play(song)
         for s in self.queue:
             if s.adder >= 0 and s.paid:
                 self.guests[s.adder].credits += s.paid
                 self.c['refunds'] += 1
+                self._ev('refund', g=s.adder, amt=s.paid)
+        self._frame()
         return self.summary()
 
     def play(self, s: Song):
@@ -385,6 +425,7 @@ class Party:
                         ad.jail_count += 1
                         self.c['jail'] += 1
                         self.dirty()
+                        self._ev('jail', g=ad.gid, downs=thr)
                     if up and op > 0.6 and rng.random() < p.p_tip * min(1.6, g.w ** 0.5):
                         units = 1 if op < 1.4 else 2
                         units = min(units, economy.tip_units_allowed(tipped.get(gid, 0), self.cfg))
@@ -401,6 +442,7 @@ class Party:
                             if dbl:
                                 self.grant(ad, dbl, 'tip_bonus', 'tips')
                             self.c['tips'] += 1
+                            self._ev('tip', g=gid, to=ad.gid, amt=amt, bonus=dbl)
             if ci in (2, 3) and not skipped:
                 _, back = self.etas()
                 price = self.skip_price(s, back)
@@ -437,12 +479,18 @@ class Party:
                         self.c['skip_host'] += 1
                     self.skip_paid.append(price)
                     skipped = True
+                    self._ev('skip', price=price, payers=[g.gid for g, _a in bought],
+                             of=s.adder if s.adder >= 0 else None)
             for g in self.guests:
                 if self.present(g):
                     self.act(g)
+            self._frame()
             if skipped:
                 break
         self.voters.append(nvotes)
+        if self.record and self.songs_log:
+            self.songs_log[-1].update(ups=s.ups, downs=s.downs,
+                                      skipped=round(self.t, 2) if skipped else None)
         self.t = start + (cps[last] if skipped else 1.0) * s.dur
 
     def act(self, g: Guest):
@@ -463,6 +511,7 @@ class Party:
                 g.jail_min += self.t - g.jailed_t
                 self.c['jail_out'] += 1
                 self.dirty()
+                self._ev('jail_out', g=g.gid, fee=p.jail_fee)
             else:
                 return
         waiting = [s for s in self.queue if s.adder == g.gid]
@@ -482,6 +531,7 @@ class Party:
             price = self.add_price(wait, dur, ready)
             if wait > p.party_min - self.t:
                 self.c['refused_late'] += 1
+                self._ev('too_late', g=g.gid, wait=round(wait, 1))
                 g.next_wish = self.t + 10
                 g.wish_since = -1
                 return
@@ -507,6 +557,7 @@ class Party:
                 if g.first_add_t < 0:
                     g.first_add_t = self.t
                 self.c['adds'] += 1
+                self._ev('add', g=g.gid, price=price, wait=round(wait, 1), rnd=rnd)
                 g.wish_waits.append(self.t - g.wish_since)
                 g.wish_since = -1
                 g.next_wish = self.t + rng.exponential(g.wish_every)
@@ -528,6 +579,7 @@ class Party:
                 self.spent['next'] += price
                 self.c['next'] += 1
                 self.next_paid.append(price)
+                self._ev('next', g=g.gid, price=price, jump=round(etas[i], 1))
                 self.queue.remove(s)
                 self.queue.insert(self.queue.index(live[0]), s)
                 s.nexted = True
@@ -546,6 +598,7 @@ class Party:
                 g.spent_other += price
                 self.spent['bump_up'] += price
                 self.c['bump_up'] += 1
+                self._ev('bump_up', g=g.gid, price=price)
                 j, k = self.queue.index(s), self.queue.index(live[i - 1])
                 self.queue[j], self.queue[k] = self.queue[k], self.queue[j]
                 self.dirty()
@@ -561,6 +614,7 @@ class Party:
                 g.spent_other += price
                 self.spent['bump_down'] += price
                 self.c['bump_down'] += 1
+                self._ev('bump_down', g=g.gid, price=price, of=s.adder if s.adder >= 0 else None)
                 j, k = self.queue.index(s), self.queue.index(live[i + 1])
                 self.queue[j], self.queue[k] = self.queue[k], self.queue[j]
                 s.pushed_back += 1
@@ -675,6 +729,12 @@ SHARED = ("start_credits", "topup_every_min", "topup_cap", "vote_reward", "adder
           "chip_in", "max_waiting", "fair_order")
 
 
+def plan_preset(n: int) -> str:
+    """The plan's preset for a party of `n` (report §3.5; services/jukebox/
+    show.PRESETS carries the same three)."""
+    return "small" if n <= 8 else "medium" if n <= 16 else "large"
+
+
 def program(n: int) -> dict:
     """The plan's jukebox share by party size (D3; report §3.5)."""
     if n <= 8:
@@ -690,3 +750,132 @@ def params_for(n: int, cfg: EconomyConfig | None = None) -> Params:
     rules = {k: getattr(cfg, k) for k in SHARED}
     rules["skip_down_mult"] = economy.skip_down_mult(cfg)
     return replace(Params(), economy=cfg, **rules, **program(n))
+
+
+# ── the master view's party simulator (phase 3 PR 3.4) ───────────────────────
+
+GUESTS_MIN, GUESTS_MAX = 2, 40
+NIGHTS_MIN, NIGHTS_MAX = 1, 40
+
+
+def _clean(v):
+    """JSON-safe: a NaN (a measure with nothing to measure) is None."""
+    if isinstance(v, float):
+        return None if math.isnan(v) else round(v, 4)
+    if isinstance(v, dict):
+        return {k: _clean(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_clean(x) for x in v]
+    return v
+
+
+def program_mix(mode: str, every: int, run: int, n: int) -> tuple[dict, str]:
+    """His program as the simulator's slot pattern, and how to say it. A
+    Manual program's slots sit after particular songs of his playlist,
+    which a model night does not have, so it plays the plan's mix for the
+    party size instead — and says so."""
+    if mode == "jukebox_first":
+        return dict(set_per_slot=0, juke_per_slot=1), "jukebox first; the set fills any gap"
+    if mode == "auto":
+        sets = "every set song" if every == 1 else f"every {every} set songs"
+        juke = "a jukebox song" if run == 1 else f"{run} jukebox songs"
+        return dict(set_per_slot=every, juke_per_slot=run), f"{juke} after {sets}"
+    mix = program(n)
+    _, plan_words = program_mix("auto" if mix["set_per_slot"] else "jukebox_first",
+                                max(1, mix["set_per_slot"]), mix["juke_per_slot"], n)
+    return mix, (f"your program is Manual (slots placed after particular songs), which a model "
+                 f"night has no playlist for — this night uses the plan's mix for {n} guests: "
+                 f"{plan_words}")
+
+
+def night_params(n: int, cfg: EconomyConfig, mix: dict) -> Params:
+    """A night at `n` guests under `cfg`, with the given slot pattern. The
+    night is the model's four hours: its arrivals and early leavers are
+    timed for that length, so it is not a setting."""
+    return replace(params_for(n, cfg), **mix)
+
+
+def _guest_kind(g: Guest) -> str:
+    if g.p_vote >= 0.45:
+        return "regular"
+    if g.p_vote < 0.15:
+        return "quiet"
+    return "middle"
+
+
+def recording(party: Party, summary: dict) -> dict:
+    """One recorded night as the page plays it back."""
+    end = party.p.party_min
+    guests = [dict(id=g.gid, kind=_guest_kind(g), arrive=round(g.arrive, 1),
+                   leave=round(min(g.leave, end), 1), played=g.played_n, added=g.songs_added,
+                   earned=int(sum(g.earned.values())), spent=int(g.spent_add + g.spent_other),
+                   tips_given=g.tips_given, jails=g.jail_count, end_credits=int(round(g.credits)))
+              for g in party.guests]
+    return _clean(dict(minutes=end, last_call=end - party.p.last_call_min, guests=guests,
+                       songs=party.songs_log, frames=party.frames, events=party.events,
+                       summary=summary))
+
+
+# What the page compares, his settings against the tuned ones — the plan's
+# §3.2 rows, in its words.
+ROWS = (
+    ("got_played", "Got at least one song (of those who asked)", "share"),
+    ("juke_played", "Guest songs played in the night", "count"),
+    ("first_song_wait_all", "First song, from arriving (median)", "min"),
+    ("add_price_median", "Add price when they want one (median)", "credits"),
+    ("price_mid", "Price at the back of the line, mid-party", "credits"),
+    ("afford_rate", "Can afford it right away (all requests)", "share"),
+    ("afford_empty", "… with nothing already in line", "share"),
+    ("wait_to_play_median", "Add to play (median)", "min"),
+    ("back_wait_p90", "Back of the line, p90", "min"),
+    ("skips_hr", "Skips an hour", "rate"),
+    ("nexts_hr", "Play next an hour", "rate"),
+    ("tips_hr", "Tips an hour", "rate"),
+    ("jails", "Jails a night", "count"),
+    ("songs_per_lurk", "Songs per quiet guest", "count"),
+    ("held_mid_per_guest", "Credits held per guest, mid-party", "credits"),
+    ("unspent_share", "Credits unspent at the end", "share"),
+    ("refused_late", "Turned away as too late (a night)", "count"),
+)
+
+# The promises the plan's tuning keeps at every party size (§3.1, §3.4,
+# §3.6) — what a change of settings should not break.
+CHECKS = (
+    ("got_played", "Everyone who asks gets a song", lambda v: v >= 0.995, "100%"),
+    ("wait_to_play_median", "Median wait to play, 30 min or less", lambda v: v <= 30.5, "≤ 30 min"),
+    ("back_wait_p90", "Back of the line, 75 min or less (p90)", lambda v: v <= 75.5, "≤ 75 min"),
+    ("songs_per_lurk", "Quiet guests get a song", lambda v: v >= 1.0, "≥ 1 song"),
+    ("skips_hr", "Skips stay under two an hour", lambda v: v < 2.0, "< 2 an hour"),
+)
+
+
+def simulate(guests: int, cfg: EconomyConfig, *, mode: str = "auto", every: int = 1,
+             run: int = 1, seed: int = 1, nights: int = 20) -> dict:
+    """One party night under his settings, recorded for the page, plus the
+    average of `nights` nights (the watched night is the first of them)
+    under his settings AND under the tuned defaults, on the same guests,
+    seeds and program — so a change he made shows as a difference."""
+    if not GUESTS_MIN <= guests <= GUESTS_MAX:
+        raise ValueError(f"guests must be {GUESTS_MIN}-{GUESTS_MAX}")
+    if not NIGHTS_MIN <= nights <= NIGHTS_MAX:
+        raise ValueError(f"nights must be {NIGHTS_MIN}-{NIGHTS_MAX}")
+    mix, words = program_mix(mode, every, run, guests)
+    yours = night_params(guests, cfg, mix)
+    party = Party(guests, yours, seed * 100003, record=True)
+    night = recording(party, party.run())
+    avg = run_many(guests, yours, seeds=nights, base_seed=seed)
+    tuned_cfg = EconomyConfig()
+    same = cfg == tuned_cfg
+    tuned = avg if same else run_many(guests, night_params(guests, tuned_cfg, mix),
+                                      seeds=nights, base_seed=seed)
+    rows = [dict(key=k, label=label, unit=unit, yours=_clean(avg.get(k)), tuned=_clean(tuned.get(k)))
+            for k, label, unit in ROWS]
+    checks = []
+    for k, label, ok, target in CHECKS:
+        v = avg.get(k)
+        known = isinstance(v, (int, float)) and not math.isnan(v)
+        checks.append(dict(key=k, label=label, target=target, value=_clean(v) if known else None,
+                           ok=bool(ok(v)) if known else None))
+    return dict(guests=guests, nights=nights, seed=seed, program=words, mix=mix,
+                plan_preset=plan_preset(guests), mix_is_plans=mix == program(guests),
+                same_as_tuned=same, night=night, rows=rows, checks=checks)
