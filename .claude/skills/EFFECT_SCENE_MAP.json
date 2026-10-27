@@ -122,7 +122,9 @@
         "scripts/check_fish_help_topics.mjs",
         "tests/test_fish_wake_blend.py",
         "scripts/check_fish_tail_drive.py",
-        "tests/test_fish_tail_drive.py"
+        "tests/test_fish_tail_drive.py",
+        "scripts/check_fish_pond_rest.py",
+        "tests/test_fish_pond_rest.py"
       ]
     },
     "melt-effect": {
@@ -253,7 +255,8 @@
         "scripts/add_fish_swim_burst_flare.py",
         "scripts/add_fish_big_fish_flare.py",
         "scripts/set_fish_drop_shock_off.py",
-        "scripts/set_fish_tail_drive.py"
+        "scripts/set_fish_tail_drive.py",
+        "scripts/set_fish_pond_rest.py"
       ]
     },
     "sauron-scene": {

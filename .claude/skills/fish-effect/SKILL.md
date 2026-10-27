@@ -6,8 +6,9 @@ description: >
   bands/kinds but with completely different kinematics. Load before
   touching swim speed, avoidance, the camera window, wake/trail rendering,
   dispersal, the lull's searching keeper / the intensity-scaled drop, the
-  swim-burst flare or the big-fish flare — every one of these has a shipped
-  invariant that isn't visible from reading the code cold.
+  swim-burst flare, the big-fish flare, the tail drive or the pond rest —
+  every one of these has a shipped invariant that isn't visible from
+  reading the code cold.
 ---
 
 # Fish
@@ -68,7 +69,7 @@ binding statement (`fx/VENDOR.md` #84); what is not visible cold:
   cruise). The ordinary target never asks for less than cruise, so in
   ordinary music the tail strokes continuously and the visible change is
   the speed rising and falling with each stroke, the tail moving first
-  at a beat. The pond rest (the plan's PR 3) is what will ask for less.
+  at a beat. The pond rest (below) is what asks for less.
 - **The QUICK MOMENTS stay quick** (`TAIL_STIFF_MAX`'s block). The swim
   burst, a solo burst and a big-fish flee each shorten the old speed ease
   (`BURST_SPEED_TAU`, `SOLO_SPEED_TAU`, `BIG_FLEE_TAU`); the water's own
@@ -90,6 +91,94 @@ binding statement (`fx/VENDOR.md` #84); what is not visible cold:
 - **Registered first guesses**: `glide_drag` (d + l, 1.6/s; cruise is held
   at any value) and `glide_below` (0.75); help topic `fish-tail-drive`.
   On for the music Fish scene only (the fish-scene skill's script).
+
+## THE POND REST (2026-10-26) — they almost stop when the music goes
+   quiet; `quiet_rest = 0` is the old motion bit for bit
+
+His ask: "at really low music levels, like when it's almost or completely
+quiet, the fish should almost come to a rest, with very sporadic short
+motions, like real fish in a pond"; the plan he approved: "a quiet pond
+rest with occasional darts", music Fish only, "'quiet' means the music's
+own level". The module's POND REST block is the binding statement
+(`fx/VENDOR.md` #85); what is not visible cold:
+
+- **It hears `volume()`, never the band powers.** The melbank auto-gains
+  (it divides by a slow max), so `lows_power` reads a quiet passage as
+  loud within ~2 s. `volume()` is 1 + dB SPL / 100 (`fx/effects/audio.py`
+  `pre_process_audio`, filtered at alpha 0.99) and is CLIPPED to [0, 1] on
+  read: a fresh analysis filter starts at -90 dB, so a fresh process's
+  first read is -0.9. His house volume (`snap_volume`) never reaches the
+  capture client, so it does not calm them.
+- **The detector is `rest_step`, a module function** (the library check
+  runs the same one): a slow average (1.2 s) the rest ENTERS on, a fast one
+  (0.12 s) that can only WAKE it, a smoothstep from `rest_calm_level` 0.66
+  (-34 dB) to `rest_full_level` 0.52 (-48 dB), in over 2.2 s, out over
+  0.15 s. No callback for `REST_SILENCE_S` (1 s) reads 0: the audio hub's
+  own pause. An effect that has NEVER heard anything reads loud (0.8), so
+  a stub with no `volume()` (every older check's) never rests.
+- **The startle**: a spike strong enough to lunge cuts the level by its
+  own size in the same frame, and the lunge's share of the target is never
+  scaled (`target / (1 + lunge) * (keep + lunge)`), so the next song's
+  first hit is a full burst (above 2x cruise 0.13-0.18 s after Dopamine's
+  opening hit, measured).
+- **A MOMENT's share is never rested either**: `_pond_rest_step` runs
+  AFTER the big-fish flee, the swim burst and the solo dash have multiplied
+  the target (`ordinary` is captured before them) and rests only the
+  ordinary share (`ordinary / (1 + lunge) * (keep + lunge) + (target -
+  ordinary)`); the brake skips a fish a moment drives too. Run before them,
+  the rest squashed a swim burst at full rest to a 0.05 cruise-second dash
+  (now 0.55; awake 0.81) and left resting fish in the big fish's path (219
+  and 158 frames of a middle on it, now 0) — `check_fish_pond_rest.py` §4
+  keeps that old rule as its red control. **A new speed moment must
+  multiply the target BETWEEN the capture and the call**, or the rest will
+  squash it.
+- **The beat TRACKER's ticks are scaled by (1 - rest).** `bpm_beat_now()`
+  predicts ticks with no drums at all; without the gate a drumless quiet
+  passage twitches to the tempo grid. A real onset arrives through the
+  impulse spike, which is never gated.
+- **With the tail drive** the fins brake (`REST_BRAKE`), except on a fish
+  a dart is pushing (`_dart_thrust`), and the low effort bursts and glides.
+- **The darts**: `p_dart` is the push clock (> 0 pushing; it runs on BELOW
+  0 through the glide while the turn continues, and is reset to 0 when
+  the steer lets go), `p_dhd` the heading (NaN = no dart), `p_dnext` the
+  next due time (effect clock). **A dart begins where `p_dart` turns
+  POSITIVE** — a detector keyed on "it rose" double-counts every reset
+  from below 0 (found building the check). A dart turns only as far as it
+  travels (`omega_max = speed / turn_radius_px`), so the steer stays on
+  through the glide until the fish faces the dart's heading (`DART_FACE`)
+  or `DART_STEER_S` passes: measured a 0.28 s push to 0.68x cruise, 0.78
+  body lengths, 38 degrees median against aims of 29-115. Do not get more
+  turn by turning tighter — the turn radius is the shipped arc invariant;
+  a dart aimed into the wall turns away from its aim, the wall winning.
+- **Their own generator**: `self._rng.spawn(1)[0]`, made on the first
+  dart step. A spawned child never draws from or advances the shared
+  stream, and a seeded test reproduces the darts; in the room
+  (`default_rng()`) each instance darts its own way.
+- **Never during a moment** (`_rest_held`): a charge, lull or drop, a
+  formed school, a rush (any mode 3), or a live crossfade on either side
+  (`particle_handoff.transition_progress`) or a transition program running
+  into it. Held = level 0 and every dart ends (`_end_darts`). The
+  held-transition draw paths (`_fade_only`, `_draw_collapse`) zero
+  `_rest_level` too, since nothing swims there.
+- **The escape hatch is structural**: at 0, `_pond_rest_step` is never
+  entered and `volume()` is never read; `scripts/check_fish_pond_rest.py`
+  §1 proves frames AND kinematics bit for bit against the pinned
+  `REST_BASELINE_REF` over both real-audio arcs at `tail_drive` 0 and 1,
+  fed deep quiet. **A proof comparing fish motion against a pinned
+  pre-change module, with an audio stub that HAS `volume()`, must hold
+  `quiet_rest = 0`.** Switching it off live forgets the level and any dart
+  in flight (`config_updated`; the arrays do not exist yet during
+  `super().__init__`, hence its `hasattr`).
+- **His library** (`tests/fixtures/fish_swim/library_volume.npz`, 126 of
+  his songs' `volume()` per frame, re-recorded by the check's
+  `--write-fixtures`): at rest 0.58% of song time, inside the music in 2
+  songs (quiet stretches of Efecto and Hey Nineteen). The between-songs
+  fixtures (Contra's outro, Dopamine's opening) carry `vol` beside the
+  lows and beats; record one song per interpreter.
+- **Registered first guesses**: `quiet_rest` (0..1), `rest_calm_level`,
+  `rest_full_level`, `dart_every_s` (mean, 9 s); help topic
+  `fish-pond-rest`. On for the music Fish scene only (the fish-scene
+  skill's script); House Fish would rest almost all the time.
 
 ## The "Fish Swim Burst" flare kind ships at `trigger_offset_ms = 0` —
    his own ruling, and per-kind timing has since made a pre-fire SAFE
@@ -622,6 +711,8 @@ Sonic-reachable once it is registered there.
 arcs, with `test_fish_wake_blend.py`),
 `check_fish_help_topics.mjs` (every help topic a fish param links is a
 real `helpContent.ts` entry, not a substring match),
+`check_fish_pond_rest.py` (the pond rest's acceptance list on his real
+audio and library, with `test_fish_pond_rest.py`),
 `check_fish_tail_drive.py` (the tail drive's acceptance list, with
 `test_fish_tail_drive.py` — its own guards section re-runs
 `check_fish_disperse.py`'s searching-lull dispersal measurement at

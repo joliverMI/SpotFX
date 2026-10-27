@@ -2540,3 +2540,41 @@ against that commit.
     `tests/fixtures/fish_swim/`. On for the music Fish scene only via
     `scripts/set_fish_tail_drive.py` (a deploy step). Unverified against
     his live room.
+85. `effects/fish.py` (SpotFX-authored, #21): THE POND REST (2026-10-26;
+    his ask, "at really low music levels, like when it's almost or
+    completely quiet, the fish should almost come to a rest, with very
+    sporadic short motions, like real fish in a pond", and the plan he
+    approved, "a quiet pond rest with occasional darts", music Fish only,
+    "'quiet' means the music's own level"; `/home/javi/fleet-spotfx/data/
+    fish-swim-plan/report.md`, part 2b). A new registered `quiet_rest`
+    (0..1, default 0) with `rest_calm_level` (0.66), `rest_full_level`
+    (0.52) and `dart_every_s` (9), and three SoA arrays (`p_dart`, `p_dhd`,
+    `p_dnext`). `audio_data_updated` records `volume()` (the absolute
+    level, clipped to [0, 1]) and when; `rest_step` (a module function the
+    library check shares) turns it into a rest level (a slow average
+    enters, a fast one only wakes, no callback for 1 s is silence); a
+    strong spike cuts it at once. At rest an ordinary swimmer's target
+    falls to 3% of cruise (the lunge's share never scaled, nor a flee's,
+    the swim burst's or a solo dash's: the rest runs after them), the tail
+    drive's fins brake, the beat tracker's ticks are scaled by (1 - rest),
+    and each fish keeps a dart clock on its own generator (spawned from the
+    effect's, never drawn from it). Held at 0 through a charge, lull, drop, formed
+    school, rush or crossfade. `quiet_rest = 0` enters none of it and never
+    reads `volume()`: kinematics and frames byte-identical to the pinned
+    pre-change module over two real-audio arcs at `tail_drive` 0 and 1.
+    Measured on his crystal with his real audio (Contra's outro, 5 s of
+    silence, Dopamine's opening; three seeds): through the fade's end and
+    the gap 0.16-0.21x cruise (before: 1.01-1.02x), above 2x cruise 0.13-
+    0.18 s after Dopamine's first hit, peaking 3.6-4.9x, the music before
+    the fade unchanged; over 90 s of quiet a dart every 8.4 s per fish
+    (never under 3 s), a 0.28 s push to 0.68x cruise, 0.78 body lengths,
+    turning 38 degrees, resting at 0.02x between; a swim burst at full rest
+    dashes 0.55 cruise-seconds (awake 0.81; resting its share too: 0.05) and
+    a big fish finds no resting fish's middle on it (resting the flee too:
+    219 and 158 frames); the tracker's 16 ticks in a drumless quiet passage
+    lunge none (control: 16); 0.58% of song time at rest across 126 of his
+    captured songs, inside the music in 2.
+    Evidence: `scripts/check_fish_pond_rest.py` +
+    `tests/test_fish_pond_rest.py`, `tests/fixtures/fish_swim/`. On for the
+    music Fish scene only via `scripts/set_fish_pond_rest.py` (a deploy
+    step). Unverified against his live room.

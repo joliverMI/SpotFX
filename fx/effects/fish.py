@@ -475,6 +475,65 @@ TAIL_BEAT_ON = 0.05             # ... and above this the fish strokes
 # on its trigger instead of waiting for the next mid-sweep. A beat does not
 # shorten the ease, so a beat is the tail drive's own response.
 TAIL_STIFF_MAX = 12.0           # the most a moment may quicken it
+
+# ── THE POND REST (2026-10-26, data/fish-swim-plan part 2) ────────────────
+# His ask: "at really low music levels, like when it's almost or completely
+# quiet, the fish should almost come to a rest, with very sporadic short
+# motions, like real fish in a pond"; the plan he approved: "a quiet pond
+# rest with occasional darts", for the music Fish scene only, "'quiet' means
+# the music's own level".
+#
+# THE QUIET DETECTOR (`rest_step`, shared with the library check) reads
+# `volume()`: 1 + dB SPL / 100, the ABSOLUTE level. The band powers the fish
+# otherwise react to are auto-gained (the melbank divides by a slow max), so
+# they read a quiet passage as loud within ~2 s. A slow average (REST_SLOW_S)
+# is what the rest ENTERS on and a fast one (REST_FAST_S) can only wake it;
+# calm starts at `rest_calm_level` and is full rest at `rest_full_level`
+# (smoothstep between); the level eases in over REST_IN_S and out over
+# REST_OUT_S. No audio callback for REST_SILENCE_S is silence (the audio
+# hub's own pause); an effect that has never heard anything reads as loud. A
+# strong hit (the lunge's own spike) cuts the level by its size at once: the
+# startle.
+#
+# AT REST an ordinary swimmer's target falls toward REST_SPEED_X of cruise,
+# but the beat's own share (the lunge) is never scaled, so the first hit
+# after quiet is a full burst, and nor is a moment's (a flee from the big
+# fish, the swim burst, a solo dash): the rest is applied after them, to the
+# ordinary share only. With the tail drive on, the fins brake (REST_BRAKE
+# extra linear drag at full rest, never on a fish a dart or a moment drives)
+# and the low effort bursts and glides. Each resting fish keeps a dart clock (mean `dart_every_s`, never
+# sooner than DART_MIN_S after its last): a dart is about DART_S of DART_X
+# effort with the brake off, toward a heading DART_TURN radians either way.
+# A turn needs path (the turn radius caps the rate), so the turn carries on
+# through the glide until the fish faces that heading (DART_FACE) or
+# DART_STEER_S has passed; then it glides back to rest.
+# The beat TRACKER's predicted ticks are scaled by (1 - rest), so a drumless
+# quiet passage stops twitching to the tempo grid; a real onset still
+# bursts.
+#
+# SCOPE: ordinary swimmers, and never during a charge, lull or drop, while a
+# school is formed or a rush is running, or during a crossfade on either side
+# of this effect (a transition program included): the level is held at 0 and
+# every dart ends. `quiet_rest` 0 is the motion before it, bit for bit: none
+# of it runs and `volume()` is never read. Between 0 and 1 the rest is that
+# share of full. The darts draw from their OWN generator, spawned from the
+# effect's: the shared stream is never drawn from.
+REST_SLOW_S = 1.2       # the average the rest enters on ...
+REST_FAST_S = 0.12      # ... and the one that can only wake it
+REST_SILENCE_S = 1.0    # this long with no audio callback is silence
+REST_UNHEARD = 0.8      # what an effect that never heard anything reads
+REST_IN_S = 2.2         # the rest eases in over this ...
+REST_OUT_S = 0.15       # ... and out this fast
+REST_SPEED_X = 0.03     # the target at full rest, x cruise
+REST_BRAKE = 1.2        # extra linear drag at full rest (tail drive), /s
+REST_DART_AT = 0.5      # a fish this rested keeps a dart clock
+DART_MIN_S = 3.0        # never sooner than this after its last dart
+DART_X = 1.6            # a dart's effort, x cruise ...
+DART_S = 0.3            # ... for about this long (x 0.6-1.4) ...
+DART_TURN = (0.5, 2.0)  # ... turning this many radians, either way
+DART_W = 6.0            # the steer toward a dart's heading ...
+DART_FACE = 0.15        # ... which lets go once it faces it (rad) ...
+DART_STEER_S = 1.0      # ... or this long into the glide after the push
 ACCEL_TAU = 0.18        # acceleration smoothing
 TURN_GAIN = 3.0         # 1/s: desired turn rate per radian of heading
                         # error, BEFORE the turn-rate clamp. Frame-rate
@@ -1203,6 +1262,26 @@ def _hue_clip(layer, cap=255.0):
     )
 
 
+def rest_quiet(level, calm, full):
+    """How quiet one volume reading is for THE POND REST: 0 at or above
+    `calm`, 1 at or below `full`, a smoothstep between."""
+    z = min(max((calm - level) / max(calm - full, 1e-6), 0.0), 1.0)
+    return z * z * (3.0 - 2.0 * z)
+
+
+def rest_step(state, volume, dt, calm, full):
+    """One frame of THE POND REST's quiet detector: `state` is (slow
+    average, fast average, rest level); returns the next one. The effect and
+    scripts/check_fish_pond_rest.py's library check run this same step."""
+    slow, fast, level = state
+    slow += (volume - slow) * min(1.0, dt / REST_SLOW_S)
+    fast += (volume - fast) * min(1.0, dt / REST_FAST_S)
+    target = min(rest_quiet(slow, calm, full), rest_quiet(fast, calm, full))
+    tau = REST_IN_S if target > level else REST_OUT_S
+    level += (target - level) * min(1.0, dt / tau)
+    return slow, fast, level
+
+
 # Every per-fish SoA array, in one place so compaction and the particle
 # handoff native snapshot can never drift out of sync with each other.
 _SOA_NAMES = (
@@ -1224,6 +1303,10 @@ _SOA_NAMES = (
     # whether it is stroking, the flap phase that stroke began at, and the
     # beat envelope
     "p_tamp", "p_tf", "p_tst", "p_tph0", "p_tkick",
+    # the pond rest (the POND REST block): a dart's clock (> 0 its push,
+    # below 0 the turn through its glide), its heading (NaN = none), and
+    # when that fish's next dart is due
+    "p_dart", "p_dhd", "p_dnext",
 )
 
 
@@ -1731,6 +1814,43 @@ class Fish2d(Twod, GradientEffect):
                 ),
                 default=0.75,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.5)),
+            # 2026-10-26, the plan he approved: "a quiet pond rest with
+            # occasional darts" (the POND REST block at the top of this
+            # module)
+            vol.Optional(
+                "quiet_rest",
+                description=(
+                    "Pond rest: how far the fish come to rest when the "
+                    "music is almost or completely quiet (0 = never, the "
+                    "motion before 2026-10-26 exactly; 1 = almost still, "
+                    "with an occasional short dart)"
+                ),
+                default=0.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            vol.Optional(
+                "rest_calm_level",
+                description=(
+                    "Pond rest: the music level (volume, 1 + dB/100) below "
+                    "which the fish start to calm"
+                ),
+                default=0.66,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            vol.Optional(
+                "rest_full_level",
+                description=(
+                    "Pond rest: the music level at and below which they are "
+                    "fully at rest"
+                ),
+                default=0.52,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            vol.Optional(
+                "dart_every_s",
+                description=(
+                    "Pond rest: the average seconds between one resting "
+                    "fish's darts (never sooner than 3 s)"
+                ),
+                default=9.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=3.5, max=120.0)),
             vol.Optional(
                 "ripple_amount",
                 description="Wake strength: how much smear a fish lays down",
@@ -2099,6 +2219,20 @@ class Fish2d(Twod, GradientEffect):
         self.p_tst = np.ones(CAP, dtype=np.float32)
         self.p_tph0 = np.zeros(CAP, dtype=np.float32)
         self.p_tkick = np.zeros(CAP, dtype=np.float32)
+        # THE POND REST: the quiet detector's state (slow, fast, level), the
+        # level in use this frame, the last volume heard and when, the darts
+        # (clock, heading, next due), their own generator, and this frame's
+        # steering and pushing masks
+        self._rest = None
+        self._rest_level = 0.0
+        self._rest_vol = None
+        self._rest_heard = None
+        self.p_dart = np.zeros(CAP, dtype=np.float32)
+        self.p_dhd = np.full(CAP, np.nan, dtype=np.float32)
+        self.p_dnext = np.zeros(CAP, dtype=np.float32)
+        self._dart_rng = None
+        self._darting = None
+        self._rest_free = None
         self._prog_birth_snap = None
         self._prog_birth_pids = None
         self._prog_birth_token = None
@@ -2207,6 +2341,20 @@ class Fish2d(Twod, GradientEffect):
         self.tail_drive = self._config["tail_drive"]
         self.glide_drag = self._config["glide_drag"]
         self.glide_below = self._config["glide_below"]
+        self.quiet_rest = self._config["quiet_rest"]
+        self.rest_calm_level = self._config["rest_calm_level"]
+        self.rest_full_level = self._config["rest_full_level"]
+        self.dart_every_s = self._config["dart_every_s"]
+        if self.quiet_rest <= 0.0:
+            # switched off: forget the level and any dart in flight, so
+            # nothing reads a stale one (the arrays exist once __init__ has)
+            self._rest = None
+            self._rest_level = 0.0
+            self._darting = self._rest_free = None
+            if hasattr(self, "p_dart"):
+                self.p_dart[:] = 0.0
+                self.p_dhd[:] = np.nan
+                self.p_dnext[:] = 0.0
         self.ripple_amount = self._config["ripple_amount"]
         self.ripple_spread = self._config["ripple_spread"]
         self.ripple_life = self._config["ripple_life"]
@@ -2293,6 +2441,16 @@ class Fish2d(Twod, GradientEffect):
         self.slow = float(slow) if np.isfinite(slow) else 0.0
         if data.bpm_beat_now():
             self._beat_pending = True
+        if self.quiet_rest > 0.0:
+            # THE POND REST hears the absolute level, and when it last did
+            # (clipped: a fresh analysis filter starts at -90 dB)
+            try:
+                level = float(data.volume())
+            except Exception:
+                return
+            if np.isfinite(level):
+                self._rest_vol = min(max(level, 0.0), 1.0)
+                self._rest_heard = self.t
 
     def do_once(self):
         super().do_once()
@@ -2450,6 +2608,9 @@ class Fish2d(Twod, GradientEffect):
         self.p_tst[s] = 1.0
         self.p_tph0[s] = self.p_flap[s]
         self.p_tkick[s] = 0.0
+        self.p_dart[s] = 0.0
+        self.p_dhd[s] = np.nan
+        self.p_dnext[s] = 0.0
         self.p_wurg[s] = 0.0
         self.p_wcmd[s] = 0.0
         self.p_wauth[s] = 0.0
@@ -3718,6 +3879,130 @@ class Fish2d(Twod, GradientEffect):
                 fire_event=False,
             )
 
+    def _pond_rest_step(self, n, dt, eligible, ordinary, target, cruise,
+                        spike, jump_eff):
+        """THE POND REST (the block of that name at the top of the module):
+        update the quiet level, startle it on a strong hit, then ask the
+        ordinary swimmers for less and run their darts. `ordinary` and
+        `target` are the (speed ease's, tail drive's) targets before and
+        after this frame's moments (a flee, a burst, a solo dash). Returns
+        the two targets to use: the ordinary share rested, every moment's
+        share kept whole and a dart's push raised, for eligible fish only."""
+        want, want_tail = target
+        vol = self._rest_vol if self._rest_vol is not None else REST_UNHEARD
+        if (self._rest_heard is not None
+                and self.t - self._rest_heard > REST_SILENCE_S):
+            vol = 0.0
+        state = self._rest if self._rest is not None else (vol, vol, 0.0)
+        slow, fast, level = rest_step(
+            state, vol, dt, self.rest_calm_level, self.rest_full_level
+        )
+        # the startle: a strong hit cuts the rest by its own size at once
+        if spike >= LUNGE_SPIKE_MIN and jump_eff > 0.0:
+            level *= 1.0 - min(float(spike), 1.0)
+        if self._rest_held(n):
+            level = 0.0
+        self._rest = (slow, fast, level)
+        rest = level * float(self.quiet_rest)
+        self._rest_level = rest
+        self._darting = self._rest_free = None
+        if rest <= 0.0:
+            # awake, or held: no dart flies, and the clocks start again when
+            # the rest comes back
+            if np.isfinite(self.p_dhd[:n]).any() or self.p_dnext[:n].any():
+                self._end_darts(n)
+            return want, want_tail
+        thrust, steer = self._dart_step(n, dt, eligible, rest)
+        self._darting = steer
+        lunge = self.p_lun[:n]
+        keep = 1.0 - rest * (1.0 - REST_SPEED_X)
+        # the fins never brake a fish a dart pushes or a moment drives
+        free = eligible & (want > ordinary[0])
+        if thrust is not None:
+            free |= thrust
+        self._rest_free = free if free.any() else None
+
+        def asked(base, moved):
+            # the beat's own share (the lunge) and a moment's are never
+            # scaled: only the ordinary swimming comes to rest
+            rested = base / (1.0 + lunge) * (keep + lunge) + (moved - base)
+            if thrust is not None:
+                rested = np.where(thrust, np.maximum(rested, cruise * DART_X),
+                                  rested)
+            return np.where(eligible, rested, moved)
+        want = asked(ordinary[0], want)
+        if want_tail is not None:
+            want_tail = asked(ordinary[1], want_tail)
+        return want, want_tail
+
+    def _rest_held(self, n):
+        """THE POND REST is held at 0: a charge, lull or drop, a formed
+        school, a rush, or a crossfade on either side of this effect (a
+        transition program running into it included)."""
+        return (
+            self._phase != "none"
+            or self._school_on
+            or bool((self.p_mode[:n] == 3).any())
+            or getattr(self, "_transition_program", None) is not None
+            or particle_handoff.transition_progress(self._virtual) is not None
+        )
+
+    def _end_darts(self, n):
+        """No dart in flight, and every dart clock unset."""
+        self.p_dart[:n] = 0.0
+        self.p_dhd[:n] = np.nan
+        self.p_dnext[:n] = 0.0
+
+    def _dart_step(self, n, dt, eligible, rest):
+        """The resting fish's dart clocks (THE POND REST's block), on the
+        darts' own generator. Returns (thrusting, steering): the fish a dart
+        pushes this frame, and the fish still turning toward their dart's
+        heading — each None when there are none."""
+        if self._dart_rng is None:
+            # spawned, never drawn from: the shared stream is untouched and
+            # a seeded effect darts the same way every run
+            self._dart_rng = self._rng.spawn(1)[0]
+        rng = self._dart_rng
+        flying = np.isfinite(self.p_dhd[:n])
+        if flying.any():
+            # the push runs its own few tenths of a second (`p_dart` > 0);
+            # the turn carries on through the glide (`p_dart` <= 0) until the
+            # fish faces the dart's heading or DART_STEER_S has passed
+            self.p_dart[:n] = np.where(flying, self.p_dart[:n] - dt, 0.0)
+            off = np.abs(_wrap_pi(
+                self.p_hd[:n] - np.nan_to_num(self.p_dhd[:n])))
+            done = flying & (self.p_dart[:n] <= 0.0) & (
+                (off < DART_FACE) | (self.p_dart[:n] <= -DART_STEER_S))
+            if done.any():
+                self.p_dart[:n][done] = 0.0
+                self.p_dhd[:n][done] = np.nan
+        due_at = self.p_dnext[:n]
+        extra = max(float(self.dart_every_s) - DART_MIN_S, 0.1)
+        resting = eligible & (rest > REST_DART_AT)
+        if resting.any():
+            unset = resting & (due_at <= 0.0)
+            if unset.any():
+                due_at[unset] = self.t + DART_MIN_S + rng.exponential(
+                    extra, int(unset.sum()))
+            due = resting & (self.t >= due_at) & ~np.isfinite(
+                self.p_dhd[:n])
+            if due.any():
+                idx = np.flatnonzero(due)
+                self.p_dart[idx] = DART_S * rng.uniform(0.6, 1.4, idx.size)
+                lo, hi = DART_TURN
+                turn = rng.uniform(lo, hi, idx.size) * rng.choice(
+                    [-1.0, 1.0], idx.size)
+                self.p_dhd[idx] = (self.p_hd[idx] + turn).astype(np.float32)
+                due_at[idx] = self.t + DART_MIN_S + rng.exponential(
+                    extra, idx.size)
+        else:
+            # too awake to dart: the clocks start again when it rests
+            due_at[eligible] = 0.0
+        thrusting = eligible & (self.p_dart[:n] > 0.0)
+        steering = eligible & np.isfinite(self.p_dhd[:n])
+        return (thrusting if thrusting.any() else None,
+                steering if steering.any() else None)
+
     def _decay_tail_kick(self, n, dt):
         """The beat envelope decays every frame tail_drive is on, whether or
         not any fish is eligible to stroke from it this frame — a kick
@@ -3815,6 +4100,15 @@ class Fish2d(Twod, GradientEffect):
             ),
             1.0,
         )
+        if self._rest_level > 0.0:
+            # THE POND REST: the fins brake, except on a fish a dart pushes
+            # or a moment drives
+            brake = REST_BRAKE * self._rest_level
+            free = self._rest_free
+            if free is not None and free.size == n:
+                lin = lin + np.where(free[idx], 0.0, brake)
+            else:
+                lin = lin + brake
         v = (v + stiff * thrust * dt) / (
             1.0 + stiff * (quad * np.abs(v) + lin) * dt
         )
@@ -4476,6 +4770,8 @@ class Fish2d(Twod, GradientEffect):
         radial's bloom lands identically whichever of the two it replaces."""
         col = self._collapse
         n = self.n
+        self._rest_level = 0.0      # nothing swims here, so nothing rests
+        self._darting = self._rest_free = None
         frac = particle_handoff.transition_progress(self._virtual)
         if frac is not None:
             s_ = float(np.clip(
@@ -5355,7 +5651,12 @@ class Fish2d(Twod, GradientEffect):
             self.p_trail_acc[ni] = 0.0
 
         if beat_now and self._phase != "charge":
-            spike = max(spike, 0.4 + 0.5 * impulse)
+            hit = 0.4 + 0.5 * impulse
+            if self._rest_level > 0.0:
+                # THE POND REST: the tracker's predicted ticks do not lunge a
+                # resting fish (a real onset still does, through the spike)
+                hit *= 1.0 - self._rest_level
+            spike = max(spike, hit)
             self._beat_pending = False
 
         self.roll_total = (self.roll_total + self.gradient_spin * dt) % 1.0
@@ -5485,6 +5786,10 @@ class Fish2d(Twod, GradientEffect):
             # would resume ordinary swimming after the drop still above
             # TAIL_BEAT_ON and force an extra stroke
             self._decay_tail_kick(n, dt)
+        if self.quiet_rest > 0.0:
+            # THE POND REST rests this ORDINARY target; the moments below (a
+            # flee, a burst, a solo dash) keep their own share whole
+            ordinary = (want, want_tail)
         # The ease is per fish (the pulse split makes `tau` an array even
         # for ordinary swimming). At stroke_speed_cap=0 (with
         # min_drift_speed at its max of 1) `want` above is `want_full`
@@ -5530,6 +5835,11 @@ class Fish2d(Twod, GradientEffect):
             )
         if self._burst_tail > 0.0:
             tau = np.minimum(tau, BURST_SPEED_TAU)
+        if self.quiet_rest > 0.0:
+            want, want_tail = self._pond_rest_step(
+                n, dt, pulse_eligible, ordinary, (want, want_tail), cruise,
+                spike, jump_eff,
+            )
         # ejecta hold whatever they left with
         prev = self.p_spd[:n].copy()
         if np.ndim(tau):
@@ -5887,6 +6197,12 @@ class Fish2d(Twod, GradientEffect):
                 off_px / max(KEEP_LEVEL_SPAN * self.r_height, 1e-3),
                 -1.0, 1.0)
 
+        darting = self._darting
+        if darting is not None and darting.size == n:
+            # THE POND REST: a darting fish turns toward its dart's heading
+            aim = np.nan_to_num(self.p_dhd[:n])
+            desired_x += np.where(darting, np.cos(aim) * DART_W, 0.0)
+            desired_y += np.where(darting, np.sin(aim) * DART_W, 0.0)
         desired = np.arctan2(desired_y, desired_x)
         d_hd = _wrap_pi(desired - hd)
 
@@ -6378,6 +6694,8 @@ class Fish2d(Twod, GradientEffect):
         frozen smear on the panel for the whole hold."""
         half_life = 0.02 + self.trail_decay * 0.5
         self.trail *= np.float32(0.5 ** (dt / half_life))
+        self._rest_level = 0.0      # nothing swims here, so nothing rests
+        self._darting = self._rest_free = None
         # An empty panel is exactly when the lull's last two thirds run, so
         # the window still has to ease home and the clock still has to run.
         self._step_camera(dt, self.cruise_px)

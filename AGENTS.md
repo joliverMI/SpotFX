@@ -9370,6 +9370,20 @@ A new Matrix effect + a Fish scene that is a WHOLESALE COPY of his Orbits V2
      (`scripts/set_fish_tail_drive.py`, a deploy step). Proof:
      `scripts/check_fish_tail_drive.py`; the fish-effect skill has the
      rest.
+   * **THE POND REST (2026-10-26)** (`quiet_rest`, the module's POND REST
+     block, his "the fish should almost come to a rest, with very sporadic
+     short motions, like real fish in a pond"): it hears `volume()`, the
+     ABSOLUTE level (the band powers are auto-gained and read a quiet
+     passage as loud within ~2 s), and is held at 0 through every charge,
+     lull, drop, school, rush and crossfade. It rests only the ORDINARY
+     share of the speed target, after the flee / swim burst / solo dash
+     have multiplied it, so a new speed moment must multiply in before
+     `_pond_rest_step` or the rest squashes it. `quiet_rest = 0` runs none of
+     it and never reads `volume()`; a proof comparing against a pinned
+     pre-change fish with an audio stub that HAS `volume()` must hold it at
+     0. Only the music Fish turns it on (`scripts/set_fish_pond_rest.py`,
+     a deploy step). Proof: `scripts/check_fish_pond_rest.py`; the
+     fish-effect skill has the rest.
    * **THE WAKE NOW SITS UNDER THE SCHOOL DURING A CHARGE OR LULL — a
      visible change he did not ask for, shipped with this branch.** The
      wake buffer is SCREEN space, and the old deposit

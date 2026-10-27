@@ -104,25 +104,29 @@ SEED = 7
 
 
 # ── the fixtures: the fish's own audio inputs, per frame ────────────────
-async def _record(stem, shapes_dir):
+async def _record(stem, shapes_dir, volume=False):
     """The WHOLE WAV through the real analysis (HubMelbankSource: resampler,
     phase vocoder, melbank with its auto-gain, aubio's tempo tracker),
     reading per accepted 60 fps frame exactly what the fish reads: its lows
     power and `bpm_beat_now()`, each once (the tempo tracker is stateful,
-    so a second read would be a second frame of audio)."""
+    so a second read would be a second frame of audio), and with `volume`
+    the absolute `volume()` the pond rest hears (a plain read). Returns
+    (lows, beats) or (lows, beats, volumes)."""
     import soundfile as sf
 
     from fx.audio_ingest import HubMelbankSource
 
     td = tempfile.mkdtemp()
     host = await headless.start_headless_host(str(Path(td) / "fx"))
-    lows, beats = [], []
+    lows, beats, vols = [], [], []
     try:
         src = HubMelbankSource(host)
 
         def cb():
             lows.append(src.lows_power())
             beats.append(bool(src.bpm_beat_now()))
+            if volume:
+                vols.append(src.volume())
 
         src.subscribe(cb)
         pcm, sr = sf.read(os.path.join(shapes_dir, stem + ".wav"),
@@ -135,7 +139,10 @@ async def _record(stem, shapes_dir):
             src.ingest(pcm[s:s + 512])
     finally:
         await host.shutdown()
-    return np.array(lows, dtype=np.float32), np.array(beats, dtype=bool)
+    out = (np.array(lows, dtype=np.float32), np.array(beats, dtype=bool))
+    if volume:
+        out += (np.array(vols, dtype=np.float32),)
+    return out
 
 
 def record_one(arc, shapes_dir):
@@ -226,10 +233,11 @@ _RUN = [0]
 
 
 async def run_arc(arc, effect_type="fish", extra=None, on_attach=None,
-                  spy=None):
+                  spy=None, audio=None):
     """Render one arc; return the assembled frames (n, 2664, 3) float32.
     `on_attach(effect)` runs once it exists, `spy(effect)` just before the
-    room closes."""
+    room closes. `audio` replaces the audio stub (its lows and beat are set
+    per frame; anything else it answers is its own)."""
     spec = ARCS[arc]
     lows, beats = load_fixture(arc)
     _RUN[0] += 1
@@ -251,7 +259,7 @@ async def run_arc(arc, effect_type="fish", extra=None, on_attach=None,
         eff._rng = np.random.default_rng(SEED)
         if on_attach is not None:
             on_attach(eff)
-        audio = _Audio()
+        audio = audio if audio is not None else _Audio()
         sched = {int(t * 60): (ph, dur) for t, ph, dur in spec["phases"]}
         pokes = {int(t * 60): p for t, p in spec["pokes"]}
         ramp = None
