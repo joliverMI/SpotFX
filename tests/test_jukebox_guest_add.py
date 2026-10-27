@@ -37,7 +37,8 @@ class Catalog:
     """Spotify's search, for the tests: every jukebox song of the world, and
     a few the world can't play. Counts its calls."""
 
-    def __init__(self, w: World, explicit: set[str] = frozenset()) -> None:
+    def __init__(self, w: World, explicit: set[str] = frozenset(),
+                 track_delay_s: float = 0.0) -> None:
         self.w = w
         self.calls: list[str] = []
         self.songs = {jb_uri(i): {"uri": jb_uri(i), "title": f"J{i} Song", "artist": "Band",
@@ -47,6 +48,7 @@ class Catalog:
                       for i in range(12)}
         self.fail = False
         self.delay = 0.0
+        self.track_delay_s = track_delay_s
 
     def search(self, q, limit=10, offset=0):
         self.calls.append(f"search:{q}:{offset}")
@@ -63,6 +65,11 @@ class Catalog:
 
     def track(self, uri):
         self.calls.append("track")
+        if self.track_delay_s:
+            # a slow Spotify lookup: real time (the fake clock) passes before
+            # the caller gets the metadata back, with nothing else about the
+            # night having moved on
+            self.w.clock.t += self.track_delay_s
         return dict(self.songs[uri]) if uri in self.songs else None
 
 
@@ -219,6 +226,28 @@ def test_a_song_that_would_start_after_the_night_ends_is_turned_away():
         # Cy's would start ~22 min in (after S2): past the end
         before = list(_waiting_titles(w))
         code, out = await g.add(cy, jb_uri(2))
+        assert (code, out["reason"]) == (409, "too_late")
+        assert _waiting_titles(w) == before                # nothing was added
+    _run(go())
+
+
+def test_a_slow_track_lookup_does_not_let_a_too_late_song_through():
+    async def go():
+        # S0 is playing, 2 s in: 298 s left of it, so the song (which would
+        # start the instant S0 ends) starts in 298 s. The night ends with
+        # 318 s of budget left at the moment `add` is first called — plenty
+        # of room — but the Spotify `track()` lookup takes 25 s, so by the
+        # time the real end-of-night deadline is checked only 293 s of
+        # budget are left: less than the 298 s the song needs.
+        w = await _night(set_s=300, jb_s=200, every=1)
+        cat = Catalog(w, track_delay_s=25.0)       # a slow Spotify `track()` call
+        g = _setup(w, cat, show=ShowConfig(night_ends=_hhmm(w, 6), last_call_min=0))
+        cy = await _phone(g)
+        before = list(_waiting_titles(w))
+        code, out = await g.add(cy, jb_uri(0))
+        # with a fresh (post-lookup) clock the song would start after the
+        # night ends, and must be refused even though the budget captured
+        # BEFORE the lookup still had it fitting comfortably
         assert (code, out["reason"]) == (409, "too_late")
         assert _waiting_titles(w) == before                # nothing was added
     _run(go())

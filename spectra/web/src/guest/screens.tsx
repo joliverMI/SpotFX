@@ -194,7 +194,7 @@ export function AddScreen({ view, onAdded }: {
   const rest = results.filter((r) => !r.library);
   const row = (r: SearchResult) => {
     const inLine = r.in_line || added.has(r.uri);
-    const why = inLine ? 'Already in line.' : r.why_not;
+    const why = r.why_not;
     return (
       <li key={r.uri} className="g-row g-result">
         <Art song={{ ...r, kind: 'jukebox', by: { kind: 'other', name: '' }, mine: false }} size="small" />

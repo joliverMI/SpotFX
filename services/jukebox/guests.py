@@ -781,8 +781,9 @@ class Guests:
                               image=meta.get("image") or "", thumb=meta.get("thumb") or "",
                               explicit=bool(meta.get("explicit")), known=bool(known),
                               added_ms=now_ms, added_by=phone, round=played + len(mine) + 1)
+            fresh_now_ms = self.deps.now_ms()
             out = await self.deps.runner().add_entry(entry, fair=show.economy.fair_order,
-                                                     latest_start_ms=reqs["ends_at_ms"] - now_ms)
+                                                     latest_start_ms=reqs["ends_at_ms"] - fresh_now_ms)
             if out.get("status") != "added":
                 if out.get("reason") == "too_late":
                     return refusal("too_late", 409)
