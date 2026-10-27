@@ -8,7 +8,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { spotfxGet, spotfxPost, spotfxPut } from '../api/client';
 import type {
-  JukeboxPreview, JukeboxStatus, PriceCheck, ProgramConfig, SetMoveResult, ShowRead, SimResult,
+  JukeboxPreview, JukeboxStatus, NightReport, PriceCheck, ProgramConfig, SetMoveResult, ShowRead,
+  SimResult,
 } from './types';
 
 export const JUKEBOX_KEYS = {
@@ -137,5 +138,19 @@ export interface SimulateRequest {
 export function useSimulate() {
   return useMutation({
     mutationFn: (req: SimulateRequest) => spotfxPost<SimResult>('/jukebox/simulate', { nights: 20, ...req }),
+  });
+}
+
+// ── the post-party report ───────────────────────────────────────────────────
+
+/** The latest night's report; with a party size the model's nights come
+ * alongside (a simulation server-side, so it is fetched on demand). */
+export function useJukeboxReport(enabled: boolean, guests: number | null, nightId: string | null) {
+  return useQuery({
+    queryKey: ['jukebox-report', nightId, guests],
+    queryFn: () => spotfxGet<NightReport>(`/jukebox/report${guests ? `?guests=${guests}` : ''}`),
+    enabled,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 }

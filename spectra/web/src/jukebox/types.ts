@@ -283,3 +283,52 @@ export interface SimResult {
   rows: SimRow[];
   checks: SimCheck[];
 }
+
+// ── the post-party report (services/jukebox/night_report.py) ─────────────────
+
+export interface ReportNight {
+  id: string;
+  state: 'running' | 'ended' | 'refused';
+  playlist: string | null;
+  started_ms: number | null;
+  ended_ms: number | null;
+  end_reason: string | null;
+  end_detail: string | null;
+  hours: number | null;
+  played: { set: number; jukebox: number; skipped: number; foreign: number };
+  jukebox_share: number | null;
+  songs_per_hour: number | null;
+  line: { added: number; by_host: number; by_guests: number; played: number; removed: number;
+    skipped: number; playing_at_end: number; waiting_at_end: number };
+  add_to_play_median_min: number | null;
+  warnings_at_end: string[];
+}
+
+export interface ReportCredits {
+  phones: number;
+  minted: number;
+  held_at_end: number;
+  unspent_share: number | null;
+  adds: number;
+}
+
+export interface ReportRow {
+  key: string;
+  label: string;
+  unit: SimUnit;
+  this_night: number | null;
+  why: string | null;
+  yours?: number | null;      // the model's nights (comparison rows only)
+}
+
+export interface NightReport {
+  status: 'ok' | 'none';
+  summary: string;
+  night?: ReportNight;
+  credits?: ReportCredits | null;
+  integrity?: string[] | null;
+  rows?: ReportRow[];
+  comparison?: { guests: number; nights: number; program: string; rows: ReportRow[] } | null;
+  guests?: number | null;
+  guests_from?: 'you' | 'the ledger' | null;
+}

@@ -1204,6 +1204,12 @@ async def simulate_jukebox_party(guests: int = 20, program: _JukeboxSimProgramEn
 
 
 @mcp.tool()
+async def jukebox_night_report(guests: Optional[int] = None) -> dict:
+    """How the latest Jukebox night went, beside the model's nights."""
+    return await _call("jukebox_night_report", guests=guests)
+
+
+@mcp.tool()
 async def set_jukebox_setting(key: str, value: Union[bool, int, float, str],
                               confirm_id: Optional[str] = None) -> dict:
     """Change one Jukebox setting (the first call asks; pass its

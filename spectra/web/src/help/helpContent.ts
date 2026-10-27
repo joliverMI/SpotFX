@@ -2326,7 +2326,7 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'Jukebox — the set list with jukebox slots',
     keywords: 'jukebox set list party playlist slots queue guests spotify program',
     intro:
-      'The Jukebox (Engine ▾ Jukebox, /jukebox) plays your set playlist as Spotify\'s own context, in order, and puts jukebox slots between set songs. Spotify never sees a slot: about 45 seconds before the song in front of a slot ends, the top waiting jukebox song is sent into Spotify\'s queue and the queue is read back to confirm it is next; after it, the set carries on where it was. Only that one sent song is locked in place — everything still waiting can be moved or removed. This page is the master view: the Set list tab edits the program, the Live tab shows a running night (read-only), the Credits tab holds the party-size presets, the price check and every credits setting, and the Simulate tab plays a model party night so you can watch the credits work before a party. The guest page comes in a later phase. Sonic can do most of this by voice from the 💬 button on this page — it asks before it changes anything.',
+      'The Jukebox (Engine ▾ Jukebox, /jukebox) plays your set playlist as Spotify\'s own context, in order, and puts jukebox slots between set songs. Spotify never sees a slot: about 45 seconds before the song in front of a slot ends, the top waiting jukebox song is sent into Spotify\'s queue and the queue is read back to confirm it is next; after it, the set carries on where it was. Only that one sent song is locked in place — everything still waiting can be moved or removed. This page is the master view: the Set list tab edits the program, the Live tab shows a running night (read-only) and the latest night\'s report, the Credits tab holds the party-size presets, the price check and every credits setting, and the Simulate tab plays a model party night so you can watch the credits work before a party. The guest page comes in a later phase. Sonic can do most of this by voice from the 💬 button on this page — it asks before it changes anything.',
     entries: [
       {
         id: 'jukebox-set-list',
@@ -2358,6 +2358,16 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Read-only. It shows whether a night is running and since when, the song playing (a set song, a jukebox song, or something off the set — the Jukebox then waits until the set plays again), the next 20 program items with when each starts, and the jukebox line.',
           '"Sent to Spotify" marks the one song already in Spotify\'s queue. If it is removed, it is skipped the moment it starts and the next waiting song takes its slot.',
           'A night never starts while the house is sleeping (or while that can\'t be read), ends if sleeping comes on, and never runs while Absorb Music has a window open. In this phase a night is started for the daytime test; the guest page and the host\'s own controls come later.',
+        ],
+      },
+      {
+        id: 'jukebox-report',
+        title: 'The night\'s report',
+        keywords: 'report post-party after the party night measured ledger credits compare model bands real numbers next party',
+        body: [
+          'The Live tab ends with the latest night\'s report (or the night so far, while one runs): how long it ran, the set and jukebox songs played, what was skipped, the jukebox\'s share, songs an hour, the songs added to the line and what became of them, and the median wait from adding a song to hearing it.',
+          'Once guests use credits (the guest page is a later phase), it adds the night\'s credits from its ledger — guests, credits made, what was still held at the end, songs bought — and checks the ledger against its own rules, naming any entry that breaks one. Pick a party size (or, after a guest night, the number of guests who used credits) to set each measure beside the party simulator\'s nights at that size, under your saved settings and program, so the next party starts from real numbers rather than the model.',
+          'A measure this night couldn\'t take shows "–" with the reason on hover — "no guest credits were used", or "this night\'s records don\'t hold it yet" (jail is not in the ledger, for one) — never a zero. The report reads only; nothing is changed by opening it.',
         ],
       },
       {
@@ -2468,7 +2478,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         title: 'Sonic on the Jukebox page: the night, the settings, the simulator',
         keywords: 'sonic jukebox chat popup pop-up start the jukebox stop the night is the jukebox on what is playing line credits setting price preset small medium large simulate party confirm yes',
         body: [
-          'The Jukebox page has the same floating 💬 button, scoped to the Jukebox. Ask it "is the jukebox on?", "what\'s playing?", "how much is a skip with 20 people?", "what are the jukebox settings?", "make the add price start at 5", "use the large preset", "simulate a party of 25", "start the jukebox", or "stop the night".',
+          'The Jukebox page has the same floating 💬 button, scoped to the Jukebox. Ask it "is the jukebox on?", "what\'s playing?", "how did last night go?", "how much is a skip with 20 people?", "what are the jukebox settings?", "make the add price start at 5", "use the large preset", "simulate a party of 25", "start the jukebox", or "stop the night".',
           'It ASKS FIRST before every change — a setting, a preset, starting a night and stopping one — and nothing happens until you say yes. A yes covers exactly the question as it was asked: if a setting changed in between, or (for a stop) a different night is running, it asks again, and a question left unanswered expires after five minutes. A setting is checked by SpotFX before you are asked, so a value outside its range is refused with its reason and you are never asked about a change that would not be made.',
           'It goes through the very same routes as this page, so a start through Sonic is the same Start, refused for the same reasons — no set playlist linked, the house asleep, Absorb running, Spotify failing — and it tells you the reason in the page\'s own words. A night it starts is recorded as started by Sonic. The simulator through Sonic is the same model nights as the Simulate tab, reported as numbers; to watch one, use the tab.',
           'Some things stay on this page: linking the set playlist and placing Manual slots (the editor shows the set song by song), reordering the set playlist (it rewrites your playlist in Spotify), and the jukebox line. There are no guests or credits to give yet — that arrives with the guest page.',

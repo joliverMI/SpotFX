@@ -11051,6 +11051,17 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   (`tests/test_jukebox_guest_link.py::FakeTailscale`, his own Serve on
   :443 included). The party token lives through a night (it is on the
   printed cards) and is replaced when a night that used the link ends.
+- **THE POST-PARTY REPORT (a skeleton)**: `services/jukebox/night_report.py`
+  (`GET /api/jukebox/report`, the Live tab's last card, Sonic's
+  `jukebox_night_report`) measures the latest night from what it records —
+  what played, the line, and its credits ledger when guests used one — with
+  each measure keyed by `simulator.ROWS`, so it sits beside the model's
+  nights at the party size (the ledger's phones, or `?guests=`). A measure
+  the night can't take is None WITH its reason (`why`), never a 0; the
+  ledger's own `verify()` rides along. It reads only. A test fixture that
+  builds a `Ledger` must pass `persist=False` (or run under conftest's
+  isolation) — the default persists to `storage/jukebox_ledger/` and
+  replays on the next open.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his program settings, one validator:

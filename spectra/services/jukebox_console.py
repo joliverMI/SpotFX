@@ -348,6 +348,21 @@ async def _op_simulate_jukebox_party(guests: int = 20, program: str = "saved",
                     "rules under his saved settings; nothing reached Spotify or the room"}
 
 
+async def _op_jukebox_night_report(guests: Optional[int] = None) -> dict:
+    params = {"guests": int(guests)} if guests else None
+    r, err = await _request("GET", "/api/jukebox/report", params=params, timeout=SIMULATE_TIMEOUT_S)
+    if err:
+        return err
+    if r.get("status") != "ok":
+        return {"status": "ok", "summary": r.get("summary") or "No night has been played yet."}
+    cmp_rows = (r.get("comparison") or {}).get("rows") or []
+    return {"status": "ok", "summary": r.get("summary"), "night": r.get("night"),
+            "credits": r.get("credits"), "ledger_problems": r.get("integrity") or [],
+            "guests": r.get("guests"), "guests_from": r.get("guests_from"),
+            "rows": [{k: x.get(k) for k in ("key", "label", "unit", "this_night", "yours", "why")}
+                     for x in (cmp_rows or r.get("rows") or [])]}
+
+
 # ── writes (every one asks first) ────────────────────────────────────────────
 
 async def _op_set_jukebox_setting(key: str, value: Any, confirm_id: Optional[str] = None) -> dict:
@@ -555,6 +570,21 @@ OPERATIONS: dict[str, SonicOperation] = {
                           "seed": {"type": "integer", "minimum": 1, "maximum": 1000000, "default": 1}},
                       "additionalProperties": False},
         handler=_op_simulate_jukebox_party),
+    "jukebox_night_report": SonicOperation(
+        name="jukebox_night_report", domain="jukebox", kind="read",
+        summary="How the latest Jukebox night went: what played, the line, the credits, and "
+                "each measure beside the model's nights at the party size.",
+        instructions=(
+            _INSTR_COMMON
+            + "Use for 'how did last night go?'. `summary` is the sentence to say. Without "
+            "guests the party size comes from the night's ledger (the guests who used credits); "
+            "pass guests to compare at another size. A row whose this_night is null was not "
+            "measured — say why (its `why`), never call it zero. `ledger_problems` must be read "
+            "to him when present."),
+        input_schema={"type": "object",
+                      "properties": {"guests": {"type": "integer", "minimum": 2, "maximum": 40}},
+                      "additionalProperties": False},
+        handler=_op_jukebox_night_report),
     "set_jukebox_setting": SonicOperation(
         name="set_jukebox_setting", domain="jukebox", kind="write",
         summary="Change one Jukebox setting — a program setting, phone approval or one credits "

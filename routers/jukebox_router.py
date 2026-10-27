@@ -43,6 +43,13 @@ process on its own port (phase 2) and never reaches these routes.
   POST   /api/jukebox/guest-link/self-test  the plan alone while closed (no
                                       Tailscale call); Funnel's own status and
                                       the public address while live
+  GET    /api/jukebox/report          the post-party report of the latest night
+                                      (services/jukebox/night_report.py): what
+                                      it played, its line, its credits ledger
+                                      when guests used one, and — with a party
+                                      size (`?guests=`, else the ledger's
+                                      phones) — each measure beside the model's
+                                      nights at that size. Reads only
   POST   /api/jukebox/simulate        {guests, nights, seed, program:
                                       "saved"|"preset"} — the party simulator:
                                       one model night under the SAVED economy,
@@ -70,13 +77,13 @@ Absorb's convention.
 from __future__ import annotations
 
 import asyncio
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
 from models.jukebox import ProgramConfig
-from services.jukebox import guest_link, night, show, simulator, store
+from services.jukebox import guest_link, night, night_report, show, simulator, store
 from services.jukebox.night import sentence
 
 router = APIRouter(prefix="/api/jukebox", tags=["jukebox"])
@@ -302,3 +309,31 @@ async def post_guest_link_rotate() -> dict:
 @router.post("/guest-link/self-test")
 async def post_guest_link_self_test() -> dict:
     return await guest_link.controller.self_test()
+
+
+# ── the post-party report (PR 3.3's report, a skeleton) ─────────────────────
+
+def build_report(guests: Optional[int], nights: int, now_ms: int) -> dict:
+    runner = night.runner
+    runner._ensure_loaded()
+    n = runner.night
+    show_cfg = store.load_show()
+    program_cfg = store.load_config()
+    entries, verify = night_report.load_entries(n.id if n else "", show_cfg.economy)
+    out = night_report.build(n, entries, show_cfg.economy, now_ms=now_ms, guests=guests,
+                             mode=program_cfg.mode, every=program_cfg.every,
+                             run=program_cfg.run, nights=nights, verify=verify)
+    return {"program_from": "your saved program and credits settings", **out}
+
+
+@router.get("/report")
+async def get_report(guests: Optional[int] = None, nights: int = 20) -> dict:
+    if guests is not None and not simulator.GUESTS_MIN <= guests <= simulator.GUESTS_MAX:
+        raise HTTPException(status_code=422, detail=f"guests must be "
+                            f"{simulator.GUESTS_MIN}-{simulator.GUESTS_MAX}")
+    nights = max(simulator.NIGHTS_MIN, min(int(nights), simulator.NIGHTS_MAX))
+    if _simulating.locked():
+        raise HTTPException(status_code=409, detail="a simulation is already running")
+    import time as _time
+    async with _simulating:
+        return await asyncio.to_thread(build_report, guests, nights, int(_time.time() * 1000))

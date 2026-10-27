@@ -223,6 +223,24 @@ const NIGHT = {
   ok(S.pointAt(pts, 6).t === 5, 'the hover reads the point at or before the pointer');
 }
 
+// ── 1d. the night's report words ──────────────────────────────────────────
+console.log('\n§1d jukeboxReport.ts — the report in words, "–" never 0');
+const REP = JSON.parse(readFileSync(join(web, 'harness/jukeboxReportSnapshot.json'), 'utf8'));
+{
+  const RW = await bundle(`export * from ${JSON.stringify(join(web, 'src/jukebox/jukeboxReport.ts'))};`, 'report');
+  const facts = Object.fromEntries(RW.nightFacts(REP.night).map((f) => [f.label, f.value]));
+  ok(facts['Jukebox songs played'] === '3' && facts['Set songs played'] === '4' && facts['Length'] === '2 h',
+    `the night's facts read the server's numbers (${JSON.stringify(facts)})`);
+  ok(facts['Add to play (median)'] === '30 min', 'the add-to-play median in minutes');
+  ok(facts['Removed / playing / still waiting'] === '1 / 0 / 1', 'removed, still-playing and still-waiting counts');
+  const credits = Object.fromEntries(RW.creditFacts(REP.credits).map((f) => [f.label, f.value]));
+  ok(credits['Held at the end'] === '8 (30%)' && credits['Guests who used credits'] === '3', 'the credits in words');
+  const jail = REP.comparison.rows.find((r) => r.key === 'jails');
+  const c = RW.compareCells(jail);
+  ok(c.night === '–' && c.why && c.model !== '–', 'a measure the night could not take is "–" with its reason, beside the model');
+  ok(RW.endLine({ ...REP.night, state: 'running' }).startsWith('Still running'), 'a running night is a report so far');
+}
+
 // ── 2. the page, mounted ──────────────────────────────────────────────────
 let jsdomMod;
 try {
@@ -316,6 +334,7 @@ globalThis.fetch = async (url, init = {}) => {
   }
   if (u.startsWith('/api/jukebox/price-check')) return json(PC);
   if (u.startsWith('/api/jukebox/simulate')) return json(SIM);
+  if (u.startsWith('/api/jukebox/report')) return json(REP);
   if (u.startsWith('/api/jukebox/status')) return json(statusOf());
   if (u.startsWith('/api/jukebox/preview')) {
     return json({ status: 'ok', playlist_name: 'Saturday set', set_songs: SET.length, set: SET,
@@ -423,6 +442,14 @@ console.log('\n§2 the editor, mounted — every click PUTs the slots the rule s
   ok(text($(c, '[data-testid="jukebox-live-card"]')).includes('Shuffle is on')
     && !text($(c, '[data-testid="jukebox-live-card"]')).includes('runs out by'),
   'the night\'s own warning shows on Live; the sign-in line is not shown twice');
+  ok(text($(c, '[data-testid="jukebox-report-summary"]')) === REP.summary, 'the night\'s report closes the Live tab');
+  ok(c.querySelectorAll('[data-testid="jukebox-report-compare"] .jukebox-sim-tr:not(.head)').length === REP.comparison.rows.length,
+    'a guest night sits beside the model\'s nights, row for row');
+  const sizeSel = c.querySelector('select[aria-label="Compare with a party of"]');
+  P.actSync(() => { sizeSel.value = '8'; sizeSel.dispatchEvent(new dom.window.Event('change', { bubbles: true })); });
+  await P.settle();
+  ok(world.requests.some((r) => r.method === 'GET' && r.url === '/api/jukebox/report?guests=8'),
+    'picking a party size asks for the report at that size');
   const live = c.querySelector('[data-testid="jukebox-live-card"]')?.parentElement;
   for (const b of live ? [...live.querySelectorAll('button')] : []) await click(b);
   ok(writes().length === before, 'nothing on the Live tab writes — it is read-only');
@@ -502,7 +529,8 @@ console.log('\n§2c the Simulate tab, mounted — run a night, play it back, com
 console.log('\n§3 help — every topic is real and reachable from the page');
 {
   const topics = ['jukebox', 'jukebox-set-list', 'jukebox-slots', 'jukebox-live', 'jukebox-sign-in',
-    'jukebox-credits', 'jukebox-presets', 'jukebox-price-check', 'jukebox-simulator', 'sonic-jukebox'];
+    'jukebox-credits', 'jukebox-presets', 'jukebox-price-check', 'jukebox-simulator', 'sonic-jukebox',
+    'jukebox-report'];
   const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
   const knownIds = new Set();
   for (const section of HELP_SECTIONS) {
@@ -551,7 +579,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     if (id && id !== 'sonic-scene-backups') reached.add(id);
   }
   ok(topics.every((id) => reached.has(id)) && reached.size === topics.length,
-    `the page's own controls and its 💬 Sonic open exactly the ten jukebox topics (${[...reached].sort().join(', ')})`);
+    `the page's own controls and its 💬 Sonic open exactly the eleven jukebox topics (${[...reached].sort().join(', ')})`);
   P.unmount();
 }
 
