@@ -19,7 +19,7 @@ import { BUILDER_LAYERS } from './canvas/layers';
 import IconToggle from '../components/IconToggle';
 import { AnalysedGlyph, DropSeqGlyph, LightShowGlyph } from '../home/markerGlyphs';
 import { BEAT_STRIP_H, snapRailHFor, stripCountFor, type IntensityBgMode, type LayerDataBag, type ViewState } from './canvas/frame';
-import { DEFAULT_BEAT_MS, PHASE_COLOR, buildDisplay, zoomWindow, type Handle } from './dropSequences';
+import { DEFAULT_BEAT_MS, PHASE_COLOR, buildDisplay, zoomWindow, type SeqHandle } from './dropSequences';
 import DropSequenceStrip from './components/DropSequenceStrip';
 import DropSequencesCard from './components/DropSequencesCard';
 import DropSeqToolbar from './components/DropSeqToolbar';
@@ -292,7 +292,7 @@ export default function BuilderPage() {
   const { data: dropResp, isLoading: dropLoading, error: dropError } = useDropSequences(uri);
   const { data: dropRails } = useDropRails(uri, showDropSeqs);
   const [dropSel, setDropSel] = useState<string | null>(null);
-  const [dropHover, setDropHover] = useState<{ key: string; handle: Handle } | null>(null);
+  const [dropHover, setDropHover] = useState<{ key: string; handle: SeqHandle } | null>(null);
   useEffect(() => { setDropSel(null); setDropHover(null); }, [uri]);
   const analysedApplies = analysedPlan ? analysedPlan.applies : true;
   const dropSeqs = useMemo(

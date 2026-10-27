@@ -254,7 +254,7 @@ def test_a_dragged_handle_wins_and_the_others_stay_automatic():
     s = _only(_view())
     assert s["state"] == "edited"
     assert (s["charge_ms"], s["lull_ms"], s["drop_ms"]) == (35_000, 41_000, 44_000)
-    assert s["moved"] == {"charge": False, "lull": True, "drop": False}
+    assert s["moved"] == {"charge": False, "lull": True, "drop": False, "pre_drop": False}
     _set_detected([(44_100, 39_000, 36_000)])      # re-analysis moves the automatic ones
     s = _only(_view())
     assert s["lull_ms"] == 41_000                  # his time always wins

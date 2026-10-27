@@ -24,11 +24,23 @@
  *
  * TESTING (RoomControlState.drop_testing): while it is on, the drop that
  * just played is moved to the top and highlighted (`justPlayed`) — for a
- * quick tap — until the next one plays. */
+ * quick tap — until the next one plays.
+ *
+ * THE PRE-DROP (predrop plan step 4) is the fourth part: its button wears
+ * its KIND's glyph (a spike, or a vocal intro) in the pre-drop's orange and
+ * the same four looks; its state comes from the server (`parts.pre_drop`,
+ * or a row of his own's `pre_drop.part` — the pre-drop of his own drop is
+ * stored in the drop store, never his song profile, so its tap asks
+ * nothing first). A waiting pre-drop is something waiting for him: it
+ * counts in the title and lights the double tick, his own rows included.
+ * Nothing plays from a pre-drop yet; its words say so. The in-place
+ * editor's pre-drop handle snaps to the rail of its kind — a spike to the
+ * hits (`DropRails.hits`), a vocal intro to the entries — and stays inside
+ * its kind's lead range (`snapPreDrop` / `stepPreDrop` / `clampPreDrop`). */
 import type {
-  DropSequencesResponse, DropSequenceView, PartKey, PartView, YoursRow,
+  DropSequencesResponse, DropSequenceView, PartKey, PartView, PreDropKind, YoursRow,
 } from '../timeline/dropSequences';
-import { PARTS, PHASE_COLOR } from '../timeline/dropSequences';
+import { PARTS, PHASE_COLOR, PRE_DROP_COLOR } from '../timeline/dropSequences';
 import type { LastDrop } from '../types';
 
 export type RowKind = 'detected' | 'added' | 'yours';
@@ -68,6 +80,15 @@ export interface PanelRow {
   canApprove: boolean;
   /** Testing is on and this drop is the one that just played */
   justPlayed: boolean;
+  /** THE PRE-DROP: where it plays (null when none or switched off), its
+   * kind (kept while off, for its glyph), where an off one comes back,
+   * where the detector (or, on his own drop, the rules) put it, and
+   * whether he placed it himself */
+  preDropMs: number | null;
+  preDropKind: PreDropKind | null;
+  preDropWas: number | null;
+  preDropAuto: number | null;
+  preDropMoved: boolean;
   view: DropSequenceView | null;
   yours: YoursRow | null;
 }
@@ -76,9 +97,18 @@ export const PART_LABEL: Record<PartKey, string> = {
   charge: 'Charge', lull: 'Lull', pre_drop: 'Pre-drop', drop: 'Drop',
 };
 
-/** The colours are the Timeline's own (dropSequences.ts PHASE_COLOR, read,
- * never re-typed) plus the pre-drop's orange (the approved plan's colour rec). */
-export const PART_COLOR: Record<PartKey, string> = { ...PHASE_COLOR, pre_drop: '#fb923c' };
+/** The colours are the Timeline's own (dropSequences.ts PHASE_COLOR and
+ * PRE_DROP_COLOR, read, never re-typed). */
+export const PART_COLOR: Record<PartKey, string> = { ...PHASE_COLOR, pre_drop: PRE_DROP_COLOR };
+
+/** A pre-drop's kind, in words. */
+export const PRE_DROP_KIND_WORD: Record<PreDropKind, string> = {
+  spike: 'a spike', intro: 'a vocal intro',
+};
+
+/** What a pre-drop's tooltip adds while no pre-drop plays in the room yet
+ * (drop_firing.PRE_DROPS_PLAY: the engine that plays them is a later step). */
+export const PRE_DROPS_DO_NOT_PLAY = 'pre-drops do not play in the room yet';
 
 /** What a tap on a part does: waiting → on, on → off, off → on. */
 export function nextPartState(s: PartView): 'on' | 'off' | null {
@@ -88,10 +118,18 @@ export function nextPartState(s: PartView): 'on' | 'off' | null {
 }
 
 /** A part button's words: its tooltip, and its aria-label. */
-export function partTitle(row: Pick<PanelRow, 'kind'>, part: PartKey, state: PartView,
-  provenance?: TriggerProvenance | null): string {
+export function partTitle(row: Pick<PanelRow, 'kind'> & Partial<Pick<PanelRow, 'preDropKind'>>,
+  part: PartKey, state: PartView, provenance?: TriggerProvenance | null): string {
   const name = PART_LABEL[part];
-  if (state === 'absent') return part === 'pre_drop' ? 'No pre-drop on this drop' : `No ${name.toLowerCase()} on this drop`;
+  if (part === 'pre_drop') {
+    // the pre-drop is never one of his triggers, his own drops included
+    if (state === 'absent') return 'No pre-drop on this drop — add one in its editor (the pencil)';
+    const named = row.preDropKind ? `${name} (${PRE_DROP_KIND_WORD[row.preDropKind]})` : name;
+    if (state === 'on') return `${named}: approved — tap to switch it off; ${PRE_DROPS_DO_NOT_PLAY}`;
+    if (state === 'off') return `${named}: off, never plays — tap to switch it back on; ${PRE_DROPS_DO_NOT_PLAY}`;
+    return `${named}: waiting for you — tap to approve it; ${PRE_DROPS_DO_NOT_PLAY}`;
+  }
+  if (state === 'absent') return `No ${name.toLowerCase()} on this drop`;
   if (row.kind === 'yours') {
     if (state === 'off') return `${name}: your trigger is switched off — tap to switch it back on`;
     const how = provenance?.remove_would === 'delete'
@@ -121,7 +159,17 @@ function partsOfView(v: DropSequenceView): Record<PartKey, PartView> {
 
 function partsOfYours(r: YoursRow): Record<PartKey, PartView> {
   const m = (x: YoursRow['charge']): PartView => (x == null ? 'absent' : x.enabled ? 'on' : 'off');
-  return { charge: m(r.charge), lull: m(r.lull), pre_drop: 'absent', drop: m(r.drop) };
+  // his pre-drop's state is the drop store's (YoursRow.pre_drop.part);
+  // none, or not worked out yet, is absent
+  return { charge: m(r.charge), lull: m(r.lull), pre_drop: r.pre_drop?.part ?? 'absent',
+    drop: m(r.drop) };
+}
+
+/** The state line's pre-drop clause: its kind, or that it is off. */
+function preDropClause(part: PartView, kind: PreDropKind | null): string {
+  if (part === 'absent' || !kind) return '';
+  if (part === 'off') return ' · pre-drop off';
+  return kind === 'intro' ? ' · vocal-intro pre-drop' : ' · spike pre-drop';
 }
 
 const PRESENT = (s: PartView) => s !== 'absent';
@@ -173,12 +221,18 @@ export function buildPanelRows(resp: DropSequencesResponse | null | undefined,
     const parts = partsOfYours(r);
     const standIns = (r.detections ?? []).map((k) => byKey.get(k)).filter(Boolean) as DropSequenceView[];
     const plays = r.enabled && (hisApplies || standIns.some((v) => v.fires === true));
+    const pre = r.pre_drop ?? null;
+    // a waiting pre-drop is the one thing on his own drop that waits for him
+    const preWaiting = r.enabled && parts.pre_drop === 'waiting';
     rows.push({
       key: r.key, kind: 'yours', dropMs: r.drop.timestamp_ms,
       chargeMs: r.charge?.timestamp_ms ?? null, lullMs: r.lull?.timestamp_ms ?? null,
-      parts, plays, stateLine: yoursStateLine(r, prov), waiting: false,
-      switchedOff: !r.enabled, canApprove: false, justPlayed: false, view: standIns[0] ?? null,
-      yours: r,
+      parts, plays,
+      stateLine: yoursStateLine(r, prov) + preDropClause(parts.pre_drop, pre?.kind ?? null),
+      waiting: preWaiting, switchedOff: !r.enabled, canApprove: preWaiting, justPlayed: false,
+      preDropMs: pre?.ms ?? null, preDropKind: pre?.kind ?? null,
+      preDropWas: pre?.off ? (pre.was ?? null) : null, preDropAuto: pre?.auto ?? null,
+      preDropMoved: !!pre?.moved, view: standIns[0] ?? null, yours: r,
     });
   }
   for (const v of views) {
@@ -189,11 +243,17 @@ export function buildPanelRows(resp: DropSequencesResponse | null | undefined,
     const switchedOff = parts.drop === 'off';
     rows.push({
       key: v.key, kind, dropMs: v.drop_ms, chargeMs: v.charge_ms, lullMs: v.lull_ms,
-      parts, plays: v.fires === true, stateLine: viewStateLine(v, parts, testing),
+      parts, plays: v.fires === true,
+      stateLine: viewStateLine(v, parts, testing)
+        + preDropClause(parts.pre_drop, v.pre_drop_kind ?? null),
       waiting: kind === 'detected' && !switchedOff && waitingParts.length > 0
         && v.state !== 'matches_yours',
       switchedOff, canApprove: kind === 'detected' && !switchedOff && waitingParts.length > 0,
-      justPlayed: false, view: v, yours: null,
+      justPlayed: false,
+      preDropMs: v.pre_drop_ms ?? null, preDropKind: v.pre_drop_kind ?? null,
+      preDropWas: v.pre_drop_off ? (v.pre_drop_was ?? null) : null,
+      preDropAuto: v.pre_drop_auto ?? null, preDropMoved: !!v.moved?.pre_drop,
+      view: v, yours: null,
     });
   }
   rows.sort((a, b) => a.dropMs - b.dropMs || (a.kind === 'yours' ? -1 : 1));
@@ -250,3 +310,12 @@ export function removeTitle(row: PanelRow, prov: ProvenanceResponse | null | und
   if (off) bits.push(`switch off ${off} imported trigger${off === 1 ? '' : 's'}`);
   return `Remove: ${bits.join(', ') || 'nothing left to remove'}`;
 }
+
+// ── the pre-drop handle (the in-place editor) ─────────────────────────────
+
+/** The pre-drop handle's rails, range, snap and step are the Timeline's own
+ * (timeline/dropEdit.ts) — one definition, so the two editors can never
+ * place a pre-drop differently. */
+export {
+  PRE_DROP_LEAD_MS, preDropRail, snapPreDrop, stepPreDrop, clampPreDrop,
+} from '../timeline/dropEdit';

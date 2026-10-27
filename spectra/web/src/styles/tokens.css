@@ -3531,6 +3531,26 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   background: var(--surface); color: var(--text); cursor: pointer; text-decoration: none;
 }
 .home-drop-editor-act:disabled { opacity: 0.45; cursor: default; }
+/* ── Home Drops panel: the PRE-DROP (predrop plan step 4) ──────────────
+ * Its handle hangs over the strip's TOP edge (the other three hang under
+ * its bottom), so a pre-drop a few hundred ms before its drop never sits
+ * on the drop's own handle; its grip wears its kind's glyph. The rail it
+ * snaps to (hits for a spike, vocal entries for an intro) is drawn from
+ * the top edge too. */
+.home-drop-editor-strip.has-pre { margin-top: 22px; }
+.home-drop-editor-handle.pre_drop { top: -22px; bottom: auto; }
+.home-drop-editor-handle.pre_drop .home-drop-editor-grip {
+  display: flex; align-items: center; justify-content: center; color: #14061f;
+}
+.home-drop-editor-prerail { stroke: rgba(251, 146, 60, 0.55); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.home-drop-editor-prerail.intro { stroke-dasharray: 3 2; }
+.home-drop-editor-kind {
+  width: 32px; height: 32px; padding: 0; border-radius: 6px;
+  border: 1.5px solid var(--part); background: var(--surface); color: var(--part);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+  touch-action: manipulation;
+}
+.home-drop-editor-kind:disabled { opacity: 0.45; cursor: default; }
 
 @media (min-width: 1200px) {
   .home-page { max-width: none; }
@@ -3915,3 +3935,25 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   .absorb-icon-btn { width: 40px; height: 40px; }
   .absorb-actions button, .absorb-row-actions button { min-height: 40px; }
 }
+
+/* ── Timeline drop sequences: the PRE-DROP (predrop plan step 4) ────────
+ * The full-song strip's orange tick (faded while it waits for him, as a
+ * suggestion's segments are), and the detail box's pre-drop row, whose
+ * glyph IS the kind switch (one tap: spike ⇄ vocal intro). The detail rows'
+ * name column widens from 74px so "Pre-drop" fits beside its glyph and
+ * every row's time box stays aligned with the others. */
+.drop-strip-predrop {
+  position: absolute; top: 4px; height: 16px; width: 2px; margin-left: -1px;
+  border-radius: 1px; pointer-events: none; opacity: 0.95;
+}
+.drop-strip-predrop.faded { opacity: 0.35; }
+.drop-detail-row { grid-template-columns: 88px minmax(0, 1fr) auto; }
+.drop-detail-predrop { margin-top: 2px; padding-top: 4px; border-top: 1px dashed rgba(251, 146, 60, 0.35); }
+.drop-predrop-kind {
+  width: 22px; height: 22px; padding: 0; flex: none; border-radius: 6px;
+  border: 1.5px solid currentColor; background: var(--surface2);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.drop-predrop-kind.empty { opacity: 0.35; cursor: default; border-style: dashed; }
+.drop-predrop-kind:disabled { opacity: 0.55; cursor: not-allowed; }
+.drop-predrop-tools { margin-top: 4px; }

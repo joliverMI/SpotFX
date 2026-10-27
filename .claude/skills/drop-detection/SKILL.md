@@ -63,8 +63,8 @@ report.md` 3.6). Four things not visible cold:
   from then on approval is explicit per part, and only an approved DROP
   makes it his (`_view_state`). The Timeline's legacy `member` op still
   makes a sequence "edited" (his) in legacy mode — the panel's part toggle
-  never does. The pre-drop is absent on every drop until pre-drop
-  detection (plan step 3).
+  never does. The pre-drop's part is real since step 4 (see "Editing a
+  pre-drop" below).
 - **WHAT FIRES reads parts and Testing** (`drop_firing._member_ms`,
   `_candidates(view, testing)`): a drop part off → never fires (listed,
   silent); a waiting part fires with its tier (confident) or in Testing; a
@@ -341,8 +341,8 @@ the binding statement for both rules. Six things:
   analysis moved TO his own drop.
 - **THE VIEW** names it (`pre_drop_ms`, `_kind`, `_auto`, `_tier`,
   `_score`; an automatic pre-drop his drop has moved past is left out, as
-  an automatic lull is). `parts["pre_drop"]` stays `absent` — its button,
-  handle, drag and `moved.pre_drop` are step 4.
+  an automatic lull is). Its part, button, handle and drag are step 4,
+  below.
 - **HIS OWN DROPS' PRE-DROPS** (`authored[].pre_drop`) are computed against
   his drop's moment and memoised per (song, detection stamp, drop ms) —
   ONLY on the read-through path (`view_with_detection`, a worker thread).
@@ -367,6 +367,52 @@ topic `testbed-predrops`. Proofs: `tests/test_predrop_detector.py`
 (synthetic envelopes for every test of both rules, the re-anchor, the
 committed cut cases, Eyes Cut Deeper whole), `tests/test_predrop_view.py`,
 `scripts/check_predrop_detector.py`.
+
+## Editing a pre-drop (2026-10-26)
+
+Predrop plan step 4 — still nothing plays (`drop_firing.PRE_DROPS_PLAY`).
+`drop_sequences.py`'s "EDITING A PRE-DROP" and "HIS OWN DROPS' PRE-DROPS"
+docstring sections are the binding statement. Six things:
+
+- **`pre_drop` IS A HANDLE, NOT A NEW MECHANISM.** It rides the existing
+  ops: `handles {pre_drop: ms | None}` (a drag keeps its kind; None = back
+  to the detector's place and kind, or gone on a drop he added), `member
+  handle=pre_drop` (off keeps where it comes back, `pre_drop_was`), `fill
+  handle=pre_drop` (＋ Pre-drop: `predrop_detector.place` — `detect`'s
+  answer, else the best weak candidate), `parts {pre_drop}`, the double
+  tick and Confirm. One new op, `pre_drop_kind`, switches its kind.
+  Undo/redo is the existing before/after pair.
+- **TWO RULES, DIFFERENT SCOPES.** Its lead must fit its kind's range
+  (`predrop_detector.lead_range`: spike 250-3000, intro 350-4500) — checked
+  on the pre-drop's OWN edits (drag, kind switch, fill), never on a drop
+  drag, which may therefore leave a placed pre-drop outside it. The order
+  rule (one he placed stays 200 ms before its drop) holds a drop move back;
+  a move carrying the pre-drop too is checked against where it is GOING
+  (`_set_phase_handles(pre=)`). An automatic one a move leaves behind is
+  left out with a note.
+- **WHAT COUNTS AS HIS.** A drag or a switch-off makes the sequence
+  "edited" in the legacy reading (the whole drop his, as a lull drag does);
+  a kind switch alone does not. The detector's tier and score show only
+  while he has not placed it. A pre-drop found after he confirmed a drop
+  WAITS for his tick in the legacy reading; one he placed is on.
+- **HIS OWN DROPS' PRE-DROPS LIVE IN THE DROP STORE**, never his song
+  profile: `overrides["mine:<drop trigger id>"]`, through
+  `apply_edit("mine_pre_drop", drop_ms, pre, step)`. `drop_panel` maps a
+  "his:" key onto it (`his_pre_drop_ctx` works the rules' pre-drop out off
+  the loop), so every pre-drop route accepts his keys and his profile and
+  fired copy are byte-identical afterwards. A combined his-row move writes
+  his profile first, then the pre-drop, as one undo step. His row's double
+  tick approves its waiting pre-drop (`his_pre_drop_now`), and switching
+  it off asks nothing — no trigger of his is touched.
+- **THE RAILS**: `snap_rails` adds `hits` (every high-band attack, a
+  dragged spike's rail) and `entries` (every mid-band entry passing the
+  intro's tests 1-3), `predrop_detector.rails`.
+- **THE UI** is two places over the same edits: the Timeline's orange
+  pre-drop handle with its kind's glyph (drag-snap to its kind's rail, the
+  strip tick, the review card's row; help topic `pre-drop`) and the Home
+  Drops panel's pre-drop button plus the editor's fourth handle
+  (`home/dropsPanel.ts` holds its snap/step/lead helpers). Both send only
+  the calls above.
 
 ## A LIGHT SHOW SET CAN BE ARMED ON A PHASE (2026-10-19)
 
@@ -457,6 +503,13 @@ those ASK FIRST — `needs_confirmation` with the question and a single-use
 were (absorb_console's two-call protocol). `undo_drop_edit` puts back his
 song-profile rows too. Testing is the ordinary `drop_testing` setting.
 
+The pre-drop (2026-10-26, step 4): `set_pre_drop` (exactly one of
+`at_seconds`, `before_drop_ms`, or `place` = detected / rules / off / on)
+and `switch_pre_drop` (spike / intro), plus `set_drop_part part=pre_drop`
+— none of them asks first, because no trigger of his is touched; each is
+undone by `undo_drop_edit`. `list_drop_sequences` shows each drop's
+`pre_drop` (time, kind, off, placed by him, tier) and each of his rows'.
+
 The drop colour change (2026-10-26) is two ordinary settings-registry keys,
 `drop_colour_change` and `drop_colour_spread_deg`; the change itself (a
 light-driving act) has no write op, the same boundary every fire keeps.
@@ -479,4 +532,8 @@ drops across both stores, on copies of his real Pop Off and Dopamine),
 check_timeline_changed_elsewhere.mjs`, `scripts/check_home_drops_layout.py`.
 The drop colour change's: `tests/test_drop_colour.py`. Pre-drops':
 `tests/test_predrop_detector.py`, `tests/test_predrop_view.py`,
-`scripts/check_predrop_detector.py`.
+`scripts/check_predrop_detector.py`; editing them: `tests/
+test_predrop_edits.py` (every edit, the two rules, the rails, his own
+drops on his Eyes Cut Deeper shape, the routes, Sonic),
+`scripts/check_drop_sequence_view.mjs`, `scripts/
+check_drop_sequence_edit.mjs`, `scripts/check_home_drops_panel.mjs`.

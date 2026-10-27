@@ -65,9 +65,9 @@ export default function DropSeqToolbar({
         </span>
       )}
       <span className={`drop-keys${focus ? ' on' : ''}`}
-        title={focus ? 'The keyboard is on this sequence: C L D pick a handle · ← → step it to the next snap point (Shift: 10 ms) · Enter confirms · Delete dismisses · N P next/previous · Ctrl+Z undo · Esc lets go'
+        title={focus ? 'The keyboard is on this sequence: C L D pick a handle, R the pre-drop · ← → step it to the next snap point (Shift: 10 ms) · K switches the pre-drop\'s kind · Enter confirms · Delete dismisses · N P next/previous · Ctrl+Z undo · Esc lets go'
           : 'Click a sequence to give it the keyboard'}>
-        ⌨ C L D · ← → · Enter · Del · N P
+        ⌨ C L D R · ← → · K · Enter · Del · N P
       </span>
       <HelpLink topic="drop-sequence-keys" title="Drop-sequence keyboard" />
       <HelpLink topic="drop-sequence-editing" title="Editing drop sequences" />

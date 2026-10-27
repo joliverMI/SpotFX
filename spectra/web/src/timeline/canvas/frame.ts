@@ -3,7 +3,7 @@
 import type {
   AudioShapeData, AudioShapeMeta, EventOption, LibrosaAnalysis, MarkType, MusicTrigger,
 } from '../types';
-import type { DisplaySeq, DropRails, Handle } from '../dropSequences';
+import type { DisplaySeq, DropRails, SeqHandle } from '../dropSequences';
 import type { Ghost, SnapGuide } from '../dropEdit';
 
 export interface Win {
@@ -109,13 +109,13 @@ export interface DropSeqLayerData {
   seqs: DisplaySeq[];
   rails: DropRails | null;
   selectedKey: string | null;
-  /** the selected handle (C/L/D, or the one last grabbed) — ringed */
-  selectedHandle?: Handle | null;
+  /** the selected handle (C/L/D/R, or the one last grabbed) — ringed */
+  selectedHandle?: SeqHandle | null;
   /** "＋ Add a drop" is armed */
   adding?: boolean;
   /** the live drag/add state (a ref the page mutates) */
   live?: { current: DropLive } | null;
-  hover: { key: string; handle: Handle } | null;
+  hover: { key: string; handle: SeqHandle } | null;
   /** where the recording starts (song ms) — before it is "not captured" */
   capturedFromMs: number | null;
   /** one beat, ms (the protected two-bar tail after a drop is 8 of them) */
@@ -162,7 +162,7 @@ export type Hit =
   | { kind: 'trigger-triangle'; triggerId: string }
   | { kind: 'ai-marker'; index: number }
   | { kind: 'beat'; beatMs: number; values: Record<string, number> }
-  | { kind: 'drop-seq'; key: string; handle: Handle; chip?: boolean }
+  | { kind: 'drop-seq'; key: string; handle: SeqHandle; chip?: boolean }
   | { kind: 'light-show-flag'; level: 'high' | 'low'; ms: number }
   | null;
 
@@ -183,11 +183,25 @@ export const BEAT_STRIP_H = 21;
  * plus a 2 px gap — plan.html's Timeline mock. */
 export const SNAP_RAIL_H = 36;
 
-/** How tall the snap-rail band is for this data: SNAP_RAIL_H while the
- * drop-sequence layer has rails to draw, else 0 — so a canvas without the
- * layer (the debug page) keeps its geometry exactly. */
+/** The pre-drop's two rails under those (predrop plan step 4): hits (what a
+ * spike snaps to) over vocal entries (what a vocal intro snaps to), 12 px
+ * each. Only while the rails carry them (an older server sends neither). */
+export const PRE_DROP_RAIL_ROW_H = 12;
+export const PRE_DROP_RAIL_H = 2 * PRE_DROP_RAIL_ROW_H;
+
+/** Whether these rails carry the pre-drop's hits and vocal entries. */
+export function hasPreDropRails(rails: Pick<DropRails, 'hits' | 'entries'> | null | undefined): boolean {
+  return !!rails && (Array.isArray(rails.hits) || Array.isArray(rails.entries));
+}
+
+/** How tall the snap-rail band is for this data: SNAP_RAIL_H (plus the
+ * pre-drop's two rails when the rails carry them) while the drop-sequence
+ * layer has rails to draw, else 0 — so a canvas without the layer (the
+ * debug page, Home's audio shape) keeps its geometry exactly. */
 export function snapRailHFor(data: Pick<LayerDataBag, 'dropSeq'>): number {
-  return data.dropSeq?.rails ? SNAP_RAIL_H : 0;
+  const rails = data.dropSeq?.rails;
+  if (!rails) return 0;
+  return SNAP_RAIL_H + (hasPreDropRails(rails) ? PRE_DROP_RAIL_H : 0);
 }
 
 export function stripCountFor(

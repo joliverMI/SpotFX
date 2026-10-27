@@ -439,8 +439,11 @@ async def set_parts(uri: str, key: str, parts: dict) -> PanelResult:
     if len(parts) != 1:
         raise ds.InvalidEdit("switch one part of your own drop at a time")
     (part, value), = parts.items()
-    if part == "pre_drop":
-        raise ds.InvalidEdit("this drop has no pre-drop")
+    if part == ds.PRE_DROP:
+        if value not in (ds.PART_ON, ds.PART_OFF):
+            raise ds.InvalidEdit("a part is switched on or off")
+        return await _his_pre_drop(uri, key, {"part": value},
+                                   f"your pre-drop {'approved' if value == ds.PART_ON else 'off'}")
     if part not in ds.HANDLES or value not in (ds.PART_ON, ds.PART_OFF):
         raise ds.InvalidEdit("a part is the charge, lull or drop, switched on or off")
     view = await asyncio.to_thread(_view, uri)
@@ -482,9 +485,16 @@ async def set_parts(uri: str, key: str, parts: dict) -> PanelResult:
 
 
 async def approve(uri: str, key: str) -> PanelResult:
-    """The double tick: approve every part that is not off."""
+    """The double tick: approve every part that is not off. On one of his
+    own drops that is only its pre-drop — the rest of it is his already."""
     if is_his(key):
-        await asyncio.to_thread(_his_row, uri, key)
+        row = await asyncio.to_thread(_his_row, uri, key)
+        ctx = await asyncio.to_thread(ds.his_pre_drop_ctx, uri, row["drop"]["id"],
+                                      int(row["drop"]["timestamp_ms"]))
+        pre = await asyncio.to_thread(ds.his_pre_drop_now, uri, ctx)
+        if pre is not None and pre["part"] == ds.PART_WAITING:
+            return await _his_pre_drop(uri, key, {"part": ds.PART_ON},
+                                       "your pre-drop approved")
         edits = await asyncio.to_thread(ds.edits, uri)
         bare = {"overrides": edits["overrides"], "added": edits["added"]}
         return PanelResult(key, bare, bare, [], "your own drop is approved already")
@@ -547,6 +557,11 @@ async def move_handles(uri: str, key: str, handles: dict) -> PanelResult:
     if not is_his(key):
         res = await asyncio.to_thread(ds.apply_edit, uri, "handles", key=key, handles=handles)
         return PanelResult(res.result, res.before, res.after, [], "moved")
+    handles = dict(handles)
+    pre_given = ds.PRE_DROP in handles
+    pre_ms = handles.pop(ds.PRE_DROP, None)
+    if pre_given and not handles:
+        return await _his_pre_drop(uri, key, {"move": pre_ms}, "moved your pre-drop")
     row = await asyncio.to_thread(_his_row, uri, key)
     times = {h: (row.get(h) or {}).get("timestamp_ms") for h in ds.HANDLES}
     moves = []
@@ -561,10 +576,60 @@ async def move_handles(uri: str, key: str, handles: dict) -> PanelResult:
     ds._check_order(times)
     if not moves:
         raise ds.InvalidEdit("name at least one handle to move")
+    if pre_given:
+        # the pre-drop moves in the drop store, its drop in his song profile:
+        # one write each, one undo step (the profile put back if the second fails)
+        ctx = await asyncio.to_thread(ds.his_pre_drop_ctx, uri, row["drop"]["id"],
+                                      int(times["drop"]))
+        changes = await _his_write(uri, move=moves)
+        res = await _drop_steps(uri, [{"op": "mine_pre_drop", "key": ctx["key"],
+                                       "drop_ms": ctx["drop_ms"], "pre": ctx["pre"],
+                                       "step": {"move": pre_ms}}], changes)
+        return PanelResult(key, res.before, res.after, changes,
+                           _join(said_profile(changes), "moved your pre-drop"))
     changes = await _his_write(uri, move=moves)
     edits = await asyncio.to_thread(ds.edits, uri)
     bare = {"overrides": edits["overrides"], "added": edits["added"]}
     return PanelResult(key, bare, bare, changes, _join(said_profile(changes)))
+
+
+async def _his_pre_drop(uri: str, key: str, step: dict, said: str) -> PanelResult:
+    """A pre-drop edit on one of HIS OWN drops: stored in the drop store
+    (overrides["mine:<his drop trigger id>"], drop_sequences.py's PRE-DROPS),
+    never in his song profile — the pre-drop is not one of his triggers."""
+    row = await asyncio.to_thread(_his_row, uri, key)
+    ctx = await asyncio.to_thread(ds.his_pre_drop_ctx, uri, row["drop"]["id"],
+                                  int(row["drop"]["timestamp_ms"]))
+    res = await asyncio.to_thread(ds.apply_edit, uri, "mine_pre_drop", key=ctx["key"],
+                                  drop_ms=ctx["drop_ms"], pre=ctx["pre"], step=step)
+    return PanelResult(key, res.before, res.after, [], said)
+
+
+async def pre_drop_member(uri: str, key: str, off: bool) -> PanelResult:
+    """The pre-drop switched off, or back on (any drop, his own included)."""
+    said = f"pre-drop {'off' if off else 'on'}"
+    if is_his(key):
+        return await _his_pre_drop(uri, key, {"off": bool(off)}, f"your {said}")
+    res = await asyncio.to_thread(ds.apply_edit, uri, "member", key=key,
+                                  handle=ds.PRE_DROP, off=bool(off))
+    return PanelResult(res.result, res.before, res.after, [], said)
+
+
+async def pre_drop_fill(uri: str, key: str) -> PanelResult:
+    """＋ Pre-drop: one where the detector's rules put it."""
+    if is_his(key):
+        return await _his_pre_drop(uri, key, {"fill": "rules"}, "added a pre-drop to your drop")
+    res = await asyncio.to_thread(ds.apply_edit, uri, "fill", key=key, handle=ds.PRE_DROP)
+    return PanelResult(res.result, res.before, res.after, [], "added a pre-drop")
+
+
+async def pre_drop_kind(uri: str, key: str, kind: str) -> PanelResult:
+    """Switch a pre-drop's kind (a spike or a vocal intro)."""
+    said = f"pre-drop: {'a spike' if kind == 'spike' else 'a vocal intro'}"
+    if is_his(key):
+        return await _his_pre_drop(uri, key, {"kind": kind}, f"your {said}")
+    res = await asyncio.to_thread(ds.apply_edit, uri, "pre_drop_kind", key=key, kind=kind)
+    return PanelResult(res.result, res.before, res.after, [], said)
 
 
 def _said_steps(done: list, steps: list[dict]) -> str:

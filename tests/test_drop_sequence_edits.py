@@ -112,7 +112,9 @@ def test_a_whole_sequence_move_is_one_edit_and_order_is_checked_together():
                         handles={"charge": 35_500, "lull": 40_500, "drop": 44_500})
     s = _by_key("drop:44000")
     assert (s["charge_ms"], s["lull_ms"], s["drop_ms"]) == (35_500, 40_500, 44_500)
-    assert s["state"] == "edited" and all(s["moved"].values())
+    assert s["state"] == "edited"
+    assert all(s["moved"][h] for h in ("charge", "lull", "drop"))
+    assert s["moved"]["pre_drop"] is False        # not touched by this move
     assert res.before == {"overrides": {}, "added": []}
     # moving the drop past where the lull is going would break the order if
     # applied one at a time — together it is fine

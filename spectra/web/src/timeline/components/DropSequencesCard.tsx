@@ -11,18 +11,31 @@
  * previous/next snap steps for each handle, and the "the analysis moved
  * it" question — all through ../hooks/useDropEditor.ts, each one an undo
  * step. "Make it my triggers" stays for later (shown disabled, saying so).
+ *
+ * THE PRE-DROP ROW (predrop plan step 4): its time, kind, tier and part
+ * state; one tap on its glyph switches its kind (spike ⇄ vocal intro —
+ * refused here, saying why, when its lead does not fit the other kind);
+ * ◀ ▶ step it along its kind's rail; on / off; back to detected (or remove
+ * one he placed the detector did not find); ＋ Pre-drop when the drop has
+ * none. On one of HIS OWN sequences too: its pre-drop lives in the drop
+ * store, edited through his "his:<drop id>" key. Nothing plays from a
+ * pre-drop yet.
  * What fires is the server's answer per sequence (phase 5, spectra/
  * services/drop_firing.py). ../dropSequences.ts holds every word and
  * number shown here. */
 import { useNavigate } from 'react-router-dom';
 import HelpLink from '../../help/HelpLink';
+import Icon from '../../components/Icon';
 import { useSongTimelineView } from '../../components/songTimelineView';
 import { fmtAgo } from '../../lib/time';
 import {
-  PHASE_COLOR, fireLine, fmtHundredths, fmtTenths, handleRows, reviewStatus, roomLines,
-  sequenceFires, switchLine, whyFound, type DisplaySeq, type DropSequencesResponse, type Handle,
+  PHASE_COLOR, PRE_DROP_COLOR, PRE_DROP_KIND_NAME, PRE_DROP_NOT_YET, fireLine, fmtHundredths,
+  fmtTenths, handleRows, preDropRow, reviewStatus, roomLines, sequenceFires, switchLine, whyFound,
+  type DisplaySeq, type DropSequencesResponse, type Handle, type PreDropKind, type SeqHandle,
 } from '../dropSequences';
-import { editable } from '../dropEdit';
+import {
+  OTHER_PRE_DROP_KIND, PRE_DROP_LEAD_MS, editable, editableHandle, preDropKindFits,
+} from '../dropEdit';
 import type { DropEditor } from '../hooks/useDropEditor';
 import { DROP_FOCUS_ATTR } from '../hooks/useDropSeqInteractions';
 
@@ -41,6 +54,115 @@ export function SeqBadge({ s }: { s: DisplaySeq }) {
 
 function PhaseSwatch({ h }: { h: Handle }) {
   return <span className={`drop-swatch ${h}`} style={{ color: PHASE_COLOR[h] }} aria-hidden />;
+}
+
+/** The pre-drop's glyph, its kind's (the registry's — the Drops panel's own). */
+function PreDropGlyph({ kind, size = 14 }: { kind: PreDropKind; size?: number }) {
+  return kind === 'intro' ? <Icon name="preDropVoice" size={size} /> : <Icon name="preDrop" size={size} />;
+}
+
+const PRE_STEP_LABEL: Record<PreDropKind, [string, string]> = {
+  spike: ['◀ hit', 'hit ▶'], intro: ['◀ entry', 'entry ▶'],
+};
+
+/** The pre-drop's row and its buttons — on every sequence a hand can edit,
+ * his own included. */
+function PreDropDetail({ s, editor, selHandle, onSelectHandle, onStep }: {
+  s: DisplaySeq;
+  editor: DropEditor;
+  selHandle: SeqHandle;
+  onSelectHandle: (h: SeqHandle) => void;
+  onStep: (h: SeqHandle, dir: 1 | -1) => void;
+}) {
+  const row = preDropRow(s);
+  const p = s.preDrop;
+  const can = editableHandle(s, 'pre_drop');
+  const busy = editor.busy;
+  const playing = s.pre_drop != null;
+  const kind = p?.kind ?? null;
+  const other = kind ? OTHER_PRE_DROP_KIND[kind] : null;
+  const fits = kind && other && row.leadMs != null ? preDropKindFits(other, row.leadMs) : false;
+  const [lo, hi] = other ? PRE_DROP_LEAD_MS[other] : [0, 0];
+  const kindTitle = !kind || !other ? '' : !can
+    ? `A ${PRE_DROP_KIND_NAME[kind]} pre-drop`
+    : fits
+      ? `A ${PRE_DROP_KIND_NAME[kind]} pre-drop — tap to make it a ${PRE_DROP_KIND_NAME[other]} (it then snaps to the ${other === 'intro' ? 'vocal entries' : 'hits'})`
+      : `A ${PRE_DROP_KIND_NAME[kind]} pre-drop — it cannot be a ${PRE_DROP_KIND_NAME[other]}: `
+        + `a ${PRE_DROP_KIND_NAME[other]} sits ${lo}-${hi} ms before its drop, this one ${row.leadMs ?? '—'} ms`;
+  const what = fmtTenths(s.drop);
+  const selectable = can && playing;
+  return (
+    <div className="drop-detail-predrop" role="group" aria-label="The pre-drop">
+      <div className="drop-detail-row">
+        <span className="drop-detail-name">
+          {kind ? (
+            <button type="button" className="drop-predrop-kind" style={{ color: PRE_DROP_COLOR }}
+              disabled={!can || !fits || busy} title={kindTitle}
+              aria-label={kindTitle}
+              onClick={() => { if (other) void editor.preDropKind(s.key, other); }}>
+              <PreDropGlyph kind={kind} />
+            </button>
+          ) : (
+            <span className="drop-predrop-kind empty" aria-hidden style={{ color: PRE_DROP_COLOR }}>
+              <PreDropGlyph kind="spike" />
+            </span>
+          )}
+          Pre-drop
+        </span>
+        <span className={`drop-detail-time${row.at == null ? ' empty' : ''}`}
+          style={selectable && selHandle === 'pre_drop' ? { borderColor: 'var(--accent)' } : undefined}
+          onClick={() => { if (selectable) onSelectHandle('pre_drop'); }}
+          title={selectable ? 'Select the pre-drop (R on the keyboard; then ← → step it)' : undefined}>
+          {row.at != null ? fmtHundredths(row.at) : '—'}
+        </span>
+        <span className="drop-detail-steps">
+          {(kind ? PRE_STEP_LABEL[kind] : PRE_STEP_LABEL.spike).map((label, i) => (
+            <button key={label} type="button" disabled={!can || !playing || busy}
+              title={can ? `Step the pre-drop to the ${i === 0 ? 'previous' : 'next'} ${kind === 'intro' ? 'vocal entry' : 'hit'}`
+                : 'This sequence is not edited here'}
+              onClick={() => onStep('pre_drop', i === 0 ? -1 : 1)}>{label}</button>
+          ))}
+        </span>
+        <span className="drop-detail-note">
+          {kind && <>{PRE_DROP_KIND_NAME[kind]} · </>}{row.note}{row.state && <> · {row.state}</>}
+        </span>
+      </div>
+      {can && (
+        <div className="drop-detail-tools drop-predrop-tools">
+          {p && (p.off ? (
+            <button type="button" disabled={busy} title="Switch the pre-drop back on"
+              onClick={() => void editor.member(s.key, 'pre_drop', false)}>Pre-drop on</button>
+          ) : (
+            <button type="button" disabled={busy}
+              title="Switch the pre-drop off: the drop stays (it can be switched back on)"
+              onClick={() => void editor.member(s.key, 'pre_drop', true)}>Pre-drop off</button>
+          ))}
+          {p?.moved && (p.auto != null ? (
+            <button type="button" disabled={busy}
+              title="Forget where you put the pre-drop: back to where the analysis puts it"
+              onClick={() => void editor.moveHandles(s.key, { pre_drop: null }, `pre-drop back to detected: ${what}`)}>
+              ↺ Pre-drop back to detected
+            </button>
+          ) : (
+            <button type="button" disabled={busy}
+              title="Remove the pre-drop you placed (the analysis found none here)"
+              onClick={() => void editor.moveHandles(s.key, { pre_drop: null }, `removed the pre-drop: ${what}`)}>
+              ✕ Remove pre-drop
+            </button>
+          ))}
+          {!p && !s.preDropUnknown && (
+            <button type="button" disabled={busy}
+              title="Add a pre-drop: placed where the rules put one (the strongest hit or vocal entry before the drop), then yours to move"
+              onClick={() => void editor.fill(s.key, 'pre_drop')}>＋ Pre-drop</button>
+          )}
+        </div>
+      )}
+      <p className="drop-detail-soon">
+        {PRE_DROP_NOT_YET}{p && can ? ' Approve it in Home\'s Drops panel (its own button in the drop\'s bar).' : ''}
+        {' '}<HelpLink topic="pre-drop" title="Pre-drops" />
+      </p>
+    </div>
+  );
 }
 
 function breakText(s: DisplaySeq): string | null {
@@ -64,9 +186,9 @@ function Detail({ s, uri, confidentScore, onJump, onClose, editor, selHandle, on
   onJump: () => void;
   onClose: () => void;
   editor: DropEditor;
-  selHandle: Handle;
-  onSelectHandle: (h: Handle) => void;
-  onStep: (h: Handle, dir: 1 | -1) => void;
+  selHandle: SeqHandle;
+  onSelectHandle: (h: SeqHandle) => void;
+  onStep: (h: SeqHandle, dir: 1 | -1) => void;
 }) {
   const why = whyFound(s.view, confidentScore);
   const rows = handleRows(s);
@@ -132,6 +254,8 @@ function Detail({ s, uri, confidentScore, onJump, onClose, editor, selHandle, on
           {r.note && <span className="drop-detail-note">{r.note}</span>}
         </div>
       ))}
+      <PreDropDetail s={s} editor={editor} selHandle={selHandle}
+        onSelectHandle={onSelectHandle} onStep={onStep} />
       <div className="drop-detail-row">
         <span className="drop-detail-name">Strength</span>
         <span className="drop-detail-time wide">
@@ -219,7 +343,7 @@ function Detail({ s, uri, confidentScore, onJump, onClose, editor, selHandle, on
         )}
       </div>
       <p className="drop-detail-soon">
-        Drag a handle on the graph (it snaps to bass spikes and beats; Alt places freely), or step it here.
+        Drag a handle on the graph (it snaps to bass spikes and beats, the pre-drop to hits or vocal entries; Alt places freely), or step it here.
         Every change is one undo step, and takes effect on the show from the next moment on. "Make it my triggers" comes later.
         {' '}<HelpLink topic="drop-sequence-editing" title="Editing drop sequences" />
         {' '}· or tell Sonic <HelpLink topic="sonic-drops" title="Sonic on drop detection" />
@@ -261,9 +385,9 @@ export default function DropSequencesCard({
   analysedApplies: boolean;
   analysedReason: string | null;
   editor: DropEditor;
-  selHandle: Handle;
-  onSelectHandle: (h: Handle) => void;
-  onStep: (h: Handle, dir: 1 | -1) => void;
+  selHandle: SeqHandle;
+  onSelectHandle: (h: SeqHandle) => void;
+  onStep: (h: SeqHandle, dir: 1 | -1) => void;
 }) {
   const selected = seqs.find((s) => s.key === selectedKey) ?? null;
   const dismissedCount = resp?.counts?.dismissed ?? 0;

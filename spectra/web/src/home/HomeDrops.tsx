@@ -17,6 +17,11 @@
  * `triggers.last_drop` as its backstop) moves to the top, highlighted.
  * Removed and switched-off never play, even then — the server's rule.
  *
+ * THE PRE-DROP's button wears its kind's glyph (`preDrop` for a spike,
+ * `preDropVoice` for a vocal intro); on one of his own drops its tap goes
+ * through the same `parts` call, since its state lives in the drop store,
+ * never his song profile. Nothing plays from a pre-drop yet.
+ *
  * TIE-INS (components/songTimelineView.tsx): a tap on a drop pill on the
  * song timeline, or on a sequence on Home's audio shape, selects the drop
  * here and scrolls it into view; selecting one zooms the shared window,
@@ -44,6 +49,12 @@ import {
 const PART_ICON: Record<PartKey, IconName> = {
   charge: 'phaseCharge', lull: 'phaseLull', pre_drop: 'preDrop', drop: 'phaseDrop',
 };
+
+/** A part's glyph: the pre-drop's follows its kind. */
+function partIcon(r: PanelRow, part: PartKey): IconName {
+  if (part === 'pre_drop' && r.preDropKind === 'intro') return 'preDropVoice';
+  return PART_ICON[part];
+}
 
 /** The newer of two last-drop records (the push and the poll's backstop). */
 function newer(a: LastDrop | null | undefined, b: LastDrop | null | undefined): LastDrop | null {
@@ -217,9 +228,11 @@ export default function HomeDrops() {
               <div className="home-drops-bar" role="group" aria-label={`Drop at ${fmtDropTime(r.dropMs)}`}>
                 <button type="button" className="home-drops-btn approve"
                   disabled={!r.canApprove}
-                  title={r.canApprove ? 'Approve the whole drop: charge, lull, pre-drop and drop'
+                  title={r.canApprove
+                    ? (his ? 'Approve its pre-drop (your own triggers need no approval)'
+                      : 'Approve the whole drop: charge, lull, pre-drop and drop')
                     : his ? 'Your own drop needs no approval' : 'Nothing here is waiting for approval'}
-                  aria-label="Approve the whole drop"
+                  aria-label={his && r.canApprove ? 'Approve its pre-drop' : 'Approve the whole drop'}
                   onClick={() => { if (idle()) void editor.approve(r.key, `the drop at ${fmtDropTime(r.dropMs)}`); }}>
                   <Icon name="checkAll" size={17} />
                 </button>
@@ -230,12 +243,13 @@ export default function HomeDrops() {
                   return (
                     <button key={part} type="button"
                       className={`home-drops-btn part ${part} ${state}`}
+                      data-kind={part === 'pre_drop' ? (r.preDropKind ?? undefined) : undefined}
                       style={{ ['--part' as string]: PART_COLOR[part] }}
                       disabled={state === 'absent'}
                       aria-pressed={state === 'on'}
                       title={title} aria-label={title}
                       onClick={() => tapPart(r, part)}>
-                      <Icon name={PART_ICON[part]} size={16} />
+                      <Icon name={partIcon(r, part)} size={16} />
                     </button>
                   );
                 })}
@@ -257,7 +271,7 @@ export default function HomeDrops() {
                 ) : (
                   <button type="button" className={`home-drops-btn edit${editing === r.key ? ' on' : ''}`}
                     aria-expanded={editing === r.key}
-                    title="Edit this drop here: drag its charge, lull and drop"
+                    title="Edit this drop here: drag its charge, lull, pre-drop and drop"
                     aria-label="Edit this drop"
                     onClick={() => { select(r); setEditing(editing === r.key ? null : r.key); }}>
                     <Icon name="edit" size={16} />

@@ -46,7 +46,24 @@ from spectra.services import drop_firing, drop_panel, drop_sequences as ds
 from spectra.services.sonic_ops import SonicOperation
 
 HANDLE_CHOICES = ("charge", "lull", "drop")
-PART_CHOICES = ("charge", "lull", "drop")
+PART_CHOICES = ("charge", "lull", "pre_drop", "drop")
+PRE_DROP_PLACES = ("detected", "rules", "off", "on")
+PRE_DROP_KINDS = ("spike", "intro")
+
+
+def _pre_drop_brief(pre: Optional[dict]) -> Optional[dict]:
+    """A pre-drop as the listing names it: its time, kind, state and the
+    detector's confidence (drop_sequences.py's PRE-DROPS)."""
+    if not pre:
+        return None
+    at = pre.get("ms") if not pre.get("off") else pre.get("was")
+    out = {"at_s": _secs(at), "kind": pre.get("kind"), "off": bool(pre.get("off")),
+           "placed_by_you": bool(pre.get("moved"))}
+    if pre.get("tier"):
+        out["tier"] = pre["tier"]
+    if pre.get("part"):
+        out["part"] = pre["part"]
+    return out
 
 
 def _current_uri() -> Optional[str]:
@@ -101,6 +118,13 @@ def _describe(n: int, s: dict) -> dict:
     # on / waiting / off / absent for charge, lull, pre_drop and drop
     if s.get("parts"):
         out["parts"] = dict(s["parts"])
+    pre = _pre_drop_brief({"ms": s.get("pre_drop_ms"), "was": s.get("pre_drop_was"),
+                           "kind": s.get("pre_drop_kind"), "off": s.get("pre_drop_off"),
+                           "moved": (s.get("moved") or {}).get("pre_drop"),
+                           "tier": s.get("pre_drop_tier")}
+                          if s.get("pre_drop_kind") else None)
+    if pre:
+        out["pre_drop"] = pre
     return out
 
 
@@ -164,7 +188,14 @@ async def _op_list(uri: Optional[str] = None) -> dict:
     # room's own phase-5 verdict — rides every sequence this returns; the
     # other handlers below still resolve a sequence off the plain view via
     # _pick, which only ever needs the key/times/state fields, not firing.
-    view = await asyncio.to_thread(drop_firing.annotated_view, uri)
+    def read() -> dict:
+        # off the loop, so his own drops' pre-drops are worked out too
+        from spectra.services import trigger_store
+        triggers = trigger_store.list_for_song(uri)
+        return drop_firing.annotated_view(
+            uri, view=ds.view(uri, triggers=triggers, compute_pre_drops=True),
+            triggers=triggers)
+    view = await asyncio.to_thread(read)
     seqs = _numbered(view)
     number_of = {s["key"]: i + 1 for i, s in enumerate(seqs)}
     yours = [{"drop_s": _secs(r["drop"]["timestamp_ms"]),
@@ -174,7 +205,8 @@ async def _op_list(uri: Optional[str] = None) -> dict:
               "switched_off": [h for h in HANDLE_CHOICES
                                if r.get(h) and not r[h].get("enabled")],
               "stands_for": [number_of[k] for k in r.get("detections") or []
-                             if k in number_of]}
+                             if k in number_of],
+              "pre_drop": _pre_drop_brief(r.get("pre_drop"))}
              for r in view.get("yours") or []]
     return {"status": "ok", "uri": uri, "detection": view.get("status"),
             "beat_s": _secs((view.get("song") or {}).get("beat_ms")),
@@ -342,11 +374,11 @@ async def _op_approve(sequence: Any, uri: Optional[str] = None) -> dict:
     return out
 
 
-async def _op_set_part(part: Literal["charge", "lull", "drop"], on: bool,
+async def _op_set_part(part: Literal["charge", "lull", "pre_drop", "drop"], on: bool,
                        sequence: Any = None, your_drop_s: Any = None,
                        uri: Optional[str] = None, confirm_id: Optional[str] = None) -> dict:
     if part not in PART_CHOICES:
-        return {"status": "rejected", "reason": "part must be charge, lull or drop"}
+        return {"status": "rejected", "reason": "part must be charge, lull, pre_drop or drop"}
     if not isinstance(on, bool):
         return {"status": "rejected", "reason": "on must be true or false"}
     uri, rej = _song(uri)
@@ -357,7 +389,9 @@ async def _op_set_part(part: Literal["charge", "lull", "drop"], on: bool,
     if rej:
         return rej
     value = ds.PART_ON if on else ds.PART_OFF
-    if row is not None and not on:
+    if row is not None and not on and part != ds.PRE_DROP:
+        # (his pre-drop is not one of his triggers: switching it off changes
+        # nothing in his song profile, so it needs no question)
         member = row.get(part)
         if not member or not member.get("enabled"):
             return {"status": "rejected", "reason": f"that drop of yours has no {part} "
@@ -379,8 +413,80 @@ async def _op_set_part(part: Literal["charge", "lull", "drop"], on: bool,
     if out["status"] == "applied":
         where = (f"your drop at {_secs(row['drop']['timestamp_ms'])} s" if row is not None
                  else f"drop sequence #{sequence}")
-        out["summary"] = (f"{part} {'approved' if on else 'switched off'} on {where}"
+        out["summary"] = (f"{part.replace('_', '-')} {'approved' if on else 'switched off'} "
+                          f"on {where}"
                           + (f" — {out['said']}" if out.get("said") else ""))
+    return out
+
+
+async def _pre_drop_target(view: dict, sequence: Any, your_drop_s: Any
+                           ) -> tuple[Optional[str], Optional[int], str, Optional[dict]]:
+    """(key, the moment its drop fires, how to name it, rejection)."""
+    key, s, row, rej = _target(view, sequence, your_drop_s)
+    if rej:
+        return None, None, "", rej
+    if row is not None:
+        drop_ms = int(row["drop"]["timestamp_ms"])
+        return key, drop_ms, f"your drop at {_secs(drop_ms)} s", None
+    return key, int(s["drop_ms"]), f"drop sequence #{sequence}", None
+
+
+async def _op_set_pre_drop(sequence: Any = None, your_drop_s: Any = None,
+                           at_seconds: Any = None, before_drop_ms: Any = None,
+                           place: Optional[str] = None, uri: Optional[str] = None) -> dict:
+    given = [x for x in (at_seconds, before_drop_ms, place) if x is not None]
+    if len(given) != 1:
+        return {"status": "rejected",
+                "reason": "give exactly one of at_seconds, before_drop_ms or place"}
+    if place is not None and place not in PRE_DROP_PLACES:
+        return {"status": "rejected", "reason": f"place must be one of {PRE_DROP_PLACES}"}
+    uri, rej = _song(uri)
+    if rej:
+        return rej
+    view = await asyncio.to_thread(ds.view, uri)
+    key, drop_ms, where, rej = await _pre_drop_target(view, sequence, your_drop_s)
+    if rej:
+        return rej
+    if place == "detected":
+        write = drop_panel.move_handles(uri, key, {ds.PRE_DROP: None})
+        words = f"the pre-drop of {where} is back where the detector puts it"
+    elif place == "rules":
+        write = drop_panel.pre_drop_fill(uri, key)
+        words = f"added a pre-drop to {where}, where the rules put it"
+    elif place in ("off", "on"):
+        write = drop_panel.pre_drop_member(uri, key, place == "off")
+        words = f"switched the pre-drop of {where} {place}"
+    else:
+        try:
+            ms = (int(round(float(at_seconds) * 1000)) if at_seconds is not None
+                  else int(drop_ms) - int(round(float(before_drop_ms))))
+        except (TypeError, ValueError):
+            return {"status": "rejected",
+                    "reason": "at_seconds / before_drop_ms must be numbers"}
+        write = drop_panel.move_handles(uri, key, {ds.PRE_DROP: ms})
+        words = (f"moved the pre-drop of {where} to {_secs(ms)} s "
+                 f"({_secs(int(drop_ms) - ms)} s before its drop)")
+    out = await _panel(uri, write)
+    if out["status"] == "applied":
+        out["summary"] = words
+    return out
+
+
+async def _op_switch_pre_drop(kind: str, sequence: Any = None, your_drop_s: Any = None,
+                              uri: Optional[str] = None) -> dict:
+    if kind not in PRE_DROP_KINDS:
+        return {"status": "rejected", "reason": "kind must be spike or intro"}
+    uri, rej = _song(uri)
+    if rej:
+        return rej
+    view = await asyncio.to_thread(ds.view, uri)
+    key, _drop_ms, where, rej = await _pre_drop_target(view, sequence, your_drop_s)
+    if rej:
+        return rej
+    out = await _panel(uri, drop_panel.pre_drop_kind(uri, key, kind))
+    if out["status"] == "applied":
+        out["summary"] = (f"the pre-drop of {where} is now "
+                          f"{'a spike' if kind == 'spike' else 'a vocal intro'}")
     return out
 
 
@@ -862,8 +968,8 @@ OPERATIONS: dict[str, SonicOperation] = {
         handler=_op_approve),
     "set_drop_part": SonicOperation(
         name="set_drop_part", domain="drops", kind="write",
-        summary="Approve or switch off one part of a drop — its charge, its lull or the "
-                "drop itself (the Drops panel's toggles).",
+        summary="Approve or switch off one part of a drop — its charge, its lull, its "
+                "pre-drop or the drop itself (the Drops panel's toggles).",
         instructions=(
             "on=true approves the part (it plays, with its drop); on=false switches it off "
             "(never plays, not even with drop testing on). Switching the DROP off keeps "
@@ -873,8 +979,9 @@ OPERATIONS: dict[str, SonicOperation] = {
             "in for it. On his own drop, on=false DELETES a trigger he placed by hand and "
             "switches off an imported one, so it asks first: tell him the question it "
             "answers, and only after he says yes call it again with the same arguments "
-            "plus confirm_id. To add a lull or charge that was never there, use "
-            "set_drop_member."),
+            "plus confirm_id (a pre-drop never asks: it is not one of his triggers). To "
+            "add a lull or charge that was never there, use set_drop_member; a pre-drop, "
+            "set_pre_drop with place='rules'. Nothing plays from a pre-drop yet."),
         input_schema={"type": "object", "properties": {
             "part": {"type": "string", "enum": list(PART_CHOICES)},
             "on": {"type": "boolean"},
@@ -885,6 +992,46 @@ OPERATIONS: dict[str, SonicOperation] = {
             "confirm_id": {"type": "string"}},
             "required": ["part", "on"], "additionalProperties": False},
         handler=_op_set_part),
+    "set_pre_drop": SonicOperation(
+        name="set_pre_drop", domain="drops", kind="write",
+        summary="Place, move, switch off or on, or add a drop's pre-drop (the hit or vocal "
+                "entry just before the drop).",
+        instructions=(
+            "Exactly one of: at_seconds (a song time), before_drop_ms (how far before its "
+            "drop, e.g. 800), or place: 'detected' (back where the detector puts it), "
+            "'rules' (add one where the rules put it, when it has none), 'off', 'on'. A "
+            "spike sits 250-3000 ms before its drop, a vocal intro 350-4500 ms; at least "
+            "200 ms before it either way. Name the drop as set_drop_part does (sequence, "
+            "or your_drop_s for one of his own drops — his pre-drop edits never touch his "
+            "triggers). list_drop_sequences shows each drop's pre_drop. Nothing plays "
+            "from a pre-drop yet. undo_drop_edit puts it back."),
+        input_schema={"type": "object", "properties": {
+            "sequence": _SEQ,
+            "your_drop_s": {"type": "number", "minimum": 0,
+                            "description": "the time of one of his own drops, in seconds"},
+            "at_seconds": {"type": "number", "minimum": 0},
+            "before_drop_ms": {"type": "integer", "minimum": 200, "maximum": 4500},
+            "place": {"type": "string", "enum": list(PRE_DROP_PLACES)},
+            "uri": _URI},
+            "additionalProperties": False},
+        handler=_op_set_pre_drop),
+    "switch_pre_drop": SonicOperation(
+        name="switch_pre_drop", domain="drops", kind="write",
+        summary="Switch a drop's pre-drop between a spike (one loud hit) and a vocal intro "
+                "(a voice entering out of a hush).",
+        instructions=(
+            "kind='spike' or 'intro'. Refused when its lead does not fit the kind (a spike "
+            "250-3000 ms before its drop, a vocal intro 350-4500 ms): move it first with "
+            "set_pre_drop. Name the drop as set_drop_part does. undo_drop_edit puts it "
+            "back."),
+        input_schema={"type": "object", "properties": {
+            "kind": {"type": "string", "enum": list(PRE_DROP_KINDS)},
+            "sequence": _SEQ,
+            "your_drop_s": {"type": "number", "minimum": 0,
+                            "description": "the time of one of his own drops, in seconds"},
+            "uri": _URI},
+            "required": ["kind"], "additionalProperties": False},
+        handler=_op_switch_pre_drop),
     "remove_drop_sequence": SonicOperation(
         name="remove_drop_sequence", domain="drops", kind="write",
         summary="Remove a drop completely (the Drops panel's Remove) — always asks first.",

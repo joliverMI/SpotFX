@@ -303,19 +303,26 @@ def test_every_apply_edit_op_has_a_sonic_operation_or_is_acknowledged():
     # (spectra/services/drop_panel.py): Sonic reaches them through
     # set_drop_part and remove_drop_sequence on one of his drops, never as
     # raw ops.
-    ACKNOWLEDGED_INDIRECT = {"restore", "dismiss_for", "undismiss_for", "multi"}
+    # mine_pre_drop is the pre-drop of one of HIS drops (stored in the drop
+    # store, never his profile): Sonic reaches it through set_pre_drop /
+    # switch_pre_drop / set_drop_part naming your_drop_s, via drop_panel.
+    ACKNOWLEDGED_INDIRECT = {"restore", "dismiss_for", "undismiss_for", "multi",
+                             "mine_pre_drop"}
     reachable_ops = {
         "confirm", "dismiss", "handles", "member", "review", "fill", "add",
         "confirm_all", "revert",
         # the Home Drops panel's three (predrop plan step 1)
         "parts", "approve", "remove",
+        # the pre-drop's kind switch (step 4: switch_pre_drop)
+        "pre_drop_kind",
     }
     assert APPLY_EDIT_OPS - ACKNOWLEDGED_INDIRECT <= reachable_ops, (
         APPLY_EDIT_OPS - ACKNOWLEDGED_INDIRECT - reachable_ops)
     # and every Sonic drops write op actually exists
     for name in ("add_drop_sequence", "set_drop_member", "revert_drop_sequence",
                 "resolve_drop_review", "undo_drop_edit", "redetect_drop_sequences",
-                "approve_drop_sequence", "set_drop_part", "remove_drop_sequence"):
+                "approve_drop_sequence", "set_drop_part", "remove_drop_sequence",
+                "set_pre_drop", "switch_pre_drop"):
         assert name in dc.OPERATIONS
 
 
