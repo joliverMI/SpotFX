@@ -379,15 +379,16 @@ BREATH_HOLD_EFFECTS = (DROP_SHOCK_EFFECTS - {"fish"}) | {"pulse", "radial"}
 # step 5): the effects SpotFX tells a pre-drop on a lull arm that plays one
 # (`pre_drop_at_s`, `pre_drop_s`, `pre_drop_kind`, `pre_drop_look`) and whose
 # lull — progress ramp, dark point, breath-hold — it measures to the
-# pre-drop instead of the drop. EMPTY on purpose until each effect's look is
-# built and he has watched it (step 6: Fireworks, Pulse, Orbits; step 7:
-# Black Hole, then Fish, Star, Sauron, the strips — never Squiggles). With it
-# empty every arm write is byte-identical to before the engine existed
-# (tests/test_pre_drop_arm_identity.py); the engine still decides whether a
-# pre-drop plays, so the drop's colour change fades across one that does.
-# A member must also declare its looks (`pre_drop_looks` in
-# config/effect_params.json, `pre_drop_looks()` below).
-PRE_DROP_EFFECTS: frozenset = frozenset()
+# pre-drop instead of the drop. An effect joins once its look is built (step
+# 6: Fireworks' rockets and Pulse's burst/swell; Orbits and step 7's Black
+# Hole, Fish, Star, Sauron and the strips later — never Squiggles). A member
+# is told every key on every lull arm (zeros when its pre-drop does not
+# play), and every other effect's arm write is byte-identical to before the
+# engine existed (tests/test_pre_drop_arm_identity.py); the engine decides
+# whether a pre-drop plays either way, so the drop's colour change fades
+# across one that does. A member must also declare its looks
+# (`pre_drop_looks` in config/effect_params.json, `pre_drop_looks()` below).
+PRE_DROP_EFFECTS: frozenset = frozenset({"fireworks", "pulse"})
 
 # ... and its drop-side half: effects told the fire's intensity on every
 # drop arm (`drop_intensity`) so the drop's length and speed scale with the

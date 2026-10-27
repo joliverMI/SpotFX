@@ -32,7 +32,9 @@ def scene(tmp_path, monkeypatch):
     from spectra.services import scene_store
     s = SceneV2(name="Black Hole V2", devices=[
         {"target_kind": "category", "target": "Matrix", "effect_type": "blackhole"},
-        {"target_kind": "category", "target": "Singles", "effect_type": "pulse"}])
+        # power declares no looks (Pulse has its own since step 6)
+        {"target_kind": "category", "target": "Singles", "effect_type": "power"},
+        {"target_kind": "category", "target": "Strips", "effect_type": "pulse"}])
     scene_store.save(s)
     return s
 
@@ -64,6 +66,14 @@ def test_reading_an_entrys_looks(scene):
     plain = _call("get_pre_drop_looks", scene="Black Hole V2", target="Singles")
     assert plain["has_looks"] is False and plain["plays"] == {"spike": None,
                                                               "intro": None}
+
+
+def test_pulse_reads_back_its_own_declared_looks(scene):
+    """Step 6's real registry block (config/effect_params.json): "auto"
+    plays the burst for a spike and the dim swell for a vocal intro."""
+    got = _call("get_pre_drop_looks", scene="Black Hole V2", target="Strips")
+    assert got["has_looks"] and set(got["declared"]) == {"burst", "swell"}
+    assert got["plays"] == {"spike": "burst", "intro": "swell"}
 
 
 def test_setting_a_look_round_trips_and_is_backed_up(scene):

@@ -252,8 +252,12 @@ def test_the_lull_arm_tells_members_the_breath_from_the_room_setting():
     for vid in ("bh", "orb"):
         assert told[vid][pg.BREATH_KEY] == pytest.approx(0.5)
         assert told[vid][pg.BREATH_AT_KEY] == pytest.approx(5.5)
-    for vid in ("fw", "sq"):
-        assert pg.BREATH_KEY not in told[vid]
+    assert pg.BREATH_KEY not in told["sq"]
+    # Fireworks is a pre-drop member (predrop step 6), told every key on
+    # every lull arm: with no pre-drop playing its breath is the zero one
+    # (no breath) rather than none, so a previous pre-drop's is forgotten
+    assert told["fw"][pg.BREATH_AT_KEY] == 0.0
+    assert told["fw"][pg.BREATH_KEY] == 0.0
     assert rec["lull_breath_s"] == pytest.approx(0.5)
 
 

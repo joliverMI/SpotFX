@@ -70,6 +70,13 @@
   },
   "effects": {
     "pulse": {
+      "pre_drop_looks": {
+        "looks": {
+          "burst": {"label": "Burst and fast fade", "kinds": ["spike", "intro"]},
+          "swell": {"label": "Dim swell", "kinds": ["spike", "intro"]}
+        },
+        "auto": {"spike": "burst", "intro": "swell"}
+      },
       "no_background_color": true,
       "params": {
         "gradient": {
@@ -4140,6 +4147,12 @@
       }
     },
     "fireworks": {
+      "pre_drop_looks": {
+        "looks": {
+          "rockets": {"label": "Rockets fire on the pre-drop", "kinds": ["spike", "intro"]}
+        },
+        "auto": {"spike": "rockets", "intro": "rockets"}
+      },
       "params": {
         "x_offset": {
           "label": "X Offset",

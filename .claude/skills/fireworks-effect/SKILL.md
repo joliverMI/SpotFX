@@ -131,6 +131,33 @@ the Black Hole; on the next big analysed flare into the others) — the
 incoming effects' generic adopts take the burst cloud; nothing here
 changed for it.
 
+## THE PRE-DROP — rockets fire ON it and burst on the drop (2026-10-27)
+
+Predrop plan step 6 (`fx/VENDOR.md` #87; the drop-detection skill for the
+engine). Fireworks is a `fx.device_model.PRE_DROP_EFFECTS` member with ONE
+look, `rockets` (`PRE_DROP_LOOK`), for both kinds. Told a pre-drop on its
+lull arm, the lull launches NO rockets at its start (it stays dark while
+what flew before fades); the breath-hold right before the pre-drop is
+TRUE black (`_pre_drop_step` clears particles and trail on its first frame
+and swallows a flare landing in it); the ordinary rocket ring fires ON the
+pre-drop and flies the gap on the effect's own clock, so it bursts on the
+drop (`_rocket_payoff`, unchanged). Three things not visible cold:
+
+- **Untold is today's, frame for frame** — every branch returns before it
+  touches state, proven against the pinned pre-look module.
+- **The brightness fade is a RATE** (`pre_drop_rocket_fade`: 0.3125/s,
+  capped at `LULL_ROCKET_FADE`): a spike's short flight stays bright, and
+  a long one (his 2 s spike maximum, a vocal intro) dims like today's, so
+  the whole lull's light stays at or below today's on every measured
+  lull/gap pair (storyboards below).
+- **It takes the breath keys** although it is no `BREATH_HOLD_EFFECTS`
+  member: SpotFX tells it a breath only on a lull that plays a pre-drop
+  (zeros otherwise).
+
+Proofs: `tests/test_pre_drop_looks.py` (rig `tests/pre_drop_look_harness.py`,
+the engine's own lull arm on his crystal's real mask),
+`scripts/render_predrop_storyboards.py` -> `docs/evidence/predrop-storyboards/`.
+
 ## Thematic transitions (2026-10-11, transitions-drop plan phase 3)
 
 Fireworks' `_handoff_snapshot` carries `vx`/`vy` = `p_vx`/`p_vy` in px/s +
@@ -159,7 +186,8 @@ melds' two room tunables (`drop_switch_swallow_delay_s`,
 layer, his own Fireworks V2 strip entry, the pinned pre-change module as
 red control), `tests/test_fireworks_melds.py` (the
 keepers meld on the real pipeline, the pinned-module byte-identity, the
-swallow and implode adopts), `scripts/render_fireworks_melds.py` (offline
+swallow and implode adopts), `tests/test_pre_drop_looks.py` (the pre-drop
+look), `scripts/render_fireworks_melds.py` (offline
 GIFs, committed under `docs/evidence/fireworks-melds/`). The scene
 migration that attaches the kind, `scripts/add_fireworks_burst_flare.py`
 (dry-run default), belongs to the fireworks-v2-scene skill. History:

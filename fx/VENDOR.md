@@ -2585,8 +2585,8 @@ against that commit.
     NOT a phase — it rides the LULL's own arm write as four told keys
     (`pre_drop_at_s`, `pre_drop_s`, `pre_drop_kind`, `pre_drop_look`), the
     lull_dark / lull_handoff / breath-hold way, told only to
-    `fx.device_model.PRE_DROP_EFFECTS` members (EMPTY at this step: no
-    effect is told anything yet; step 6 adds the first looks). The module
+    `fx.device_model.PRE_DROP_EFFECTS` members (empty at this step; step
+    6, #87, adds Fireworks and Pulse). The module
     holds the keys, their schema fields, `resolve_look` (an entry's "auto" /
     "same" / named choice against the effect's declared `pre_drop_looks`
     registry block) and `phase_clock`, one object per frame naming the
@@ -2603,3 +2603,35 @@ against that commit.
     write over his 14 real scenes equals the pre-engine golden),
     `tests/test_pre_drop_watchdog.py` (every phase effect as a stub member:
     no orphan release before the drop). Unverified against his live room.
+87. `effects/fireworks.py` + `effects/pulse.py` (SpotFX-authored, #86's
+    first members): THE PRE-DROP LOOKS (2026-10-27, predrop plan step 6,
+    report §3.5). `fx.device_model.PRE_DROP_EFFECTS` is `{fireworks,
+    pulse}` and both declare `pre_drop_looks` in config/effect_params.json.
+    FIREWORKS ("rockets", both kinds): a lull TOLD a pre-drop launches no
+    rockets at its start, so it stays dark while what flew before it fades;
+    on the breath's first frame every particle and the trail are cleared
+    and a flare landing in the breath is swallowed (true black); on the
+    pre-drop the SAME rocket ring (`_launch_rockets`) fires and flies the
+    pre-drop-to-drop gap on the effect's own clock (`pre_drop.phase_clock`),
+    losing `pre_drop_rocket_fade(gap)` of its brightness (0.3125/s, capped
+    at `LULL_ROCKET_FADE`, so a long flight dims like today's), and
+    `_rocket_payoff` bursts it on the drop unchanged. Fireworks is no
+    breath-hold effect, so its schema also takes the breath keys, told only
+    on a lull that plays a pre-drop. PULSE ("burst" for a spike, "swell"
+    for a vocal intro): the lull's fade, dark point and breath are measured
+    to the pre-drop (SpotFX's arm); on it the burst holds full for
+    `PRE_DROP_PEAK_S` then fades fast to black, the swell rises to
+    `PRE_DROP_SWELL_TOP`, and the DARK SPAN (`pre_drop_dark_s`: a quarter
+    of the gap, 0.1-0.5 s) is held black the way the breath is, released
+    `BREATH_OVERRUN_S` past the drop if it never comes; the rise spends the
+    flash budget once a lull, like a hit, and the output guard still holds
+    the delivered light. Every new branch returns before touching state
+    when nothing is told, so an untold lull is today's. Evidence:
+    `tests/test_pre_drop_looks.py` (both effects untold against their
+    pinned pre-look modules frame for frame, the looks' timing on the real
+    pipeline with the engine's own lull arm, flares and punches in the
+    black, the flash budget; rig `tests/pre_drop_look_harness.py`),
+    `tests/test_pre_drop_arm_identity.py` (members' arms are the golden
+    plus the told keys), storyboards `scripts/render_predrop_storyboards.py`
+    -> `docs/evidence/predrop-storyboards/`. Unverified against his live
+    room.
