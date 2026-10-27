@@ -18,13 +18,15 @@ from pathlib import Path
 from typing import Optional
 
 from config import BASE_DIR
-from models.jukebox import JukeboxNight, JukeboxNights, ProgramConfig, ShowConfig
+from models.jukebox import (GuestLinkConfig, GuestLinkState, JukeboxNight, JukeboxNights,
+                            ProgramConfig, ShowConfig)
 
 logger = logging.getLogger(__name__)
 
 CONFIG_FILE = BASE_DIR / "storage" / "jukebox.json"
 NIGHT_FILE = BASE_DIR / "storage" / "jukebox_night.json"
 SHOW_FILE = BASE_DIR / "storage" / "jukebox_show.json"
+GUEST_LINK_FILE = BASE_DIR / "storage" / "jukebox_guest_link.json"
 
 HISTORY_MAX = 20       # earlier nights kept (as briefs) beside the current one
 LOG_MAX = 300          # the night's own log lines
@@ -93,6 +95,31 @@ def load_show() -> ShowConfig:
 def save_show(show: ShowConfig) -> None:
     with _lock:
         _write(SHOW_FILE, show.model_dump(mode="json"))
+
+
+# ── the guest link (N1): {"config": GuestLinkConfig, "state": GuestLinkState} ─
+
+def load_guest_link() -> tuple[GuestLinkConfig, GuestLinkState]:
+    raw = _read(GUEST_LINK_FILE)
+    if not isinstance(raw, dict):
+        return GuestLinkConfig(), GuestLinkState()
+    try:
+        cfg = GuestLinkConfig.model_validate(raw.get("config") or {})
+    except Exception as exc:
+        logger.warning("Jukebox: guest link settings invalid (%s) — using defaults (off)", exc)
+        cfg = GuestLinkConfig()
+    try:
+        st = GuestLinkState.model_validate(raw.get("state") or {})
+    except Exception as exc:
+        logger.warning("Jukebox: guest link state invalid (%s) — starting clean", exc)
+        st = GuestLinkState()
+    return cfg, st
+
+
+def save_guest_link(cfg: GuestLinkConfig, st: GuestLinkState) -> None:
+    with _lock:
+        _write(GUEST_LINK_FILE, {"config": cfg.model_dump(mode="json"),
+                                 "state": st.model_dump(mode="json")})
 
 
 # ── nights ───────────────────────────────────────────────────────────────────

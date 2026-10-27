@@ -31,6 +31,7 @@ from services.audio_shape_service import audio_shape_service
 from models.song_profile import SongProfile
 from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager, setlist_router, timing_viz_router, debug_router, morph_router, color_sets_router, lock_history_router, gif_assets_router, scenes_v2_router, shape_map_router, sequencer_router, absorb_router, jukebox_router
 from services import absorb
+from services.jukebox import guest_link as jukebox_guest_link
 from services.jukebox import night as jukebox
 from services import spotify_auth_age
 from routers.settings_router import apply_settings_override
@@ -202,6 +203,11 @@ async def lifespan(app: FastAPI):
     tasks = [
         asyncio.create_task(absorb.run_supervised(), name="absorb-supervisor"),
         asyncio.create_task(jukebox.runner.run_supervised(), name="jukebox-program"),
+        # closes a guest link (Tailscale Funnel) this process opened if no
+        # night is running — a crash between a night's start and its end.
+        # Off by default; with the link off it never runs `tailscale`.
+        asyncio.create_task(jukebox_guest_link.controller.run_supervised(),
+                            name="jukebox-guest-link"),
         asyncio.create_task(spotify_auth_age.run_supervised(), name="spotify-auth-age"),
         asyncio.create_task(_song_polling_loop(_on_state_update), name=_song_task_name),
         asyncio.create_task(ledfx_client.latency_loop(), name="ledfx-latency"),
