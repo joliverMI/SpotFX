@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 import secrets
+import threading
 import time
 from typing import Optional
 
@@ -35,6 +36,16 @@ ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
 LENGTH = 8
 MINT_MAX = 200          # codes in one batch
 STORE_MAX = 2000        # codes kept in all (used ones are the first to go)
+
+# Every write below is a load-decide-save against the one bonus-codes file;
+# store.save_bonus() only locks the final write, not that whole transaction.
+# This lock covers each function's entire read-modify-write so a concurrent
+# mint/claim/void can't read a stale copy and silently undo another's change
+# (a reverted "used" mark would let a code be claimed, and its credits
+# granted, more than once — see this module's own "ONCE, EVER" docstring).
+# Every caller already runs these off the event loop (asyncio.to_thread or
+# the guests' _ledger helper), so a plain threading.Lock never blocks it.
+_lock = threading.Lock()
 
 
 def fold(text: object) -> str:
@@ -58,68 +69,74 @@ def mint(count: int, batch: str = "", now_ms: Optional[int] = None) -> list[str]
     count = int(count)
     if not 1 <= count <= MINT_MAX:
         raise ValueError(f"make 1 to {MINT_MAX} codes at a time")
-    codes = store.load_bonus()
     now_ms = int(time.time() * 1000) if now_ms is None else now_ms
     batch = (batch or "").strip()[:40] or time.strftime("%Y-%m-%d %H:%M", time.localtime(now_ms / 1000))
-    room = STORE_MAX - len(codes.codes)
-    if count > room:
-        # make room by forgetting the oldest USED codes; an unused one may be on a card
-        used = sorted((c for c, v in codes.codes.items() if v.used_ms is not None),
-                      key=lambda c: codes.codes[c].used_ms or 0)
-        for c in used[:count - room]:
-            del codes.codes[c]
-        if STORE_MAX - len(codes.codes) < count:
-            raise ValueError(f"there are already {len(codes.codes)} unused codes — "
-                             "void some before making more")
-    out = []
-    for _ in range(count):
-        code = _new(set(codes.codes))
-        codes.codes[code] = BonusCode(batch=batch, created_ms=now_ms)
-        out.append(code)
-    store.save_bonus(codes)
-    return out
+    with _lock:
+        codes = store.load_bonus()
+        room = STORE_MAX - len(codes.codes)
+        if count > room:
+            # make room by forgetting the oldest USED codes; an unused one may be on a card
+            used = sorted((c for c, v in codes.codes.items() if v.used_ms is not None),
+                          key=lambda c: codes.codes[c].used_ms or 0)
+            for c in used[:count - room]:
+                del codes.codes[c]
+            if STORE_MAX - len(codes.codes) < count:
+                raise ValueError(f"there are already {len(codes.codes)} unused codes — "
+                                 "void some before making more")
+        out = []
+        for _ in range(count):
+            code = _new(set(codes.codes))
+            codes.codes[code] = BonusCode(batch=batch, created_ms=now_ms)
+            out.append(code)
+        store.save_bonus(codes)
+        return out
 
 
 def claim(code_text: object, night_id: str, name: str, now_ms: int) -> tuple[str, Optional[str]]:
     """Mark a code used. ("ok", code) on success, else (reason, None):
     "unknown", or "spent" for a code already used. The caller holds the
-    guests' lock, so two phones can't claim one code."""
+    guests' lock, so two phones can't claim one code — this module's own
+    lock is what stops a concurrent mint/void from losing that mark."""
     code = fold(code_text)
-    codes = store.load_bonus()
-    entry = codes.codes.get(code)
-    if entry is None:
-        return "unknown", None
-    if entry.used_ms is not None:
-        return "spent", None
-    entry.used_ms, entry.used_night, entry.used_name = now_ms, night_id, name
-    store.save_bonus(codes)
-    return "ok", code
+    with _lock:
+        codes = store.load_bonus()
+        entry = codes.codes.get(code)
+        if entry is None:
+            return "unknown", None
+        if entry.used_ms is not None:
+            return "spent", None
+        entry.used_ms, entry.used_night, entry.used_name = now_ms, night_id, name
+        store.save_bonus(codes)
+        return "ok", code
 
 
 def unclaim(code: str) -> None:
     """Undo a claim whose credits couldn't be written."""
-    codes = store.load_bonus()
-    entry = codes.codes.get(code)
-    if entry is not None:
-        entry.used_ms, entry.used_night, entry.used_name = None, "", ""
-        store.save_bonus(codes)
+    with _lock:
+        codes = store.load_bonus()
+        entry = codes.codes.get(code)
+        if entry is not None:
+            entry.used_ms, entry.used_night, entry.used_name = None, "", ""
+            store.save_bonus(codes)
 
 
 def void(code_text: object) -> bool:
     """Forget an UNUSED code (a card lost, a batch printed wrong). True if it went."""
     code = fold(code_text)
-    codes = store.load_bonus()
-    entry = codes.codes.get(code)
-    if entry is None or entry.used_ms is not None:
-        return False
-    del codes.codes[code]
-    store.save_bonus(codes)
-    return True
+    with _lock:
+        codes = store.load_bonus()
+        entry = codes.codes.get(code)
+        if entry is None or entry.used_ms is not None:
+            return False
+        del codes.codes[code]
+        store.save_bonus(codes)
+        return True
 
 
 def summary() -> dict:
     """What the host's Bonus cards card shows: every code, unused first."""
-    codes = store.load_bonus()
+    with _lock:
+        codes = store.load_bonus()
     rows = [{"code": pretty(c), "batch": v.batch, "created_ms": v.created_ms,
              "used": v.used_ms is not None, "used_ms": v.used_ms, "used_name": v.used_name}
             for c, v in codes.codes.items()]

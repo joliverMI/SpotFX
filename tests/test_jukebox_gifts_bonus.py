@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+import time
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -64,6 +66,60 @@ def test_an_unreadable_codes_file_is_never_written_over():
         except ValueError:
             pass
     assert store.BONUS_FILE.read_text(encoding="utf-8") == "{ not json"
+
+
+def test_concurrent_mint_claim_and_void_hold_the_store_together(monkeypatch):
+    """A host minting/voiding codes while guests claim one, all at once: the
+    whole load-decide-save must be one critical section, or a concurrent
+    write can read a stale copy and silently undo another's change (the
+    race this test is built to catch). A sleep inserted inside the load —
+    i.e. while the fix's lock is held — maximizes the window a missing
+    lock would let another thread's load-modify-save race into."""
+    real_load = store.load_bonus
+
+    def slow_load():
+        time.sleep(0.01)
+        return real_load()
+    monkeypatch.setattr(store, "load_bonus", slow_load)
+
+    seed = bonus_codes.mint(10, "seed")
+    target = seed[0]
+    to_void = seed[1:6]
+    errors: list[Exception] = []
+    claim_results: list[tuple[str, object]] = []
+    results_lock = threading.Lock()
+
+    def guarded(fn):
+        try:
+            fn()
+        except Exception as exc:
+            with results_lock:
+                errors.append(exc)
+
+    def try_claim(i):
+        r = bonus_codes.claim(target, f"n{i}", f"g{i}", i)
+        with results_lock:
+            claim_results.append(r)
+
+    threads = [threading.Thread(target=guarded, args=(lambda i=i: try_claim(i),)) for i in range(10)]
+    threads += [threading.Thread(target=guarded, args=(lambda c=c: bonus_codes.void(c),))
+                for c in to_void]
+    threads += [threading.Thread(target=guarded, args=(lambda: bonus_codes.mint(1, "race"),))
+                for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, errors
+    oks = [r for r in claim_results if r[0] == "ok"]
+    spents = [r for r in claim_results if r[0] == "spent"]
+    assert len(oks) == 1 and len(spents) == 9, claim_results   # exactly one claim wins
+
+    s = bonus_codes.summary()
+    assert s["used"] == 1                                       # never double-granted
+    assert s["unused"] + s["used"] == 10 - len(to_void) + 10     # no mint/void lost
+    assert all(bonus_codes.claim(c, "later", "x", 999)[0] == "unknown" for c in to_void)
 
 
 # ═══ 2. a guest uses a card ════════════════════════════════════════════════
