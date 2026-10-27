@@ -179,11 +179,44 @@ def test_the_poll_hook_never_awaits_spotify():
     assert r.on_track_state(None) is None
 
 
-def test_main_wires_the_engine():
+def test_jukebox_router_is_mounted_on_the_real_app():
+    """main.app actually serves /api/jukebox/* — reached without entering the
+    app's lifespan, so no background task (song polling, the jukebox
+    supervisor, etc.) ever starts."""
     import main
-    src = open(main.__file__, encoding="utf-8").read()
-    assert "jukebox.runner.on_track_state(track)" in src
-    assert "jukebox.runner.recover()" in src
-    assert "jukebox.runner.run_supervised()" in src
-    assert any(getattr(r, "path", "").startswith("/api/jukebox") for r in main.app.routes) \
-        or "app.include_router(jukebox_router.router)" in src
+    client = TestClient(main.app)
+    r = client.get("/api/jukebox/status")
+    assert r.status_code == 200
+    assert r.json()["running"] is False
+
+
+def test_the_poll_hook_wakes_the_runner_synchronously(monkeypatch):
+    """main._on_state_update calls jukebox.runner.on_track_state on every
+    poll, synchronously, with no network call of its own."""
+    import asyncio
+    import main
+    from services import absorb
+
+    calls = []
+
+    class RecordingRunner:
+        def on_track_state(self, track):
+            calls.append(track)
+
+    monkeypatch.setattr(night_mod, "runner", RecordingRunner())
+
+    async def _noop_track(track):
+        return None
+
+    async def _noop_broadcast(app_state):
+        return None
+
+    monkeypatch.setattr(absorb.runner, "on_track_state", _noop_track)
+    monkeypatch.setattr(main.audio_shape_service, "on_track_change", _noop_track)
+    monkeypatch.setattr(main.ws_manager, "broadcast_state", _noop_broadcast)
+
+    class StubAppState:
+        current_track = None
+
+    asyncio.run(main._on_state_update(StubAppState()))
+    assert calls == [None]
