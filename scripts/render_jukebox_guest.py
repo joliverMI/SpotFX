@@ -309,6 +309,15 @@ async def run() -> int:
 
             async def fresh(phone: tuple, me: str | None) -> bool:
                 name, w, h, scale, top, bottom, ua = phone
+                art_path = "/__art/0.png"
+                # The previous phone's page — and its running poll loop — must
+                # be torn down BEFORE clearing cookies/storage, or an in-flight
+                # /g/hello response can re-set the jb_phone cookie and the
+                # jukebox.phone localStorage entry right after the clear (or
+                # after the planted phone code below is written), registering
+                # this phone as the old guest instead.
+                await cdp(ws, nid, "Page.navigate", {"url": "about:blank"})
+                await wait_for("location.href === 'about:blank'")
                 await cdp(ws, nid, "Network.clearBrowserCookies")
                 await cdp(ws, nid, "Storage.clearDataForOrigin",
                           {"origin": base, "storageTypes": "all"})
@@ -320,8 +329,9 @@ async def run() -> int:
                               {"insets": {"top": top, "bottom": bottom, "left": 0, "right": 0}})
                 native = "error" not in r
                 url = f"{base}/?t={TOKEN}"
-                await cdp(ws, nid, "Page.navigate", {"url": base + "/__art/0.png"})
-                await asyncio.sleep(0.2)
+                await cdp(ws, nid, "Page.navigate", {"url": base + art_path})
+                await wait_for(
+                    f"location.pathname === {art_path!r} && document.readyState === 'complete'")
                 if me:
                     await evaluate(ws, nid, f"localStorage.setItem('jukebox.phone', {me!r}); true")
                 await cdp(ws, nid, "Page.navigate", {"url": url})
