@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import json
 import random
+import threading
+import time
 
 import pytest
 from pydantic import ValidationError
@@ -346,6 +348,75 @@ def test_a_random_night_keeps_every_invariant():
     assert bonus_by_giver and max(bonus_by_giver.values()) <= 5
     assert not any(e.kind in ("tip_in", "tip_bonus", "adder_up") and e.phone == "host"
                    for e in led.entries)
+
+
+def test_concurrent_spends_and_votes_do_not_race(monkeypatch):
+    """A live multi-guest jukebox has several phones hitting one shared
+    Ledger at once — the check (balance, already-voted) and the write it
+    guards must be one atomic step, or two threads can both pass the same
+    check before either of their entries has landed. `_write` is widened
+    with a real sleep (which releases the GIL) so every racing thread gets
+    a chance to run its own check during the gap between a check passing
+    and its entry actually being appended — deterministic regardless of
+    scheduling, not a probabilistic bet on the interpreter's own switch
+    timing. Fire a spend from many threads at a phone that can only afford
+    some of them, and a vote on one song from many threads at once, both
+    released together via a barrier to maximize contention."""
+    led = _ledger()
+    led.grant("a", "start", 37)
+    real_write = Ledger._write
+
+    def slow_write(self: Ledger, parts):
+        time.sleep(0.002)
+        return real_write(self, parts)
+
+    monkeypatch.setattr(Ledger, "_write", slow_write)
+
+    n = 100
+    barrier = threading.Barrier(n)
+    lock = threading.Lock()
+    spends: list[object] = []
+
+    def spend_one() -> None:
+        barrier.wait()
+        try:
+            e = led.spend("a", "add", 1, "s1")
+        except LedgerError:
+            return
+        with lock:
+            spends.append(e)
+
+    threads = [threading.Thread(target=spend_one) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(spends) == 37                     # exactly the affordable number landed
+    assert led.balance("a") == 0 and led.balance("a") >= 0
+    assert len(led.entries) == 1 + 37             # the grant, plus only the paid spends
+    assert led.verify() == []
+
+    votes = 50
+    vote_barrier = threading.Barrier(votes)
+    paid: list[object] = []
+
+    def vote_once() -> None:
+        vote_barrier.wait()
+        e = led.vote("a", "song-x", own_song=False)
+        if e is not None:
+            with lock:
+                paid.append(e)
+
+    voters = [threading.Thread(target=vote_once) for _ in range(votes)]
+    for t in voters:
+        t.start()
+    for t in voters:
+        t.join()
+
+    assert len(paid) == 1                             # the same vote is paid exactly once
+    assert led.balance("a") == 1
+    assert led.verify() == []
 
 
 def test_ledgers_live_one_file_per_night(tmp_path):

@@ -106,7 +106,6 @@ class Entry:
 class _Phone:
     balance: int = 0
     given: int = 0           # credits tipped out tonight (the double-first allowance)
-    bonus_out: int = 0       # bonus credits their gifts created tonight
 
 
 class Ledger:
@@ -126,7 +125,7 @@ class Ledger:
         self._adder_paid: set[str] = set()
         self._tipped: dict[tuple[str, str], int] = {}
         self._refunded: dict[int, int] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         if self.path is not None and self.path.exists():
             for line in self.path.read_text(encoding="utf-8").splitlines():
                 if line.strip():
@@ -163,9 +162,6 @@ class Ledger:
             st.given += -e.delta
             key = (e.phone, e.ref)
             self._tipped[key] = self._tipped.get(key, 0) + (-e.delta) // max(1, self.cfg.tip_unit)
-        elif e.kind == "tip_bonus" and e.link is not None:
-            giver = self.entries[e.link - 1].phone if 0 < e.link <= len(self.entries) else ""
-            self._phones.setdefault(giver, _Phone()).bonus_out += e.delta
         elif e.kind == "refund" and e.link is not None:
             self._refunded[e.link] = self._refunded.get(e.link, 0) + e.delta
         self.entries.append(e)
@@ -200,89 +196,97 @@ class Ledger:
     def grant(self, phone: str, kind: str, amount: int, ref: str = "", note: str = "") -> Entry:
         """A free credit: the first-visit credits, a top-up, a QR card, a
         host gift."""
-        if kind not in GRANTS:
-            raise LedgerError("bad_kind")
-        return self._write([(phone, self._amount(amount), kind, ref, None, note)])[0]
+        with self._lock:
+            if kind not in GRANTS:
+                raise LedgerError("bad_kind")
+            return self._write([(phone, self._amount(amount), kind, ref, None, note)])[0]
 
     def vote(self, voter: str, song_ref: str, own_song: bool) -> Optional[Entry]:
         """+vote_reward for voting on the playing song — once per song.
         Returns None when this vote pays nothing (already paid, or 0)."""
-        if own_song:
-            raise LedgerError("own_song")
-        if (voter, song_ref) in self._voted:
-            return None
-        if self.cfg.vote_reward <= 0:
-            return None
-        return self._write([(voter, self.cfg.vote_reward, "vote", song_ref, None, "")])[0]
+        with self._lock:
+            if own_song:
+                raise LedgerError("own_song")
+            if (voter, song_ref) in self._voted:
+                return None
+            if self.cfg.vote_reward <= 0:
+                return None
+            return self._write([(voter, self.cfg.vote_reward, "vote", song_ref, None, "")])[0]
 
     def adder_ups(self, adder: str, song_ref: str, ups: int, adder_is_host: bool) -> Optional[Entry]:
         """When a guest's song has played: +adder_up_reward per ▲, once."""
-        if adder_is_host:
-            raise LedgerError("host_song")
-        if song_ref in self._adder_paid:
-            raise LedgerError("adder_paid")
-        amount = int(ups) * self.cfg.adder_up_reward
-        if amount <= 0:
-            return None
-        return self._write([(adder, amount, "adder_up", song_ref, None, f"{int(ups)} ▲")])[0]
+        with self._lock:
+            if adder_is_host:
+                raise LedgerError("host_song")
+            if song_ref in self._adder_paid:
+                raise LedgerError("adder_paid")
+            amount = int(ups) * self.cfg.adder_up_reward
+            if amount <= 0:
+                return None
+            return self._write([(adder, amount, "adder_up", song_ref, None, f"{int(ups)} ▲")])[0]
 
     def spend(self, phone: str, kind: str, amount: int, ref: str = "", note: str = "") -> Entry:
         """Pay for something: refused, with nothing written, unless the
         phone holds the credits now."""
-        if kind not in SPENDS:
-            raise LedgerError("bad_kind")
-        amount = self._amount(amount)
-        have = self.balance(phone)
-        if have < amount:
-            raise LedgerError("not_enough", need=amount, have=have)
-        return self._write([(phone, -amount, kind, ref, None, note)])[0]
+        with self._lock:
+            if kind not in SPENDS:
+                raise LedgerError("bad_kind")
+            amount = self._amount(amount)
+            have = self.balance(phone)
+            if have < amount:
+                raise LedgerError("not_enough", need=amount, have=have)
+            return self._write([(phone, -amount, kind, ref, None, note)])[0]
 
     def jail_breakout(self, phone: str, ref: str = "") -> Entry:
-        return self.spend(phone, "jail_breakout", self.cfg.jail_fee, ref)
+        with self._lock:
+            return self.spend(phone, "jail_breakout", self.cfg.jail_fee, ref)
 
     def refund(self, spend_seq: int, amount: Optional[int] = None, note: str = "") -> Entry:
         """Return a spend (a song the host removed, one that can't be
         learned, a skip pot that wasn't filled, the night ending first) —
         to the phone that paid it, at most once, never more than it cost."""
-        if not 0 < int(spend_seq) <= len(self.entries):
-            raise LedgerError("no_spend")
-        sp = self.entries[int(spend_seq) - 1]
-        if sp.kind not in SPENDS:
-            raise LedgerError("no_spend")
-        if int(spend_seq) in self._refunded:
-            raise LedgerError("refunded")
-        cost = -sp.delta
-        amount = cost if amount is None else self._amount(amount)
-        if amount > cost:
-            raise LedgerError("over_refund")
-        return self._write([(sp.phone, amount, "refund", sp.ref, sp.seq, note)])[0]
+        with self._lock:
+            if not 0 < int(spend_seq) <= len(self.entries):
+                raise LedgerError("no_spend")
+            sp = self.entries[int(spend_seq) - 1]
+            if sp.kind not in SPENDS:
+                raise LedgerError("no_spend")
+            if int(spend_seq) in self._refunded:
+                raise LedgerError("refunded")
+            cost = -sp.delta
+            amount = cost if amount is None else self._amount(amount)
+            if amount > cost:
+                raise LedgerError("over_refund")
+            return self._write([(sp.phone, amount, "refund", sp.ref, sp.seq, note)])[0]
 
     def tip(self, giver: str, adder: str, song_ref: str, units: int,
             adder_is_host: bool) -> list[Entry]:
         """§1 rule 4: 1 credit a tap to the Adder of the song playing, at
         most `tip_max_per_song` taps per giver per song; the first
         `gift_double_first` credits a giver gives tonight arrive doubled."""
-        cfg = self.cfg
-        if not cfg.tips:
-            raise LedgerError("tips_off")
-        if adder_is_host:
-            raise LedgerError("host_song")
-        if giver == adder:
-            raise LedgerError("own_tip")
-        units = self._amount(units)
-        allowed = economy.tip_units_allowed(self.tipped_on(giver, song_ref), cfg)
-        if units > allowed:
-            raise LedgerError("tip_cap", cap=cfg.tip_max_per_song)
-        amount = units * cfg.tip_unit
-        have = self.balance(giver)
-        if have < amount:
-            raise LedgerError("not_enough", need=amount, have=have)
-        bonus = economy.tip_bonus(self.given(giver), amount, cfg)
-        parts = [(giver, -amount, "tip_out", song_ref, None, adder),
-                 (adder, amount, "tip_in", song_ref, -1, giver)]
-        if bonus:
-            parts.append((adder, bonus, "tip_bonus", song_ref, -1, f"first {cfg.gift_double_first} given count double"))
-        return self._write(parts)
+        with self._lock:
+            cfg = self.cfg
+            if not cfg.tips:
+                raise LedgerError("tips_off")
+            if adder_is_host:
+                raise LedgerError("host_song")
+            if giver == adder:
+                raise LedgerError("own_tip")
+            units = self._amount(units)
+            allowed = economy.tip_units_allowed(self.tipped_on(giver, song_ref), cfg)
+            if units > allowed:
+                raise LedgerError("tip_cap", cap=cfg.tip_max_per_song)
+            amount = units * cfg.tip_unit
+            have = self.balance(giver)
+            if have < amount:
+                raise LedgerError("not_enough", need=amount, have=have)
+            bonus = economy.tip_bonus(self.given(giver), amount, cfg)
+            parts = [(giver, -amount, "tip_out", song_ref, None, adder),
+                     (adder, amount, "tip_in", song_ref, -1, giver)]
+            if bonus:
+                parts.append((adder, bonus, "tip_bonus", song_ref, -1,
+                              f"first {cfg.gift_double_first} given count double"))
+            return self._write(parts)
 
     # ── the invariants, from the entries alone ──────────────────────────────
 
@@ -291,7 +295,6 @@ class Ledger:
         the violations (empty = the file is sound)."""
         bad: list[str] = []
         bal: dict[str, int] = {}
-        given: dict[str, int] = {}
         bonus: dict[str, int] = {}
         voted: set[tuple[str, str]] = set()
         adder_paid: set[str] = set()
@@ -317,7 +320,6 @@ class Ledger:
                     bad.append(f"entry {e.seq}: Adder paid twice for {e.ref}")
                 adder_paid.add(e.ref)
             if e.kind == "tip_out":
-                given[e.phone] = given.get(e.phone, 0) - e.delta
                 if e.note == e.phone:
                     bad.append(f"entry {e.seq}: {e.phone} tipped themself")
             if e.kind in ("tip_in", "tip_bonus"):
