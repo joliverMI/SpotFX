@@ -14,6 +14,7 @@ import ScenesPage from './scenes/ScenesPage';
 import TestbedPage from './testbed/TestbedPage';
 import AbsorbPage from './absorb/AbsorbPage';
 import JukeboxPage from './jukebox/JukeboxPage';
+import JukeboxTvPage from './jukebox/JukeboxTvPage';
 import SettingsConsolePage from './settings/SettingsConsolePage';
 import StatusPage from './status/StatusPage';
 import BuilderPage from './timeline/BuilderPage';
@@ -37,6 +38,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/review', 'Review'],
   ['/testbed', 'Test Bed'],
   ['/absorb', 'Absorb Music'],
+  ['/jukebox/tv', 'Jukebox board'],
   ['/jukebox', 'Jukebox'],
   ['/timing', 'Timing'],
   ['/avsync', 'AV Sync'],
@@ -87,6 +89,15 @@ export default function App() {
     return (
       <ToastProvider>
         <main className="live-popout-page"><LiveView popout /></main>
+      </ToastProvider>
+    );
+  }
+  // The Jukebox board for his TV (/jukebox/tv): the board alone, full
+  // screen — none of the app's bars on a TV across the room.
+  if (pathname === '/jukebox/tv') {
+    return (
+      <ToastProvider>
+        <JukeboxTvPage />
       </ToastProvider>
     );
   }

@@ -295,6 +295,25 @@ const PHONES = [
   ok(GW.lineRows([{ ...line[1], paid: 6 }], PHONES)[0].paid === 6, 'what a guest paid for a song rides on its row');
 }
 
+console.log('\n§1f jukeboxBoard.ts — the board\'s words (songs, not people; people boards his switches)');
+const BOARD_SONG = (o) => ({ uri: 'spotify:track:a', title: 'Dopamine', artist: 'Wooli', image: '', thumb: '',
+  open_url: 'https://open.spotify.com/track/a', by: { kind: 'guest', name: 'Disco Ana' }, ups: 3, downs: 0, plays: 1, ...o });
+const PEOPLE_BOARDS = [
+  { id: 'pickers', title: 'Top pickers', unit: '▲ on the songs they added', shown: false, rows: [{ name: 'Disco Ana', value: 3 }] },
+  { id: 'voters', title: 'Top voters', unit: 'songs voted on', shown: true, rows: [{ name: 'Lucky Otter', value: 5 }] },
+];
+{
+  const BW = await bundle(`export * from ${JSON.stringify(join(web, 'src/jukebox/jukeboxBoard.ts'))};`, 'board');
+  ok(BW.boardSongLine(BOARD_SONG({})) === 'added by Disco Ana · ▲ 3', `a song's line (${BW.boardSongLine(BOARD_SONG({}))})`);
+  ok(BW.boardSongLine(BOARD_SONG({ by: { kind: 'set', name: "Host's set" }, plays: 2 })) === "the host's set · ▲ 3 · played 2 times",
+    'a set song played twice');
+  ok(BW.peopleHeading(PEOPLE_BOARDS[0]).endsWith("(guests don't see this)") && !BW.peopleHeading(PEOPLE_BOARDS[1]).includes('see this'),
+    'the host is told which people boards guests don\'t see');
+  ok(JSON.stringify(BW.tvPeople(PEOPLE_BOARDS).map((p) => p.id)) === '["voters"]', 'the TV shows only the people boards guests see');
+  ok(BW.tvOffLine({ board_on_tv: false }).includes('On the TV') && BW.tvOffLine({ board_on_tv: true }) === '',
+    'the TV page says how to turn it on, and nothing once it is on');
+}
+
 // ── 2. the page, mounted ──────────────────────────────────────────────────
 let jsdomMod;
 try {
@@ -333,7 +352,9 @@ function newWorld(kind) {
     show: { preset: null, approve_new_phones: false, economy: { start_credits: 8, add_base: 4, skip_down_pct: 15, tips: true },
             night_ends: '00:00', last_call_min: 20, explicit: 'no', explicit_after: '22:00', max_phones: 40,
             renames_per_night: 3, word_filter: true, free_skip_downs: 3, free_skip_share: 67,
-            free_bumps_per_hour: 2, free_play_next: 'host', free_jail_songs: 5, play_mode: 'credits' },
+            free_bumps_per_hour: 2, free_play_next: 'host', free_jail_songs: 5, play_mode: 'credits',
+            board_on: true, board_top_pickers: false, board_top_voters: false, board_most_generous: false,
+            board_on_tv: false },
     phones: running ? JSON.parse(JSON.stringify(PHONES)) : [],
     noSkip: new Set(),
     requests: [],
@@ -406,6 +427,17 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.startsWith('/api/jukebox/line/')) {
     if (u.endsWith('/move')) return json({ status: 'moved', line: [] });
     return json(method === 'DELETE' ? { status: 'removed' } : { status: body?.held ? 'held' : 'released' });
+  }
+  if (u.startsWith('/api/jukebox/board')) {
+    const sh = world.show;
+    const settings = { board_on: sh.board_on ?? true, board_top_pickers: !!sh.board_top_pickers,
+      board_top_voters: !!sh.board_top_voters, board_most_generous: !!sh.board_most_generous, board_on_tv: !!sh.board_on_tv };
+    if (!world.running) return json({ running: false, settings });
+    return json({ running: true, settings,
+      board: { title: "Tonight's top songs", empty: 'No ▲ yet tonight.',
+               songs: [BOARD_SONG({}), BOARD_SONG({ uri: 'spotify:track:b', title: 'Dancing Queen', by: { kind: 'set', name: "Host's set" }, ups: 2, downs: 1 })],
+               people: PEOPLE_BOARDS.map((p) => ({ ...p, shown: !!settings[p.id === 'pickers' ? 'board_top_pickers' : 'board_top_voters'] })) },
+      now: { ...BOARD_SONG({ title: 'Ready to Run', by: { kind: 'set', name: "Host's set" } }), up: 4, down: 1 } });
   }
   if (u.startsWith('/api/jukebox/skip-lock')) {
     if (body.locked) world.noSkip.add(body.uri); else world.noSkip.delete(body.uri);
@@ -684,7 +716,64 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
   await P.settle();
   ok(JSON.stringify(puts2().at(-1)?.body) === '{"last_call_min":30}', `a guest rule PUTs exactly that rule (${JSON.stringify(puts2().at(-1)?.body)})`);
   ok(!c.querySelector('[data-testid="rule-explicit_after"]'), 'the explicit-after time hides unless explicit is "after"');
+  // the board (phase 3): its switches, a preview of what guests see, the TV page
+  const bc = c.querySelector('[data-testid="jukebox-board-card"]');
+  const boardBoxes = [...bc.querySelectorAll('input[type="checkbox"]')].map((i) => [i.getAttribute('aria-label'), i.checked]);
+  ok(boardBoxes.length === 5 && boardBoxes[0][1] === true && boardBoxes.slice(1).every(([, on]) => !on),
+    `the Board card: show the board on, the people boards and the TV off (${JSON.stringify(boardBoxes)})`);
+  ok(!c.querySelector('[data-testid="jukebox-guest-rules"] input[aria-label="On the TV"]'), 'the board switches have their own card');
+  const songsShown = [...bc.querySelectorAll('[data-testid="jukebox-board-songs"] li')].map((li) => li.textContent);
+  ok(songsShown.length === 2 && songsShown[0].includes('Dopamine') && songsShown[0].includes('added by Disco Ana · ▲ 3')
+    && songsShown[1].includes("the host's set"), 'the card previews tonight\'s top songs with who added each');
+  ok(text(bc.querySelector('[data-testid="jukebox-board-pickers"]')).includes("(guests don't see this)"),
+    'a people board guests don\'t see is marked so on the host\'s card');
+  P.actSync(() => bc.querySelector('input[aria-label="People board: top voters"]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })));
+  await P.settle();
+  const showPut = world.requests.filter((r) => r.method === 'PUT' && r.url.startsWith('/api/jukebox/show')).at(-1);
+  ok(JSON.stringify(showPut?.body) === '{"board_top_voters":true}', `a people board switch PUTs exactly that switch (${JSON.stringify(showPut?.body)})`);
+  ok(!!buttonByText(bc, /^Open the TV page$/), 'the card opens the TV page');
   P.unmount();
+}
+
+console.log('\n§2e the TV page (/jukebox/tv), mounted — nothing until "On the TV", then the board');
+{
+  const TV = await bundle(`
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import JukeboxTvPage from ${JSON.stringify(join(web, 'src/jukebox/JukeboxTvPage.tsx'))};
+let root = null;
+const container = document.createElement('div');
+document.body.appendChild(container);
+export function mount() {
+  if (root) act(() => { root.unmount(); });
+  root = createRoot(container);
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  act(() => { root.render(React.createElement(QueryClientProvider, { client: qc }, React.createElement(JukeboxTvPage))); });
+  return container;
+}
+export async function settle(ms = 30) {
+  for (let i = 0; i < 6; i += 1) await act(async () => { await new Promise((r) => setTimeout(r, ms)); });
+}
+export function unmount() { if (root) act(() => { root.unmount(); }); root = null; }
+`, 'tv');
+  world = newWorld('running');
+  let c = TV.mount();
+  await TV.settle();
+  ok(!!c.querySelector('[data-testid="jukebox-tv-off"]') && !c.querySelector('[data-testid="jukebox-tv-now"]'),
+    'with "On the TV" off the TV page shows nothing of the night, and says how to turn it on');
+  ok(document.body.classList.contains('jukebox-tv-body') && !c.querySelector('nav'), 'full screen: none of SPECTRA\'s bars');
+  world.show = { ...world.show, board_on_tv: true, board_top_voters: true };
+  c = TV.mount();
+  await TV.settle();
+  const now = c.querySelector('[data-testid="jukebox-tv-now"]');
+  ok(!!now && text(now).includes('Ready to Run') && text(now).includes('▲ 4') && text(now).includes('▼ 1'),
+    'on: the song playing with its live ▲▼');
+  ok(c.querySelectorAll('[data-testid="jukebox-board-songs"] li').length === 2, 'on: tonight\'s top songs');
+  ok(!!c.querySelector('[data-testid="jukebox-board-voters"]') && !c.querySelector('[data-testid="jukebox-board-pickers"]'),
+    'the TV shows only the people boards guests see (top voters on, top pickers off)');
+  ok(!text(c).includes("guests don't see this"), 'the TV never carries the host\'s own notes');
+  TV.unmount();
 }
 
 // ── 3. help ───────────────────────────────────────────────────────────────
@@ -693,7 +782,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
   const topics = ['jukebox', 'jukebox-set-list', 'jukebox-slots', 'jukebox-live', 'jukebox-sign-in',
     'jukebox-credits', 'jukebox-presets', 'jukebox-price-check', 'jukebox-simulator', 'sonic-jukebox',
     'jukebox-report', 'jukebox-guest-page', 'jukebox-guests', 'jukebox-free-play', 'jukebox-credits-mode',
-    'jukebox-skip-lock'];
+    'jukebox-skip-lock', 'jukebox-board'];
   const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
   const knownIds = new Set();
   for (const section of HELP_SECTIONS) {
@@ -745,7 +834,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     if (id && id !== 'sonic-scene-backups') reached.add(id);
   }
   ok(topics.every((id) => reached.has(id)) && reached.size === topics.length,
-    `the page's own controls and its 💬 Sonic open exactly the sixteen jukebox topics (${[...reached].sort().join(', ')})`);
+    `the page's own controls and its 💬 Sonic open exactly the seventeen jukebox topics (${[...reached].sort().join(', ')})`);
   P.unmount();
 }
 

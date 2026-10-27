@@ -8,7 +8,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { spotfxDel, spotfxGet, spotfxPost, spotfxPut } from '../api/client';
 import type {
-  GuestsRead, JukeboxPreview, JukeboxStatus, NightReport, PriceCheck, ProgramConfig, SetMoveResult,
+  GuestsRead, JukeboxBoardRead, JukeboxPreview, JukeboxStatus, NightReport, PriceCheck, ProgramConfig,
+  SetMoveResult,
   ShowRead, SimResult,
 } from './types';
 
@@ -108,6 +109,7 @@ export function useSaveShow() {
     onSuccess: (r) => {
       qc.setQueryData(SHOW_KEYS.show, r);
       qc.invalidateQueries({ queryKey: ['jukebox-price-check'] });
+      qc.invalidateQueries({ queryKey: ['jukebox-board'] });
     },
   });
 }
@@ -163,6 +165,16 @@ export function useGuests(running: boolean) {
     queryKey: ['jukebox-guests'],
     queryFn: () => spotfxGet<GuestsRead>('/jukebox/guests'),
     refetchInterval: running ? 5000 : 30000,
+  });
+}
+
+/** The board (tonight's top songs, the people boards, the song playing):
+ *  the Guests tab's Board card and the TV page. */
+export function useJukeboxBoard(fast: boolean) {
+  return useQuery({
+    queryKey: ['jukebox-board'],
+    queryFn: () => spotfxGet<JukeboxBoardRead>('/jukebox/board'),
+    refetchInterval: fast ? 5000 : 15000,
   });
 }
 

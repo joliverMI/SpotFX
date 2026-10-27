@@ -20,7 +20,7 @@ import {
   wantsHomeScreenHint, type BannerKind, type Tab,
 } from './logic';
 import { Art, Sheet } from './bits';
-import { AddScreen, NowScreen, QueueScreen, ShopScreen, Welcome } from './screens';
+import { AddScreen, BoardScreen, NowScreen, QueueScreen, ShopScreen, Welcome } from './screens';
 
 type Ok = Extract<Answer, { ok: true }>;
 type Spend =
@@ -306,6 +306,7 @@ export default function GuestApp() {
           <AddScreen view={view} onAdded={(v, text) => { show(v); setToast(text); setShopReload((n) => n + 1); }} />
         )}
         {tab === 'shop' && view.features.shop && <ShopScreen view={view} reload={shopReload} />}
+        {tab === 'board' && view.features.board && <BoardScreen />}
       </main>
       {tipping !== null && (
         <div className="g-toast g-toast-undo" role="status">

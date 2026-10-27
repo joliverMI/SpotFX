@@ -11197,6 +11197,24 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   render's credits shots (14-21), `check_jukebox_guest_logic.mjs`'s credits
   section, `check_jukebox_editor.mjs` §1e/§2b/§2d; help
   `jukebox-credits-mode`, `jukebox-skip-lock`.
+- **THE BOARD** (phase 3; `services/jukebox/board.py` is the binding
+  statement): "Tonight's top songs" RANKS SONGS, NOT PEOPLE — the plan's
+  §2.2 flag (Spotify's "Do not create a game") at D1's default (a). A song
+  that played twice is one row; who added it is attribution, never a rank.
+  The people boards (top pickers, top voters, most generous — the last
+  credits mode only) ship OFF (`ShowConfig.board_*`, the Guests tab's Board
+  card, Sonic asking first). No prizes, and nothing the board says uses a
+  word in `board.BANNED_WORDS` — a test holds every string to it; keep it
+  that way in any new board wording. A phone is named only by its name
+  (`build_board(viewer=)` marks `mine` without the id ever leaving).
+  Guests read `/g/board` (the guest app's allowlist) on their Board tab;
+  the host's card and the TV page read `GET /api/jukebox/board`, which
+  carries every people board marked `shown`. THE TV PAGE is SPECTRA's
+  `/jukebox/tv` — rendered outside the app chrome (App.tsx, like `/live`),
+  LAN-only, showing only what guests see, and nothing until "On the TV"
+  (`board_on_tv`) is on. Specs: `tests/test_jukebox_board.py`,
+  `check_jukebox_editor.mjs` §1f/§2d/§2e, the guest render's
+  `22-board`; help `jukebox-board`.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his program settings, one validator:

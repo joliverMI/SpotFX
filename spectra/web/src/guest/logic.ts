@@ -337,5 +337,21 @@ export function earnedToast(earned: number | undefined): string {
   return earned && earned > 0 ? `+${credits(earned)} for voting` : '';
 }
 
+// ── the Board (report §1 rule 11, §2.2) ──────────────────────────────────
+
+/** How often the Board asks again while it is open. */
+export const BOARD_POLL_MS = 15000;
+
+/** A board song's line: who added it, its ▲, and how often it played. */
+export function boardSongLine(s: { by: By; mine: boolean; ups: number; plays: number }): string {
+  const played = s.plays > 1 ? ` · played ${s.plays} times` : '';
+  return `${byLine(s.by, s.mine)} · ▲ ${s.ups}${played}`;
+}
+
+/** A people board's count in words: "1 song voted on", "3 songs voted on". */
+export function peopleCount(value: number, p: { unit: string; unit_one?: string }): string {
+  return `${value} ${value === 1 && p.unit_one ? p.unit_one : p.unit}`;
+}
+
 /** How long the page holds a tip before sending it, so a mis-tap can be undone. */
 export const TIP_UNDO_MS = 3000;

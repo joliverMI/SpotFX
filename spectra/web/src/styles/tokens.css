@@ -4106,3 +4106,32 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .jukebox-sim-tr.head { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
 .jukebox-sim-tr.head > span:not(:first-child) { text-align: right; }
 .jukebox-sim-tr.moved > span:nth-child(2) { color: var(--accent); }
+/* The board (the Guests tab's Board card and the TV page, /jukebox/tv) */
+.jukebox-board { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.jukebox-board-title { font-size: 13px; font-weight: 600; margin: 6px 0 2px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.jukebox-board-songs, .jukebox-board-names { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.jukebox-board-song { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.jukebox-board-place { min-width: 1.6em; text-align: right; font-weight: 700; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.jukebox-board-art { width: 36px; height: 36px; border-radius: 4px; flex: none; object-fit: cover; }
+.jukebox-board-art-empty { display: inline-flex; align-items: center; justify-content: center; background: var(--surface2); color: var(--text-muted); }
+.jukebox-board-spotify { font-size: 12px; color: #1ed760; white-space: nowrap; flex: none; }
+.jukebox-board-names li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.jukebox-board-names li span:last-child { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+body.jukebox-tv-body { background: var(--bg); }
+.jukebox-tv { min-height: 100vh; box-sizing: border-box; padding: 32px 48px; display: flex; flex-direction: column; gap: 24px; }
+.jukebox-tv-note { font-size: 24px; color: var(--text-muted); text-align: center; margin: auto; max-width: 40em; }
+.jukebox-tv-now { display: flex; gap: 32px; align-items: center; }
+.jukebox-tv-art { width: 220px; height: 220px; border-radius: 12px; flex: none; object-fit: cover; font-size: 64px; }
+.jukebox-tv-now-words { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.jukebox-tv-label { font-size: 18px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; }
+.jukebox-tv-title { font-size: 44px; font-weight: 700; overflow-wrap: anywhere; }
+.jukebox-tv-artist { font-size: 26px; color: var(--text-muted); }
+.jukebox-tv-by { font-size: 20px; }
+.jukebox-tv-votes { display: flex; gap: 24px; font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.jukebox-tv-up { color: var(--ok); }
+.jukebox-tv-down { color: var(--danger); }
+.jukebox-board-tv .jukebox-board-title { font-size: 20px; }
+.jukebox-board-tv .jukebox-song-title { font-size: 22px; }
+.jukebox-board-tv .jukebox-song-artist { font-size: 16px; }
+.jukebox-board-tv .jukebox-board-art { width: 56px; height: 56px; }
+.jukebox-board-tv .jukebox-board-names li { font-size: 20px; }

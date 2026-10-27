@@ -94,7 +94,11 @@ GUEST_RULE_KEYS: tuple[str, ...] = ("night_ends", "last_call_min", "explicit", "
                                     # free play (PR 2.3): the room's skip, bumps,
                                     # play next, the jail's time-out
                                     "free_skip_downs", "free_skip_share", "free_bumps_per_hour",
-                                    "free_play_next", "free_jail_songs")
+                                    "free_play_next", "free_jail_songs",
+                                    # the board (§4's Board card): the people
+                                    # boards are his call and ship off (D1)
+                                    "board_on", "board_top_pickers", "board_top_voters",
+                                    "board_most_generous", "board_on_tv")
 
 _PROGRAM_LABELS = {
     "mode": "where the jukebox slots go",
@@ -630,7 +634,10 @@ OPERATIONS: dict[str, SonicOperation] = {
             "the free-play rules — free_skip_downs (2-10 ▼ to skip a song), free_skip_share "
             "(50-90, the percent of the votes that must be ▼), free_bumps_per_hour (0-10), "
             "free_play_next (host | off), free_jail_songs (0-15 songs a jailed guest's songs "
-            "sit out; 0 = no jail) — "
+            "sit out; 0 = no jail) — the board — board_on (the guests' Board tab, \"Tonight's "
+            "top songs\"), board_top_pickers / board_top_voters / board_most_generous (the "
+            "people boards, off by default: ranking people is the plan's §2.2 flag, so say so "
+            "when he turns one on), board_on_tv (the full-screen board page for his TV) — "
             "or any economy key from get_jukebox_settings. SpotFX validates first; an "
             "out-of-range value is refused with its reason before he is asked."),
         input_schema={"type": "object",

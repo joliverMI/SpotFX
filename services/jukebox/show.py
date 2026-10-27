@@ -103,6 +103,12 @@ GUEST_FIELDS: list[tuple[str, str, str, str]] = [
     ("free_bumps_per_hour", "Free play", "Bumps per guest", "an hour"),
     ("free_play_next", "Free play", "Play next", ""),
     ("free_jail_songs", "Free play", "Jail: a guest's songs sit out (0 = no jail)", "songs"),
+    # the board (report §4's Board card; D1 (a): people boards off)
+    ("board_on", "Board", "Show the board (Tonight's top songs)", ""),
+    ("board_top_pickers", "Board", "People board: top pickers", ""),
+    ("board_top_voters", "Board", "People board: top voters", ""),
+    ("board_most_generous", "Board", "People board: most generous (credits mode)", ""),
+    ("board_on_tv", "Board", "On the TV", ""),
 ]
 EXPLICIT_WORDS = {"no": "not allowed", "extra": "allowed (+2 credits with credits on)",
                   "after": "allowed after a set time"}
