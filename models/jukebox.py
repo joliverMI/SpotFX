@@ -499,6 +499,21 @@ class GuestPhone(_Model):
     bumps_ms: list[int] = Field(default_factory=list)
 
 
+class BonusCode(_Model):
+    """One printed bonus card's code (services/jukebox/bonus_codes.py): good
+    for `qr_bonus` credits once, ever. `used_*` say when, on which night and
+    by which guest's name it was used (never the phone's id)."""
+    batch: str = ""
+    created_ms: int = 0
+    used_ms: Optional[int] = None
+    used_night: str = ""
+    used_name: str = ""
+
+
+class BonusCodes(_Model):
+    codes: dict[str, BonusCode] = Field(default_factory=dict)
+
+
 class GuestBook(_Model):
     """One night's phones and votes. `votes` is keyed by the PLAY — the song
     and the moment it started (`<uri>@<started_ms>`) — so a song that plays

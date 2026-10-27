@@ -197,4 +197,6 @@ export interface WalletView {
   shop: ShopTile[];
   how_to_earn: string[];
   disclaimer: string;
+  /** the printed bonus card: its credits, and whether this phone used one tonight */
+  bonus?: { amount: number; used: boolean; tries_left: number };
 }

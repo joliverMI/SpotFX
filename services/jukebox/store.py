@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from config import BASE_DIR
-from models.jukebox import (GuestBook, GuestLinkConfig, GuestLinkState, JukeboxNight,
+from models.jukebox import (BonusCodes, GuestBook, GuestLinkConfig, GuestLinkState, JukeboxNight,
                             JukeboxNights, ProgramConfig, ShowConfig)
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,7 @@ NIGHT_FILE = BASE_DIR / "storage" / "jukebox_night.json"
 SHOW_FILE = BASE_DIR / "storage" / "jukebox_show.json"
 GUEST_LINK_FILE = BASE_DIR / "storage" / "jukebox_guest_link.json"
 GUESTS_FILE = BASE_DIR / "storage" / "jukebox_guests.json"
+BONUS_FILE = BASE_DIR / "storage" / "jukebox_bonus_codes.json"
 
 HISTORY_MAX = 20       # earlier nights kept (as briefs) beside the current one
 LOG_MAX = 300          # the night's own log lines
@@ -139,6 +140,27 @@ def load_guests() -> GuestBook:
 def save_guests(data: dict) -> None:
     with _lock:
         _write(GUESTS_FILE, data)
+
+
+# ── the printed bonus cards' codes (services/jukebox/bonus_codes.py) ─────────
+
+def load_bonus() -> BonusCodes:
+    """The codes. A file that is there but can't be read RAISES ValueError
+    rather than reading as empty: printed cards may carry its codes, and
+    saving over it would lose them."""
+    try:
+        text = BONUS_FILE.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return BonusCodes()
+    try:
+        return BonusCodes.model_validate(json.loads(text))
+    except Exception as exc:
+        raise ValueError(f"the bonus codes file can't be read ({exc})") from exc
+
+
+def save_bonus(codes: BonusCodes) -> None:
+    with _lock:
+        _write(BONUS_FILE, codes.model_dump(mode="json"))
 
 
 # ── nights ───────────────────────────────────────────────────────────────────

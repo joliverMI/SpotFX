@@ -13,7 +13,9 @@ import InfoTip from '../components/InfoTip';
 import { useToast } from '../components/Toast';
 import { checkValue, groupFields, presetTitle, priceRows, rangeLine } from './jukeboxCredits';
 import { GUEST_COUNTS } from './jukeboxEditor';
-import { useApplyPreset, useJukeboxShow, usePriceCheck, useSaveShow } from './queries';
+import {
+  useApplyPreset, useBonusCodes, useJukeboxShow, useMintBonus, usePriceCheck, useSaveShow, useVoidBonus,
+} from './queries';
 import type { EconomyField } from './types';
 
 function errText(e: unknown): string {
@@ -136,7 +138,72 @@ export default function CreditsTab() {
           ))}
         </div>
       </section>
+
+      <BonusCards amount={show.economy.qr_bonus as number} />
     </div>
+  );
+}
+
+const MINT_MAX = 200;   // SpotFX bonus_codes.MINT_MAX
+
+/** THE PRINTED BONUS CARDS (report §1 rule 1, §9's N2): one-time codes, each
+ * good for the QR bonus once, ever, and one per phone a night. Made here in
+ * batches; printed on the cards (with the join QR); a lost card's code can
+ * be voided while it is unused. */
+function BonusCards({ amount }: { amount: number }) {
+  const toast = useToast();
+  const q = useBonusCodes();
+  const mint = useMintBonus();
+  const voidCode = useVoidBonus();
+  const [count, setCount] = useState('10');
+  const [batch, setBatch] = useState('');
+  const n = Number(count);
+  const ok = Number.isInteger(n) && n >= 1 && n <= MINT_MAX;
+  const data = q.data;
+  return (
+    <section className="card jukebox-card jukebox-list-card" data-testid="jukebox-bonus-cards">
+      <div className="jukebox-card-head">
+        <InfoTip topic="jukebox-bonus-cards"
+          text="One-time codes for the printed bonus cards: each is good for the QR bonus once, ever, and a phone can use one a night. Credits mode only.">
+          <span className="card-title jukebox-card-title">Bonus cards</span>
+        </InfoTip>
+        <span className="jukebox-muted">
+          {data ? `${data.unused} unused · ${data.used} used · +${amount} credits each` : q.isError ? "The codes couldn't be read." : 'Reading the codes…'}
+        </span>
+      </div>
+      <div className="jukebox-bonus-make">
+        <label className="jukebox-field">
+          <span className="jukebox-field-label">Make</span>
+          <input type="number" min={1} max={MINT_MAX} value={count} aria-label="How many codes to make"
+            onChange={(e) => setCount(e.target.value)} />
+          <span className="jukebox-muted">codes (1-{MINT_MAX})</span>
+        </label>
+        <label className="jukebox-field">
+          <span className="jukebox-field-label">Label</span>
+          <input value={batch} maxLength={40} placeholder="e.g. Saturday party" aria-label="A label for this batch"
+            onChange={(e) => setBatch(e.target.value)} />
+        </label>
+        <button type="button" disabled={!ok || mint.isPending}
+          onClick={() => mint.mutate({ count: n, batch }, {
+            onSuccess: (r) => toast(`Made ${r.made?.length ?? n} codes`, 'success'),
+            onError: (e) => toast(errText(e), 'error'),
+          })}>Make codes</button>
+      </div>
+      {data && data.codes.length > 0 && (
+        <ul className="jukebox-bonus-codes" data-testid="jukebox-bonus-codes">
+          {data.codes.map((c) => (
+            <li key={c.code} className={c.used ? 'used' : ''}>
+              <code>{c.code}</code>
+              <span className="jukebox-muted">{c.used ? `used by ${c.used_name || 'a guest'}` : c.batch}</span>
+              {!c.used && (
+                <button type="button" aria-label={`Void ${c.code}`}
+                  onClick={() => voidCode.mutate(c.code, { onError: (e) => toast(errText(e), 'error') })}>Void</button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

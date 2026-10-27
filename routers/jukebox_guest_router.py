@@ -18,6 +18,7 @@ directly, and a wrong or missing key is a plain 401.
   POST /api/jukebox/guest/breakout {phone}               credits: break out of jail
   GET  /api/jukebox/guest/wallet?phone=                  credits: the Shop and history
   GET  /api/jukebox/guest/board?phone=                   the Board: tonight's top songs
+  POST /api/jukebox/guest/bonus   {phone, code}          credits: a printed bonus card's code
   GET  /api/jukebox/guest/view?phone=                    the screen, again
 
 What each does is services/jukebox/guests.py; every answer carries the
@@ -199,6 +200,17 @@ async def post_next(body: NextBody, request: Request) -> JSONResponse:
 async def post_breakout(body: PhoneOnly, request: Request) -> JSONResponse:
     _check(request)
     return _answer(await guests.book.break_out(body.phone))
+
+
+class BonusBody(BaseModel):
+    phone: Optional[str] = None
+    code: Optional[str] = Field(None, max_length=40)
+
+
+@router.post("/bonus")
+async def post_bonus(body: BonusBody, request: Request) -> JSONResponse:
+    _check(request)
+    return _answer(await guests.book.redeem_bonus(body.phone, body.code))
 
 
 @router.get("/wallet")

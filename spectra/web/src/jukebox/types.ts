@@ -240,6 +240,12 @@ export interface JukeboxBoardRead {
           open_url: string; by: BoardBy; up: number; down: number } | null;
 }
 
+/** The printed bonus cards' codes (SpotFX services/jukebox/bonus_codes.py). */
+export interface BonusCodeRow {
+  code: string; batch: string; created_ms: number; used: boolean; used_ms: number | null; used_name: string;
+}
+export interface BonusCodesRead { unused: number; used: number; codes: BonusCodeRow[]; made?: string[] }
+
 export interface GuestsRead {
   running: boolean;
   phones: GuestPhone[];

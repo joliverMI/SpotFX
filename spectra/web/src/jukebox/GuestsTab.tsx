@@ -13,8 +13,8 @@ import { useToast } from '../components/Toast';
 import BoardLists from './BoardLists';
 import { lineRows, phoneActions, phoneLine, type PhoneAction } from './jukeboxGuests';
 import {
-  useGuests, useHoldEntry, useHostPhone, useJukeboxBoard, useJukeboxShow, usePlayNext, useRemoveEntry,
-  useSaveShow, useSkipLock,
+  useGift, useGuests, useHoldEntry, useHostPhone, useJukeboxBoard, useJukeboxShow, usePlayNext,
+  useRemoveEntry, useSaveShow, useSkipLock,
 } from './queries';
 import type { GuestField, GuestPhone, JukeboxStatus, ShowConfig } from './types';
 
@@ -41,6 +41,12 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
   const remove = useRemoveEntry();
   const playNext = usePlayNext();
   const skipLock = useSkipLock();
+  const gift = useGift();
+  const giveTo = (to: string, amount: number, who: string) => gift.mutate({ to, amount }, {
+    onSuccess: (r) => toast(`Gave ${who} ${amount} credit${amount === 1 ? '' : 's'}${
+      to === 'everyone' && r.gift ? ` (${r.gift.phones} phone${r.gift.phones === 1 ? '' : 's'})` : ''}`, 'success'),
+    onError,
+  });
   const onError = (e: unknown) => toast(errText(e), 'error');
   const phones = guestsQ.data?.phones ?? [];
   const show = showQ.data?.show;
@@ -167,6 +173,11 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
       <section className="card jukebox-card jukebox-list-card" data-testid="jukebox-phones">
         <div className="jukebox-card-head">
           <span className="card-title jukebox-card-title">Phones</span>
+          {running && credits && (
+            <InfoTip topic="jukebox-gifts" text="A gift of credits to everyone at the party (joined, approved, not blocked). Gifts are gifts: nothing is asked in return.">
+              <button type="button" onClick={() => giveTo('everyone', 2, 'everyone')}>Everyone +2</button>
+            </InfoTip>
+          )}
           <span className="jukebox-muted">
             {running ? `${phones.length} tonight${guestsQ.data?.pending ? ` · ${guestsQ.data.pending} waiting for you` : ''}${guestsQ.data?.jailed ? ` · ${guestsQ.data.jailed} in a time-out` : ''}` : 'no night running'}
           </span>
@@ -174,8 +185,9 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
         {phones.length > 0 ? (
           <ul className="jukebox-phones">
             {phones.map((p) => (
-              <PhoneRow key={p.id} p={p}
-                onSet={(patch) => host.mutate({ id: p.id, ...patch }, { onError })} />
+              <PhoneRow key={p.id} p={p} canGift={running && credits && p.joined && p.approved && !p.blocked}
+                onSet={(patch) => host.mutate({ id: p.id, ...patch }, { onError })}
+                onGift={(amount) => giveTo(p.id, amount, p.name)} />
             ))}
           </ul>
         ) : running && <p className="jukebox-muted">No phones yet: they join through tonight's party link.</p>}
@@ -240,12 +252,18 @@ function RuleRow({ f, show, onSave, onBad }: {
   );
 }
 
-function PhoneRow({ p, onSet }: {
+const GIFT_MAX = 20;    // SpotFX guests.GIFT_MAX
+
+function PhoneRow({ p, onSet, canGift = false, onGift }: {
   p: GuestPhone;
   onSet: (patch: { approved?: boolean; blocked?: boolean; name_locked?: boolean; name?: string;
                    pardon?: boolean }) => void;
+  canGift?: boolean; onGift?: (amount: number) => void;
 }) {
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [giving, setGiving] = useState<string | null>(null);
+  const giveAmount = giving === null ? NaN : Number(giving);
+  const giveOk = Number.isInteger(giveAmount) && giveAmount >= 1 && giveAmount <= GIFT_MAX;
   return (
     <li className={`jukebox-phone${p.blocked ? ' jukebox-phone-blocked' : ''}${p.jail_left ? ' jukebox-phone-jailed' : ''}`}
         data-testid="jukebox-phone">
@@ -263,6 +281,19 @@ function PhoneRow({ p, onSet }: {
         <span className="jukebox-song-artist">{phoneLine(p)}</span>
       </span>
       <span className="jukebox-guest-actions">
+        {canGift && onGift && (giving === null ? (
+          <button onClick={() => setGiving('2')}>Give…</button>
+        ) : (
+          <>
+            <input type="number" min={1} max={GIFT_MAX} value={giving} aria-label={`Credits to give ${p.name}`}
+              className="jukebox-gift-input" autoFocus onChange={(e) => setGiving(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && giveOk) { onGift(giveAmount); setGiving(null); }
+                if (e.key === 'Escape') setGiving(null);
+              }} />
+            <button disabled={!giveOk} onClick={() => { onGift(giveAmount); setGiving(null); }}>Give</button>
+          </>
+        ))}
         {phoneActions(p).map((a) => (
           <button key={a} onClick={() => {
             if (a === 'approve') onSet({ approved: true });

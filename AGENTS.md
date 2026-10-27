@@ -11215,6 +11215,28 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   (`board_on_tv`) is on. Specs: `tests/test_jukebox_board.py`,
   `check_jukebox_editor.mjs` §1f/§2d/§2e, the guest render's
   `22-board`; help `jukebox-board`.
+- **GIFTS AND BONUS CARDS** (phase 3; the plan's §1 rule 1, §4's Free
+  credits card, §9's N2). The host's gift (`guests.gift`, `POST
+  /api/jukebox/gift`): "Everyone +2" reaches every phone JOINED, APPROVED
+  and not blocked; "Give…" one of them, 1-`GIFT_MAX` (20); credits mode
+  only; a "host_gift" ledger grant per phone. Sonic's
+  `give_jukebox_credits` asks first and takes a guest only by their exact
+  name (a near miss is refused naming the closest — never guessed). THE
+  BONUS CODES are `services/jukebox/bonus_codes.py` (its docstring is the
+  binding statement): their OWN store (`storage/jukebox_bonus_codes.json`,
+  `store.BONUS_FILE`, conftest-isolated) because cards are printed before a
+  night exists; good for `qr_bonus` ONCE, EVER; one per phone a night (the
+  wallet's `got` set); `BONUS_TRIES` (5) wrong codes a phone a night; a
+  file that is there but unreadable RAISES rather than reading empty
+  (`store.load_bonus`), so printed codes are never written over. A guest
+  uses one from the join link (`?b=` — the guest page keeps it in session
+  storage, strips it from the address, and uses it once they join in
+  credits mode) or by typing it in the Shop (`/g/bonus`). Minting and
+  voiding are the Credits tab's Bonus cards card; a named Sonic exclusion.
+  Specs: `tests/test_jukebox_gifts_bonus.py`, `test_jukebox_console.py`'s
+  gift test, `check_jukebox_editor.mjs` §2b/§2d, the guest logic check's
+  bonus section, the render's credits pass (it arrives by a card's link);
+  help `jukebox-gifts`, `jukebox-bonus-cards`.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his program settings, one validator:

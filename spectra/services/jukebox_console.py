@@ -29,10 +29,9 @@ the simulator is a model night that writes nothing.
 
 What stays off-limits, each named so an audit can tell "considered and
 excluded" from "forgotten":
-  * giving credits, guests, phones and approvals — the guest page (phase
-    2.1, SpotFX's services/jukebox/guests.py) has no credits yet and no host
-    controls over phones yet; when credits arrive, giving them joins this
-    domain and asks first;
+  * the printed BONUS CARDS' codes (making, listing, voiding them) — they
+    are for printing on cards, on the Credits tab's Bonus cards card and the
+    printable card page; a code read aloud is a code given away;
   * a guest's own acts on the guest page — joining, the name a phone picks,
     its votes, the songs it adds — are the guests', never the host's to make
     by voice (`jukebox_status` reads how many phones are on the page);
@@ -58,6 +57,7 @@ excluded" from "forgotten":
 """
 from __future__ import annotations
 
+import difflib
 import json as _json
 import time
 import uuid
@@ -530,6 +530,64 @@ async def _op_stop_jukebox_night(pause: bool = False, confirm_id: Optional[str] 
     return {"status": "applied", "summary": f"The Jukebox night stopped: {r.get('detail')}"}
 
 
+GIFT_MAX = 20            # the most one gift gives a phone (SpotFX guests.GIFT_MAX)
+_EVERYONE = {"everyone", "everybody", "all", "the whole party", "the party"}
+
+
+async def _op_give_jukebox_credits(to: str, amount: int = 2,
+                                   confirm_id: Optional[str] = None) -> dict:
+    """The host's gift (report §4: "Everyone +2", "Give…"): credits to every
+    phone at tonight's party, or to one guest named EXACTLY (a near miss is
+    refused naming the close ones — a misheard name must not gift the wrong
+    guest). Asks first, naming who and how much."""
+    g, err = await _get("/api/jukebox/guests")
+    if err:
+        return err
+    if not g.get("running"):
+        return {"status": "rejected", "reason": "no Jukebox night is running"}
+    if g.get("play_mode") != "credits":
+        return {"status": "rejected", "reason": "credits are off tonight — the guest page is on "
+                                                "free play, where gifts mean nothing"}
+    try:
+        n = int(amount)
+    except (TypeError, ValueError):
+        return {"status": "rejected", "reason": f"a gift is 1 to {GIFT_MAX} credits"}
+    if not 1 <= n <= GIFT_MAX:
+        return {"status": "rejected", "reason": f"a gift is 1 to {GIFT_MAX} credits"}
+    party = [p for p in g.get("phones") or []
+             if p.get("joined") and p.get("approved") and not p.get("blocked")]
+    word = str(to or "").strip()
+    if word.casefold() in _EVERYONE:
+        if not party:
+            return {"status": "rejected", "reason": "nobody has joined tonight yet"}
+        target, who = "everyone", (f"everyone at the party ({len(party)} "
+                                   f"phone{'' if len(party) == 1 else 's'})")
+        state = sorted(p["id"] for p in party)
+    else:
+        match = [p for p in party if p.get("name", "").casefold() == word.casefold()]
+        if len(match) != 1:
+            close = difflib.get_close_matches(word, [p.get("name", "") for p in party], n=3,
+                                              cutoff=0.5)
+            hint = f" — the closest: {', '.join(close)}" if close else ""
+            return {"status": "rejected",
+                    "reason": f"no guest at tonight's party is named {word!r}{hint}; say the "
+                              "name exactly as the Guests tab shows it, or 'everyone'"}
+        target, who, state = match[0]["id"], match[0]["name"], [match[0]["id"]]
+    question = (f"Give {who} {n} credit{'' if n == 1 else 's'}? Credits are free, only for "
+                "tonight, and a gift asks nothing in return.")
+    refusal = _gate("give_jukebox_credits", {"to": target, "amount": n}, state, confirm_id,
+                    question)
+    if refusal:
+        return refusal
+    r, err = await _request("POST", "/api/jukebox/gift", body={"to": target, "amount": n})
+    if err:
+        return err
+    gift = r.get("gift") or {}
+    return {"status": "applied",
+            "summary": f"Gave {n} credit{'' if n == 1 else 's'} to {who}.",
+            "phones": gift.get("phones")}
+
+
 # ── declarations ─────────────────────────────────────────────────────────────
 
 _INSTR_COMMON = (
@@ -686,4 +744,22 @@ OPERATIONS: dict[str, SonicOperation] = {
                                      "confirm_id": _CONFIRM_PROP},
                       "additionalProperties": False},
         handler=_op_stop_jukebox_night),
+    "give_jukebox_credits": SonicOperation(
+        name="give_jukebox_credits", domain="jukebox", kind="write",
+        summary="Give credits to everyone at tonight's party, or to one guest by name — the "
+                "host's gift (credits mode); always asks first.",
+        instructions=(
+            _INSTR_COMMON + _INSTR_CONFIRM
+            + "`to` is 'everyone' or a guest's name EXACTLY as the Guests tab shows it (a near "
+            "miss is refused with the closest names — never guess which guest he meant). "
+            f"`amount` is 1-{GIFT_MAX} (2 is the plan's \"Everyone +2\"). Only in credits mode "
+            "and while a night runs. A gift is a gift: never offer credits in exchange for "
+            "anything."),
+        input_schema={"type": "object",
+                      "properties": {"to": {"type": "string"},
+                                     "amount": {"type": "integer", "minimum": 1,
+                                                "maximum": GIFT_MAX},
+                                     "confirm_id": _CONFIRM_PROP},
+                      "required": ["to"], "additionalProperties": False},
+        handler=_op_give_jukebox_credits),
 }

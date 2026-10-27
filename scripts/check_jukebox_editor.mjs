@@ -357,6 +357,8 @@ function newWorld(kind) {
             board_on_tv: false },
     phones: running ? JSON.parse(JSON.stringify(PHONES)) : [],
     noSkip: new Set(),
+    codes: [{ code: 'ABCD-EFGH', batch: 'Saturday', created_ms: 1, used: false, used_ms: null, used_name: '' },
+            { code: 'WXYZ-2345', batch: 'Saturday', created_ms: 1, used: true, used_ms: 5, used_name: 'Disco Ana' }],
     requests: [],
   };
 }
@@ -438,6 +440,19 @@ globalThis.fetch = async (url, init = {}) => {
                songs: [BOARD_SONG({}), BOARD_SONG({ uri: 'spotify:track:b', title: 'Dancing Queen', by: { kind: 'set', name: "Host's set" }, ups: 2, downs: 1 })],
                people: PEOPLE_BOARDS.map((p) => ({ ...p, shown: !!settings[p.id === 'pickers' ? 'board_top_pickers' : 'board_top_voters'] })) },
       now: { ...BOARD_SONG({ title: 'Ready to Run', by: { kind: 'set', name: "Host's set" } }), up: 4, down: 1 } });
+  }
+  if (u.startsWith('/api/jukebox/gift')) {
+    return json({ status: 'ok', gift: { amount: body.amount, phones: body.to === 'everyone' ? 2 : 1, names: [] } });
+  }
+  if (u.startsWith('/api/jukebox/bonus-codes')) {
+    if (method === 'POST') {
+      const made = Array.from({ length: body.count }, (_, i) => `MADE-${String(i).padStart(4, '2')}`);
+      world.codes = [...made.map((code) => ({ code, batch: body.batch || 'today', created_ms: 2, used: false, used_ms: null, used_name: '' })), ...world.codes];
+      const out = { unused: world.codes.filter((c) => !c.used).length, used: world.codes.filter((c) => c.used).length, codes: world.codes };
+      return json({ made, ...out });
+    }
+    if (method === 'DELETE') world.codes = world.codes.filter((c) => c.code !== decodeURIComponent(u.split('/').pop()));
+    return json({ unused: world.codes.filter((c) => !c.used).length, used: world.codes.filter((c) => c.used).length, codes: world.codes });
   }
   if (u.startsWith('/api/jukebox/skip-lock')) {
     if (body.locked) world.noSkip.add(body.uri); else world.noSkip.delete(body.uri);
@@ -608,6 +623,19 @@ console.log('\n§2b the Credits tab, mounted — presets, the price check, each 
   ok(JSON.stringify(puts().at(-1)?.body) === '{"play_mode":"free"}', `Free play PUTs exactly {play_mode: "free"} (${JSON.stringify(puts().at(-1)?.body)})`);
   await P.settle();
   ok(text(modeOn()) === 'Free play' && text(modeCard).includes('Nothing costs anything'), 'the Mode card shows free play once saved');
+  // the printed bonus cards (phase 3)
+  const bonusCard = $(c, '[data-testid="jukebox-bonus-cards"]');
+  ok(text(bonusCard).includes('1 unused · 1 used') && text(bonusCard).includes('used by Disco Ana'),
+    `the Bonus cards card counts the codes and names who used one (${text(bonusCard).slice(0, 80)})`);
+  ok([...bonusCard.querySelectorAll('li')].filter((li) => li.querySelector('button')).length === 1,
+    'only an unused code can be voided');
+  await click(buttonByText(bonusCard, /^Make codes$/));
+  const mintReq = world.requests.filter((r) => r.method === 'POST' && r.url === '/api/jukebox/bonus-codes').at(-1);
+  ok(JSON.stringify(mintReq?.body) === '{"count":10,"batch":""}', `Make codes POSTs the count and label (${JSON.stringify(mintReq?.body)})`);
+  await P.settle();
+  ok(text($(c, '[data-testid="jukebox-bonus-cards"]')).includes('11 unused'), 'the new codes are listed, unused first');
+  await click(c.querySelector('[data-testid="jukebox-bonus-cards"] button[aria-label="Void ABCD-EFGH"]'));
+  ok(world.requests.some((r) => r.method === 'DELETE' && r.url === '/api/jukebox/bonus-codes/ABCD-EFGH'), 'Void DELETEs that code');
   P.unmount();
 }
 
@@ -696,6 +724,21 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
     && !c.querySelector('[data-testid="jukebox-guest-rules"] input[aria-label="Skip by vote: at least"]'),
     'the free-play rules have their own card');
   ok(!!c.querySelector('[data-testid="jukebox-free-play-off"]'), 'on credits, the Free play card says its rules wait for free play');
+  // the host's gifts (phase 3): Everyone +2, and Give… on a phone at the party
+  const phonesCard = c.querySelector('[data-testid="jukebox-phones"]');
+  await click(buttonByText(phonesCard, /^Everyone \+2$/));
+  const g1 = world.requests.filter((r) => r.url === '/api/jukebox/gift').at(-1);
+  ok(g1?.method === 'POST' && JSON.stringify(g1.body) === '{"to":"everyone","amount":2}', 'Everyone +2 POSTs a gift of 2 to everyone');
+  const rowsP = [...c.querySelectorAll('[data-testid="jukebox-phone"]')];
+  ok(!!buttonByText(rowsP[0], /^Give…$/) && !buttonByText(rowsP[1], /^Give…$/) && !buttonByText(rowsP[2], /^Give…$/),
+    'Give… only on a phone at the party (joined, approved, not blocked)');
+  await click(buttonByText(rowsP[0], /^Give…$/));
+  const amt = rowsP[0].querySelector('input[aria-label="Credits to give Disco Ana"]');
+  const numSet = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set;
+  P.actSync(() => { numSet.call(amt, '5'); amt.dispatchEvent(new dom.window.Event('input', { bubbles: true })); });
+  await click(buttonByText(rowsP[0], /^Give$/));
+  const g2 = world.requests.filter((r) => r.url === '/api/jukebox/gift').at(-1);
+  ok(JSON.stringify(g2?.body) === '{"to":"pa","amount":5}', `Give… POSTs that phone and amount (${JSON.stringify(g2?.body)})`);
   await click(buttonByText(phones[1], /^Approve$/));
   const appr = world.requests.filter((r) => r.url === '/api/jukebox/guests/pb').at(-1);
   ok(appr?.method === 'POST' && JSON.stringify(appr.body) === '{"approved":true}', 'Approve POSTs {approved: true} for that phone');
@@ -782,7 +825,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
   const topics = ['jukebox', 'jukebox-set-list', 'jukebox-slots', 'jukebox-live', 'jukebox-sign-in',
     'jukebox-credits', 'jukebox-presets', 'jukebox-price-check', 'jukebox-simulator', 'sonic-jukebox',
     'jukebox-report', 'jukebox-guest-page', 'jukebox-guests', 'jukebox-free-play', 'jukebox-credits-mode',
-    'jukebox-skip-lock', 'jukebox-board'];
+    'jukebox-skip-lock', 'jukebox-board', 'jukebox-gifts', 'jukebox-bonus-cards'];
   const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
   const knownIds = new Set();
   for (const section of HELP_SECTIONS) {
@@ -834,7 +877,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     if (id && id !== 'sonic-scene-backups') reached.add(id);
   }
   ok(topics.every((id) => reached.has(id)) && reached.size === topics.length,
-    `the page's own controls and its 💬 Sonic open exactly the seventeen jukebox topics (${[...reached].sort().join(', ')})`);
+    `the page's own controls and its 💬 Sonic open exactly the nineteen jukebox topics (${[...reached].sort().join(', ')})`);
   P.unmount();
 }
 

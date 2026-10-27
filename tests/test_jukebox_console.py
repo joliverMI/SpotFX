@@ -346,3 +346,38 @@ def test_the_board_switches_are_settings_sonic_asks_before_changing(spotfx):
     assert {k for k in jc.GUEST_RULE_KEYS if k.startswith("board_")} == {
         k for k, card, *_ in show.GUEST_FIELDS if card == "Board"}
 
+
+def test_a_gift_asks_first_naming_who_and_a_near_miss_is_refused(spotfx, monkeypatch):
+    """The plan's 3.4 row ("give credits"): Sonic gives credits to everyone at
+    the party or to one guest named exactly, only on his yes; a misheard
+    name is refused with the closest names, never guessed."""
+    from services.jukebox import guests as G
+    from tests.test_jukebox_credits_play import _show
+    from tests.test_jukebox_guest_add import TOKEN, Catalog, Lib, _inline, _phone
+    w = spotfx.world
+    store.save_show(_show())
+    g = G.Guests(G.GuestDeps(token_ok=lambda t: t == TOKEN, to_thread=_inline,
+                             now_ms=lambda: int(w.clock.t * 1000), gateway=lambda: Catalog(w),
+                             library_search=Lib([]), known=lambda uris: {u: False for u in uris}))
+    monkeypatch.setattr(G, "book", g)
+    assert _run(jc._op_give_jukebox_credits("everyone", 2))["reason"] == "no Jukebox night is running"
+    store.save_config(store.load_config().model_copy(update={"playlist": PLAYLIST_URI}))
+    assert spotfx.post("/api/jukebox/night/start", json={}).json()["status"] == "running"
+    ana, ben = spotfx.portal.call(_phone, g), spotfx.portal.call(_phone, g)
+    spotfx.portal.call(lambda: g.host_set(ana, name="Disco Ana"))
+    before = len(_writes(spotfx))
+    ask = _run(jc._op_give_jukebox_credits("everyone", 2))
+    assert ask["status"] == "needs_confirmation" and "everyone at the party (2 phones)" in ask["question"]
+    assert len(_writes(spotfx)) == before
+    done = _run(jc._op_give_jukebox_credits("everyone", 2, confirm_id=ask["confirm_id"]))
+    assert done["status"] == "applied" and done["phones"] == 2
+    wal = g._wallet_for(w.runner.night.id, store.load_show())
+    assert wal.balance(ana) == wal.balance(ben) == 4 + 2
+    r = _run(jc._op_give_jukebox_credits("Disco Anna", 3))
+    assert r["status"] == "rejected" and "Disco Ana" in r["reason"]          # the closest, named
+    ask = _run(jc._op_give_jukebox_credits("disco ana", 3))
+    assert "Give Disco Ana 3 credits?" in ask["question"]
+    assert _run(jc._op_give_jukebox_credits("disco ana", 3, confirm_id=ask["confirm_id"]))["status"] == "applied"
+    assert wal.balance(ana) == 9 and wal.balance(ben) == 6
+    assert _run(jc._op_give_jukebox_credits("everyone", 50))["status"] == "rejected"
+    assert "give_jukebox_credits" in jc.OPERATIONS and jc.OPERATIONS["give_jukebox_credits"].kind == "write"

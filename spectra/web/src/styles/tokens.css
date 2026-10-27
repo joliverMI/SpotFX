@@ -4135,3 +4135,13 @@ body.jukebox-tv-body { background: var(--bg); }
 .jukebox-board-tv .jukebox-song-artist { font-size: 16px; }
 .jukebox-board-tv .jukebox-board-art { width: 56px; height: 56px; }
 .jukebox-board-tv .jukebox-board-names li { font-size: 20px; }
+
+/* The host's gifts and the printed bonus cards' codes */
+.jukebox-gift-input { width: 4.5em; }
+.jukebox-bonus-make { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 8px; }
+.jukebox-bonus-codes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 12px; max-height: 320px; overflow-y: auto; }
+.jukebox-bonus-codes li { display: flex; align-items: center; gap: 8px; padding: 2px 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.jukebox-bonus-codes li.used { opacity: 0.55; }
+.jukebox-bonus-codes code { font-size: 14px; letter-spacing: 0.06em; }
+.jukebox-bonus-codes li .jukebox-muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jukebox-bonus-codes li button { padding: 2px 8px; font-size: 12px; }

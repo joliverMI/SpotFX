@@ -119,6 +119,10 @@ play's book:
   REFUNDS are written, never assumed: a paid song the host removed, an
   unfilled pot, and every paid song still waiting when the night ends
   (`_close_night`).
+  GIFTS AND BONUS CARDS (§1 rule 1, §4): the host's `gift` (everyone at the
+  party, or one phone) and a printed card's one-time code
+  (`redeem_bonus`, services/jukebox/bonus_codes.py) are "host_gift" and
+  "qr_bonus" ledger grants like any other.
   THE SKIP LOCK (§12, "the host can lock a song from skips") is the
   engine's `no_skip` list, by song, in both modes: the room's vote, a paid
   skip, a chip-in and a pot that fills all refuse a locked song.
@@ -155,6 +159,8 @@ HOUSE_TZ = ZoneInfo("America/New_York")
 PLAYS_KEPT = 300                 # plays whose votes are kept (the report reads them)
 PRESENT_WINDOW_MS = 15 * 60_000  # "guests" in the crowd-scaled rules: phones seen this recently
 BUMP_WINDOW_MS = 60 * 60_000     # free play's bumps: so many in any hour
+BONUS_TRIES = 5                  # wrong bonus codes a phone may try a night
+GIFT_MAX = 20                    # the most credits one host gift gives a phone
 NEXT_SHOWN = 8                   # upcoming songs on the Now and Queue screens
 POLL_MS = 3000                   # how often the page asks again while it is open
 SEARCH_PAGE = 10                 # Spotify results a page (report §9, PR 2.2)
@@ -267,6 +273,14 @@ SENTENCES: dict[str, str] = {
     "skip_none": "There's nothing to skip right now.",
     "pot_full": "The pot is already full — the song is being skipped.",
     "bad_amount": "That isn't an amount of credits.",
+    "bonus_used_tonight": "You've used a bonus card tonight — it's one per phone.",
+    "bonus_unknown": "That code isn't a bonus card. Check it and try again.",
+    "bonus_spent": "That bonus card has already been used.",
+    "bonus_tries": "That's too many codes tried tonight — ask the host.",
+    "bonus_unreadable": "Bonus cards can't be checked right now — ask the host.",
+    "gift_amount": "A gift is 1 to {n} credits.",
+    "gift_not_in": "That phone isn't in tonight's party (it hasn't joined, or it's blocked).",
+    "gift_nobody": "Nobody has joined tonight yet.",
     "at_front_next": "It's already the next song to go in.",
     "next_pushed_max": "A song it would jump past has been moved back as far as it can go tonight.",
     "jailed_credits": "You're in jail: your songs wait until you break out ({fee} credits). You can still vote.",
@@ -858,6 +872,7 @@ class Guests:
         self._wallet: Optional[Any] = None
         self._wallet_closed: set[str] = set()
         self._polled: dict[str, int] = {}       # a phone's last poll: "here" for top-ups
+        self._bonus_tries: dict[str, int] = {}  # wrong bonus codes per phone, tonight
         self._back_wait: tuple[tuple, Optional[int]] = ((), None)
 
     def _get_lock(self) -> asyncio.Lock:
@@ -873,6 +888,7 @@ class Guests:
             self._seen.clear()
             self._skip_armed.clear()
             self._polled.clear()
+            self._bonus_tries.clear()
         return self._book
 
     def _crowd(self) -> int:
@@ -1366,6 +1382,82 @@ class Guests:
             return refusal("credits_off", 409), None, None, show
         return None, gs, book, show
 
+    # ── the printed bonus cards and the host's gifts (§1 rule 1, §4) ────────
+
+    async def redeem_bonus(self, phone: Any, code: Any) -> tuple[int, dict]:
+        """A printed bonus card (services/jukebox/bonus_codes.py): its code is
+        good for `qr_bonus` credits once, ever, and a phone uses one a night.
+        A phone gets BONUS_TRIES wrong codes a night. Credits mode only — in
+        free play the card is kept for a night that uses credits."""
+        from services.jukebox import bonus_codes
+        async with self._get_lock():
+            gate, gs, book, show = await self._credits_gate(phone)
+            if gate:
+                return gate
+            w = self._wallet_for(gs["night_id"], show)
+            if "qr_bonus" in w.got.get(phone, set()):
+                return refusal("bonus_used_tonight", 409)
+            tries = self._bonus_tries.get(phone, 0)
+            if tries >= BONUS_TRIES:
+                return refusal("bonus_tries", 429)
+            try:
+                result, used = await self._ledger(bonus_codes.claim, code, gs["night_id"],
+                                                  book.phones[phone].name, self.deps.now_ms())
+            except ValueError:
+                logger.warning("Jukebox: the bonus codes file can't be read")
+                return refusal("bonus_unreadable", 503)
+            if result != "ok" or used is None:
+                self._bonus_tries[phone] = tries + 1
+                return refusal(f"bonus_{result}", 409)
+            amount = show.economy.qr_bonus
+            try:
+                entry = await self._ledger(w.led.grant, phone, "qr_bonus", amount, used)
+            except Exception:
+                await self._ledger(bonus_codes.unclaim, used)   # the card stays good
+                raise
+            w.noted([entry])
+            await self._save()
+            return self._ok(book, phone, gs, bonus={"amount": amount})
+
+    async def gift(self, to: Any, amount: Any) -> tuple[int, dict]:
+        """The host's gift (§4: "Everyone +2", "Give…"): `amount` credits to
+        every phone at the party — joined, approved, not blocked — or to one.
+        Gifts stay gifts: nothing is asked for in return (§1). Credits mode
+        only."""
+        try:
+            n = int(amount)
+        except (TypeError, ValueError):
+            return refusal("gift_amount", 422, n=GIFT_MAX)
+        if not 1 <= n <= GIFT_MAX:
+            return refusal("gift_amount", 422, n=GIFT_MAX)
+        async with self._get_lock():
+            gs = self._running()
+            if gs is None:
+                return refusal("not_running", 409)
+            show = self.deps.show()
+            if show.play_mode != "credits":
+                return refusal("credits_off", 409)
+            book = self._book_for(gs["night_id"])
+            if to == "everyone":
+                targets = [pid for pid, p in book.phones.items()
+                           if p.joined and p.approved and not p.blocked]
+                if not targets:
+                    return refusal("gift_nobody", 409)
+            else:
+                p = book.phones.get(to) if isinstance(to, str) else None
+                if p is None:
+                    return refusal("no_phone", 404)
+                if not (p.joined and p.approved) or p.blocked:
+                    return refusal("gift_not_in", 409)
+                targets = [to]
+            w = self._wallet_for(gs["night_id"], show)
+            for pid in targets:
+                w.noted([await self._ledger(w.led.grant, pid, "host_gift", n)])
+            await self._save()
+            return 200, {"status": "ok", "gift": {
+                "amount": n, "phones": len(targets),
+                "names": [book.phones[pid].name for pid in targets]}}
+
     async def tip(self, phone: Any, units: Any = 1) -> tuple[int, dict]:
         """Tip the guest whose song is playing (§1 rule 4): a tap at a time,
         at most `tip_max_per_song` per song; never the host, never yourself.
@@ -1668,6 +1760,9 @@ class Guests:
         return 200, {"status": "ok", "balance": w.balance(phone), "earned": wallet.earned(entries),
                      "history": wallet.history_rows(entries, names, titles), "shop": shop,
                      "how_to_earn": list(wallet.HOW_TO_EARN), "disclaimer": wallet.DISCLAIMER,
+                     "bonus": {"amount": cfg.qr_bonus,
+                               "used": "qr_bonus" in w.got.get(phone, set()),
+                               "tries_left": max(0, BONUS_TRIES - self._bonus_tries.get(phone, 0))},
                      "view": self._view(book, phone, gs)}
 
     async def view(self, phone: Any) -> tuple[int, dict]:

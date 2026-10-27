@@ -469,6 +469,7 @@ def _isolated_jukebox(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "SHOW_FILE", tmp_path / "jukebox_show.json")
     monkeypatch.setattr(store, "GUEST_LINK_FILE", tmp_path / "jukebox_guest_link.json")
     monkeypatch.setattr(store, "GUESTS_FILE", tmp_path / "jukebox_guests.json")
+    monkeypatch.setattr(store, "BONUS_FILE", tmp_path / "jukebox_bonus_codes.json")
     monkeypatch.setattr(night, "runner", night.JukeboxRunner())
     # tonight's phones (services/jukebox/guests.py) and the guest app's key
     from services.jukebox import guests

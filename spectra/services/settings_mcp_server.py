@@ -1236,5 +1236,11 @@ async def stop_jukebox_night(pause: bool = False, confirm_id: Optional[str] = No
     return await _call("stop_jukebox_night", pause=pause, confirm_id=confirm_id)
 
 
+@mcp.tool()
+async def give_jukebox_credits(to: str, amount: int = 2, confirm_id: Optional[str] = None) -> dict:
+    """Give credits to everyone at tonight's party, or one guest by name (always asks first)."""
+    return await _call("give_jukebox_credits", to=to, amount=amount, confirm_id=confirm_id)
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
