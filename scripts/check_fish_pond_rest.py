@@ -43,7 +43,7 @@ plan's acceptance bars:
   7. AN AUDIO PAUSE — no audio callback for more than REST_SILENCE_S (the
      audio hub's own pause) rests the shoal; an effect that has never heard
      anything does not.
-  8. HIS LIBRARY — the same detector (`rest_step`) over 125 of his captured
+  8. HIS LIBRARY — the same detector (`rest_step`) over 126 of his captured
      songs (tests/fixtures/fish_swim/library_volume.npz: volume() computed
      the pipeline's way from his WAVs, checked here against the real
      pipeline's own reading of Contra's outro): at rest at most 1% of song
