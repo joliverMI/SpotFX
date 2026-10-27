@@ -4024,6 +4024,13 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .jukebox-item.jukebox .jukebox-tag { border-color: var(--accent); color: var(--accent); }
 .jukebox-item.open { opacity: 0.6; }
 .jukebox-item-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+/* The Guests tab (phase 2.2): the host's buttons on a song and on a phone */
+.jukebox-guest-actions { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; flex: none; }
+.jukebox-guest-actions button { padding: 4px 10px; font-size: 13px; }
+.jukebox-phones { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.jukebox-phone { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); min-width: 0; flex-wrap: wrap; }
+.jukebox-phone input { font: inherit; padding: 2px 6px; max-width: 14em; }
+.jukebox-phone-blocked { opacity: 0.6; }
 .jukebox-log pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 320px; overflow: auto; margin: 8px 0 0; }
 .jukebox-presets { display: grid; gap: 8px; margin-bottom: 10px; }
 .jukebox-preset { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px 12px; height: auto; white-space: normal; }
@@ -4041,6 +4048,9 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .jukebox-field-label { overflow-wrap: anywhere; }
 .jukebox-field input[type='number'] { width: 84px; min-width: 0; }
 .jukebox-field-range { grid-column: 1 / -1; font-size: 11px; }
+/* The Guests tab's rules: a choice and a time need more than a number's 84px */
+.jukebox-rule-wide { grid-template-columns: 1fr minmax(120px, 190px); }
+.jukebox-rule-wide select, .jukebox-rule-wide input[type='time'] { width: 100%; min-width: 0; color-scheme: dark; }
 .jukebox-field.jukebox-check { display: flex; }
 /* the party simulator (SimulateTab.tsx). Two series on one credits axis;
    colours checked with the dataviz palette validator against --surface. */

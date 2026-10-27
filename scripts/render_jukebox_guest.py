@@ -89,6 +89,14 @@ ART = {f"/__art/{i}.png": _art_png(c) for i, c in enumerate(
 class Scene:
     def __init__(self) -> None:
         self.name = "plain"
+        self.started_ms = int(time.time() * 1000) - 3_600_000
+        self.added: list = []
+
+    async def add_entry(self, entry, *, fair: bool = True, latest_start_ms=None) -> dict:
+        """The engine's add, for the scene: the song joins the back of the line."""
+        self.added.append(entry)
+        return {"status": "added", "entry": entry.model_dump(mode="json"),
+                "starts_in_ms": 25 * 60_000}
 
     def state(self) -> dict:
         from models.jukebox import LineEntry, NowItem, SetItem
@@ -135,9 +143,41 @@ class Scene:
                    ProgramItem("jukebox", line[2].uri, "El Apagón", "Bad Bunny", 202000, entry_id="e3"),
                    ProgramItem("set", sets[3].uri, sets[3].title, sets[3].artist, 270000, set_index=3)]
         from services.jukebox.program import with_start_times
-        return {"running": True, "night_id": "render-night", "now": now, "is_playing": True,
+        line += self.added
+        nxt += [ProgramItem("jukebox", e.uri, e.title, e.artist, e.duration_ms, entry_id=e.id)
+                for e in self.added]
+        return {"running": True, "night_id": "render-night", "started_ms": self.started_ms,
+                "now": now, "is_playing": True,
                 "duration_ms": duration, "remaining_ms": remaining,
                 "next": with_start_times(nxt, remaining), "line": line, "set_items": sets}
+
+
+class Catalog:
+    """Spotify's search, for the render: real-looking songs with art drawn
+    locally — one explicit, one long, two from his library (one "Ready")."""
+    SONGS = [
+        ("Dancing Queen", "ABBA", 231000, False), ("Dancing in the Moonlight", "Toploader", 232000, False),
+        ("Dancing On My Own", "Robyn", 287000, False), ("Dance Monkey", "Tones And I", 209000, False),
+        ("Dancing with a Stranger (with Normani)", "Sam Smith, Normani", 171000, False),
+        ("Dancin (Krono Remix)", "Aaron Smith, Luvli", 197000, True),
+        ("Dancing in the Dark", "Bruce Springsteen", 241000, False),
+        ("Dancing Barefoot - Extended Live Version from the Archive", "Patti Smith Group", 412000, False),
+        ("Dance the Night", "Dua Lipa", 176000, False), ("Dancing Days", "Led Zeppelin", 223000, False),
+    ]
+
+    def __init__(self) -> None:
+        self.songs = [{"uri": f"spotify:track:dance{i:017d}", "title": t, "artist": a, "duration_ms": d,
+                       "explicit": e, "image": f"/__art/{i % 8}.png", "thumb": f"/__art/{i % 8}.png"}
+                      for i, (t, a, d, e) in enumerate(self.SONGS)]
+
+    def search(self, q, limit=10, offset=0):
+        return [dict(m) for m in self.songs[offset:offset + limit]]
+
+    def tracks(self, uris):
+        return [dict(m) for m in self.songs if m["uri"] in uris]
+
+    def track(self, uri):
+        return next((dict(m) for m in self.songs if m["uri"] == uri), None)
 
 
 def build_server(tmp: Path, scene: Scene):
@@ -153,7 +193,18 @@ def build_server(tmp: Path, scene: Scene):
     for attr in ("CONFIG_FILE", "NIGHT_FILE", "SHOW_FILE", "GUEST_LINK_FILE", "GUESTS_FILE"):
         setattr(store, attr, tmp / f"{attr.lower()}.json")
     jukebox_guest_router.KEY_FILE = tmp / "guest_key"
-    book = guests.Guests(guests.GuestDeps(state=scene.state, token_ok=lambda t: t == TOKEN))
+    from datetime import datetime, timedelta
+    from models.jukebox import ShowConfig
+    from services.jukebox.library import Song
+    ends = datetime.now(guests.HOUSE_TZ) + timedelta(hours=3)
+    store.save_show(ShowConfig(night_ends=f"{ends.hour:02d}:{ends.minute:02d}"))
+    catalog = Catalog()
+    library = [catalog.songs[0]["uri"], catalog.songs[6]["uri"]]
+    book = guests.Guests(guests.GuestDeps(
+        state=scene.state, token_ok=lambda t: t == TOKEN, runner=lambda: scene,
+        gateway=lambda: catalog,
+        library_search=lambda q, n: [Song(u, "", "", "") for u in library][:n],
+        known=lambda uris: {u: u in (library[0], catalog.songs[3]["uri"]) for u in uris}))
     book._book = GuestBook(night_id="render-night", phones={
         ANA: GuestPhone(id=ANA, name="Disco Ana", joined=True),
         OTTER: GuestPhone(id=OTTER, name="Lucky Otter", joined=True)})
@@ -402,6 +453,29 @@ async def run() -> int:
                 await tap(".g-name-chip")
                 await wait_for("!!document.querySelector('.g-sheet')")
                 await check(phone, "5-name-sheet")
+                # ── find a song and add it ──
+                await evaluate(ws, nid, "document.querySelector('.g-sheet-backdrop')?.click(); true")
+                await tap(".g-tab:nth-child(3)")
+                if not await wait_for("!!document.querySelector('#g-search')"):
+                    failures.append(f"{name}: no Add screen")
+                    continue
+                await tap("#g-search")
+                await cdp(ws, nid, "Input.insertText", {"text": "danc"})
+                if not await wait_for("document.querySelectorAll('.g-result').length >= 10"):
+                    failures.append(f"{name}: no search results")
+                    continue
+                await check(phone, "9-add-results")
+                ready = await evaluate(ws, nid, """(() => {
+                  const h = [...document.querySelectorAll('.g-add .g-h2')].map((x) => x.textContent);
+                  return h[0]?.startsWith('Ready') && !!document.querySelector('.g-badge-ready')
+                    && !!document.querySelector('.g-badge-explicit') && !!document.querySelector('.g-badge-long'); })()""")
+                if not ready:
+                    failures.append(f"{name}: the Ready section, or the Ready/explicit/long badges, are missing")
+                await tap(".g-add-btn:not([disabled])")
+                if not await wait_for("!!document.querySelector('.g-toast')"):
+                    failures.append(f"{name}: adding a song showed no confirmation")
+                await check(phone, "10-added")
+                scene.added.clear()
                 # ── your song: next, then playing (the strip, the banner) ──
                 scene.name = "mine_next"
                 if not await fresh(phone, ME):

@@ -37,6 +37,7 @@ import SonicChatPopover from '../components/SonicChatPopover';
 import { useToast } from '../components/Toast';
 import SortableList from '../lightshow/SortableList';
 import CreditsTab from './CreditsTab';
+import GuestsTab from './GuestsTab';
 import SimulateTab from './SimulateTab';
 import { compareCells, creditFacts, endLine, nightFacts } from './jukeboxReport';
 import {
@@ -55,7 +56,7 @@ function errText(e: unknown): string {
 }
 
 export default function JukeboxPage() {
-  const [tab, setTab] = useState<'set' | 'live' | 'credits' | 'simulate'>('set');
+  const [tab, setTab] = useState<'set' | 'live' | 'guests' | 'credits' | 'simulate'>('set');
   const cfgQ = useJukeboxConfig();
   const statusQ = useJukeboxStatus();
   const cfg = cfgQ.data ?? null;
@@ -76,6 +77,8 @@ export default function JukeboxPage() {
             onClick={() => setTab('set')}>Set list</button>
           <button role="tab" aria-selected={tab === 'live'} className={tab === 'live' ? 'on' : ''}
             onClick={() => setTab('live')}>Live</button>
+          <button role="tab" aria-selected={tab === 'guests'} className={tab === 'guests' ? 'on' : ''}
+            onClick={() => setTab('guests')}>Guests</button>
           <button role="tab" aria-selected={tab === 'credits'} className={tab === 'credits' ? 'on' : ''}
             onClick={() => setTab('credits')}>Credits</button>
           <button role="tab" aria-selected={tab === 'simulate'} className={tab === 'simulate' ? 'on' : ''}
@@ -96,6 +99,7 @@ export default function JukeboxPage() {
       {tab === 'set' && <SetListTab cfg={cfg} preview={previewQ.data} loading={previewQ.isLoading}
         status={status} />}
       {tab === 'live' && <LiveTab status={status} />}
+      {tab === 'guests' && <GuestsTab status={status} />}
       {tab === 'credits' && <CreditsTab />}
       {tab === 'simulate' && <SimulateTab />}
       <SonicChatPopover helpTopic="sonic-jukebox" />

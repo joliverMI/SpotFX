@@ -94,7 +94,8 @@ def test_status_says_no_night_and_then_the_running_night(spotfx):
     spotfx.post("/api/jukebox/night/start", json={})
     r = _run(jc._op_jukebox_status())
     assert r["running"] is True and "A night is running" in r["summary"]
-    assert r["guests"] == {"phones": 0, "joined": 0} and "guest page" not in r["summary"]
+    assert r["guests"] == {"phones": 0, "joined": 0, "pending": 0}
+    assert "guest page" not in r["summary"]
 
 
 def test_status_counts_the_phones_on_the_guest_page(spotfx):
@@ -114,7 +115,7 @@ def test_status_counts_the_phones_on_the_guest_page(spotfx):
                 await guests.book.join(out["phone"])
     _run(go())
     r = _run(jc._op_jukebox_status())
-    assert r["guests"] == {"phones": 2, "joined": 1}
+    assert r["guests"] == {"phones": 2, "joined": 1, "pending": 0}
     assert "2 phones on the guest page (1 joined)." in r["summary"]
     assert not any(n.startswith("vote") or "guest" in n for n in jc.OPERATIONS)
 
@@ -161,6 +162,22 @@ def test_an_out_of_range_value_is_refused_before_he_is_asked(spotfx):
     r = _run(jc._op_set_jukebox_setting("add_base", 999))
     assert r["status"] == "rejected" and "add_base" in r["reason"]
     assert not _writes(spotfx) and not jc._PENDING
+
+
+def test_a_guest_rule_asks_first_and_is_validated_by_spotfx(spotfx):
+    """The guests' own rules (phase 2.2: last call, explicit songs, phones,
+    renames) are settings like any other: asked first, the one validator."""
+    r = _run(jc._op_get_jukebox_settings())
+    assert r["guest_rules"]["last_call_min"] == 20 and r["guest_rules"]["explicit"] == "no"
+    ask = _run(jc._op_set_jukebox_setting("last_call_min", 30))
+    assert ask["status"] == "needs_confirmation" and "20 → 30" in ask["question"]
+    assert "last call" in ask["question"] and not _writes(spotfx)
+    done = _run(jc._op_set_jukebox_setting("last_call_min", 30, confirm_id=ask["confirm_id"]))
+    assert done["status"] == "applied" and store.load_show().last_call_min == 30
+    for key, bad in (("last_call_min", 90), ("explicit", "sometimes"), ("night_ends", "midnight")):
+        r = _run(jc._op_set_jukebox_setting(key, bad))
+        assert r["status"] == "rejected" and key in r["reason"]
+    assert set(jc.GUEST_RULE_KEYS) <= set(m.ShowConfig.model_fields)
 
 
 def test_program_keys_and_approval_go_to_their_own_stores(spotfx):

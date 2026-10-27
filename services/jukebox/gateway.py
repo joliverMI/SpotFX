@@ -236,16 +236,36 @@ class JukeboxGateway:
         data = self._call(self._client().track, tid) or {}
         if not data.get("uri"):
             return None
-        image, thumb = art(data)
-        return {"uri": data["uri"], "title": data.get("name") or "",
-                "artist": _artists(data),
-                "duration_ms": int(data.get("duration_ms") or 0),
-                "explicit": bool(data.get("explicit")),
-                "image": image, "thumb": thumb}
+        return self._song(data)
+
+
+    def search(self, query: str, limit: int = 10, offset: int = 0) -> list[dict]:
+        """Spotify's own song search, `limit` a page: [{uri, title, artist,
+        duration_ms, explicit, image, thumb}]."""
+        data = self._call(self._client().search, q=query, limit=limit, offset=offset,
+                          type="track") or {}
+        return [self._song(t) for t in ((data.get("tracks") or {}).get("items") or [])
+                if (t or {}).get("uri", "").startswith(_TRACK_ID) and not t.get("is_local")]
+
+    def tracks(self, uris: list[str]) -> list[dict]:
+        """Several songs in ONE call (up to 50) — the art, length and
+        explicit flag of his own library's hits."""
+        ids = [u[len(_TRACK_ID):] for u in uris if u.startswith(_TRACK_ID)][:50]
+        if not ids:
+            return []
+        data = self._call(self._client().tracks, ids) or {}
+        return [self._song(t) for t in (data.get("tracks") or []) if t and t.get("uri")]
+
+    @staticmethod
+    def _song(t: dict) -> dict:
+        image, thumb = art(t)
+        return {"uri": t["uri"], "title": t.get("name") or "", "artist": _artists(t),
+                "duration_ms": int(t.get("duration_ms") or 0),
+                "explicit": bool(t.get("explicit")), "image": image, "thumb": thumb}
 
 
 READ_ONLY_METHODS = frozenset({"resolve_playlist", "playlist_snapshot", "playlist_items",
-                               "track", "device_id", "playback", "queue"})
+                               "track", "device_id", "playback", "queue", "search", "tracks"})
 
 
 class ReadOnlyGateway:
@@ -263,6 +283,7 @@ class ReadOnlyGateway:
 
 
 _default: Optional[JukeboxGateway] = None
+_search: Optional[JukeboxGateway] = None
 
 
 def default_gateway() -> JukeboxGateway:
@@ -270,3 +291,13 @@ def default_gateway() -> JukeboxGateway:
     if _default is None:
         _default = JukeboxGateway()
     return _default
+
+
+def search_gateway() -> JukeboxGateway:
+    """The guests' searches get their OWN gateway (its own spacing and lock),
+    so a party typing into the search box can never queue in front of the
+    engine's commit to Spotify's queue."""
+    global _search
+    if _search is None:
+        _search = JukeboxGateway()
+    return _search

@@ -39,13 +39,15 @@ ROUTES: frozenset[tuple[str, str]] = frozenset({
     ("GET", "/"), ("GET", "/assets/{name}"), ("GET", "/manifest.webmanifest"),
     ("GET", "/icon.svg"), ("GET", "/icon-180.png"), ("GET", "/icon-512.png"),
     ("POST", "/g/hello"), ("POST", "/g/join"), ("POST", "/g/name"), ("POST", "/g/vote"),
-    ("GET", "/g/view"),
+    ("POST", "/g/search"), ("POST", "/g/add"), ("GET", "/g/view"),
 })
 FORWARDS: dict[str, tuple[str, str]] = {
     "hello": ("POST", "/api/jukebox/guest/hello"),
     "join": ("POST", "/api/jukebox/guest/join"),
     "name": ("POST", "/api/jukebox/guest/name"),
     "vote": ("POST", "/api/jukebox/guest/vote"),
+    "search": ("POST", "/api/jukebox/guest/search"),
+    "add": ("POST", "/api/jukebox/guest/add"),
     "view": ("GET", "/api/jukebox/guest/view"),
 }
 STATIC_FILES = {"/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
@@ -55,7 +57,8 @@ STATIC_FILES = {"/manifest.webmanifest": ("manifest.webmanifest", "application/m
 
 LIMITS = {
     "view": Limit(rate=2.0, burst=6),          # a phone polls every 3 s
-    "write": Limit(rate=2.0, burst=6),         # votes, names, "Let's go"
+    "write": Limit(rate=2.0, burst=6),         # votes, names, "Let's go", adds
+    "search": Limit(rate=1.0, burst=4),        # the page waits for typing to stop first
     "hello": Limit(rate=0.2, burst=6),         # per address: a dozen a minute
     "hello_all": Limit(rate=2.0, burst=40),    # new phones, the whole party (a QR rush)
     "all": Limit(rate=60.0, burst=120),        # every guest call together
@@ -282,6 +285,14 @@ def create_app(*, spotfx_url: str = SPOTFX_URL, key_file: Path = guest_key.DEFAU
     @app.post("/g/vote")
     async def vote(request: Request) -> Response:
         return await _phone_call(request, "vote", "write", ("vote",))
+
+    @app.post("/g/search")
+    async def search(request: Request) -> Response:
+        return await _phone_call(request, "search", "search", ("q", "offset"))
+
+    @app.post("/g/add")
+    async def add(request: Request) -> Response:
+        return await _phone_call(request, "add", "write", ("uri",))
 
     @app.get("/g/view")
     async def view(request: Request) -> Response:

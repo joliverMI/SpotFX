@@ -106,6 +106,13 @@ export interface LineEntry {
   state: 'queued' | 'committed' | 'playing' | 'played' | 'removed' | 'skipped';
   doomed: boolean;
   commit_check: '' | 'next' | 'later' | 'missing' | 'unread';
+  /** this was its adder's Nth song tonight (fair order: 1st songs first) */
+  round?: number;
+  /** the host is holding it: it keeps its place, slots pass it */
+  held?: boolean;
+  /** the lights already know it */
+  known?: boolean;
+  explicit?: boolean;
 }
 
 export interface JukeboxStatus {
@@ -122,7 +129,7 @@ export interface JukeboxStatus {
   history: NightBrief[];
   /** Phones on tonight's guest page (services/jukebox/guests.py): every
    *  phone that opened the party link, and those that tapped Let's go. */
-  guests?: { phones: number; joined: number };
+  guests?: { phones: number; joined: number; pending?: number };
 }
 
 export interface SetMoveResult {
@@ -139,10 +146,58 @@ export type Preset = 'small' | 'medium' | 'large';
 /** Every economy setting (models.jukebox.EconomyConfig), by key. */
 export type EconomyConfig = Record<string, number | boolean>;
 
+export type ExplicitRule = 'no' | 'extra' | 'after';
+
 export interface ShowConfig {
   preset: Preset | null;
   approve_new_phones: boolean;
   economy: EconomyConfig;
+  /** the guests' own rules (phase 2.2) — house time "HH:MM" */
+  night_ends?: string;
+  last_call_min?: number;
+  explicit?: ExplicitRule;
+  explicit_after?: string;
+  max_phones?: number;
+  renames_per_night?: number;
+  word_filter?: boolean;
+}
+
+/** One of the guests' rules as the page draws it (services/jukebox/show.py
+ * `guest_fields`): its range and choices are the server's own. */
+export interface GuestField {
+  key: 'night_ends' | 'last_call_min' | 'explicit' | 'explicit_after' | 'max_phones'
+    | 'renames_per_night' | 'word_filter';
+  card: string;
+  label: string;
+  unit: string;
+  kind: 'time' | 'int' | 'choice' | 'bool';
+  default: string | number | boolean;
+  min: number | null;
+  max: number | null;
+  choices: { value: string; label: string }[] | null;
+}
+
+/** A phone at tonight's party, for the host (services/jukebox/guests.py
+ * `phones`). */
+export interface GuestPhone {
+  id: string;
+  name: string;
+  joined: boolean;
+  created_ms: number;
+  joined_ms: number | null;
+  renames: number;
+  approved: boolean;
+  blocked: boolean;
+  name_locked: boolean;
+  waiting: number;
+  played: number;
+  votes: number;
+}
+
+export interface GuestsRead {
+  running: boolean;
+  phones: GuestPhone[];
+  pending?: number;
 }
 
 /** One economy setting as the page draws it; the range is the server's
@@ -168,6 +223,7 @@ export interface PresetInfo {
 export interface ShowRead {
   show: ShowConfig;
   fields: EconomyField[];
+  guest_fields?: GuestField[];
   presets: PresetInfo[];
 }
 

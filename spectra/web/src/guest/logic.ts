@@ -41,6 +41,10 @@ export interface StripText { tone: StripTone; label: string; detail: string }
 export function stripText(strip: Strip, elapsedMs: number, nowMs: number,
                           canAdd: boolean, locale?: string): StripText {
   const left = strip.starts_in_ms === null ? null : Math.max(0, strip.starts_in_ms - elapsedMs);
+  if (strip.held && strip.tone !== 'playing') {
+    return { tone: 'queued', label: 'Your song is on hold',
+             detail: `${strip.title} · the host is holding it; it keeps its place` };
+  }
   switch (strip.tone) {
     case 'playing':
       return { tone: 'playing', label: 'Your song is playing', detail: strip.title };
@@ -117,4 +121,44 @@ export function fromAddress(search: string): { token: string | null; phone: stri
   const q = new URLSearchParams(search);
   const ok = (v: string | null) => (v && /^[A-Za-z0-9_-]{8,128}$/.test(v) ? v : null);
   return { token: ok(q.get('t')), phone: ok(q.get('p')) };
+}
+
+/** How long to wait after the last keystroke before searching (the
+ *  guest app also rate-limits searches). */
+export const SEARCH_DEBOUNCE_MS = 400;
+export const SEARCH_MIN = 2;
+
+export interface Badge { kind: 'ready' | 'long' | 'explicit' | 'in-line'; label: string }
+
+/** A search result's badges: "Ready" (the lights already know it), a long
+ *  song's length, explicit, already in line. */
+export function badges(r: { known: boolean; long: boolean; duration_ms: number;
+                            explicit: boolean; in_line: boolean }): Badge[] {
+  const out: Badge[] = [];
+  if (r.known) out.push({ kind: 'ready', label: 'Ready' });
+  if (r.long) out.push({ kind: 'long', label: mmss(r.duration_ms) });
+  if (r.explicit) out.push({ kind: 'explicit', label: 'Explicit' });
+  if (r.in_line) out.push({ kind: 'in-line', label: 'In line' });
+  return out;
+}
+
+/** The line under the search box: requests closed, your songs in line. */
+export function addStatus(req: { open: boolean; detail: string; closes_at: string;
+                                 max_waiting: number; waiting: number },
+                          approved: boolean): { canAdd: boolean; text: string } {
+  if (!approved) return { canAdd: false, text: 'The host hasn\'t let this phone in yet — hang on.' };
+  if (!req.open) return { canAdd: false, text: req.detail };
+  if (req.waiting >= req.max_waiting) {
+    return { canAdd: false,
+             text: `You have ${req.waiting} song${req.waiting === 1 ? '' : 's'} in line — add another when one plays.` };
+  }
+  const left = req.max_waiting - req.waiting;
+  return { canAdd: true,
+           text: `You can add ${left} more song${left === 1 ? '' : 's'} · requests close at ${req.closes_at}` };
+}
+
+/** After an add: "Added — plays in ~25 min (~9:46)". */
+export function addedText(startsInMs: number | null, nowMs: number, locale?: string): string {
+  if (startsInMs === null) return 'Added to the line.';
+  return `Added — plays ${inWords(startsInMs)} (~${clockAt(nowMs, startsInMs, locale)})`;
 }

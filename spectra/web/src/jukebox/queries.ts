@@ -6,10 +6,10 @@
  * server caches the set for 60 s, so re-reading it after every click costs
  * no Spotify call — `refresh` (his Reload) reads the playlist again. */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { spotfxGet, spotfxPost, spotfxPut } from '../api/client';
+import { spotfxDel, spotfxGet, spotfxPost, spotfxPut } from '../api/client';
 import type {
-  JukeboxPreview, JukeboxStatus, NightReport, PriceCheck, ProgramConfig, SetMoveResult, ShowRead,
-  SimResult,
+  GuestsRead, JukeboxPreview, JukeboxStatus, NightReport, PriceCheck, ProgramConfig, SetMoveResult,
+  ShowRead, SimResult,
 } from './types';
 
 export const JUKEBOX_KEYS = {
@@ -102,7 +102,8 @@ export function usePriceCheck(guests: number) {
 export function useSaveShow() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (patch: { economy?: Record<string, number | boolean>; approve_new_phones?: boolean }) =>
+    mutationFn: (patch: { economy?: Record<string, number | boolean>; approve_new_phones?: boolean }
+      & Record<string, unknown>) =>
       spotfxPut<ShowRead>('/jukebox/show', patch),
     onSuccess: (r) => {
       qc.setQueryData(SHOW_KEYS.show, r);
@@ -152,5 +153,51 @@ export function useJukeboxReport(enabled: boolean, guests: number | null, nightI
     enabled,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
+  });
+}
+
+// ── the host's controls over tonight's guests (phase 2.2) ───────────────────
+
+export function useGuests(running: boolean) {
+  return useQuery({
+    queryKey: ['jukebox-guests'],
+    queryFn: () => spotfxGet<GuestsRead>('/jukebox/guests'),
+    refetchInterval: running ? 5000 : 30000,
+  });
+}
+
+/** Approve, block, rename or lock the name of one phone. */
+export function useHostPhone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: { id: string; approved?: boolean; blocked?: boolean;
+                                     name_locked?: boolean; name?: string }) =>
+      spotfxPost<GuestsRead>(`/jukebox/guests/${encodeURIComponent(id)}`, patch),
+    onSuccess: (r) => {
+      qc.setQueryData(['jukebox-guests'], r);
+      qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status });
+    },
+  });
+}
+
+/** Hold a waiting song (it keeps its place; slots pass it) or let it go. */
+export function useHoldEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, held }: { id: string; held: boolean }) =>
+      spotfxPost<{ status: string; detail?: string }>(`/jukebox/line/${encodeURIComponent(id)}/hold`, { held }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status }),
+  });
+}
+
+/** Remove a song from the line (one already sent to Spotify is skipped as it starts). */
+export function useRemoveEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => spotfxDel<{ status: string; detail?: string }>(`/jukebox/line/${encodeURIComponent(id)}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status });
+      qc.invalidateQueries({ queryKey: ['jukebox-guests'] });
+    },
   });
 }

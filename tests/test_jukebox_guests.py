@@ -14,7 +14,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from models.jukebox import GuestBook, NowItem
+from models.jukebox import GuestBook, NowItem, ShowConfig
 from routers import jukebox_guest_router, jukebox_router
 from services.jukebox import gateway, guests as G, night as night_mod, store
 from jukebox_guest import key as guest_key
@@ -100,14 +100,14 @@ def test_a_phone_keeps_its_own_code_when_it_brings_one():
     _run(go())
 
 
-def test_the_party_has_a_limit(monkeypatch):
-    monkeypatch.setattr(G, "PHONES_MAX", 2)
+def test_the_party_has_the_shows_limit():
+    store.save_show(ShowConfig(max_phones=5))
 
     async def go():
         w = await _night()
         g = _guests(w)
-        await _phone(g)
-        await _phone(g)
+        for _ in range(5):
+            await _phone(g)
         code, out = await g.hello(None, TOKEN)
         assert (code, out["reason"]) == (403, "party_full")
     _run(go())
@@ -155,7 +155,8 @@ def test_shuffle_is_free_on_the_welcome_screen_and_renames_are_counted_after():
             seen.add(out["view"]["me"]["name"])
         assert len(seen) > 1
         code, out = await g.join(pid, "Disco Ana")
-        assert out["view"]["me"] == {"name": "Disco Ana", "joined": True, "renames_left": 3}
+        me = out["view"]["me"]
+        assert (me["name"], me["joined"], me["renames_left"]) == ("Disco Ana", True, 3)
         for left in (2, 1, 0):
             code, out = await g.rename(pid, shuffle=True)
             assert code == 200 and out["view"]["me"]["renames_left"] == left
@@ -338,7 +339,8 @@ def test_the_guest_routes_need_the_guest_apps_key(monkeypatch):
             assert c.get("/api/jukebox/guest/view", headers=headers).status_code == 401
         r = c.post("/api/jukebox/guest/hello", json={"token": "x"}, headers={guest_key.HEADER: key})
         assert r.status_code == 200 and r.json()["state"] == "idle"
-        assert c.get("/api/jukebox/status").json()["guests"] == {"phones": 0, "joined": 0}
+        assert c.get("/api/jukebox/status").json()["guests"] == {"phones": 0, "joined": 0,
+                                                                "pending": 0}
 
 
 def test_the_guest_key_is_cached_and_a_recreated_file_is_picked_up(monkeypatch):

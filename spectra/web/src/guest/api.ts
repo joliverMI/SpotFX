@@ -2,7 +2,7 @@
 // (jukebox_guest/app.py's /g/ routes — the only ones it answers). The phone
 // is named by its cookie; a copy of its code in this phone's own storage
 // rides along so a cleared cookie doesn't make it a stranger.
-import type { Refusal, View } from './types';
+import type { Refusal, SearchResult, View } from './types';
 
 const PHONE_KEY = 'jukebox.phone';
 
@@ -14,8 +14,11 @@ export function storePhone(id: string): void {
   try { localStorage.setItem(PHONE_KEY, id); } catch { /* private mode: the cookie still works */ }
 }
 
+export interface Found { results: SearchResult[]; more: boolean; next_offset: number; query: string }
+export interface Added { entry_id: string; title: string; starts_in_ms: number | null }
+
 export type Answer =
-  | { ok: true; view: View; phone?: string }
+  | { ok: true; view: View; phone?: string; found?: Found; added?: Added }
   | { ok: false; status: number; refusal: Refusal };
 
 const UNREACHABLE: Refusal = {
@@ -42,7 +45,9 @@ async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promi
   const d = (data ?? {}) as Record<string, unknown>;
   if (r.ok && (d.state === 'idle' || d.status === 'ok')) {
     const view = (d.state === 'idle' ? d : d.view) as View;
-    return { ok: true, view, phone: typeof d.phone === 'string' ? d.phone : undefined };
+    const found = Array.isArray(d.results) ? (d as unknown as Found) : undefined;
+    const added = d.added && typeof d.added === 'object' ? (d.added as Added) : undefined;
+    return { ok: true, view, phone: typeof d.phone === 'string' ? d.phone : undefined, found, added };
   }
   if (typeof d.reason === 'string' && typeof d.detail === 'string') {
     return { ok: false, status: r.status, refusal: d as unknown as Refusal };
@@ -56,5 +61,7 @@ export const api = {
   rename: (name: string | null, shuffle = false) =>
     call('POST', '/g/name', shuffle ? { shuffle: true } : { name }),
   vote: (vote: 'up' | 'down' | 'none') => call('POST', '/g/vote', { vote }),
+  search: (q: string, offset = 0) => call('POST', '/g/search', { q, offset }),
+  add: (uri: string) => call('POST', '/g/add', { uri }),
   view: () => call('GET', '/g/view'),
 };

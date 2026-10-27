@@ -32,6 +32,7 @@ export interface NextSong extends Song {
   starts_in_ms: number | null;
   duration_ms: number;
   place: number;               // 1 = the next song
+  known?: boolean;             // the lights already know it
   entry_id?: string;           // only on your own songs
 }
 
@@ -39,6 +40,8 @@ export interface MySong extends Song {
   entry_id: string;
   state: 'playing' | 'next' | 'waiting';
   committed: boolean;
+  held: boolean;               // the host is holding it: it keeps its place
+  known: boolean;
   place: number | null;
   starts_in_ms: number | null;
 }
@@ -49,7 +52,38 @@ export interface Strip {
   title: string;
   place: number | null;
   starts_in_ms: number | null;
+  held: boolean;
   count: number;
+}
+
+/** Tonight's requests: open until last call; songs in line per guest. */
+export interface Requests {
+  open: boolean;
+  closes_at: string;           // "11:40", house time
+  ends_at: string;
+  closes_at_ms: number;
+  ends_at_ms: number;
+  detail: string;              // why they're closed, when they are
+  max_waiting: number;
+  waiting: number;             // yours, in line now
+}
+
+/** One search result as the Add screen draws it. */
+export interface SearchResult {
+  uri: string;
+  title: string;
+  artist: string;
+  image: string;
+  thumb: string;
+  duration_ms: number;
+  explicit: boolean;
+  open_url: string;
+  known: boolean;              // "Ready": the lights already know it
+  library: boolean;            // from his own library
+  long: boolean;
+  in_line: boolean;
+  can_add: boolean;
+  why_not: string;
 }
 
 export interface Features { add: boolean; board: boolean; credits: boolean }
@@ -59,7 +93,8 @@ export interface RunningView {
   state: 'running';
   server_ms: number;
   poll_ms: number;
-  me: { name: string; joined: boolean; renames_left: number };
+  me: { name: string; joined: boolean; approved: boolean; name_locked: boolean; renames_left: number };
+  requests: Requests;
   features: Features;
   house_rules: string[];
   privacy: string;

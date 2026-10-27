@@ -2363,13 +2363,25 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'jukebox-guest-page',
         title: 'The guest page',
-        keywords: 'guest page phones guests vote up down party link token qr name welcome house rules queue your song next banner add to home screen iphone android free play',
+        keywords: 'guest page phones guests vote up down party link token qr name welcome house rules queue your song next banner add to home screen iphone android free play add search ready',
         body: [
           'The page guests open on their phones. It is its own small app on its own port (8020), separate from SpotFX and SPECTRA, and it answers nothing but the guest page: none of your controls can be reached through it.',
-          'A phone joins only through tonight\'s party link (the token in it is new for every party). It gets a fun name it can change (shuffled freely on the welcome screen, then three changes a night), reads the house rules, and taps Let\'s go. No sign-in and no account: the page keeps a random code for the phone, for tonight only.',
+          'A phone joins only through tonight\'s party link (the token in it is new for every party). It gets a fun name it can change (shuffled freely on the welcome screen, then as many changes as the Guests tab allows), reads the house rules, and taps Let\'s go. No sign-in and no account: the page keeps a random code for the phone, for tonight only.',
           'Now shows the song playing (its own album art from Spotify, who added it, "Music from Spotify" and an Open Spotify link) with two big buttons: Up and Down. One vote per phone per song; tap it again to take it back. Nobody votes on their own song. Queue shows everything coming up, with the host\'s set locked and the song already sent to Spotify marked.',
-          'The strip under the header tells a guest about their own songs: its place, and when it plays (by their phone\'s clock). When it is next, the strip turns purple and a banner says so; Android phones also buzz. iPhones can\'t buzz from a web page, so they get a hint to add the page to the Home Screen instead, which keeps the same name.',
-          'Free play only for now: no credits, and guests can\'t add songs yet (that comes next). The page is rate-limited, and while no night runs it just says the Jukebox isn\'t playing.',
+          'Add finds a song: your own library first ("Ready: the lights already know these"), then Spotify, ten at a time. Each result shows its badges (Ready, a long song\'s length, Explicit) and whether it can go in. A guest has up to two songs in line (the Credits tab\'s setting); 1st songs go before 2nd songs, so a quiet guest\'s first pick isn\'t stuck behind someone\'s second. Nothing is accepted after last call, nor anything that would start after the night ends, and explicit songs follow your rule.',
+          'The strip under the header tells a guest about their own songs: its place, and when it plays (by their phone\'s clock), or that you are holding it. When it is next, the strip turns purple and a banner says so; Android phones also buzz. iPhones can\'t buzz from a web page, so they get a hint to add the page to the Home Screen instead, which keeps the same name.',
+          'Free play only for now: no credits. The page is rate-limited, and while no night runs it just says the Jukebox isn\'t playing.',
+        ],
+      },
+      {
+        id: 'jukebox-guests',
+        title: 'The Guests tab',
+        keywords: 'guests tab phones approve block rename lock name hold remove line last call night ends explicit max phones renames word filter',
+        body: [
+          'Guest rules: when tonight ends and how long before that requests close (last call), explicit songs (not allowed, allowed, or only after a set time), the most phones tonight, name changes per night and the word filter on names. Each saves on its own; a value outside its range is refused and nothing changes.',
+          'The line: every jukebox song still to play, who added it and whether it was their 1st or 2nd song. Hold keeps a song in its place while slots pass it (Let go puts it back in play); Remove takes it out (a song already sent to Spotify is skipped the moment it starts).',
+          'Phones: everyone at tonight\'s party, how they stand (on the welcome screen, in, waiting for your approval, blocked) with their songs and votes. Approve lets a waiting phone in (with "New phones need my approval" on, on the Credits tab); Block takes a phone out for the night; Rename gives it a name of your choosing (your word, no filter); Lock name stops it changing its own.',
+          'Sonic can change the guest rules (asking first) but not a phone: approving, blocking and renaming act on a person by name, so they stay these buttons.',
         ],
       },
       {

@@ -1,10 +1,13 @@
 // The guest screens: Welcome (first visit), Now (the main screen: what is
 // playing, its votes, the two big buttons, the next few songs), and Queue
 // (your songs, then everything coming up).
-import { useState } from 'react';
-import type { RunningView } from './types';
-import { byLine, mmss, progressNow } from './logic';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { RunningView, SearchResult, View } from './types';
+import {
+  SEARCH_DEBOUNCE_MS, SEARCH_MIN, addStatus, addedText, badges, byLine, mmss, progressNow,
+} from './logic';
 import { Art, OpenSpotify, SongRow, SpotifyIcon } from './bits';
+import { api, type Found } from './api';
 
 export function Welcome({ view, busy, onShuffle, onGo, error }: {
   view: RunningView; busy: boolean; error: string;
@@ -127,7 +130,7 @@ export function QueueScreen({ view, elapsedMs, nowMs }: { view: RunningView; ela
         {mine.length ? (
           <ul className="g-list">{mine.map((s) => <SongRow key={`m-${s.place}`} song={s} elapsedMs={elapsedMs} nowMs={nowMs} />)}</ul>
         ) : (
-          <p className="g-muted">{view.mine.length ? 'Your song is further down the line.' : 'None in line tonight yet.'}</p>
+          <p className="g-muted">{view.mine.length ? 'Your song is further down the line.' : 'None in line yet — tap ＋ to add one.'}</p>
         )}
       </section>
       <section aria-label="Coming up">
@@ -139,6 +142,109 @@ export function QueueScreen({ view, elapsedMs, nowMs }: { view: RunningView; ela
         )}
         <p className="g-muted g-small">The host's set plays in order (🔒). A song marked “sent to Spotify” plays next whatever happens.</p>
       </section>
+    </div>
+  );
+}
+
+export function AddScreen({ view, onAdded }: {
+  view: RunningView; onAdded: (v: View, text: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [found, setFound] = useState<Found | null>(null);
+  const [error, setError] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [adding, setAdding] = useState('');
+  const [added, setAdded] = useState<Set<string>>(new Set());
+  const seq = useRef(0);
+  const status = addStatus(view.requests, view.me.approved);
+
+  const run = useCallback(async (q: string, offset: number) => {
+    const mine = ++seq.current;
+    setSearching(true);
+    const r = await api.search(q, offset);
+    if (mine !== seq.current) return;                 // a newer search is under way
+    setSearching(false);
+    if (!r.ok || !r.found) { setError(r.ok ? '' : r.refusal.detail); return; }
+    setError('');
+    const f = r.found;
+    setFound((prev) => (offset > 0 && prev ? { ...f, results: [...prev.results, ...f.results] } : f));
+  }, []);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < SEARCH_MIN) { seq.current += 1; setFound(null); setSearching(false); return undefined; }
+    const t = window.setTimeout(() => { void run(q, 0); }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(t);
+  }, [query, run]);
+
+  const add = async (uri: string) => {
+    setAdding(uri);
+    const r = await api.add(uri);
+    setAdding('');
+    if (r.ok) {
+      setAdded((s) => new Set(s).add(uri));
+      onAdded(r.view, addedText(r.added?.starts_in_ms ?? null, Date.now()));
+    } else {
+      setError(r.refusal.detail);
+    }
+  };
+
+  const results = found?.results ?? [];
+  const ready = results.filter((r) => r.library);
+  const rest = results.filter((r) => !r.library);
+  const row = (r: SearchResult) => {
+    const inLine = r.in_line || added.has(r.uri);
+    const why = inLine ? 'Already in line.' : r.why_not;
+    return (
+      <li key={r.uri} className="g-row g-result">
+        <Art song={{ ...r, kind: 'jukebox', by: { kind: 'other', name: '' }, mine: false }} size="small" />
+        <div className="g-row-text">
+          <div className="g-row-title">{r.title}</div>
+          <div className="g-row-artist">{r.artist}</div>
+          <div className="g-badges">
+            {badges({ ...r, in_line: inLine }).map((b) => (
+              <span key={b.kind} className={`g-badge g-badge-${b.kind}`}>{b.label}</span>
+            ))}
+          </div>
+          {why && !inLine && <div className="g-row-why">{why}</div>}
+        </div>
+        <div className="g-result-actions">
+          <button type="button" className="g-btn g-btn-primary g-add-btn"
+                  disabled={!status.canAdd || !r.can_add || inLine || adding !== ''}
+                  aria-label={`Add ${r.title}`} onClick={() => void add(r.uri)}>
+            {adding === r.uri ? '…' : inLine ? '✓' : 'Add'}
+          </button>
+          <OpenSpotify song={{ ...r, kind: 'jukebox', by: { kind: 'other', name: '' }, mine: false }} label={false} />
+        </div>
+      </li>
+    );
+  };
+  return (
+    <div className="g-add">
+      <label className="g-field-label" htmlFor="g-search">Find a song</label>
+      <input id="g-search" className="g-input" type="search" inputMode="search" autoComplete="off"
+             placeholder="A song or an artist" value={query} maxLength={60}
+             onChange={(e) => setQuery(e.target.value)} />
+      <p className={`g-add-status${status.canAdd ? '' : ' g-add-status-off'}`}>{status.text}</p>
+      {error && <p className="g-error" role="alert">{error}</p>}
+      {searching && <p className="g-muted g-small">Searching…</p>}
+      {ready.length > 0 && (
+        <section aria-label="Ready">
+          <h2 className="g-h2">Ready: the lights already know these</h2>
+          <ul className="g-list">{ready.map(row)}</ul>
+        </section>
+      )}
+      {rest.length > 0 && (
+        <section aria-label="From Spotify">
+          <h2 className="g-h2 g-h2-spotify"><SpotifyIcon size={16} /> From Spotify</h2>
+          <ul className="g-list">{rest.map(row)}</ul>
+        </section>
+      )}
+      {found && results.length === 0 && <p className="g-muted">Nothing found for “{found.query}”.</p>}
+      {found?.more && (
+        <button type="button" className="g-btn g-btn-ghost g-more" disabled={searching}
+                onClick={() => void run(found.query, found.next_offset)}>More from Spotify</button>
+      )}
     </div>
   );
 }
