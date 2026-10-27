@@ -5,7 +5,8 @@ and the double tick — on a detected drop, a drop he added, and one of his
 own drops (stored in the drop store under "mine:<his drop trigger id>",
 never his song profile); the snap rails it is dragged along; the routes;
 Sonic's set_pre_drop / switch_pre_drop. Every edit answers the undo pair.
-Nothing plays from a pre-drop yet (drop_firing.PRE_DROPS_PLAY).
+Whether a pre-drop plays is decided per scene by step 5's engine
+(spectra/services/pre_drop_play.py), not by anything edited here.
 
 Synthetic detections, plus his Eyes Cut Deeper shape (the step-3 fixture,
 tests/fixtures/predrop/ecd) where the rules and the rails need real audio.
