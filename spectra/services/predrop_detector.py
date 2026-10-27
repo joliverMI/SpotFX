@@ -289,6 +289,29 @@ def spike(s: Shape, drop_ms: float, wmin: float = SPIKE_SEARCH_MS[0],
 
 # ── kind 2: the vocal intro (pd_intro.detect) ───────────────────────────────
 
+def _entry(s: Shape, o: float, e1: float) -> dict:
+    """A mid-band onset at `o` measured as an entry: its level over
+    [o + 40, e1), the level before it, their ratio, and how long it takes to
+    reach 80% of the way up (the vocal intro's first three tests, shared by
+    the rule and the entries rail so the two can never disagree)."""
+    t, x = s.t, s.n["mid"]
+    entry = s.mean("mid", o + 40, e1)
+    before = s.mean("mid", o - 1200, o - 80)
+    ratio = (entry + 0.02) / (before + 0.02)
+    # sharpness: from o until the mid band first reaches 80% of the entry
+    k0, k1 = np.searchsorted(t, [o, e1])
+    target = before + 0.8 * max(entry - before, 0.0)
+    reach = np.nonzero(x[k0:k1] >= target)[0]
+    rise_ms = float(t[k0 + reach[0]] - o) if len(reach) else float(e1 - o)
+    return dict(entry=entry, before=before, ratio=ratio, rise_ms=rise_ms)
+
+
+def _entry_tests(e: dict, T: dict) -> dict:
+    """Tests 1-3 of the vocal intro as margins (pass at >= 1)."""
+    return dict(entry=e["entry"] / T["ENTRY_MIN"], quiet=e["ratio"] / T["RATIO_MIN"],
+                sharp=T["SHARP_MS"] / max(e["rise_ms"], 1.0))
+
+
 def intro(s: Shape, drop_ms: float, wmin: float = INTRO_SEARCH_MS[0],
           wmax: float = INTRO_SEARCH_MS[1], th: Optional[dict] = None) -> dict:
     """The vocal-intro rule at a drop, in the spike's result shape."""
@@ -310,22 +333,15 @@ def intro(s: Shape, drop_ms: float, wmin: float = INTRO_SEARCH_MS[0],
         if not (wmin <= lead <= wmax):
             continue
         e1 = min(o + 1000, D - 60)
-        entry = s.mean("mid", o + 40, e1)
-        before = s.mean("mid", o - 1200, o - 80)
-        ratio = (entry + 0.02) / (before + 0.02)
-        # sharpness: from o until the mid band first reaches 80% of the entry
-        k0, k1 = np.searchsorted(t, [o, e1])
-        target = before + 0.8 * max(entry - before, 0.0)
-        reach = np.nonzero(x[k0:k1] >= target)[0]
-        rise_ms = float(t[k0 + reach[0]] - o) if len(reach) else float(e1 - o)
+        e = _entry(s, o, e1)
+        entry, before, ratio, rise_ms = e["entry"], e["before"], e["ratio"], e["rise_ms"]
         held = s.mean("mid", o + 40, D - 60) / (entry + 1e-9)
         bass = s.mean("low", o, D - 60) / (low_post + 1e-9)
         span = D - 60 - o
         up0 = s.mean("up", o + 40, o + 40 + span / 3)
         up2 = s.mean("up", D - 60 - span / 3, D - 60)
         ramp = (up2 + 0.02) / (up0 + 0.02)
-        m = dict(entry=entry / T["ENTRY_MIN"], quiet=ratio / T["RATIO_MIN"],
-                 sharp=T["SHARP_MS"] / max(rise_ms, 1.0), hold=held / T["HOLD_MIN"],
+        m = dict(**_entry_tests(e, T), hold=held / T["HOLD_MIN"],
                  no_bass=(1.0 - min(bass, 1.0)) / (1.0 - T["BASS_MAX"]),
                  not_build=T["RAMP_MAX"] / max(ramp, 1e-6))
         score = float(min(m.values()))
@@ -435,3 +451,60 @@ def reanchor(s: Optional[Shape], att_ms: np.ndarray, att_rise: np.ndarray,
     if r.get("status") != "found" or abs(int(r["ms"]) - int(d0)) > SAME_HIT_MS:
         return None
     return d1
+
+
+# ── what a dragged pre-drop snaps to, and where ＋ Pre-drop puts one ────────
+
+ENTRY_SPAN_MS = 1000             # the entry's own window when no drop bounds it
+
+
+def rails(s: Optional[Shape]) -> tuple[list[list], list[list]]:
+    """The two pre-drop snap rails over the whole song (predrop plan 3.1):
+    HITS — every high-band attack the spike rule weighs, [ms, strength]
+    (its jump over the 1.2 s before it); ENTRIES — every mid-band onset that
+    passes the vocal intro's first three tests (loud, out of a hush, sharp)
+    over its own 1 s, [ms, strength] (its level). Both bands are the rules'
+    own normalised ones, so strength reads 0..1. Read-only."""
+    if s is None or len(s.t) < 8:
+        return [], []
+    a, b = float(s.t[0]), float(s.t[-1])
+    hits = []
+    for j in _attacks(s, "high", a, b, SPIKE_MIN_RISE):
+        h = _hit(s, j)
+        hits.append([int(h["ms"]), round(max(float(h["jump"]), 0.0), 3)])
+    T = dict(ENTRY_MIN=INTRO_ENTRY_MIN, RATIO_MIN=INTRO_RATIO_MIN, SHARP_MS=INTRO_SHARP_MS)
+    entries = []
+    for j in _attacks(s, "mid", a, b, INTRO_MIN_RISE):
+        o = int(s.t[j])
+        e = _entry(s, o, o + ENTRY_SPAN_MS)
+        if min(_entry_tests(e, T).values()) >= FOUND_SCORE:
+            entries.append([o, round(float(e["entry"]), 3)])
+    return hits, entries
+
+
+def place(s: Optional[Shape], drop_ms: float) -> Optional[tuple[int, str]]:
+    """Where ＋ Pre-drop puts one (predrop plan 3.1, "fill ... snaps to the
+    strongest hit or entry the rules would pick inside the window"): the
+    pre-drop the rules find (`detect`), else the strongest candidate either
+    rule weighed in its search window, found or not — a spike on a tie.
+    (ms, kind), or None when neither rule has a candidate there."""
+    if s is None:
+        return None
+    found = detect(s, drop_ms)
+    if found is not None:
+        return int(found.ms), found.kind
+    cands = []
+    for kind, r in ((KIND_SPIKE, spike(s, drop_ms)), (KIND_INTRO, intro(s, drop_ms))):
+        if r.get("status") in ("found", "weak") and r.get("ms") is not None:
+            cands.append((float(r["score"]), kind == KIND_SPIKE, int(r["ms"]), kind))
+    if not cands:
+        return None
+    _score, _spike, ms, kind = max(cands)
+    return ms, kind
+
+
+def lead_range(kind: str) -> tuple[int, int]:
+    """How far before its drop a pre-drop of `kind` may sit: its search
+    window, which is at least as wide as any scene may set (plan 3.1)."""
+    lo, hi = SPIKE_SEARCH_MS if kind == KIND_SPIKE else INTRO_SEARCH_MS
+    return int(lo), int(hi)

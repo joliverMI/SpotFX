@@ -12044,8 +12044,8 @@ detail. Four things:
   frozen in `tests/fixtures/predrop/study_moments.json`; bump
   `PREDROP_VERSION` (in every detection's stamp) when an unchanged song
   would find differently. Every detected sequence carries `pre_drop`; the
-  view names it (`pre_drop_ms/_kind/_auto/_tier/_score`) while
-  `parts["pre_drop"]` stays `absent` until step 4 gives it a button.
+  view names it (`pre_drop_ms/_kind/_auto/_tier/_score`) and, since step 4
+  (below), its part.
 - **THE RE-ANCHOR** moves a drop sitting ON its own pre-drop hit to the
   sustained bass return 0.5-2 s later, only when that hit passes the spike
   test against it — exactly Eyes Cut Deeper drop 1 in his store, to where
@@ -12063,6 +12063,28 @@ detail. Four things:
   keep the study's raw search on purpose. Help: `testbed-predrops` (the
   test bed's Pre-drops lane, a glyph per kind). Specs:
   `tests/test_predrop_detector.py`, `tests/test_predrop_view.py`.
+
+**PRE-DROPS ARE EDITABLE (2026-10-26, predrop plan step 4 — still nothing
+plays).** `drop_sequences.py`'s "EDITING A PRE-DROP" and "HIS OWN DROPS'
+PRE-DROPS" sections are the binding statement; the `drop-detection` skill
+has the cold-start detail. Four things:
+
+- **`pre_drop` IS ONE MORE HANDLE on the existing ops** (`handles`,
+  `member`, `fill`, `parts`, the double tick, Confirm) plus one new op,
+  `pre_drop_kind`; the snap rails gain `hits`/`entries`. Every edit is the
+  usual undo pair.
+- **ITS LEAD must fit its kind's range** (`predrop_detector.lead_range`),
+  checked on the pre-drop's own edits only — a drop drag never trips on
+  it; a placed one holds a drop move back by the 200 ms order rule, and a
+  move carrying the pre-drop is checked against where it is going.
+- **HIS OWN DROPS' PRE-DROPS live in the drop store** (`overrides
+  ["mine:<drop trigger id>"]`, `apply_edit("mine_pre_drop")`), never his
+  profile: `drop_panel` maps his "his:" keys onto them, so no edit of a
+  pre-drop ever touches one of his triggers (and none asks first).
+- **THE UI**: the Timeline's orange handle (help topic `pre-drop`) and the
+  Home panel's pre-drop button and editor handle; Sonic's `set_pre_drop` /
+  `switch_pre_drop`. Spec: `tests/test_predrop_edits.py` plus the
+  drop-sequence view/edit and Home panel check scripts.
 
 ## Touch panning + Light Show flag touch precision (2026-10-08)
 

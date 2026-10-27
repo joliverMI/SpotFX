@@ -100,6 +100,7 @@
       "mcp__settings-console__set_house_mode_setting",
       "mcp__settings-console__set_house_voice_look",
       "mcp__settings-console__set_music_device_allowlist",
+      "mcp__settings-console__set_pre_drop",
       "mcp__settings-console__set_pulse_brightness",
       "mcp__settings-console__set_pulse_reactivity",
       "mcp__settings-console__set_room_effect",
@@ -113,6 +114,7 @@
       "mcp__settings-console__start_show_sequence",
       "mcp__settings-console__stop_absorb",
       "mcp__settings-console__stop_show_sequence",
+      "mcp__settings-console__switch_pre_drop",
       "mcp__settings-console__undo_drop_edit",
       "mcp__settings-console__undo_last_scene_change",
       "mcp__settings-console__update_device"

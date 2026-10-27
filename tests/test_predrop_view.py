@@ -137,8 +137,9 @@ def test_the_view_names_the_pre_drop_and_its_kind():
     s = _one(_view())
     assert (s["pre_drop_ms"], s["pre_drop_auto"], s["pre_drop_kind"], s["pre_drop_tier"],
             s["pre_drop_score"]) == (69537, 69537, "spike", "confident", 1.154)
-    # its button is step 4's: the part stays absent, nothing plays from it
-    assert s["parts"]["pre_drop"] == "absent"
+    # he confirmed this drop before the pre-drop was found, so it is not his
+    # yet: it waits for his tick (nothing plays from a pre-drop in step 4)
+    assert s["parts"]["pre_drop"] == "waiting"
 
 
 def test_a_drop_with_none_says_nothing():

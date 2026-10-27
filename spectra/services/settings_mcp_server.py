@@ -129,6 +129,8 @@ _VoiceStateEnum = Literal[tuple(house_console.VOICE_STATES)]
 _DropHandleEnum = Literal["lull", "charge"]
 _DropReviewChoiceEnum = Literal["keep", "take"]
 _DropPartEnum = Literal[tuple(drop_console.PART_CHOICES)]
+_PreDropPlaceEnum = Literal[tuple(drop_console.PRE_DROP_PLACES)]
+_PreDropKindEnum = Literal[tuple(drop_console.PRE_DROP_KINDS)]
 _LockKeyEnum = Literal[tuple(lock_console.KEYS)]
 _AbsorbKeyEnum = Literal[tuple(absorb_console.SETTING_KEYS)]
 
@@ -885,10 +887,33 @@ async def approve_drop_sequence(sequence: int, uri: Optional[str] = None) -> dic
 async def set_drop_part(part: _DropPartEnum, on: bool, sequence: Optional[int] = None,
                         your_drop_s: Optional[float] = None, uri: Optional[str] = None,
                         confirm_id: Optional[str] = None) -> dict:
-    """Approve or switch off one part of a drop (charge, lull or the drop
-    itself); on one of his own drops, switching off asks first."""
+    """Approve or switch off one part of a drop (charge, lull, pre-drop or
+    the drop itself); on one of his own drops, switching off asks first
+    (never for the pre-drop)."""
     return await _call("set_drop_part", part=part, on=on, sequence=sequence,
                        your_drop_s=your_drop_s, uri=uri, confirm_id=confirm_id)
+
+
+@mcp.tool()
+async def set_pre_drop(sequence: Optional[int] = None, your_drop_s: Optional[float] = None,
+                       at_seconds: Optional[float] = None,
+                       before_drop_ms: Optional[int] = None,
+                       place: Optional[_PreDropPlaceEnum] = None,
+                       uri: Optional[str] = None) -> dict:
+    """Place, move, switch off/on, or add a drop's pre-drop -- exactly one of
+    at_seconds, before_drop_ms or place ('detected', 'rules', 'off', 'on')."""
+    return await _call("set_pre_drop", sequence=sequence, your_drop_s=your_drop_s,
+                       at_seconds=at_seconds, before_drop_ms=before_drop_ms, place=place,
+                       uri=uri)
+
+
+@mcp.tool()
+async def switch_pre_drop(kind: _PreDropKindEnum, sequence: Optional[int] = None,
+                          your_drop_s: Optional[float] = None,
+                          uri: Optional[str] = None) -> dict:
+    """Switch a drop's pre-drop between a spike and a vocal intro."""
+    return await _call("switch_pre_drop", kind=kind, sequence=sequence,
+                       your_drop_s=your_drop_s, uri=uri)
 
 
 @mcp.tool()

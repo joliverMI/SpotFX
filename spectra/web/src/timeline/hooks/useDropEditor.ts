@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiPost } from '../../api/client';
-import type { DropSequencesResponse, Handle } from '../dropSequences';
+import type { DropSequencesResponse, Handle, PreDropKind } from '../dropSequences';
 import {
   EMPTY_STACKS, afterRedo, afterUndo, editChanged, editErrorText, guardInFlight, pushEdit,
   redoRequest, undoRequest, type DropEdits, type ProfileChange, type UndoEntry, type UndoStacks,
@@ -30,6 +30,11 @@ interface EditAnswer {
 }
 
 export type PartState = 'on' | 'off';
+/** the handles an edit can move: the three phases and the pre-drop */
+export type EditHandle = Handle | 'pre_drop';
+/** the members that can be switched off or added by the rules */
+export type MemberHandle = 'lull' | 'charge' | 'pre_drop';
+const handleWord = (h: string) => h.replace('_', '-');
 export type PartName = 'charge' | 'lull' | 'pre_drop' | 'drop';
 
 export interface DropEditor {
@@ -45,9 +50,14 @@ export interface DropEditor {
   confirm: (key: string, what?: string) => Promise<string | null>;
   dismiss: (key: string, what?: string) => Promise<string | null>;
   revert: (key: string, what?: string) => Promise<string | null>;
-  moveHandles: (key: string, handles: Partial<Record<Handle, number | null>>, what?: string) => Promise<string | null>;
-  member: (key: string, handle: 'lull' | 'charge', off: boolean) => Promise<string | null>;
-  fill: (key: string, handle: 'lull' | 'charge') => Promise<string | null>;
+  /** `pre_drop` moves the pre-drop (null = back to where the detector puts it) */
+  moveHandles: (key: string, handles: Partial<Record<EditHandle, number | null>>, what?: string) => Promise<string | null>;
+  /** switch the lull, the charge or the pre-drop off (or back on) */
+  member: (key: string, handle: MemberHandle, off: boolean) => Promise<string | null>;
+  /** add a lull, a charge or a pre-drop where the detector's own rules put it */
+  fill: (key: string, handle: MemberHandle) => Promise<string | null>;
+  /** switch a pre-drop's kind (refused when its lead does not fit the kind) */
+  preDropKind: (key: string, kind: PreDropKind) => Promise<string | null>;
   review: (key: string, choice: 'keep' | 'take') => Promise<string | null>;
   add: (dropMs: number) => Promise<string | null>;
   /** THE HOME DROPS PANEL's writes: a part's toggle, the double tick,
@@ -157,13 +167,17 @@ export function useDropEditor(uri: string | null): DropEditor {
       : `not a drop${what ? `: ${what}` : ''}`, asKey(key)), [edit]);
   const revert = useCallback((key: string, what = '') =>
     edit('revert', { key }, `back to detected${what ? `: ${what}` : ''}`, () => key), [edit]);
-  const moveHandles = useCallback((key: string, handles: Partial<Record<Handle, number | null>>,
+  const moveHandles = useCallback((key: string, handles: Partial<Record<EditHandle, number | null>>,
     what?: string) =>
-    edit('handles', { key, handles }, what ?? `moved ${Object.keys(handles).join(' + ')}`, asKey(key)), [edit]);
-  const member = useCallback((key: string, handle: 'lull' | 'charge', off: boolean) =>
-    edit('member', { key, handle, off }, `${handle} ${off ? 'off' : 'on'}`, asKey(key)), [edit]);
-  const fill = useCallback((key: string, handle: 'lull' | 'charge') =>
-    edit('fill', { key, handle }, `added a ${handle}`, asKey(key)), [edit]);
+    edit('handles', { key, handles }, what ?? `moved ${Object.keys(handles).map(handleWord).join(' + ')}`,
+      asKey(key)), [edit]);
+  const member = useCallback((key: string, handle: MemberHandle, off: boolean) =>
+    edit('member', { key, handle, off }, `${handleWord(handle)} ${off ? 'off' : 'on'}`, asKey(key)), [edit]);
+  const fill = useCallback((key: string, handle: MemberHandle) =>
+    edit('fill', { key, handle }, `added a ${handleWord(handle)}`, asKey(key)), [edit]);
+  const preDropKind = useCallback((key: string, kind: PreDropKind) =>
+    edit('pre-drop-kind', { key, kind }, `pre-drop: ${kind === 'spike' ? 'a spike' : 'a vocal intro'}`,
+      asKey(key)), [edit]);
   const review = useCallback((key: string, choice: 'keep' | 'take') =>
     edit('review', { key, choice }, choice === 'keep' ? 'kept your place' : 'took the new place',
       asKey(key)), [edit]);
@@ -243,7 +257,7 @@ export function useDropEditor(uri: string | null): DropEditor {
     canUndo: !!u, canRedo: !!r, undoLabel: u?.label ?? null, redoLabel: r?.label ?? null,
     busy, error, clearError: () => setError(null), note,
     confirm, dismiss, revert, moveHandles, member, fill, review, add, confirmAll, redetect,
-    parts, approve, remove, switchOn,
+    parts, approve, remove, switchOn, preDropKind,
     undo, redo,
   };
 }

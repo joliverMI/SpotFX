@@ -27,9 +27,20 @@
  *   through POST /drop-sequences/restore (refused when his edits changed
  *   since, so an undo never silently overwrites a newer edit).
  *
+ *   THE PRE-DROP (predrop plan step 4), the fourth handle. It snaps to the
+ *   rail of its KIND — a spike to the HITS (every high-band attack), a vocal
+ *   intro to the vocal ENTRIES — and is held inside its kind's lead range
+ *   before the drop (PRE_DROP_LEAD_MS, the server's own check), which also
+ *   keeps it the ramp floor before the drop. It may sit before the lull
+ *   starts. A drop dragged back past it is held by a pre-drop he PLACED and
+ *   leaves an automatic one out (the server's rule for an automatic lull); a
+ *   whole-sequence move carries it. R selects it, K switches its kind. On
+ *   one of his own sequences it is the only handle the Timeline moves
+ *   (`editableHandle`).
+ *
  * Every time is SONG time, the frame the canvas draws in. */
-import type { DisplaySeq, DropRails, Handle } from './dropSequences';
-import { HANDLES } from './dropSequences';
+import type { DisplaySeq, DropRails, Handle, PreDropKind, SeqHandle, SeqTimes } from './dropSequences';
+import { HANDLES, SEQ_HANDLES } from './dropSequences';
 
 /** The engine's own ramp floor: the minimum gap between two handles. */
 export const RAMP_FLOOR_MS = 200;
@@ -47,16 +58,20 @@ export const KEY_SAVE_IDLE_MS = 450;
  * beats, else exactly where clicked (20 ms grid). */
 export const ADD_SNAP_BEATS = 2;
 
-export type SnapRail = 'spike' | 'beat' | 'free';
+/** What a snapped handle sits on: a bass spike or a beat (the phases), a
+ * hit or a vocal entry (the pre-drop), or nothing (the free grid). */
+export type SnapRail = 'spike' | 'beat' | 'hit' | 'entry' | 'free';
 
 export interface SnapGuide {
   ms: number;
-  /** "bass spike" · "downbeat" · "beat" · "free (20 ms grid)" … */
+  /** "bass spike" · "downbeat" · "beat" · "hit" · "vocal entry" · "free (20 ms grid)" … */
   what: string;
   rail: SnapRail;
 }
 
-export type HandleTimes = Record<Handle, number | null>;
+/** A sequence's handle times. The pre-drop is optional: a caller with no
+ * pre-drop (Home's in-place editor) passes the three phases alone. */
+export type HandleTimes = Record<Handle, number | null> & { pre_drop?: number | null };
 
 export const grid = (ms: number, step = FREE_GRID_MS) => Math.round(ms / step) * step;
 
@@ -116,10 +131,15 @@ export function stepHandle(
 }
 
 /** `ms` for `handle`, held inside its neighbours with the ramp-floor gap
- * (mock: setMember). A handle never pushes its neighbour. */
+ * (mock: setMember). A handle never pushes its neighbour. A drop is held
+ * the gap after `times.pre_drop` too when one is given — pass it only for a
+ * pre-drop he PLACED (`clampBasis`): an automatic one is left out instead. */
 export function clampHandle(times: HandleTimes, handle: Handle, ms: number, gap = RAMP_FLOOR_MS): number {
   let v = ms;
-  if (handle === 'drop') v = Math.max(v, (times.lull ?? times.charge ?? -Infinity) + gap);
+  if (handle === 'drop') {
+    v = Math.max(v, (times.lull ?? times.charge ?? -Infinity) + gap);
+    if (times.pre_drop != null) v = Math.max(v, times.pre_drop + gap);
+  }
   if (handle === 'lull') {
     v = Math.max(v, (times.charge ?? -Infinity) + gap);
     if (times.drop != null) v = Math.min(v, times.drop - gap);
@@ -131,24 +151,32 @@ export function clampHandle(times: HandleTimes, handle: Handle, ms: number, gap 
   return Math.max(0, Math.round(v));
 }
 
-/** Every present handle moved by `delta` (Shift-drag: the whole sequence),
- * never before the song starts. */
+/** The times a phase handle's order clamp holds it against: a pre-drop he
+ * placed holds the drop back (the server refuses the move), an automatic
+ * one does not (a drop moved past it simply leaves it out, as the server's
+ * view does with an automatic lull). */
+export function clampBasis(times: HandleTimes, preDropPlaced: boolean): HandleTimes {
+  return preDropPlaced || times.pre_drop == null ? times : { ...times, pre_drop: null };
+}
+
+/** Every present handle — the pre-drop too — moved by `delta` (Shift-drag:
+ * the whole sequence), never before the song starts. */
 export function shiftTimes(times: HandleTimes, delta: number): HandleTimes {
-  const first = Math.min(...HANDLES.map((h) => times[h]).filter((v): v is number => v != null));
+  const first = Math.min(...SEQ_HANDLES.map((h) => times[h]).filter((v): v is number => v != null));
   const d = Math.max(delta, -first);
   const out = { ...times };
-  for (const h of HANDLES) if (out[h] != null) out[h] = Math.round(out[h]! + d);
+  for (const h of SEQ_HANDLES) if (out[h] != null) out[h] = Math.round(out[h]! + d);
   return out;
 }
 
-export function timesOf(s: Pick<DisplaySeq, 'charge' | 'lull' | 'drop'>): HandleTimes {
-  return { charge: s.charge, lull: s.lull, drop: s.drop };
+export function timesOf(s: SeqTimes): HandleTimes {
+  return { charge: s.charge, lull: s.lull, drop: s.drop, pre_drop: s.pre_drop ?? null };
 }
 
 /** Only the handles whose time changed — the one save on release. */
-export function changedHandles(before: HandleTimes, after: HandleTimes): Partial<Record<Handle, number>> {
-  const out: Partial<Record<Handle, number>> = {};
-  for (const h of HANDLES) {
+export function changedHandles(before: HandleTimes, after: HandleTimes): Partial<Record<SeqHandle, number>> {
+  const out: Partial<Record<SeqHandle, number>> = {};
+  for (const h of SEQ_HANDLES) {
     const a = after[h];
     if (a != null && a !== before[h]) out[h] = a;
   }
@@ -161,6 +189,84 @@ export function editable(s: Pick<DisplaySeq, 'look' | 'fire'>): boolean {
   return s.look !== 'mine' && s.look !== 'dismissed' && s.fire !== 'stands_down';
 }
 
+/** Can a hand move this one handle? As `editable`, except the pre-drop of
+ * one of HIS OWN sequences: his charge, lull and drop are his triggers
+ * (moved on their own strip), but the pre-drop before his drop lives in the
+ * drop store, so it is edited here through his "his:<drop id>" key. */
+export function editableHandle(s: Pick<DisplaySeq, 'look' | 'fire'>, h: SeqHandle): boolean {
+  if (h === 'pre_drop') return s.look !== 'dismissed' && s.fire !== 'stands_down';
+  return editable(s);
+}
+
+// ── the pre-drop's own rails and range ───────────────────────────────────
+
+/** How far before its drop a pre-drop of each kind may sit — its search
+ * window, as wide as any scene may set (predrop_detector.lead_range; the
+ * server refuses a drag, a kind switch or ＋ Pre-drop outside it). Both
+ * floors sit above the ramp floor, so a pre-drop inside its range is always
+ * at least RAMP_FLOOR_MS before its drop. */
+export const PRE_DROP_LEAD_MS: Record<PreDropKind, [number, number]> = {
+  spike: [250, 3000], intro: [350, 4500],
+};
+
+const PRE_DROP_RAIL_WORD: Record<PreDropKind, string> = { spike: 'hit', intro: 'vocal entry' };
+const PRE_DROP_SNAP: Record<PreDropKind, SnapRail> = { spike: 'hit', intro: 'entry' };
+
+/** The rail a pre-drop of `kind` snaps to: a spike to the hits, a vocal
+ * intro to the vocal entries. */
+export function preDropRail(
+  kind: PreDropKind, rails: Pick<DropRails, 'hits' | 'entries'> | null | undefined,
+): [number, number][] {
+  if (!rails) return [];
+  return (kind === 'intro' ? rails.entries : rails.hits) ?? [];
+}
+
+/** Where a pre-drop dragged to `ms` lands: the nearest point on its kind's
+ * rail within `radiusMs`, else — or with Alt — the 20 ms grid. */
+export function snapPreDrop(
+  kind: PreDropKind, ms: number, rails: Pick<DropRails, 'hits' | 'entries'> | null | undefined,
+  radiusMs: number, freePlace = false,
+): SnapGuide {
+  if (freePlace) return free(ms);
+  let best: { ms: number; d: number } | null = null;
+  for (const [t] of preDropRail(kind, rails)) {
+    const d = Math.abs(t - ms);
+    if (d <= radiusMs && (!best || d < best.d)) best = { ms: t, d };
+  }
+  return best ? { ms: best.ms, what: PRE_DROP_RAIL_WORD[kind], rail: PRE_DROP_SNAP[kind] } : free(ms);
+}
+
+/** ← → for the pre-drop: the next point on its kind's rail after (dir 1) or
+ * before (dir -1) `ms`; with `nudge`, NUDGE_MS along. Null when the rail has
+ * nothing further. */
+export function stepPreDrop(
+  kind: PreDropKind, ms: number, dir: 1 | -1,
+  rails: Pick<DropRails, 'hits' | 'entries'> | null | undefined, nudge = false,
+): SnapGuide | null {
+  if (nudge) return { ms: ms + dir * NUDGE_MS, what: `nudged ${NUDGE_MS} ms`, rail: 'free' };
+  const pool = preDropRail(kind, rails).map(([t]) => t).sort((a, b) => a - b);
+  const next = dir > 0 ? pool.find((t) => t > ms + 5) : [...pool].reverse().find((t) => t < ms - 5);
+  return next == null ? null : { ms: next, what: PRE_DROP_RAIL_WORD[kind], rail: PRE_DROP_SNAP[kind] };
+}
+
+/** `ms` held inside its kind's lead range before the drop — never closer
+ * than the ramp floor — and never before the song starts. It may sit
+ * before the lull. */
+export function clampPreDrop(kind: PreDropKind, dropMs: number, ms: number, gap = RAMP_FLOOR_MS): number {
+  const [lo, hi] = PRE_DROP_LEAD_MS[kind];
+  const v = Math.min(Math.max(ms, dropMs - hi), dropMs - Math.max(lo, gap));
+  return Math.max(0, Math.round(v));
+}
+
+/** Whether a pre-drop `leadMs` before its drop fits `kind`'s lead range —
+ * the kind switch's own test (the server refuses one that does not). */
+export function preDropKindFits(kind: PreDropKind, leadMs: number): boolean {
+  const [lo, hi] = PRE_DROP_LEAD_MS[kind];
+  return leadMs >= lo && leadMs <= hi;
+}
+
+export const OTHER_PRE_DROP_KIND: Record<PreDropKind, PreDropKind> = { spike: 'intro', intro: 'spike' };
+
 /** The ghost of a sequence being moved: its key and its times right now. */
 export interface Ghost {
   key: string;
@@ -171,17 +277,24 @@ export interface Ghost {
 
 /** The display list with the ghost's times laid over its sequence. A
  * detection that moved off the analysis reads as edited, as it will once
- * saved; its dotted lines show where the analysis had each moved handle. */
+ * saved; its dotted lines show where the analysis had each moved handle.
+ * The pre-drop rides the ghost too: moved off the rules' place it gets its
+ * dotted line, and an AUTOMATIC one the drop was dragged back past is left
+ * out, exactly as the saved view will leave it. On one of his own
+ * sequences only the pre-drop can move, so only its line is touched. */
 export function withGhost(seqs: DisplaySeq[], ghost: Ghost | null | undefined): DisplaySeq[] {
   if (!ghost) return seqs;
   return seqs.map((s) => {
     if (s.key !== ghost.key) return s;
     const t = ghost.times;
-    const out: DisplaySeq = { ...s, charge: t.charge, lull: t.lull, drop: t.drop ?? s.drop };
+    const drop = t.drop ?? s.drop;
+    const preIn = t.pre_drop !== undefined ? t.pre_drop : s.pre_drop;
+    const pre = preIn != null && preIn > drop - RAMP_FLOOR_MS ? null : preIn;
+    const out: DisplaySeq = { ...s, charge: t.charge, lull: t.lull, drop, pre_drop: pre };
+    const had = { ...s.analysisHad };
+    let moved = false;
     const auto = s.view?.auto;
-    if (auto && s.look !== 'added') {
-      const had = { ...s.analysisHad };
-      let moved = false;
+    if (auto && s.look !== 'added' && s.look !== 'mine') {
       for (const h of HANDLES) {
         const a = auto[`${h}_ms` as const];
         if (a != null && out[h] != null && Math.abs(out[h]! - a) > 0) {
@@ -191,13 +304,30 @@ export function withGhost(seqs: DisplaySeq[], ghost: Ghost | null | undefined): 
           delete had[h];
         }
       }
-      out.analysisHad = had;
-      if (moved && (s.look === 'confident' || s.look === 'suggested' || s.look === 'confirmed')) {
-        out.look = 'edited';
+    }
+    const preAuto = s.preDrop?.auto ?? null;
+    if (preAuto != null && !s.preDrop?.off && t.pre_drop !== undefined && t.pre_drop !== s.pre_drop) {
+      if (pre != null && pre !== preAuto) {
+        had.pre_drop = preAuto;
+        moved = true;
+      } else if (pre === preAuto) {
+        delete had.pre_drop;
       }
+    }
+    out.analysisHad = had;
+    if (moved && (s.look === 'confident' || s.look === 'suggested' || s.look === 'confirmed')) {
+      out.look = 'edited';
     }
     return out;
   });
+}
+
+/** Whether the saved view has caught up with a saved ghost (the ghost can
+ * then be let go of): every handle drawn where the ghost draws it. */
+export function ghostLanded(s: DisplaySeq, ghost: Ghost): boolean {
+  if (s.key !== ghost.key) return false;
+  const shown = withGhost([s], ghost)[0];
+  return SEQ_HANDLES.every((h) => s[h] === shown[h]);
 }
 
 /** Adding a drop: where a click at `ms` puts it — the nearest bass spike
@@ -342,8 +472,9 @@ export function redoRequest(e: UndoEntry) {
 // ── the keyboard ──────────────────────────────────────────────────────────
 
 export type DropKeyAction =
-  | { kind: 'select'; handle: Handle }
+  | { kind: 'select'; handle: SeqHandle }
   | { kind: 'step'; dir: 1 | -1; nudge: boolean }
+  | { kind: 'pre_drop_kind' }
   | { kind: 'confirm' }
   | { kind: 'dismiss' }
   | { kind: 'sequence'; dir: 1 | -1 }
@@ -352,10 +483,11 @@ export type DropKeyAction =
   | { kind: 'escape' };
 
 /** What a key does while a drop sequence has the Timeline's keyboard
- * (report section 8.2): C L D pick a handle, ← → step it (Shift nudges),
- * Enter confirms, Delete dismisses, N P go to the next/previous sequence,
- * Ctrl/Cmd+Z undo, Ctrl/Cmd+Y or Shift+Z redo, Escape lets go. Null = not
- * ours; the page's other keys get it. */
+ * (report section 8.2): C L D pick a handle and R the pre-drop (P is taken:
+ * previous), ← → step it (Shift nudges), K switches the pre-drop's kind
+ * (spike ⇄ vocal intro), Enter confirms, Delete dismisses, N P go to the
+ * next/previous sequence, Ctrl/Cmd+Z undo, Ctrl/Cmd+Y or Shift+Z redo,
+ * Escape lets go. Null = not ours; the page's other keys get it. */
 export function dropKeyAction(e: {
   key: string; shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean;
 }): DropKeyAction | null {
@@ -369,6 +501,8 @@ export function dropKeyAction(e: {
   if (k === 'c') return { kind: 'select', handle: 'charge' };
   if (k === 'l') return { kind: 'select', handle: 'lull' };
   if (k === 'd') return { kind: 'select', handle: 'drop' };
+  if (k === 'r') return { kind: 'select', handle: 'pre_drop' };
+  if (k === 'k') return { kind: 'pre_drop_kind' };
   if (k === 'ArrowLeft') return { kind: 'step', dir: -1, nudge: !!e.shiftKey };
   if (k === 'ArrowRight') return { kind: 'step', dir: 1, nudge: !!e.shiftKey };
   if (k === 'Enter') return { kind: 'confirm' };

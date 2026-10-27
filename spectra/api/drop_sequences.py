@@ -16,7 +16,8 @@ phase 4). spectra/services/drop_sequences.py is the binding statement.
   GET /api/drop-sequences/rails?uri= the snap rails the Timeline draws under
                                     the sequence layer (phase 3): the
                                     detector's own bass spikes and the
-                                    beats, song time. Read-only.
+                                    beats, and the pre-drop's hits and
+                                    entries, song time. Read-only.
 
 EDITS (phase 4) — each a POST with a JSON body naming the song (`uri`)
 and, where it applies, the sequence (`key`, as the view gives it). Every
@@ -31,8 +32,11 @@ side of it — the pair the Timeline's undo/redo puts back through
   POST /handles       {uri, key, handles}           move handles in one edit;
                                                     {"drop": ms, "lull": null, ...}
                                                     (null = back to automatic)
-  POST /member        {uri, key, handle, off}       lull/charge off or back on
-  POST /fill          {uri, key, handle}            add a lull or charge by the rules
+  POST /member        {uri, key, handle, off}       lull/charge/pre-drop off or back on
+  POST /fill          {uri, key, handle}            add a lull, charge or pre-drop by
+                                                    the rules
+  POST /pre-drop-kind {uri, key, kind}              switch a pre-drop's kind
+                                                    (spike | intro)
   POST /review        {uri, key, choice}            "the analysis moved it": keep|take
   POST /add           {uri, drop_ms, lull_ms?, charge_ms?}
                                                     a sequence of his; a missing lull
@@ -120,16 +124,20 @@ class _Seq(_Song):
 
 
 class _Handles(_Seq):
-    handles: dict[Literal["charge", "lull", "drop"], Optional[int]]
+    handles: dict[Literal["charge", "lull", "pre_drop", "drop"], Optional[int]]
 
 
 class _Member(_Seq):
-    handle: Literal["lull", "charge"]
+    handle: Literal["lull", "charge", "pre_drop"]
     off: bool
 
 
 class _Fill(_Seq):
-    handle: Literal["lull", "charge"]
+    handle: Literal["lull", "charge", "pre_drop"]
+
+
+class _PreDropKind(_Seq):
+    kind: Literal["spike", "intro"]
 
 
 class _Review(_Seq):
@@ -210,12 +218,22 @@ async def post_handles(body: _Handles):
 
 @router.post("/member")
 async def post_member(body: _Member):
+    if body.handle == "pre_drop":
+        # any drop's pre-drop, his own included (stored in the drop store)
+        return await _panel(body.uri, drop_panel.pre_drop_member(body.uri, body.key, body.off))
     return await _run(body.uri, "member", key=body.key, handle=body.handle, off=body.off)
 
 
 @router.post("/fill")
 async def post_fill(body: _Fill):
+    if body.handle == "pre_drop":
+        return await _panel(body.uri, drop_panel.pre_drop_fill(body.uri, body.key))
     return await _run(body.uri, "fill", key=body.key, handle=body.handle)
+
+
+@router.post("/pre-drop-kind")
+async def post_pre_drop_kind(body: _PreDropKind):
+    return await _panel(body.uri, drop_panel.pre_drop_kind(body.uri, body.key, body.kind))
 
 
 @router.post("/review")

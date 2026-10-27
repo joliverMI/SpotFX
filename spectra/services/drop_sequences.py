@@ -94,10 +94,8 @@ toggle them"). Every view sequence carries `parts`, one state per part:
            detection plays on its own, a suggested one waits (or plays
            while drop Testing is on, drop_firing.py);
   off      never plays, not even in Testing;
-  absent   the drop has no such part (the pre-drop on every drop until
-           the pre-drop gets its button and handle — predrop plan step 4 —
-           even where one is detected and the view's pre_drop_* fields
-           carry it).
+  absent   the drop has no such part (a lull or charge it never had; a
+           pre-drop the rules did not find and he has not placed).
 A charge, lull or pre-drop leads into its drop, so it plays only when its
 drop plays (drop_firing.py); a drop switched off keeps the sequence listed
 but silent, which is not a dismissal. Stored as `overrides[key].parts`
@@ -139,7 +137,44 @@ drop time, and worked out only on the read-through path
 clock's, which must never analyse, so it shows only what is memoised and
 leaves the key out where nothing is ("not worked out yet", never "none").
 Nothing plays from a pre-drop yet (drop_firing.PRE_DROPS_PLAY), and an
-added sequence has none until he places one (step 4).
+added sequence has none until he places one.
+
+EDITING A PRE-DROP (predrop plan step 4: its orange handle on the Timeline
+and in the panel's editor, its panel button, Sonic's set_pre_drop /
+switch_pre_drop). `pre_drop` is a handle (`EDIT_HANDLES`): a drag keeps
+its kind (`pre_drop_ms` + `pre_drop_kind`), None goes back to the
+detector's place and kind; `member` switches it off (`pre_drop_off`, the
+view's `pre_drop_was` where it comes back); `pre_drop_kind` switches it
+between a spike and a vocal intro; `fill` (＋ Pre-drop) places one where
+`predrop_detector.place` puts it; `parts` approves it. The view's
+`moved.pre_drop` is "he placed it", and the detector's tier and score
+show only while it has not. TWO RULES, and where each holds: a pre-drop's
+LEAD must fit its kind's range (`predrop_detector.lead_range`, its search
+window) — checked on the pre-drop's own edits only, so dragging the drop
+never trips on it; and one he placed must stay RAMP_FLOOR_MS before its
+drop — the order rule, which holds a drop move back (a move carrying the
+pre-drop too is checked against where it is GOING), while an automatic
+one a move leaves behind is left out with a note, as an automatic lull is.
+A drag or a switch-off counts as "edited" (`_legacy_his`), like a lull's;
+a kind switch alone does not (it relabels the moment, it does not place
+it). In parts mode it is approved only by its own toggle, the double tick or
+Confirm; in the legacy reading only one he placed is his — one found since
+his confirm waits (`_part_states`).
+
+HIS OWN DROPS' PRE-DROPS live in THIS store, never in his song profile (a
+pre-drop is not one of his triggers): `overrides["mine:<his drop trigger
+id>"]`, edited through `apply_edit("mine_pre_drop", drop_ms=, pre=,
+step=)` with the moment his drop fires and the rules' pre-drop against it
+(`his_pre_drop_ctx`; drop_panel.py maps the panel's "his:" keys onto it).
+A mine: override holds only pre-drop fields; it is dropped the moment
+nothing of his is left in it. `authored` groups and `yours` rows carry the
+result as `pre_drop` (`_his_pre_drop_view`: ms, kind, auto, off, was,
+moved, lead_ms, score, tier, part — None when there is none).
+
+THE SNAP RAILS (`snap_rails`) also carry `hits` (every high-band attack,
+[ms, strength] — a dragged spike snaps to these) and `entries` (every
+mid-band entry passing the vocal intro's first three tests — a dragged
+vocal intro snaps to these), from `predrop_detector.rails`.
 
 A DROP THE RE-ANCHOR MOVED keeps its overrides: a detection carries
 `reanchored_from` (where the first-spike rule put it), and an override
@@ -201,7 +236,16 @@ PHASE_CLASSES = ("charge", "lull", "drop")
 
 PARTS = ("charge", "lull", "pre_drop", "drop")
 """The parts of a drop, in the order they play (module docstring's PARTS).
-The pre-drop is one, absent on every drop until pre-drop detection lands."""
+The pre-drop is one, absent on a drop that has none."""
+PRE_DROP = "pre_drop"
+EDIT_HANDLES = HANDLES + (PRE_DROP,)
+"""What one `handles` edit can move: the three phases and the pre-drop."""
+MEMBERS = ("lull", "charge", PRE_DROP)
+"""What can be switched off, or added where the detector's rules put it."""
+MINE_PREFIX = "mine:"
+"""His own drops' pre-drop edits live under overrides["mine:<his drop
+trigger id>"] (module docstring's PRE-DROPS) — never in his song profile."""
+NO_PRE_DROP = "this drop has no pre-drop — add one first (＋ Pre-drop)"
 PART_ON = "on"
 PART_WAITING = "waiting"
 PART_OFF = "off"
@@ -544,6 +588,197 @@ def _check_order(times: dict) -> None:
                 f"{h1} must sit at least {drop_detector.RAMP_FLOOR_MS} ms before {h2}")
     if times.get("drop") is None:
         raise InvalidEdit("a sequence needs its drop")
+    pre = times.get(PRE_DROP)
+    if pre is not None and int(times["drop"]) - int(pre) < drop_detector.RAMP_FLOOR_MS:
+        raise InvalidEdit(f"the pre-drop must sit at least {drop_detector.RAMP_FLOOR_MS} ms "
+                          "before its drop")
+
+
+# ── the pre-drop (module docstring's PRE-DROPS) ────────────────────────────
+
+def _base_pre(base: Optional[dict]) -> Optional[dict]:
+    """The detector's pre-drop in a detection (or the rules' for one of his
+    drops), None when it found none."""
+    pre = (base or {}).get("pre_drop")
+    return pre if isinstance(pre, dict) and pre.get("ms") is not None else None
+
+
+def _pre_drop_of(base_pre: Optional[dict], rec: dict) -> dict:
+    """THE EFFECTIVE PRE-DROP from the detector's (`base_pre`) and his edits
+    in `rec` (an override, an added record or a mine: override): `ms` where
+    it plays (None when there is none or it is switched off), `kind`, `auto`
+    the detector's place, `off`, `was` where an off one comes back, `moved`
+    he placed it (a drag, or ＋ Pre-drop). His place always wins."""
+    auto = int(base_pre["ms"]) if base_pre else None
+    placed = rec.get("pre_drop_ms")
+    moved = placed is not None
+    at = int(placed) if moved else auto
+    if at is None:
+        return {"ms": None, "kind": None, "auto": auto, "off": False, "was": None,
+                "moved": False}
+    kind = rec.get("pre_drop_kind") or (base_pre or {}).get("kind")
+    if kind not in predrop_detector.KINDS:
+        kind = predrop_detector.KIND_SPIKE
+    off = bool(rec.get("pre_drop_off"))
+    return {"ms": None if off else at, "kind": kind, "auto": auto, "off": off,
+            "was": at if off else None, "moved": moved}
+
+
+def _kind_word(kind: str) -> str:
+    return "spike" if kind == predrop_detector.KIND_SPIKE else "vocal intro"
+
+
+def _check_pre_drop_lead(kind: str, ms: int, drop_ms: Optional[int]) -> None:
+    """A pre-drop of `kind` sits inside its kind's lead range (its search
+    window, as wide as any scene may set): outside it no scene could ever
+    play it. Checked on the pre-drop's own edits only."""
+    if drop_ms is None:
+        return
+    lo, hi = predrop_detector.lead_range(kind)
+    lead = int(drop_ms) - int(ms)
+    if not lo <= lead <= hi:
+        raise InvalidEdit(f"a {_kind_word(kind)} pre-drop sits {lo}-{hi} ms before its drop; "
+                          f"this one would sit {lead} ms before it")
+
+
+@dataclass
+class _Slot:
+    """Where a pre-drop edit lands: the record holding his edits (an
+    override, an added sequence, or a mine: override), the detector's own
+    pre-drop, and the effective charge/lull/drop it must keep in order."""
+    rec: dict
+    base_pre: Optional[dict]
+    times: dict
+    kind: str                       # "detected" | "added" | "mine"
+    okey: str
+
+
+def _is_mine(key: str) -> bool:
+    return isinstance(key, str) and key.startswith(MINE_PREFIX)
+
+
+def _added_times(rec: dict) -> dict:
+    out = {h: rec.get(f"{h}_ms") for h in HANDLES}
+    for h in ("lull", "charge"):
+        if rec.get(f"{h}_off"):
+            out[h] = None
+    return out
+
+
+def _slot(entry: dict, key: str, ctx: Optional[dict] = None) -> _Slot:
+    """`ctx` names one of his own drops for a mine: key: {"drop_ms": the
+    moment his drop fires, "pre": the rules' pre-drop against it}."""
+    if _is_mine(key):
+        if not ctx or ctx.get("drop_ms") is None:
+            raise InvalidEdit("a pre-drop of your own drop needs its drop's moment")
+        rec = entry.setdefault("overrides", {}).setdefault(key, {})
+        return _Slot(rec, _base_pre({"pre_drop": ctx.get("pre")}),
+                     {"charge": None, "lull": None, "drop": int(ctx["drop_ms"])}, "mine", key)
+    if _is_added(key):
+        rec = _find_added(entry, key)
+        return _Slot(rec, None, _added_times(rec), "added", key)
+    okey, det, ov = _override(entry, key)
+    base = det or ov.get("detected") or {}
+    return _Slot(ov, _base_pre(base), _effective(base, ov), "detected", okey)
+
+
+def _pre_move(slot: _Slot, ms: Optional[int]) -> None:
+    """Move the pre-drop (a drag). None = back to the detector's place: a
+    pre-drop he placed where the detector found none goes."""
+    if ms is None:
+        for k in ("pre_drop_ms", "pre_drop_kind"):
+            slot.rec.pop(k, None)
+        if slot.base_pre is None:
+            slot.rec.pop("pre_drop_off", None)
+        return
+    cur = _pre_drop_of(slot.base_pre, slot.rec)
+    if cur["ms"] is None and cur["was"] is None:
+        raise InvalidEdit(NO_PRE_DROP)
+    _check_pre_drop_lead(cur["kind"], ms, slot.times.get("drop"))
+    _check_order({**slot.times, PRE_DROP: int(ms)})
+    slot.rec["pre_drop_ms"] = int(ms)
+    slot.rec["pre_drop_kind"] = cur["kind"]           # a dragged pre-drop keeps its kind
+    slot.rec.pop("pre_drop_off", None)
+
+
+def _pre_off(slot: _Slot, off: bool) -> None:
+    cur = _pre_drop_of(slot.base_pre, slot.rec)
+    if off:
+        if cur["ms"] is None and not cur["off"]:
+            raise InvalidEdit("this drop has no pre-drop to switch off")
+        slot.rec["pre_drop_off"] = True
+        return
+    if not cur["off"]:
+        if cur["ms"] is None:
+            raise InvalidEdit(NO_PRE_DROP)
+        return
+    _check_order({**slot.times, PRE_DROP: int(cur["was"])})
+    slot.rec.pop("pre_drop_off", None)
+
+
+def _pre_kind(slot: _Slot, kind: str) -> None:
+    if kind not in predrop_detector.KINDS:
+        raise InvalidEdit(f"a pre-drop's kind is one of {predrop_detector.KINDS}")
+    cur = _pre_drop_of(slot.base_pre, slot.rec)
+    at = cur["ms"] if cur["ms"] is not None else cur["was"]
+    if at is None:
+        raise InvalidEdit(NO_PRE_DROP)
+    _check_pre_drop_lead(kind, at, slot.times.get("drop"))
+    if kind == (slot.base_pre or {}).get("kind") and not cur["moved"]:
+        slot.rec.pop("pre_drop_kind", None)
+    else:
+        slot.rec["pre_drop_kind"] = kind
+
+
+def _pre_fill(slot: _Slot, placed: Optional[tuple[int, str]], why: Optional[str]) -> None:
+    """＋ Pre-drop: one where the rules put it (predrop_detector.place)."""
+    cur = _pre_drop_of(slot.base_pre, slot.rec)
+    if cur["off"]:
+        raise InvalidEdit("this drop's pre-drop is switched off — switch it back on")
+    if cur["ms"] is not None:
+        raise InvalidEdit("this drop already has a pre-drop — drag it to move it")
+    if placed is None:
+        raise InvalidEdit(why or "the rules find no hit or vocal entry to put a pre-drop on "
+                                 "before this drop")
+    ms, kind = int(placed[0]), str(placed[1])
+    _check_pre_drop_lead(kind, ms, slot.times.get("drop"))
+    _check_order({**slot.times, PRE_DROP: ms})
+    slot.rec["pre_drop_ms"] = ms
+    slot.rec["pre_drop_kind"] = kind
+    slot.rec.pop("pre_drop_off", None)
+
+
+def _pre_part(slot: _Slot, value: str) -> None:
+    """The pre-drop's toggle: "on" approves it (switching it back on when it
+    was off), "off" switches it off. An added drop's parts are all his."""
+    cur = _pre_drop_of(slot.base_pre, slot.rec)
+    if value == PART_OFF:
+        _pre_off(slot, True)
+        if isinstance(slot.rec.get("parts"), dict):
+            slot.rec["parts"].pop(PRE_DROP, None)
+            if slot.kind == "mine" and not slot.rec["parts"]:
+                slot.rec.pop("parts")
+        return
+    if cur["off"]:
+        _pre_off(slot, False)
+    elif cur["ms"] is None:
+        raise InvalidEdit("this drop has no pre-drop — add one in its editor")
+    if slot.kind != "added":
+        slot.rec.setdefault("parts", {})[PRE_DROP] = PART_ON
+
+
+def place_pre_drop(uri: str, drop_ms: int) -> tuple[Optional[tuple[int, str]], Optional[str]]:
+    """Where ＋ Pre-drop puts one for the drop at `drop_ms`, and why not
+    when it cannot (predrop_detector.place over the song's own shape)."""
+    try:
+        analysis = drop_detector.analyse(uri)
+    except drop_detector.Unavailable:
+        return None, "this song's audio shape cannot be read to place a pre-drop"
+    got = predrop_detector.place(analysis.shape, int(drop_ms))
+    if got is None:
+        return None, ("the rules find no hit or vocal entry to put a pre-drop on in the "
+                      f"{predrop_detector.INTRO_SEARCH_MS[1] / 1000:g} s before this drop")
+    return got, None
 
 
 class EditConflict(RuntimeError):
@@ -569,6 +804,10 @@ def _op_confirm(entry: dict, key: str) -> str:
         _find_added(entry, key)
         return key                      # an added sequence is his already
     okey, det, ov = _override(entry, key)
+    if (not isinstance(ov.get("parts"), dict)
+            and _pre_drop_of(_base_pre(det or ov.get("detected")), ov)["ms"] is not None):
+        # a pre-drop he can see: Confirm approves it too, which takes PARTS MODE
+        okey, det, ov = _ensure_parts(entry, key)
     ov["state"] = STATE_CONFIRMED
     if isinstance(ov.get("parts"), dict):
         # PARTS MODE (module docstring): a confirm approves every part that
@@ -582,8 +821,9 @@ def _op_confirm(entry: dict, key: str) -> str:
 def _legacy_his(ov: dict) -> bool:
     """The legacy reading of an override without a `parts` dict: confirmed
     or edited means the whole sequence is his."""
-    moved = any(ov.get(f"{h}_ms") is not None for h in HANDLES)
-    edited = moved or bool(ov.get("lull_off")) or bool(ov.get("charge_off"))
+    moved = any(ov.get(f"{h}_ms") is not None for h in EDIT_HANDLES)
+    edited = (moved or bool(ov.get("lull_off")) or bool(ov.get("charge_off"))
+              or bool(ov.get("pre_drop_off")))
     return ov.get("state") == STATE_CONFIRMED or edited
 
 
@@ -599,6 +839,10 @@ def _ensure_parts(entry: dict, key: str) -> tuple[str, Optional[dict], dict]:
             for h in ("charge", "lull"):
                 if eff.get(h) is not None:
                     parts[h] = PART_ON
+            # a pre-drop he placed himself was his; one found since waits
+            pre = _pre_drop_of(_base_pre(det or ov.get("detected")), ov)
+            if pre["moved"] and pre["ms"] is not None:
+                parts[PRE_DROP] = PART_ON
             parts["drop"] = PART_ON
             ov["state"] = STATE_CONFIRMED
         ov["parts"] = parts
@@ -606,12 +850,14 @@ def _ensure_parts(entry: dict, key: str) -> tuple[str, Optional[dict], dict]:
 
 
 def _approve_parts(ov: dict, det: Optional[dict]) -> None:
-    """Every charge/lull part that exists and is not off → on."""
+    """Every charge/lull/pre-drop part that exists and is not off → on."""
     eff = _effective(det or ov.get("detected") or {}, ov)
     parts = ov.setdefault("parts", {})
     for h in ("charge", "lull"):
         if eff.get(h) is not None and not ov.get(f"{h}_off"):
             parts[h] = PART_ON
+    if _pre_drop_of(_base_pre(det or ov.get("detected")), ov)["ms"] is not None:
+        parts[PRE_DROP] = PART_ON
 
 
 def _refuse_dismissed(ov: dict) -> None:
@@ -627,8 +873,16 @@ def _op_part(entry: dict, key: str, part: str, value: str) -> str:
         raise InvalidEdit(f"part must be one of {PARTS}")
     if value not in (PART_ON, PART_OFF):
         raise InvalidEdit("a part is switched on or off")
-    if part == "pre_drop":
-        raise InvalidEdit("this drop has no pre-drop")
+    if part == PRE_DROP:
+        if _is_added(key):
+            _pre_part(_slot(entry, key), value)
+            _find_added(entry, key)["at"] = _now_ms()
+            return key
+        okey, _det, ov = _ensure_parts(entry, key)
+        _refuse_dismissed(ov)
+        _pre_part(_slot(entry, key), value)
+        ov["at"] = _now_ms()
+        return okey
     if _is_added(key):
         if part in ("lull", "charge"):
             return _op_member_off(entry, key, part, value == PART_OFF)
@@ -767,8 +1021,8 @@ def _op_reset(entry: dict, key: str) -> bool:
 def _check_handle_values(handles: dict) -> dict:
     out = {}
     for h, ms in handles.items():
-        if h not in HANDLES:
-            raise InvalidEdit(f"handle must be one of {HANDLES}")
+        if h not in EDIT_HANDLES:
+            raise InvalidEdit(f"handle must be one of {EDIT_HANDLES}")
         if ms is not None and int(ms) < 0:
             raise InvalidEdit("a handle cannot sit before the song starts")
         out[h] = int(ms) if ms is not None else None
@@ -781,8 +1035,40 @@ def _op_set_handles(entry: dict, key: str, handles: dict) -> str:
     """Move one or more handles of a sequence in ONE edit. `None` for a
     handle = back to the detector's place (on an added sequence: remove
     that member; the drop can never be removed). The rest stay as they
-    are. Order is enforced: charge < lull < drop, RAMP_FLOOR_MS apart."""
+    are. Order is enforced: charge < lull < drop, RAMP_FLOOR_MS apart, and a
+    pre-drop he placed stays RAMP_FLOOR_MS before its drop (an automatic one
+    the move leaves behind is simply left out, as an automatic lull is).
+    `pre_drop` moves the pre-drop (module docstring's PRE-DROPS) in the same
+    edit — a whole-sequence move carries it."""
     handles = _check_handle_values(handles)
+    pre_given = PRE_DROP in handles
+    pre_ms = handles.pop(PRE_DROP, None)
+    # moved together, the order is checked against where the pre-drop is
+    # GOING (a whole-sequence move earlier would otherwise trip on where it was)
+    done = (_set_phase_handles(entry, key, handles,
+                               pre=pre_ms if pre_given else _KEEP_PRE)
+            if handles else None)
+    if pre_given:
+        slot = _slot(entry, key)
+        _pre_move(slot, pre_ms)
+        slot.rec["at"] = _now_ms()
+        return slot.okey
+    return done
+
+
+def _placed_pre(base_pre: Optional[dict], rec: dict) -> Optional[int]:
+    """The pre-drop's time for the order rule: only one he placed holds a
+    move back (an automatic one is left out instead)."""
+    cur = _pre_drop_of(base_pre, rec)
+    return cur["ms"] if cur["moved"] else None
+
+
+_KEEP_PRE = object()
+
+
+def _set_phase_handles(entry: dict, key: str, handles: dict, pre: Any = _KEEP_PRE) -> str:
+    """`pre`: the pre-drop's time to keep the order against, when this edit
+    moves it too (None: back to the detector's — automatic, never checked)."""
     if _is_added(key):
         rec = _find_added(entry, key)
         trial = {h: rec.get(f"{h}_ms") for h in HANDLES}
@@ -797,6 +1083,7 @@ def _op_set_handles(entry: dict, key: str, handles: dict) -> str:
         for h, off in offs.items():
             if off:
                 eff[h] = None
+        eff[PRE_DROP] = _placed_pre(None, rec) if pre is _KEEP_PRE else pre
         _check_order(eff)
         for h in HANDLES:
             rec[f"{h}_ms"] = trial[h]
@@ -814,15 +1101,21 @@ def _op_set_handles(entry: dict, key: str, handles: dict) -> str:
         trial_ov[f"{h}_ms"] = ms
         if ms is not None and h in ("lull", "charge"):
             trial_ov[f"{h}_off"] = False
-    _check_order(_effective(base, trial_ov))
+    _check_order({**_effective(base, trial_ov),
+                  PRE_DROP: _placed_pre(_base_pre(base), ov) if pre is _KEEP_PRE else pre})
     ov.update(trial_ov)
     ov["at"] = _now_ms()
     return okey
 
 
 def _op_member_off(entry: dict, key: str, handle: str, off: bool) -> str:
+    if handle == PRE_DROP:
+        slot = _slot(entry, key)
+        _pre_off(slot, off)
+        slot.rec["at"] = _now_ms()
+        return slot.okey
     if handle not in ("lull", "charge"):
-        raise InvalidEdit("only the lull or the charge can be switched off")
+        raise InvalidEdit("only the lull, the charge or the pre-drop can be switched off")
     if _is_added(key):
         rec = _find_added(entry, key)
         if not off:
@@ -931,6 +1224,53 @@ def _place(uri: str, entry: dict, handle: str, drop_ms: int,
             got = drop_detector._to_beat(analysis.song, drop_ms - 2 * analysis.song.beat_len)
         return int(got)
     return int(drop_detector.place_charge(analysis.prep, lull_ms if lull_ms is not None else drop_ms))
+
+
+def _op_pre_drop_fill(entry: dict, key: str, placed: Optional[tuple[int, str]],
+                      why: Optional[str], ctx: Optional[dict] = None) -> str:
+    slot = _slot(entry, key, ctx)
+    if slot.kind == "detected":
+        _refuse_dismissed(slot.rec)
+    _pre_fill(slot, placed, why)
+    slot.rec["at"] = _now_ms()
+    return slot.okey
+
+
+def _op_pre_drop_kind(entry: dict, key: str, kind: str, ctx: Optional[dict] = None) -> str:
+    slot = _slot(entry, key, ctx)
+    _pre_kind(slot, kind)
+    slot.rec["at"] = _now_ms()
+    return slot.okey
+
+
+def _op_mine_pre_drop(entry: dict, key: str, ctx: dict, step: dict) -> str:
+    """One of HIS OWN drops' pre-drop edits (module docstring's PRE-DROPS):
+    `step` is {"move": ms|None} | {"off": bool} | {"kind": k} | {"part": v}
+    | {"fill": (ms, kind) | None, "why": ...}, stored under the mine: key."""
+    if not _is_mine(key):
+        raise InvalidEdit(f"not a pre-drop of your own drop: {key!r}")
+    slot = _slot(entry, key, ctx)
+    if "move" in step:
+        _pre_move(slot, step["move"])
+    elif "off" in step:
+        _pre_off(slot, bool(step["off"]))
+    elif "kind" in step:
+        _pre_kind(slot, step["kind"])
+    elif "part" in step:
+        if step["part"] not in (PART_ON, PART_OFF):
+            raise InvalidEdit("a part is switched on or off")
+        _pre_part(slot, step["part"])
+    elif "fill" in step:
+        _pre_fill(slot, step["fill"], step.get("why"))
+    else:
+        raise InvalidEdit("name what to do to the pre-drop")
+    if any(k != "at" for k in slot.rec):
+        slot.rec["at"] = _now_ms()
+    else:                                   # nothing of his left: no record at all
+        entry["overrides"].pop(key, None)
+        if not entry["overrides"]:
+            entry.pop("overrides", None)
+    return key
 
 
 def _op_fill(entry: dict, key: str, handle: str, placed: Optional[int]) -> str:
@@ -1163,6 +1503,18 @@ def _apply_edit(uri: str, op: str, **kw) -> EditResult:
         return _mutate_tracked(uri, lambda e: _op_member_off(e, key, kw["handle"], kw["off"]))
     if op == "review":
         return _mutate_tracked(uri, lambda e: _op_resolve_review(e, key, kw["choice"]))
+    if op == "fill" and kw.get("handle") == PRE_DROP:
+        times = _current_times(stored(uri), key)
+        placed, why = place_pre_drop(uri, int(times["drop"]))
+        return _mutate_tracked(uri, lambda e: _op_pre_drop_fill(e, key, placed, why))
+    if op == "pre_drop_kind":
+        return _mutate_tracked(uri, lambda e: _op_pre_drop_kind(e, key, kw["kind"]))
+    if op == "mine_pre_drop":
+        ctx = {"drop_ms": int(kw["drop_ms"]), "pre": kw.get("pre")}
+        step = dict(kw["step"])
+        if step.get("fill") == "rules":
+            step["fill"], step["why"] = place_pre_drop(uri, ctx["drop_ms"])
+        return _mutate_tracked(uri, lambda e: _op_mine_pre_drop(e, key, ctx, step))
     if op == "fill":
         handle = kw["handle"]
         times = _current_times(stored(uri), key)
@@ -1225,6 +1577,9 @@ def _apply_edit(uri: str, op: str, **kw) -> EditResult:
                                            for x in st["keys"]) if k)
                 elif kind == "undismiss_for":
                     out.extend(_op_undismiss_for(entry, str(st["his_id"])))
+                elif kind == "mine_pre_drop":
+                    ctx = {"drop_ms": int(st["drop_ms"]), "pre": st.get("pre")}
+                    out.append(_op_mine_pre_drop(entry, st["key"], ctx, dict(st["step"])))
                 else:
                     raise InvalidEdit(f"unknown step {kind!r}")
             return out
@@ -1318,6 +1673,9 @@ class SequenceView:
     pre_drop_auto: Optional[int] = None
     pre_drop_tier: Optional[str] = None
     pre_drop_score: Optional[float] = None
+    # switched off: pre_drop_ms is None and pre_drop_was is where it comes back
+    pre_drop_off: bool = False
+    pre_drop_was: Optional[int] = None
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -1340,7 +1698,18 @@ def _part_states(v: SequenceView, stored: Optional[dict], legacy_his: bool,
             out[h] = PART_ON if stored.get(h) == PART_ON else PART_WAITING
         else:
             out[h] = PART_ON if legacy_his else PART_WAITING
-    out["pre_drop"] = PART_ABSENT
+    if v.pre_drop_off:
+        out[PRE_DROP] = PART_OFF
+    elif v.pre_drop_ms is None:
+        out[PRE_DROP] = PART_ABSENT
+    elif added:
+        out[PRE_DROP] = PART_ON
+    elif stored is not None:
+        out[PRE_DROP] = PART_ON if stored.get(PRE_DROP) == PART_ON else PART_WAITING
+    else:
+        # the legacy reading approves what he could see: a pre-drop he placed
+        # himself; one found since waits, following its own tier
+        out[PRE_DROP] = PART_ON if (legacy_his and v.moved.get(PRE_DROP)) else PART_WAITING
     if stored is not None and stored.get("drop") == PART_OFF:
         out["drop"] = PART_OFF
     elif added:
@@ -1382,8 +1751,9 @@ def _detected_view(seq: dict, ov: Optional[dict], okey: Optional[str],
     eff = _effective(seq, ov)
     auto = {"charge_ms": seq.get("charge_ms"), "lull_ms": seq.get("lull_ms"),
             "drop_ms": seq.get("drop_ms")}
-    moved = {h: ov.get(f"{h}_ms") is not None for h in HANDLES}
-    edited = any(moved.values()) or bool(ov.get("lull_off")) or bool(ov.get("charge_off"))
+    moved = {h: ov.get(f"{h}_ms") is not None for h in EDIT_HANDLES}
+    edited = (any(moved.values()) or bool(ov.get("lull_off")) or bool(ov.get("charge_off"))
+              or bool(ov.get("pre_drop_off")))
     state = _view_state(ov, edited, seq.get("tier") or STATE_SUGGESTED)
     v = SequenceView(
         key=okey or seq["key"], origin="detected", state=state,
@@ -1406,12 +1776,7 @@ def _detected_view(seq: dict, ov: Optional[dict], okey: Optional[str],
             v.needs_review = True
             v.notes.append(f"the analysis now finds this drop at {seq['drop_ms']} ms, "
                            f"not {was} ms: keep yours, or take the new place")
-    pre = seq.get("pre_drop")
-    if isinstance(pre, dict) and pre.get("ms") is not None:
-        v.pre_drop_ms = v.pre_drop_auto = int(pre["ms"])
-        v.pre_drop_kind = pre.get("kind")
-        v.pre_drop_tier = pre.get("tier")
-        v.pre_drop_score = pre.get("score")
+    _set_pre_view(v, _base_pre(seq), ov)
     _drop_automatic_out_of_order(v)
     stored_parts = ov.get("parts") if isinstance(ov.get("parts"), dict) else None
     v.parts = _part_states(v, stored_parts, _legacy_his(ov))
@@ -1425,8 +1790,9 @@ def _orphan_view(okey: str, ov: dict) -> Optional[SequenceView]:
     if base["drop_ms"] is None:
         return None
     eff = _effective(base, ov)
-    moved = {h: ov.get(f"{h}_ms") is not None for h in HANDLES}
-    edited = any(moved.values()) or bool(ov.get("lull_off")) or bool(ov.get("charge_off"))
+    moved = {h: ov.get(f"{h}_ms") is not None for h in EDIT_HANDLES}
+    edited = (any(moved.values()) or bool(ov.get("lull_off")) or bool(ov.get("charge_off"))
+              or bool(ov.get("pre_drop_off")))
     state = _view_state(ov, edited, None)
     if state is None:
         return None
@@ -1440,6 +1806,7 @@ def _orphan_view(okey: str, ov: dict) -> Optional[SequenceView]:
     if state != STATE_DISMISSED:
         v.notes.append("the analysis no longer finds this drop; it stays yours "
                        "as you left it")
+    _set_pre_view(v, None, ov)
     _drop_automatic_out_of_order(v)
     stored_parts = ov.get("parts") if isinstance(ov.get("parts"), dict) else None
     v.parts = _part_states(v, stored_parts, _legacy_his(ov))
@@ -1459,8 +1826,76 @@ def _drop_automatic_out_of_order(v: SequenceView) -> None:
         v.notes.append("automatic charge left out: it no longer sits before the lull or drop")
         v.charge_ms = None
     if v.pre_drop_ms is not None and v.pre_drop_ms > v.drop_ms - floor:
-        v.notes.append("automatic pre-drop left out: it no longer sits before your drop")
+        v.notes.append("your pre-drop left out: the drop now sits before it"
+                       if v.moved.get(PRE_DROP) else
+                       "automatic pre-drop left out: it no longer sits before your drop")
         v.pre_drop_ms = None
+
+
+def _set_pre_view(v: SequenceView, base_pre: Optional[dict], rec: dict) -> None:
+    """The view's pre-drop fields (module docstring's PRE-DROPS): the
+    detector's tier and score only while the pre-drop is the detector's."""
+    pre = _pre_drop_of(base_pre, rec)
+    v.pre_drop_ms, v.pre_drop_kind, v.pre_drop_auto = pre["ms"], pre["kind"], pre["auto"]
+    v.pre_drop_off, v.pre_drop_was = pre["off"], pre["was"]
+    v.moved[PRE_DROP] = pre["moved"]
+    if base_pre is not None and not pre["moved"]:
+        v.pre_drop_tier = base_pre.get("tier")
+        v.pre_drop_score = base_pre.get("score")
+
+
+def _his_pre_drop_view(pre: Optional[dict], ov: Optional[dict], drop_ms: int) -> Optional[dict]:
+    """The pre-drop of one of HIS OWN drops: the rules' (`pre`) with his
+    edits to it (`ov`, the mine: override). None when it has none — or when
+    one he placed no longer sits before his drop (he moved the drop since)."""
+    ov = ov if isinstance(ov, dict) else {}
+    cur = _pre_drop_of(_base_pre({"pre_drop": pre}), ov)
+    at = cur["ms"] if cur["ms"] is not None else cur["was"]
+    if at is None:
+        return None
+    if not cur["off"] and int(drop_ms) - int(at) < drop_detector.RAMP_FLOOR_MS:
+        return None
+    parts = ov.get("parts") if isinstance(ov.get("parts"), dict) else {}
+    part = (PART_OFF if cur["off"]
+            else PART_ON if parts.get(PRE_DROP) == PART_ON else PART_WAITING)
+    det = pre if (isinstance(pre, dict) and not cur["moved"]) else None
+    return {"ms": cur["ms"], "kind": cur["kind"], "auto": cur["auto"], "off": cur["off"],
+            "was": cur["was"], "moved": cur["moved"], "lead_ms": int(drop_ms) - int(at),
+            "score": det.get("score") if det else None,
+            "tier": det.get("tier") if det else None, "part": part}
+
+
+def _his_pre_drop_for(uri: str, stamp: Optional[str], drop: dict, compute: bool,
+                      overrides: Optional[dict]) -> tuple[bool, Optional[dict]]:
+    """(set it, the pre-drop) for one of his drops (`drop` its {id,
+    timestamp_ms}): set when the rules' answer is known, or when he placed
+    one himself; left unset while it is not worked out yet."""
+    ms = int(drop["timestamp_ms"])
+    ov = (overrides or {}).get(f"{MINE_PREFIX}{drop['id']}")
+    known, pre = (his_pre_drop(uri, stamp, ms, compute=compute) if stamp
+                  else (False, None))
+    if known:
+        return True, _his_pre_drop_view(pre, ov, ms)
+    if isinstance(ov, dict) and ov.get("pre_drop_ms") is not None:
+        return True, _his_pre_drop_view(None, ov, ms)
+    return False, None
+
+
+def his_pre_drop_ctx(uri: str, drop_id: str, drop_ms: int) -> dict:
+    """What a pre-drop edit on one of his drops needs (drop_panel.py): the
+    moment his drop fires and the rules' pre-drop against it, worked out
+    now if it is not memoised (analysis I/O: call it off the event loop)."""
+    det = stored(uri).get("detected")
+    stamp = str(det["stamp"]) if isinstance(det, dict) and det.get("stamp") else None
+    pre = his_pre_drop(uri, stamp, int(drop_ms), compute=True)[1] if stamp else None
+    return {"drop_ms": int(drop_ms), "pre": pre, "key": f"{MINE_PREFIX}{drop_id}"}
+
+
+def his_pre_drop_now(uri: str, ctx: dict) -> Optional[dict]:
+    """The pre-drop of one of his drops as the panel shows it now (the
+    HisPreDrop dict, None when it has none), from `his_pre_drop_ctx`."""
+    ov = (stored(uri).get("overrides") or {}).get(ctx["key"])
+    return _his_pre_drop_view(ctx.get("pre"), ov, int(ctx["drop_ms"]))
 
 
 # His own drops' pre-drops (module docstring's PRE-DROPS): (uri, detection
@@ -1496,16 +1931,17 @@ def his_pre_drop(uri: str, stamp: str, drop_ms: int, *,
     return True, found
 
 
-def _attach_his_pre_drops(uri: str, stamp: str, groups: list[dict],
-                          compute: bool) -> None:
-    """`pre_drop` on each of his grouped drops whose answer is known (the
-    key left out where it is not worked out yet)."""
+def _attach_his_pre_drops(uri: str, stamp: Optional[str], groups: list[dict],
+                          compute: bool, overrides: Optional[dict] = None) -> None:
+    """`pre_drop` on each of his grouped drops (or his rows) whose answer is
+    known, with his edits to it (the key left out where it is not worked out
+    yet)."""
     for g in groups:
         d = g.get("drop")
         if not d:
             continue
-        known, pre = his_pre_drop(uri, stamp, int(d["timestamp_ms"]), compute=compute)
-        if known:
+        set_it, pre = _his_pre_drop_for(uri, stamp, d, compute, overrides)
+        if set_it:
             g["pre_drop"] = pre
 
 
@@ -1525,8 +1961,8 @@ def view(uri: str, *, triggers: Optional[list] = None,
     marks = his_marks(triggers)
     groups, lone = group_authored(marks)
     det = entry.get("detected")
-    if isinstance(det, dict) and det.get("stamp"):
-        _attach_his_pre_drops(uri, str(det["stamp"]), groups, compute_pre_drops)
+    stamp = str(det["stamp"]) if isinstance(det, dict) and det.get("stamp") else None
+    _attach_his_pre_drops(uri, stamp, groups, compute_pre_drops, entry.get("overrides"))
     out: dict = {"uri": uri, "authored": groups, "authored_lone": lone}
     if not isinstance(det, dict):
         out.update({"status": "not_detected", "reason": "this song has not been "
@@ -1595,6 +2031,7 @@ def view(uri: str, *, triggers: Optional[list] = None,
     out["sequences"].sort(key=lambda s: s["drop_ms"])
     out["counts"] = _counts(out["sequences"])
     out["yours"] = yours_rows(triggers, out["sequences"], overrides)
+    _attach_his_pre_drops(uri, stamp, out["yours"], compute_pre_drops, overrides)
     return out
 
 
@@ -1615,6 +2052,8 @@ def _add_added(out: dict, entry: dict, marks: list[HisMark], beat: float) -> Non
         except (KeyError, TypeError, ValueError):
             continue
         v.his_marks_near = _near(marks, v.drop_ms, NEAR_BEATS * beat)
+        _set_pre_view(v, None, rec)
+        _drop_automatic_out_of_order(v)
         stored_parts = rec.get("parts") if isinstance(rec.get("parts"), dict) else None
         v.parts = _part_states(v, stored_parts, True, added=True)
         out["sequences"].append(v.as_dict())
@@ -1704,7 +2143,8 @@ def snap_rails(uri: str) -> dict:
         analysis = drop_detector.analyse(uri)
     except drop_detector.Unavailable as exc:
         return {"uri": uri, "status": "unavailable", "reason": str(exc),
-                "beat_ms": None, "captured_from_ms": None, "spikes": [], "beats": []}
+                "beat_ms": None, "captured_from_ms": None, "spikes": [], "beats": [],
+                "hits": [], "entries": []}
     song = analysis.song
     doc = analysis_reader.librosa_analysis_for_stem(song.stem) or {}
     flags = [bool(b.get("is_downbeat")) for b in doc.get("beats") or []]
@@ -1712,9 +2152,12 @@ def snap_rails(uri: str) -> dict:
              for i, ms in enumerate(song.beat_ms)]
     spikes = [[int(ms), round(float(rise), 3)]
               for ms, rise in zip(analysis.prep.att_ms, analysis.prep.att_rise)]
+    # the pre-drop's two rails (predrop plan 3.1): what a dragged spike and
+    # a dragged vocal intro snap to — the rules' own attacks and entries
+    hits, entries = predrop_detector.rails(analysis.shape)
     return {"uri": uri, "status": "ok", "reason": None,
             "beat_ms": round(song.beat_len, 3), "captured_from_ms": int(song.t[0]),
-            "spikes": spikes, "beats": beats}
+            "spikes": spikes, "beats": beats, "hits": hits, "entries": entries}
 
 
 def summary() -> dict:

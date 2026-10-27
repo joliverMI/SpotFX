@@ -5,11 +5,15 @@
  * triggers, a sequence of his, or a confident detection where the song
  * plays the analysed show — the server's `fires`); a dashed "?" is a
  * suggestion waiting for his confirm; an outlined "✦" is one this song
- * will not play under the room's setting now. Clicking a pill selects it and zooms the big graph
- * from two bars before the charge to two bars after the drop. Read-only:
- * nothing here moves or edits a sequence. */
+ * will not play under the room's setting now. An orange tick is a sequence's
+ * pre-drop (predrop plan step 4), faded while it waits for him. Clicking a
+ * pill selects it and zooms the big graph from two bars before the charge
+ * to two bars after the drop. Read-only: nothing here moves or edits a
+ * sequence. */
 import type { Win } from '../canvas/frame';
-import { PHASE_COLOR, stripTitle, switchChip, switchLine, type DisplaySeq } from '../dropSequences';
+import {
+  PHASE_COLOR, PRE_DROP_COLOR, preDropLook, stripTitle, switchChip, switchLine, type DisplaySeq,
+} from '../dropSequences';
 
 export default function DropSequenceStrip({
   seqs, durationMs, capturedFromMs, selectedKey, getWin, getNowMs, onPick,
@@ -48,6 +52,10 @@ export default function DropSequenceStrip({
           {s.lull != null && (
             <span className={`drop-strip-seg${faded(s) ? ' faded' : ''}`}
               style={{ left: pct(s.lull), width: width(s.lull, s.drop), background: PHASE_COLOR.lull }} />
+          )}
+          {s.pre_drop != null && (
+            <span className={`drop-strip-predrop${faded(s) || preDropLook(s) === 'suggested' ? ' faded' : ''}`}
+              style={{ left: pct(s.pre_drop), background: PRE_DROP_COLOR }} />
           )}
         </span>
       ))}

@@ -26,9 +26,20 @@
 //   SIX   the tie-in: a tap on the song timeline's drop pill selects it
 //   SEVEN Remove's tooltip says what each trigger's own provenance says,
 //         and the general rule for any it does not name — never a guess
+//   EIGHT the PRE-DROP's button (predrop plan step 4): its look follows the
+//         server's parts.pre_drop (his own drop's YoursRow.pre_drop.part),
+//         its glyph follows its kind, a tap sends exactly ONE `parts` call
+//         {pre_drop} — on his own drop too, asking nothing first — and a
+//         waiting pre-drop counts for review and lights the double tick
+//   NINE  the editor's PRE-DROP handle: a drag sends ONE `handles` call
+//         {pre_drop: ms} snapped to its kind's rail (a spike to the hits, a
+//         vocal intro to the entries) and held inside its kind's lead range;
+//         ◀ ▶ step along that rail; one tap on its glyph sends ONE
+//         `pre-drop-kind`; ＋ Pre-drop sends ONE `fill {handle: pre_drop}`;
+//         his own drop's moves under his key; undo goes through `restore`
 //
 // Run: node scripts/check_home_drops_panel.mjs
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,6 +73,9 @@ dom.window.ResizeObserver = globalThis.ResizeObserver;
 dom.window.HTMLElement.prototype.scrollIntoView = function scrollIntoView() {
   this.setAttribute('data-scrolled', 'yes');
 };
+// jsdom has no pointer capture: the editor's handles call it on pointerdown
+dom.window.HTMLElement.prototype.setPointerCapture = function setPointerCapture() {};
+dom.window.HTMLElement.prototype.releasePointerCapture = function releasePointerCapture() {};
 dom.window.requestAnimationFrame = (fn) => setTimeout(() => fn(Date.now()), 16);
 dom.window.cancelAnimationFrame = (id) => clearTimeout(id);
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame;
@@ -93,10 +107,14 @@ const VIEW = {
     seq({ key: 'drop:44000', state: 'suggested', charge_ms: 35000, lull_ms: 40000, drop_ms: 44000,
       parts: parts('waiting', 'waiting', 'waiting'), fires: false, fires_reason: 'waits_for_confirm' }),
     seq({ key: 'drop:90000', state: 'confident', tier: 'confident', charge_ms: 80000, lull_ms: 86000,
-      drop_ms: 90000, parts: parts('waiting', 'waiting', 'waiting'), fires: true,
-      fires_reason: 'analysed_show', playing: ['charge', 'lull', 'drop'] }),
+      drop_ms: 90000, parts: parts('waiting', 'waiting', 'waiting', 'waiting'), fires: true,
+      fires_reason: 'analysed_show', playing: ['charge', 'lull', 'drop'],
+      pre_drop_ms: 89200, pre_drop_kind: 'spike', pre_drop_auto: 89200, pre_drop_tier: 'confident',
+      pre_drop_score: 1.15, pre_drop_off: false, pre_drop_was: null }),
     seq({ key: 'drop:130000', state: 'suggested', charge_ms: null, lull_ms: 126000, drop_ms: 130000,
-      parts: parts('absent', 'waiting', 'off'), fires: false, fires_reason: 'switched_off' }),
+      parts: parts('absent', 'waiting', 'off', 'off'), fires: false, fires_reason: 'switched_off',
+      pre_drop_ms: null, pre_drop_kind: 'intro', pre_drop_auto: 127000, pre_drop_tier: 'suggested',
+      pre_drop_score: 1.05, pre_drop_off: true, pre_drop_was: 127000 }),
     seq({ key: 'drop:169980', state: 'matches_yours', tier: 'confident', charge_ms: 160000,
       lull_ms: 166000, drop_ms: 169980, parts: parts('waiting', 'waiting', 'waiting'), fires: true,
       fires_reason: 'analysed_show', matches: [{ id: 'h-drop', kind: 'drop', timestamp_ms: 170000 }] }),
@@ -108,6 +126,8 @@ const VIEW = {
     lull: { id: 'h-lull', kind: 'lull', timestamp_ms: 166100, enabled: true },
     drop: { id: 'h-drop', kind: 'drop', timestamp_ms: 170000, enabled: true },
     enabled: true, detections: ['drop:169980'], detection: 'drop:169980',
+    pre_drop: { ms: 169400, kind: 'spike', auto: 169400, off: false, was: null, moved: false,
+      lead_ms: 600, score: 1.2, tier: 'confident', part: 'on' },
   }],
   firing: { effective_mode: 'analysed', has_authored: true, analysed_applies: true,
     his_applies: false, testing: false },
@@ -130,6 +150,15 @@ const PROFILE_CHANGES = [
   { id: 'h-drop', before: { id: 'h-drop', event_id: 'fixed-drop', timestamp_ms: 170000 }, after: null, index: 6, did: 'deleted' },
 ];
 const controls = { drop_testing: false, scene_change_mode: 'analysed' };
+// the snap rails: bass spikes and beats, and the pre-drop's own two rails
+const RAILS = {
+  uri: URI, status: 'ok', reason: null, beat_ms: 500, captured_from_ms: 0,
+  spikes: [[90000, 0.9], [170000, 0.9]],
+  beats: [[88000, 1], [88500, 0], [89000, 0], [89500, 0], [90000, 1]],
+  hits: [[88600, 0.5], [89200, 0.8], [89700, 0.4], [89800, 0.6], [169300, 0.4], [169400, 0.8]],
+  entries: [[87000, 0.6], [88800, 0.7]],
+};
+let revN = 0;
 let failNextPut = false;
 const STATUS = {
   increment: 'S3', dark: false,
@@ -139,7 +168,10 @@ const STATUS = {
 };
 
 const calls = [];
-const json = (status, data) => ({ ok: status < 400, status, json: async () => data });
+// a fresh copy per answer, as a real server sends: handing back the fixture's
+// own objects would let an in-place change slip past react-query's
+// structural sharing and leave the page drawing the old view
+const json = (status, data) => ({ ok: status < 400, status, json: async () => structuredClone(data) });
 const answer = (result, extra = {}) => ({
   result, view: VIEW, before: EDITS_BEFORE, after: EDITS_BEFORE, rev_before: 'r0',
   rev_after: 'r0', profile: [], said: '', ...extra,
@@ -170,6 +202,19 @@ globalThis.fetch = async (url, opts = {}) => {
       said: 'deleted 3 triggers you placed by hand; dismissed 1 detection standing in for it' }));
   }
   if (p === '/spectra/api/drop-sequences/restore') return json(200, answer(null, { before: EDITS_AFTER, after: EDITS_BEFORE, rev_before: 'r3', rev_after: 'r0' }));
+  if (p === '/spectra/api/drop-sequences/rails') return json(200, RAILS);
+  if (['handles', 'fill', 'pre-drop-kind'].some((x) => p === `/spectra/api/drop-sequences/${x}`)) {
+    // what the server does to the view (spectra/services/drop_sequences.py),
+    // so the editor's next drag starts where the last one landed
+    const s = VIEW.sequences.find((q) => q.key === body.key);
+    if (s && body.handles && 'pre_drop' in body.handles) s.pre_drop_ms = body.handles.pre_drop;
+    if (s && body.kind) s.pre_drop_kind = body.kind;
+    const his = VIEW.yours.find((r) => r.key === body.key);
+    if (his && body.handles && 'pre_drop' in body.handles) his.pre_drop.ms = body.handles.pre_drop;
+    revN += 1;
+    return json(200, answer(body.key, { rev_before: 'r0', rev_after: `rp${revN}`,
+      after: { overrides: { [body.key]: { touched: revN } }, added: [] } }));
+  }
   return json(404, { detail: `not in this fixture: ${method} ${p}` });
 };
 
@@ -190,7 +235,9 @@ import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import HomeDrops from ${src('home/HomeDrops.tsx')};
-export { removeTitle } from ${src('home/dropsPanel.ts')};
+export { removeTitle, buildPanelRows, snapPreDrop, stepPreDrop, clampPreDrop } from ${src('home/dropsPanel.ts')};
+export { ICONS } from ${src('components/iconRegistry.ts')};
+export { PRE_DROP_COLOR } from ${src('timeline/dropSequences.ts')};
 import { SongTimelineViewProvider, useSongTimelineView } from ${src('components/songTimelineView.tsx')};
 import { __emit } from ${JSON.stringify(fakeWsPath)};
 
@@ -238,6 +285,22 @@ export async function ask(uri, ms) {
   await act(async () => { askDrop(uri, ms); });
   await settle();
 }
+
+/** A real pointer gesture: down on the handle, then moves and the up on
+ * the window, where the editor listens. */
+export async function drag(el, xs, id = 7) {
+  const PE = window.PointerEvent;
+  await act(async () => {
+    el.dispatchEvent(new PE('pointerdown', { bubbles: true, pointerId: id, clientX: xs[0] }));
+  });
+  for (const x of xs) {
+    await act(async () => { window.dispatchEvent(new PE('pointermove', { pointerId: id, clientX: x })); });
+  }
+  await act(async () => {
+    window.dispatchEvent(new PE('pointerup', { pointerId: id, clientX: xs[xs.length - 1] }));
+  });
+  await settle();
+}
 `;
 const entryFile = join(tmpDir, 'entry.mjs');
 writeFileSync(entryFile, entrySrc);
@@ -281,7 +344,7 @@ console.log('ONE  the rows, their parts and the review count');
   ok(partBtn(a, 'charge').classList.contains('waiting') && partBtn(a, 'lull').classList.contains('waiting')
     && partBtn(a, 'drop').classList.contains('waiting'), 'a suggestion: every part waiting (dashed)');
   ok(partBtn(a, 'pre_drop').classList.contains('absent') && partBtn(a, 'pre_drop').disabled,
-    'the pre-drop is absent and cannot be tapped (no pre-drop detection yet)');
+    'a drop with no pre-drop: its pre-drop button faint and inert');
   const c = rowByTime('2:10.0');
   ok(partBtn(c, 'drop').classList.contains('off') && c.classList.contains('dim'),
     'a switched-off drop: its drop part striped off, the row dimmed');
@@ -404,6 +467,213 @@ console.log('SEVEN Remove\'s words never guess where a trigger came from');
     'one the answer does not name: the general rule, not a guess that it is imported');
   ok(/placed by hand: deleted; imported: switched off/.test(H.removeTitle(yours, null)),
     'no answer at all: the general rule');
+}
+
+console.log('EIGHT the pre-drop button: its look, its glyph, one call a tap');
+{
+  const pathOf = (btn) => btn?.querySelector('svg path')?.getAttribute('d');
+  const b = rowByTime('1:30.0');
+  const pb = partBtn(b, 'pre_drop');
+  ok(pb.classList.contains('waiting') && !pb.disabled && pb.getAttribute('data-kind') === 'spike',
+    'a waiting spike pre-drop: dashed, and it can be tapped');
+  ok(pathOf(pb) === H.ICONS.preDrop, 'a spike wears the spike glyph (preDrop)');
+  ok(/a spike/.test(pb.title) && /waiting for you/.test(pb.title)
+    && /do not play in the room yet/.test(pb.title),
+    `its tooltip names the kind, the state, and that it does not play yet ("${pb.title}")`);
+  ok(/spike pre-drop/.test(b.querySelector('.home-drops-state')?.textContent ?? ''),
+    'the row\'s state line names the pre-drop\'s kind');
+  const c = rowByTime('2:10.0');
+  const pc = partBtn(c, 'pre_drop');
+  ok(pc.classList.contains('off') && pathOf(pc) === H.ICONS.preDropVoice
+    && pc.getAttribute('data-kind') === 'intro',
+    'a switched-off vocal intro: striped, wearing the vocal-intro glyph (preDropVoice)');
+  ok(/pre-drop off/.test(c.querySelector('.home-drops-state')?.textContent ?? ''),
+    'and the state line says its pre-drop is off');
+  const d = rowByTime('2:50.0');
+  const pd = partBtn(d, 'pre_drop');
+  ok(pd.classList.contains('on') && pathOf(pd) === H.ICONS.preDrop,
+    'his own drop\'s pre-drop reads YoursRow.pre_drop.part (on)');
+  ok(!/your trigger/.test(pd.title), 'and is never called one of his triggers');
+
+  const inertBefore = posts('parts').length;
+  await H.click(partBtn(rowByTime('0:44.0'), 'pre_drop'));
+  ok(posts('parts').length === inertBefore, 'a tap on an absent pre-drop sends nothing');
+
+  const before = posts('parts').length;
+  await H.click(pb);
+  await H.click(pc);
+  await H.click(pd);
+  const sent = posts('parts').slice(before);
+  ok(sent.length === 3, `three taps, three calls (${sent.length})`);
+  ok(sent[0]?.body.key === 'drop:90000'
+    && JSON.stringify(sent[0]?.body.parts) === JSON.stringify({ pre_drop: 'on' }),
+    `waiting → on: ${JSON.stringify(sent[0]?.body)}`);
+  ok(sent[1]?.body.key === 'drop:130000'
+    && JSON.stringify(sent[1]?.body.parts) === JSON.stringify({ pre_drop: 'on' }),
+    `off → on: ${JSON.stringify(sent[1]?.body)}`);
+  ok(sent[2]?.body.key === 'his:h-drop'
+    && JSON.stringify(sent[2]?.body.parts) === JSON.stringify({ pre_drop: 'off' }),
+    `his own drop's pre-drop, on → off, through the same call: ${JSON.stringify(sent[2]?.body)}`);
+  ok(!posts('remove').slice(1).length && !calls.some((x) => /confirm_id/.test(JSON.stringify(x.body ?? {}))),
+    'nothing asked first (the pre-drop lives in the drop store, never his song profile)');
+
+  // a waiting pre-drop on his own drop waits for him: review count + double tick
+  const yoursWaiting = { ...VIEW, yours: [{ ...VIEW.yours[0],
+    pre_drop: { ...VIEW.yours[0].pre_drop, part: 'waiting' } }] };
+  const hisRow = H.buildPanelRows(yoursWaiting, { testing: false }).find((r) => r.kind === 'yours');
+  ok(hisRow?.canApprove && hisRow.waiting && hisRow.parts.pre_drop === 'waiting',
+    'his own drop with a waiting pre-drop counts for review and lights the double tick');
+  const none = { ...VIEW, yours: [{ ...VIEW.yours[0], pre_drop: null }] };
+  const hisNone = H.buildPanelRows(none, { testing: false }).find((r) => r.kind === 'yours');
+  ok(hisNone?.parts.pre_drop === 'absent' && !hisNone.canApprove,
+    'his own drop with no pre-drop: absent, nothing to approve');
+  const unworked = { ...VIEW, yours: [{ ...VIEW.yours[0] }] };
+  delete unworked.yours[0].pre_drop;
+  ok(H.buildPanelRows(unworked, { testing: false }).find((r) => r.kind === 'yours')
+    ?.parts.pre_drop === 'absent', 'not worked out yet: absent too');
+}
+
+console.log('NINE the editor\'s pre-drop handle');
+{
+  // the pure rules first
+  ok(H.clampPreDrop('spike', 10000, 9900) === 9750 && H.clampPreDrop('spike', 10000, 5000) === 7000,
+    'a spike stays 250–3000 ms before its drop');
+  ok(H.clampPreDrop('intro', 10000, 9800) === 9650 && H.clampPreDrop('intro', 10000, 4000) === 5500,
+    'a vocal intro stays 350–4500 ms before its drop');
+  ok(H.snapPreDrop('intro', 88850, RAILS, 168).ms === 88800
+    && H.snapPreDrop('spike', 89650, RAILS, 168).ms === 89700,
+    'each kind snaps to its own rail');
+  ok(/free/.test(H.snapPreDrop('spike', 88850, RAILS, 168).what),
+    'a spike far from any hit is placed free (a vocal entry is not its rail)');
+  ok(H.stepPreDrop('spike', 89200, 1, RAILS)?.ms === 89700
+    && H.stepPreDrop('intro', 88800, -1, RAILS)?.ms === 87000,
+    '◀ ▶ step along the kind\'s own rail');
+
+  const editorOf = () => container.querySelector('.home-drop-editor');
+  const stripBox = () => {
+    const strip = container.querySelector('.home-drop-editor-strip');
+    strip.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 96, right: 1000,
+      bottom: 96, x: 0, y: 0, toJSON() { return this; } });
+    return strip;
+  };
+  // 1:30's window: two beats before its charge (80000) to two after its drop
+  const START = 79000, SPAN = 12000;
+  const xAt = (ms) => ((ms - START) / SPAN) * 1000;
+
+  await H.click(rowByTime('1:30.0').querySelector('.home-drops-btn.edit'));
+  ok(!!editorOf(), 'the pencil opens the editor in place');
+  stripBox();
+  let ph = editorOf().querySelector('.home-drop-editor-handle.pre_drop');
+  ok(ph && ph.getAttribute('data-kind') === 'spike'
+    && ph.querySelector('svg path')?.getAttribute('d') === H.ICONS.preDrop,
+    'its fourth handle: the pre-drop, wearing its kind\'s glyph');
+  ok(editorOf().querySelector('.home-drop-editor-strip').classList.contains('has-pre'),
+    'the strip makes room for a handle over its top edge');
+  ok(ph.style.getPropertyValue('--part').toLowerCase() === H.PRE_DROP_COLOR.toLowerCase(),
+    `the handle is the pre-drop's orange (${ph.style.getPropertyValue('--part')})`);
+  {
+    // the 44 px target and touch-action: none are the shared handle class's;
+    // the pre-drop's own rules may move it, never take either away
+    const css = readFileSync(join(repo, 'spectra/web/src/styles/tokens.css'), 'utf8');
+    const block = (sel) => {
+      const i = css.indexOf(`${sel} {`);
+      return i < 0 ? '' : css.slice(i, css.indexOf('}', i));
+    };
+    const base = block('.home-drop-editor-handle');
+    const own = block('.home-drop-editor-handle.pre_drop');
+    ok(/touch-action:\s*none/.test(base) && /width:\s*44px/.test(base) && /height:\s*44px/.test(base)
+      && own && !/touch-action|width|height/.test(own),
+      'a 44 px touch target with touch-action: none, which its own rule leaves alone');
+  }
+
+  let before = posts('handles').length;
+  await H.drag(ph, [xAt(89200), xAt(89500), xAt(89650)]);
+  let sent = posts('handles').slice(before);
+  ok(sent.length === 1 && sent[0].body.key === 'drop:90000'
+    && JSON.stringify(sent[0].body.handles) === JSON.stringify({ pre_drop: 89700 }),
+    `a drag saves once, snapped to the nearest hit: ${JSON.stringify(sent[0]?.body)}`);
+
+  before = posts('handles').length;
+  ph = editorOf().querySelector('.home-drop-editor-handle.pre_drop');
+  await H.drag(ph, [xAt(89700), xAt(89950)]);
+  sent = posts('handles').slice(before);
+  ok(sent.length === 1 && sent[0].body.handles.pre_drop === 89750,
+    `dragged too close to its drop, a spike is held 250 ms before it: ${JSON.stringify(sent[0]?.body)}`);
+
+  before = posts('handles').length;
+  await H.click(editorOf().querySelector('.home-drop-editor-stepbtn.pre-earlier'));
+  sent = posts('handles').slice(before);
+  ok(sent.length === 1 && sent[0].body.handles.pre_drop === 89700,
+    `◀ steps back to the previous hit: ${JSON.stringify(sent[0]?.body)}`);
+
+  // 300 ms before its drop: a vocal intro (350–4500 ms) cannot sit there, so
+  // the switch the server would refuse is never sent
+  let kb = editorOf().querySelector('.home-drop-editor-kind');
+  ok(kb?.disabled && /350–4500 ms/.test(kb.title) && /300 ms/.test(kb.title),
+    `a switch that cannot fit is off, and says why ("${kb?.title}")`);
+  before = posts('pre-drop-kind').length;
+  await H.click(kb);
+  ok(posts('pre-drop-kind').length === before, 'and a tap on it sends nothing');
+
+  before = posts('handles').length;
+  await H.click(editorOf().querySelector('.home-drop-editor-stepbtn.pre-earlier'));
+  sent = posts('handles').slice(before);
+  ok(sent.length === 1 && sent[0].body.handles.pre_drop === 89200,
+    `◀ again, back to the hit before that: ${JSON.stringify(sent[0]?.body)}`);
+
+  kb = editorOf().querySelector('.home-drop-editor-kind');
+  ok(kb && !kb.disabled && /a spike/.test(kb.title) && /vocal intro/.test(kb.title),
+    `800 ms before its drop the switch is on, saying what it is and what a tap makes it ("${kb?.title}")`);
+  before = posts('pre-drop-kind').length;
+  await H.click(kb);
+  sent = posts('pre-drop-kind').slice(before);
+  ok(sent.length === 1 && sent[0].body.key === 'drop:90000' && sent[0].body.kind === 'intro',
+    `one tap on its glyph, one pre-drop-kind call: ${JSON.stringify(sent[0]?.body)}`);
+  ph = editorOf().querySelector('.home-drop-editor-handle.pre_drop');
+  ok(ph?.getAttribute('data-kind') === 'intro'
+    && ph.querySelector('svg path')?.getAttribute('d') === H.ICONS.preDropVoice,
+    'the handle now wears the vocal intro\'s glyph');
+
+  before = posts('handles').length;
+  stripBox();
+  await H.drag(ph, [xAt(89200), xAt(89000), xAt(88850)]);
+  sent = posts('handles').slice(before);
+  ok(sent.length === 1 && sent[0].body.handles.pre_drop === 88800,
+    `a vocal intro snaps to a vocal entry, never a hit: ${JSON.stringify(sent[0]?.body)}`);
+
+  // undo: the pre-drop edit goes back through restore like every other edit
+  const lastRev = `rp${revN}`;
+  before = posts('restore').length;
+  await H.click(container.querySelector('.home-drops-undo'));
+  sent = posts('restore').slice(before);
+  ok(sent.length === 1 && sent[0].body.expect === lastRev
+    && JSON.stringify(sent[0].body.edits) === JSON.stringify(EDITS_BEFORE),
+    `undo puts his edits back through one restore (expect ${lastRev}): ${JSON.stringify(sent[0]?.body)}`);
+
+  // ＋ Pre-drop on a drop that has none
+  await H.click(rowByTime('0:44.0').querySelector('.home-drops-btn.edit'));
+  ok(!editorOf().querySelector('.home-drop-editor-handle.pre_drop'),
+    'a drop with no pre-drop: no pre-drop handle');
+  const add = editorOf().querySelector('.home-drop-editor-act.add-pre-drop');
+  ok(!!add, 'and its editor offers ＋ Pre-drop');
+  before = posts('fill').length;
+  await H.click(add);
+  sent = posts('fill').slice(before);
+  ok(sent.length === 1 && sent[0].body.key === 'drop:44000' && sent[0].body.handle === 'pre_drop',
+    `＋ Pre-drop: one fill by the rules: ${JSON.stringify(sent[0]?.body)}`);
+
+  // his own drop: the pre-drop moves under his key
+  await H.click(rowByTime('2:50.0').querySelector('.home-drops-btn.edit'));
+  stripBox();
+  const HS = 159100, HSPAN = 11900;
+  const hx = (ms) => ((ms - HS) / HSPAN) * 1000;
+  ph = editorOf().querySelector('.home-drop-editor-handle.pre_drop');
+  before = posts('handles').length;
+  await H.drag(ph, [hx(169400), hx(169320)]);
+  sent = posts('handles').slice(before);
+  ok(sent.length === 1 && sent[0].body.key === 'his:h-drop'
+    && JSON.stringify(sent[0].body.handles) === JSON.stringify({ pre_drop: 169300 }),
+    `his own drop's pre-drop moves under his key, snapped to a hit: ${JSON.stringify(sent[0]?.body)}`);
 }
 
 if (failures) {

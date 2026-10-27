@@ -327,7 +327,8 @@ def _recovered_state(s: dict) -> Optional[str]:
     a sequence his own hand-authored trigger already covers in every mode
     that fires that trigger; it never double-fires)."""
     moved = s.get("moved") or {}
-    if any(moved.values()) or s.get("lull_off") or s.get("charge_off"):
+    if (any(moved.values()) or s.get("lull_off") or s.get("charge_off")
+            or s.get("pre_drop_off")):
         return drop_sequences.STATE_EDITED
     if s.get("tier") == drop_detector.TIER_CONFIDENT:
         return drop_sequences.STATE_CONFIDENT

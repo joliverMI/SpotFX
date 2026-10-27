@@ -42,6 +42,16 @@
  * builds to its OWN partner (a charge to its lull, or its drop when it has
  * no lull; a lull to its drop), the phase-partner rule.
  *
+ * THE PRE-DROP (predrop plan step 4) is the fourth member: a spike or a
+ * vocal intro 250 ms to 4.5 s before the drop, orange (PRE_DROP_COLOR), its
+ * glyph its kind's. A detection's comes from its own `pre_drop_*` fields; one
+ * of HIS drops carries the rules' pre-drop with his edits to it
+ * (AuthoredGroup.pre_drop) — the one member of his own sequence edited here,
+ * through his "his:<drop id>" key. Its look follows its part state the way a
+ * member's follows its tier (`preDropLook`): approved (or placed by him on
+ * an older server) and a confident one solid, a suggested one dashed, one
+ * switched off drawn as an off member is. Nothing plays from a pre-drop yet.
+ *
  * DOM-free, so scripts/check_drop_sequence_view.mjs drives it directly. */
 import { phaseBlendSpan, type PhaseBlendSpan } from './phaseBlend';
 
@@ -55,6 +65,10 @@ export const PHASE_COLOR: Record<Handle, string> = {
   drop: '#ec4899',
 };
 
+/** The pre-drop's colour (orange), the fourth member's on the Timeline and
+ * in the Home Drops panel alike. */
+export const PRE_DROP_COLOR = '#fb923c';
+
 // ── the wire (spectra/services/drop_sequences.py) ─────────────────────────
 
 export type DropServerState =
@@ -63,8 +77,13 @@ export type DropServerState =
 export type Handle = 'charge' | 'lull' | 'drop';
 export const HANDLES: Handle[] = ['charge', 'lull', 'drop'];
 
+/** Every handle a sequence carries on the Timeline: the three phases and
+ * the pre-drop, drawn in this order (the drop's star last, on top). */
+export type SeqHandle = Handle | 'pre_drop';
+export const SEQ_HANDLES: SeqHandle[] = ['charge', 'lull', 'pre_drop', 'drop'];
+
 /** A drop's parts, in the order they play — the pre-drop is one (absent on
- * every drop until pre-drop detection lands). */
+ * a drop that has none). */
 export type PartKey = 'charge' | 'lull' | 'pre_drop' | 'drop';
 export const PARTS: PartKey[] = ['charge', 'lull', 'pre_drop', 'drop'];
 export type PartView = 'on' | 'waiting' | 'off' | 'absent';
@@ -89,7 +108,8 @@ export interface DropSequenceView {
   detected_key: string | null;
   /** where the detector puts each handle (null on an added sequence) */
   auto: { charge_ms: number | null; lull_ms: number | null; drop_ms: number | null } | null;
-  moved: Partial<Record<Handle, boolean>>;
+  /** which handles he placed; `pre_drop` too (a drag or ＋ Pre-drop) */
+  moved: Partial<Record<Handle | 'pre_drop', boolean>>;
   lull_off: boolean;
   charge_off: boolean;
   score: number | null;
@@ -126,16 +146,23 @@ export interface DropSequenceView {
    * what, when (a hard cut on the drop, or early in the charge) and why.
    * Absent until the trigger clock has reached the sequence. */
   switch?: DropSwitchPlan;
-  /** THE PRE-DROP (spectra/services/predrop_detector.py, predrop plan step
-   * 3): where it is, which kind, where the detector puts it, how sure. All
-   * null when the drop has none. Absent from an older server. Nothing plays
-   * from it yet, and parts.pre_drop stays 'absent' until it gets its
-   * button (step 4). */
+  /** THE PRE-DROP (spectra/services/predrop_detector.py; drop_sequences.py's
+   * PRE-DROPS): where it plays (null when the drop has none or it is
+   * switched off), its kind (kept while off, so its glyph still shows), where
+   * the detector puts it (null when the detector found none — on an added
+   * drop always), and how sure the detector is — tier and score are the
+   * detector's, null once he placed it himself (`moved.pre_drop`). Its part
+   * state is parts.pre_drop. Absent from an older server. Nothing plays from
+   * a pre-drop yet (drop_firing.PRE_DROPS_PLAY). */
   pre_drop_ms?: number | null;
   pre_drop_kind?: PreDropKind | null;
   pre_drop_auto?: number | null;
   pre_drop_tier?: 'confident' | 'suggested' | null;
   pre_drop_score?: number | null;
+  /** switched off: `pre_drop_ms` is null and `pre_drop_was` is where it comes
+   * back when switched on again */
+  pre_drop_off?: boolean;
+  pre_drop_was?: number | null;
 }
 
 /** A pre-drop's kind: one loud hit in the high band, or a line in the mid
@@ -149,6 +176,27 @@ export interface PreDropFound {
   lead_ms: number;
   score: number;
   tier: 'confident' | 'suggested';
+}
+
+/** The pre-drop of one of HIS OWN drops (an `authored` group or a `yours`
+ * row): the rules' pre-drop for his drop's moment with his own edits to it
+ * (stored under overrides["mine:<drop trigger id>"], drop_sequences.py's
+ * PRE-DROPS). `ms` is where it plays (null while switched off; `was` is
+ * where it comes back); `auto` where the rules put it (null when he placed
+ * one the rules did not find); tier/score/lead_ms are the rules' and null
+ * once he moved it. `part` is its part state (never 'absent': a drop with
+ * no pre-drop carries `pre_drop: null`). */
+export interface HisPreDrop {
+  ms: number | null;
+  kind: PreDropKind;
+  auto: number | null;
+  off: boolean;
+  was: number | null;
+  moved: boolean;
+  lead_ms: number | null;
+  score: number | null;
+  tier: 'confident' | 'suggested' | null;
+  part: Exclude<PartView, 'absent'>;
 }
 
 export interface DropSwitchPlan {
@@ -216,10 +264,10 @@ export interface AuthoredGroup {
   charge: HisMark | null;
   lull: HisMark | null;
   drop: HisMark;
-  /** the pre-drop the rules find before HIS drop: null when there is none,
-   * the key absent while it is not worked out yet (drop_sequences.py's
+  /** the pre-drop before HIS drop, with his edits to it: null when there is
+   * none, the key absent while it is not worked out yet (drop_sequences.py's
    * PRE-DROPS — only the read-through view works it out) */
-  pre_drop?: PreDropFound | null;
+  pre_drop?: HisPreDrop | null;
 }
 
 /** One of his phase triggers in a `yours` row, enabled or switched off. */
@@ -241,6 +289,8 @@ export interface YoursRow {
   enabled: boolean;
   detections: string[];
   detection: string | null;
+  /** the pre-drop before his drop (as AuthoredGroup.pre_drop) */
+  pre_drop?: HisPreDrop | null;
 }
 
 export interface DropSequencesResponse {
@@ -276,6 +326,13 @@ export interface DropRails {
   spikes: [number, number][];
   /** [song ms, 1 = downbeat] */
   beats: [number, number][];
+  /** [song ms, strength 0..1] — every high-band attack (a clap, a hit): what
+   * a dragged SPIKE pre-drop snaps to (predrop_detector.rails) */
+  hits?: [number, number][];
+  /** [song ms, strength 0..1] — every mid-band entry passing the vocal
+   * intro's first three tests (loud, out of a hush, sharp): what a dragged
+   * VOCAL INTRO pre-drop snaps to */
+  entries?: [number, number][];
 }
 
 // ── the display model ─────────────────────────────────────────────────────
@@ -300,10 +357,20 @@ export interface DisplaySeq {
   charge: number | null;
   lull: number | null;
   drop: number;
+  /** where the pre-drop plays: null when the drop has none, it is switched
+   * off, or it is not worked out yet */
+  pre_drop: number | null;
+  /** the pre-drop itself (kind, part state, how it was placed), null when
+   * the drop has none (or, for one of his drops, not worked out yet) */
+  preDrop: PreDropInfo | null;
+  /** true while the pre-drop is not worked out yet — his drop's, before the
+   * read-through view has looked; a detection's, from an older server */
+  preDropUnknown?: boolean;
   /** where the analysis had each MOVED (or switched-off) handle — the dotted
-   * line. Only handles he changed appear here. */
-  analysisHad: Partial<Record<Handle, number>>;
-  off: { charge: boolean; lull: boolean };
+   * line. Only handles he changed appear here; a pre-drop he moved off the
+   * rules' place too. */
+  analysisHad: Partial<Record<SeqHandle, number>>;
+  off: { charge: boolean; lull: boolean; pre_drop: boolean };
   fire: FireStatus;
   /** 1-based, in time order, for sequences that fire or will; else null */
   number: number | null;
@@ -312,6 +379,51 @@ export interface DisplaySeq {
   /** the detection: its own, or (look `mine`) the one that matched him */
   view: DropSequenceView | null;
   his: AuthoredGroup | null;
+}
+
+/** A sequence's pre-drop, read off the wire the same way for a detection
+ * (DropSequenceView.pre_drop_*) and for one of his own drops (HisPreDrop). */
+export interface PreDropInfo {
+  kind: PreDropKind;
+  /** parts.pre_drop: on = approved, waiting = follows its own tier, off =
+   * never plays; null from an older server that sends no parts */
+  part: Exclude<PartView, 'absent'> | null;
+  off: boolean;
+  /** where a switched-off one comes back when switched on */
+  was: number | null;
+  /** where the rules put it: null when they found none (and on an added drop) */
+  auto: number | null;
+  /** he placed it himself (a drag, ＋ Pre-drop, a whole-sequence move) */
+  moved: boolean;
+  /** the rules' tier and score — null once he placed it */
+  tier: 'confident' | 'suggested' | null;
+  score: number | null;
+}
+
+function preDropOfView(v: DropSequenceView): PreDropInfo | null {
+  const kind = v.pre_drop_kind;
+  if (!kind) return null;
+  const part = v.parts?.pre_drop;
+  return {
+    kind, part: part && part !== 'absent' ? part : null, off: !!v.pre_drop_off,
+    was: v.pre_drop_was ?? null, auto: v.pre_drop_auto ?? null, moved: !!v.moved?.pre_drop,
+    tier: v.pre_drop_tier ?? null, score: v.pre_drop_score ?? null,
+  };
+}
+
+function preDropOfHis(p: HisPreDrop | null | undefined): PreDropInfo | null {
+  if (!p || !p.kind) return null;
+  return {
+    kind: p.kind, part: p.part ?? null, off: !!p.off, was: p.was ?? null, auto: p.auto ?? null,
+    moved: !!p.moved, tier: p.tier ?? null, score: p.score ?? null,
+  };
+}
+
+/** The dotted line for a pre-drop he moved off the rules' place (one he
+ * switched off is drawn at where it comes back instead — see the layer). */
+function preDropHad(pd: PreDropInfo | null, ms: number | null): number | undefined {
+  if (!pd || pd.off || !pd.moved || pd.auto == null || ms == null || ms === pd.auto) return undefined;
+  return pd.auto;
 }
 
 const TIER_LOOK: Record<string, SeqLook> = { confident: 'confident', suggested: 'suggested' };
@@ -341,8 +453,10 @@ export function sequenceFires(s: Pick<DisplaySeq, 'fire'>): boolean {
   return s.fire === 'fires';
 }
 
-function analysisHad(v: DropSequenceView): Partial<Record<Handle, number>> {
-  const out: Partial<Record<Handle, number>> = {};
+function analysisHad(v: DropSequenceView, pd: PreDropInfo | null): Partial<Record<SeqHandle, number>> {
+  const out: Partial<Record<SeqHandle, number>> = {};
+  const pre = preDropHad(pd, v.pre_drop_ms ?? null);
+  if (pre != null) out.pre_drop = pre;
   if (!v.auto) return out;
   for (const h of HANDLES) {
     const was = v.auto[`${h}_ms` as const];
@@ -355,11 +469,14 @@ function analysisHad(v: DropSequenceView): Partial<Record<Handle, number>> {
 
 function fromView(v: DropSequenceView, analysedApplies: boolean): DisplaySeq {
   const look = lookOf(v);
+  const pd = preDropOfView(v);
   return {
     key: v.key, look,
     charge: v.charge_ms, lull: v.lull_ms, drop: v.drop_ms,
-    analysisHad: analysisHad(v),
-    off: { charge: !!v.charge_off, lull: !!v.lull_off },
+    pre_drop: pd && !pd.off ? v.pre_drop_ms ?? null : null, preDrop: pd,
+    preDropUnknown: v.pre_drop_ms === undefined && v.pre_drop_kind === undefined,
+    analysisHad: analysisHad(v, pd),
+    off: { charge: !!v.charge_off, lull: !!v.lull_off, pre_drop: !!pd?.off },
     // an added sequence on one of his own phase triggers stands down too;
     // a drop he switched off (the Home Drops panel) is listed but silent
     fire: v.fires === false && v.fires_reason === 'matches_yours' && look !== 'dismissed'
@@ -405,10 +522,17 @@ export function buildDisplay(
     if (!g?.drop) continue;
     const det = matchedDetection(g, views);
     if (det) claimed.add(det.key);
+    // the pre-drop before HIS drop (the rules' with his edits): the one
+    // member of his own sequence the Timeline edits
+    const pd = preDropOfHis(g.pre_drop);
+    const preMs = pd && !pd.off ? g.pre_drop?.ms ?? null : null;
+    const had = preDropHad(pd, preMs);
     out.push({
       key: `his:${g.drop.id}`, look: 'mine',
       charge: g.charge?.timestamp_ms ?? null, lull: g.lull?.timestamp_ms ?? null,
-      drop: g.drop.timestamp_ms, analysisHad: {}, off: { charge: false, lull: false },
+      drop: g.drop.timestamp_ms, pre_drop: preMs, preDrop: pd, preDropUnknown: g.pre_drop === undefined,
+      analysisHad: had != null ? { pre_drop: had } : {},
+      off: { charge: false, lull: false, pre_drop: !!pd?.off },
       fire: 'fires', number: null, badge: '', view: det, his: g,
     });
   }
@@ -444,8 +568,15 @@ export function buildDisplay(
 export const TAIL_BEATS = 8;
 export const DEFAULT_BEAT_MS = 500;
 
-export function firstHandleMs(s: Pick<DisplaySeq, 'charge' | 'lull' | 'drop'>): number {
-  return s.charge ?? s.lull ?? s.drop;
+/** A sequence's times as the geometry reads them; the pre-drop is optional
+ * (Home's Drops panel zooms on charge, lull and drop alone). */
+export type SeqTimes = Pick<DisplaySeq, 'charge' | 'lull' | 'drop'> & Partial<Pick<DisplaySeq, 'pre_drop'>>;
+
+/** The sequence's earliest handle — the pre-drop may sit before the lull
+ * starts, even before a short charge. */
+export function firstHandleMs(s: SeqTimes): number {
+  const first = s.charge ?? s.lull ?? s.drop;
+  return s.pre_drop != null && s.pre_drop < first ? s.pre_drop : first;
 }
 
 /** The build each phase runs, exactly as the engine will: a charge to its
@@ -462,7 +593,7 @@ export function sequenceBuilds(s: Pick<DisplaySeq, 'charge' | 'lull' | 'drop'>):
 /** "Click one to jump the big graph to it, zoomed to fit from two bars
  * before the charge to two bars after the drop." */
 export function zoomWindow(
-  s: Pick<DisplaySeq, 'charge' | 'lull' | 'drop'>, beatMs: number | null | undefined,
+  s: SeqTimes, beatMs: number | null | undefined,
   durationMs: number,
 ): { startMs: number; endMs: number } {
   const beat = beatMs && beatMs > 0 ? beatMs : DEFAULT_BEAT_MS;
@@ -637,9 +768,83 @@ export function handleRows(s: DisplaySeq): HandleRow[] {
   });
 }
 
+// ── the pre-drop ──────────────────────────────────────────────────────────
+
+/** A pre-drop's kind as a noun ("a spike", "a vocal intro" in a sentence). */
+export const PRE_DROP_KIND_NAME: Record<PreDropKind, string> = { spike: 'spike', intro: 'vocal intro' };
+
+/** What a pre-drop does in the room today: nothing (drop_firing.
+ * PRE_DROPS_PLAY — the engine that plays them is a later step). */
+export const PRE_DROP_NOT_YET = 'Nothing plays from a pre-drop yet — a later step builds that.';
+
+/** How a pre-drop is drawn, following its part state the way a member's look
+ * follows its tier: `his` — approved (or, from an older server with no part
+ * states, placed by him) — solid; `confident` — waiting, and it will play on
+ * its own once pre-drops play — solid; `suggested` — waiting for his approval
+ * (a suggested one, or one he placed and has not approved) — dashed; `off` —
+ * switched off, drawn as an off member is. Null: nothing to draw. */
+export type PreDropLook = 'his' | 'confident' | 'suggested' | 'off';
+
+export function preDropLook(s: Pick<DisplaySeq, 'preDrop' | 'pre_drop'>): PreDropLook | null {
+  const p = s.preDrop;
+  if (!p) return null;
+  if (p.off || p.part === 'off') return 'off';
+  if (s.pre_drop == null) return null;
+  if (p.part === 'on' || (p.part == null && p.moved)) return 'his';
+  return p.tier === 'confident' ? 'confident' : 'suggested';
+}
+
+const PRE_DROP_LOOK_WORD: Record<PreDropLook, string> = {
+  his: 'approved',
+  confident: 'waiting · confident: it will play on its own',
+  suggested: 'waiting for your approval',
+  off: 'switched off · never plays',
+};
+
+/** The detail box's pre-drop row. */
+export interface PreDropRow {
+  /** where it sits: where it plays, or — switched off — where it comes back */
+  at: number | null;
+  kind: PreDropKind | null;
+  /** how far before its drop it sits */
+  leadMs: number | null;
+  look: PreDropLook | null;
+  /** "as detected" / "placed by you" / "analysis: 1:23.45 (+120 ms)" … */
+  note: string;
+  /** its lead, tier and part state in words, or null when there is none */
+  state: string | null;
+}
+
+export function preDropRow(s: DisplaySeq): PreDropRow {
+  const p = s.preDrop;
+  if (!p) {
+    return {
+      at: null, kind: null, leadMs: null, look: null, state: null,
+      note: s.preDropUnknown ? 'not worked out yet'
+        : s.look === 'mine' ? 'none before your drop' : 'none — no hit or vocal entry leads into this drop',
+    };
+  }
+  const at = s.pre_drop ?? (p.off ? p.was ?? p.auto : null);
+  const leadMs = at != null ? Math.round(s.drop - at) : null;
+  const look = preDropLook(s);
+  let note: string;
+  if (p.off) note = `switched off (comes back at ${at != null ? fmtHundredths(at) : '—'})`;
+  else if (p.moved && p.auto != null && at != null && at !== p.auto) {
+    const d = Math.round(at - p.auto);
+    note = `analysis: ${fmtHundredths(p.auto)} (${d > 0 ? '+' : ''}${d} ms)`;
+  } else if (p.moved) note = 'placed by you';
+  else note = s.look === 'mine' ? 'found before your drop' : 'as detected';
+  const tier = p.tier ? `${p.tier}${p.score != null ? ` (score ${p.score.toFixed(2)})` : ''}` : null;
+  const bits = [leadMs != null ? `${leadMs} ms before the drop` : null, tier,
+    look ? PRE_DROP_LOOK_WORD[look] : null].filter((b): b is string => !!b);
+  return { at, kind: p.kind, leadMs, look, note, state: bits.length ? bits.join(' · ') : null };
+}
+
 /** The strip's hover text for one sequence. */
 export function stripTitle(s: DisplaySeq): string {
   const head = s.number != null ? `${s.number} · ` : '';
   const sw = switchChip(s.view?.switch);
-  return `${head}${fmtTenths(s.drop)} · ${LOOK_CHIP[s.look]} · ${reviewStatus(s)}${sw ? ` · ${sw}` : ''}`;
+  const pre = s.preDrop && s.pre_drop != null
+    ? ` · ${PRE_DROP_KIND_NAME[s.preDrop.kind]} pre-drop at ${fmtTenths(s.pre_drop)}` : '';
+  return `${head}${fmtTenths(s.drop)} · ${LOOK_CHIP[s.look]} · ${reviewStatus(s)}${pre}${sw ? ` · ${sw}` : ''}`;
 }

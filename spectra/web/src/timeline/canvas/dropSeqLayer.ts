@@ -33,14 +33,29 @@
  *                          below their ▼ triangles (y 9-30), so both stay
  *                          reachable.
  *
+ * THE PRE-DROP (predrop plan step 4) is the fourth handle: an orange disc
+ * wearing its kind's glyph (the registry's `preDrop` for a spike,
+ * `preDropVoice` for a vocal intro — ./iconPath.ts strokes the registry's own
+ * path), its orange line on the graph, solid or dashed by its part state
+ * (../dropSequences.ts `preDropLook`), a dotted "pre-drop off" line where a
+ * switched-off one comes back. Its two rails sit under the bass spikes and
+ * beats: HITS (solid bars, taller = harder — what a spike snaps to) over
+ * VOCAL ENTRIES (step marks — what a vocal intro snaps to); its line reaches
+ * down to its own rail.
+ *
  * Everything it draws comes from ../dropSequences.ts (`buildDisplay`): the
  * looks, the builds (the engine's own ramp arithmetic) and the words. */
-import type { CanvasFrame, CanvasLayer, DropSeqLayerData, Hit } from './frame';
 import {
-  HANDLES, LOOK_CHIP, LOOK_GLYPH, PHASE_COLOR, TAIL_BEATS, fmtHundredths, firstHandleMs,
-  sequenceBuilds, type DisplaySeq, type Handle,
+  PRE_DROP_RAIL_H, PRE_DROP_RAIL_ROW_H, SNAP_RAIL_H, hasPreDropRails,
+  type CanvasFrame, type CanvasLayer, type DropSeqLayerData, type Hit,
+} from './frame';
+import {
+  HANDLES, LOOK_CHIP, LOOK_GLYPH, PHASE_COLOR, PRE_DROP_COLOR, PRE_DROP_KIND_NAME, SEQ_HANDLES,
+  TAIL_BEATS, fmtHundredths, firstHandleMs, preDropLook, sequenceBuilds,
+  type DisplaySeq, type Handle, type PreDropKind, type SeqHandle,
 } from '../dropSequences';
-import { editable, withGhost } from '../dropEdit';
+import { editableHandle, withGhost } from '../dropEdit';
+import { strokeIcon } from './iconPath';
 
 /** The rail band at the top of the main area (mock: RAIL 30). */
 export const RAIL_H = 30;
@@ -54,6 +69,25 @@ const LINE_HIT_X = 4;
 const CHIP_H = 18;
 
 const RGB: Record<Handle, string> = { charge: '251,191,36', lull: '56,189,248', drop: '236,72,153' };
+const PRE_RGB = '251,146,60';        // PRE_DROP_COLOR
+const ENTRY_RGB = '253,186,116';     // the vocal-entry rail: a lighter orange
+
+/** The pre-drop's glyph per kind — the registry's (the Drops panel's own). */
+export const PRE_DROP_GLYPH = { spike: 'preDrop', intro: 'preDropVoice' } as const;
+
+/** Whether this frame's rail band carries the pre-drop's two rails. */
+const preRows = (f: CanvasFrame, d: DropSeqLayerData) =>
+  hasPreDropRails(d.rails) && f.railH >= SNAP_RAIL_H + PRE_DROP_RAIL_H;
+
+/** Where a handle's line on the graph ends: in the bass-spike rail for the
+ * three phases (what they snap to), in its OWN rail for the pre-drop (hits
+ * for a spike, vocal entries for an intro) when the band carries them. */
+function lineBottom(f: CanvasFrame, d: DropSeqLayerData, s: DisplaySeq, h: SeqHandle): number {
+  if (h === 'pre_drop' && preRows(f, d)) {
+    return f.mainH + SNAP_RAIL_H + (s.preDrop?.kind === 'intro' ? 2 : 1) * PRE_DROP_RAIL_ROW_H;
+  }
+  return f.mainH + (f.railH > 0 ? SPIKE_H : 0);
+}
 
 const seqData = (f: CanvasFrame): DropSeqLayerData | null => f.data.dropSeq ?? null;
 
@@ -161,14 +195,62 @@ function drawRails(f: CanvasFrame, d: DropSeqLayerData) {
     ctx.fillStyle = down ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.28)';
     ctx.fillRect(x - 0.5, top + SPIKE_H + (down ? 2 : 6), 1, down ? 12 : 8);
   }
+  const pre = preRows(f, d);
+  if (pre) drawPreDropRails(f, d, top + SNAP_RAIL_H, hot);
   ctx.font = '9px ui-monospace, monospace';
   ctx.fillStyle = 'rgba(16,16,16,0.85)';
   ctx.fillRect(0, top + 1, 66, 11);
   ctx.fillRect(0, top + SPIKE_H + 2, 36, 11);
+  if (pre) {
+    ctx.fillRect(0, top + SNAP_RAIL_H + 1, 28, 10);
+    ctx.fillRect(0, top + SNAP_RAIL_H + PRE_DROP_RAIL_ROW_H + 1, 78, 10);
+  }
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.fillText('bass spikes', 4, top + 10);
   ctx.fillText('beats', 4, top + SPIKE_H + 11);
+  if (pre) {
+    ctx.fillStyle = `rgba(${PRE_RGB},0.9)`;
+    ctx.fillText('hits', 4, top + SNAP_RAIL_H + 9);
+    ctx.fillStyle = `rgba(${ENTRY_RGB},0.9)`;
+    ctx.fillText('vocal entries', 4, top + SNAP_RAIL_H + PRE_DROP_RAIL_ROW_H + 9);
+  }
   ctx.restore();
+}
+
+/** The pre-drop's two rails: HITS as solid bars (taller = harder, the
+ * spikes' own look), VOCAL ENTRIES as step marks (a line coming in and
+ * holding) in a lighter orange; the one a dragged pre-drop is on lights up
+ * white. */
+function drawPreDropRails(f: CanvasFrame, d: DropSeqLayerData, top: number,
+                          hot: { ms: number; rail: string } | null) {
+  const { ctx } = f;
+  const rails = d.rails!;
+  const rowH = PRE_DROP_RAIL_ROW_H;
+  const hotHit = hot && hot.rail === 'hit' ? hot.ms : null;
+  const hotEntry = hot && hot.rail === 'entry' ? hot.ms : null;
+  for (const [ms, strength] of rails.hits ?? []) {
+    if (ms < f.win.startMs || ms > f.win.endMs) continue;
+    const x = f.timeToX(ms);
+    if (ms === hotHit) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x - 1.5, top + 1, 3, rowH - 1);
+      continue;
+    }
+    const r = Math.min(1, Math.max(0, strength));
+    const h = 3 + 8 * r;
+    ctx.fillStyle = `rgba(${PRE_RGB},${0.35 + 0.65 * r})`;
+    ctx.fillRect(x - 1, top + rowH - h, 2, h);
+  }
+  const etop = top + rowH;
+  for (const [ms, strength] of rails.entries ?? []) {
+    if (ms < f.win.startMs || ms > f.win.endMs) continue;
+    const x = f.timeToX(ms);
+    const r = Math.min(1, Math.max(0, strength));
+    const h = ms === hotEntry ? rowH - 1 : 3 + 8 * r;
+    ctx.fillStyle = ms === hotEntry ? '#ffffff' : `rgba(${ENTRY_RGB},${0.35 + 0.65 * r})`;
+    ctx.fillRect(x - 0.75, etop + rowH - h, 1.5, h);
+    ctx.fillRect(x - 0.75, etop + rowH - h, 6, 1.5);
+  }
 }
 
 function drawSequenceBody(f: CanvasFrame, d: DropSeqLayerData, s: DisplaySeq) {
@@ -230,9 +312,17 @@ function drawSequenceBody(f: CanvasFrame, d: DropSeqLayerData, s: DisplaySeq) {
     ctx.lineWidth = h === 'drop' ? 2.5 : 1.5;
     ctx.beginPath(); ctx.moveTo(x, top - 4); ctx.lineTo(x, lineBot); ctx.stroke();
   }
+  // the pre-drop's line, down to its own rail; dashed while it waits for him
+  if (s.pre_drop != null) {
+    const x = X(s.pre_drop);
+    ctx.setLineDash(dash.length ? dash : preDropLook(s) === 'suggested' ? [5, 4] : []);
+    ctx.strokeStyle = dismissed ? '#888' : PRE_DROP_COLOR;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x, top - 4); ctx.lineTo(x, lineBottom(f, d, s, 'pre_drop')); ctx.stroke();
+  }
   ctx.setLineDash([]);
   if (!dismissed) {
-    for (const h of HANDLES) {
+    for (const h of SEQ_HANDLES) {
       const had = s.analysisHad[h];
       if (had == null) continue;
       const x = X(had);
@@ -246,6 +336,20 @@ function drawSequenceBody(f: CanvasFrame, d: DropSeqLayerData, s: DisplaySeq) {
         ctx.fillStyle = 'rgba(255,255,255,0.55)';
         ctx.fillText(`${h} off`, x + 3, bot - 4);
       }
+    }
+    // a switched-off pre-drop: the off look, where it comes back
+    const pd = s.preDrop;
+    const back = pd?.off ? pd.was ?? pd.auto : null;
+    if (back != null) {
+      const x = X(back);
+      ctx.setLineDash([2, 4]);
+      ctx.strokeStyle = `rgba(${PRE_RGB},0.55)`;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bot); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = '9px ui-monospace, monospace';
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.fillText('pre-drop off', x + 3, bot - 14);
     }
   }
   ctx.restore();
@@ -268,12 +372,16 @@ export const dropSeqBody: CanvasLayer = {
   },
   hitTest(x, y, f): Hit {
     const d = seqData(f);
-    if (!d || d.adding || y < RAIL_H || y > f.mainH + (f.railH > 0 ? SPIKE_H : 0)) return null;
-    let best: { key: string; handle: Handle; dist: number } | null = null;
+    if (!d || d.adding || y < RAIL_H) return null;
+    // a member line reaches into the spike rail; the pre-drop's into its own
+    const deepest = f.mainH + (f.railH <= 0 ? 0 : preRows(f, d) ? SNAP_RAIL_H + PRE_DROP_RAIL_H : SPIKE_H);
+    if (y > deepest) return null;
+    let best: { key: string; handle: SeqHandle; dist: number } | null = null;
     for (const s of seqsOf(d)) {
-      for (const h of HANDLES) {
+      for (const h of SEQ_HANDLES) {
         const ms = s[h];
         if (ms == null || ms < f.win.startMs || ms > f.win.endMs) continue;
+        if (y > lineBottom(f, d, s, h)) continue;
         const dist = Math.abs(f.timeToX(ms) - x) - (s.key === d.selectedKey ? 0.5 : 0);
         if (dist <= LINE_HIT_X && (!best || dist < best.dist)) best = { key: s.key, handle: h, dist };
       }
@@ -287,6 +395,23 @@ export const dropSeqBody: CanvasLayer = {
     if (rails && f.railH > 0 && y >= f.mainH && y <= f.mainH + f.railH) {
       const t = f.xToTime(x);
       const tol = (3 / Math.max(1, f.w)) * (f.win.endMs - f.win.startMs);
+      const nearest = (pts: [number, number][]) => {
+        let best: [number, number] | null = null;
+        for (const p of pts) {
+          if (Math.abs(p[0] - t) <= tol && (!best || Math.abs(p[0] - t) < Math.abs(best[0] - t))) best = p;
+        }
+        return best;
+      };
+      if (preRows(f, d) && y > f.mainH + SNAP_RAIL_H) {
+        if (y <= f.mainH + SNAP_RAIL_H + PRE_DROP_RAIL_ROW_H) {
+          const hit = nearest(rails.hits ?? []);
+          if (hit) return `hit · ${fmtHundredths(hit[0])} · strength ${hit[1].toFixed(2)} (taller = harder)`;
+          return 'hits: every loud short hit in the high band — where a spike pre-drop can sit';
+        }
+        const entry = nearest(rails.entries ?? []);
+        if (entry) return `vocal entry · ${fmtHundredths(entry[0])} · strength ${entry[1].toFixed(2)}`;
+        return 'vocal entries: a mid-band line coming in out of a hush — where a vocal-intro pre-drop can sit';
+      }
       if (y <= f.mainH + SPIKE_H) {
         let best: [number, number] | null = null;
         for (const sp of rails.spikes) {
@@ -342,6 +467,36 @@ export function drawHandle(
   }
 }
 
+/** The pre-drop's handle: a dark disc with an orange ring (dashed while it
+ * waits for him) wearing its kind's glyph — the registry's own drawing, a
+ * diamond only should that ever fail to draw. */
+export function drawPreDropHandle(
+  ctx: CanvasRenderingContext2D, kind: PreDropKind, x: number, y: number, color: string,
+  waiting = false,
+) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, 9, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(10,6,18,0.92)';
+  ctx.fill();
+  ctx.setLineDash(waiting ? [3, 2] : []);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.lineWidth = 1.6;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  if (!strokeIcon(ctx, PRE_DROP_GLYPH[kind], x, y, 13)) {
+    ctx.beginPath();
+    ctx.moveTo(x, y - 5); ctx.lineTo(x + 5, y); ctx.lineTo(x, y + 5); ctx.lineTo(x - 5, y);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 interface ChipBox { key: string; x: number; y: number; w: number; h: number }
 /** The chips placed on the last frame drawn — a click on one selects its
  * sequence (hitTest has no canvas context to measure text with). */
@@ -385,14 +540,21 @@ function drawRailFor(f: CanvasFrame, d: DropSeqLayerData, s: DisplaySeq, selecte
   ctx.strokeStyle = selected ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.3)';
   ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(x0, HANDLE_Y); ctx.lineTo(xd, HANDLE_Y); ctx.stroke();
-  for (const h of HANDLES) {
+  for (const h of SEQ_HANDLES) {
     const ms = s[h];
     if (ms == null) continue;
+    if (h === 'pre_drop') {
+      if (s.preDrop) {
+        drawPreDropHandle(ctx, s.preDrop.kind, X(ms), HANDLE_Y,
+          s.look === 'dismissed' ? '#888' : PRE_DROP_COLOR, preDropLook(s) === 'suggested');
+      }
+      continue;
+    }
     drawHandle(ctx, h, X(ms), HANDLE_Y, s.look === 'dismissed' ? '#888' : PHASE_COLOR[h]);
   }
   ctx.restore();
   const hover = d.hover && d.hover.key === s.key ? d.hover.handle : null;
-  const selH: Handle = selected && d.selectedHandle && s[d.selectedHandle] != null ? d.selectedHandle : 'drop';
+  const selH: SeqHandle = selected && d.selectedHandle && s[d.selectedHandle] != null ? d.selectedHandle : 'drop';
   ctx.save();
   if (selected) {
     ctx.strokeStyle = '#ffffff';
@@ -414,11 +576,20 @@ function drawHover(f: CanvasFrame, d: DropSeqLayerData) {
   const ms = s?.[hv.handle];
   if (!s || ms == null) return;
   const { ctx } = f;
-  const extra = s.look === 'mine' ? 'your trigger'
-    : s.view?.score != null && hv.handle === 'drop' ? `${LOOK_CHIP[s.look]} · score ${s.view.score.toFixed(2)}`
-    : LOOK_CHIP[s.look];
-  const how = editable(s) ? 'drag to move · double-click for details' : 'click for details';
-  const text = `${hv.handle} · ${fmtHundredths(ms)} · ${extra} · ${how}`;
+  const how = editableHandle(s, hv.handle) ? 'drag to move · double-click for details' : 'click for details';
+  let text: string;
+  if (hv.handle === 'pre_drop' && s.preDrop) {
+    // the pre-drop names itself and its kind, how far out it sits, and whose
+    const look = preDropLook(s);
+    const whose = look === 'his' ? 'approved' : look === 'confident' ? 'confident' : 'waiting for you';
+    text = `pre-drop (${PRE_DROP_KIND_NAME[s.preDrop.kind]}) · ${fmtHundredths(ms)} · `
+      + `${Math.round(s.drop - ms)} ms before the drop · ${whose} · plays nothing yet · ${how}`;
+  } else {
+    const extra = s.look === 'mine' ? 'your trigger'
+      : s.view?.score != null && hv.handle === 'drop' ? `${LOOK_CHIP[s.look]} · score ${s.view.score.toFixed(2)}`
+      : LOOK_CHIP[s.look];
+    text = `${hv.handle} · ${fmtHundredths(ms)} · ${extra} · ${how}`;
+  }
   ctx.save();
   ctx.font = '11px system-ui, sans-serif';
   const tw = ctx.measureText(text).width;
@@ -558,9 +729,9 @@ export const dropSeqRail: CanvasLayer = {
         return { kind: 'drop-seq', key: c.key, handle: 'drop', chip: true };
       }
     }
-    let best: { key: string; handle: Handle; dist: number } | null = null;
+    let best: { key: string; handle: SeqHandle; dist: number } | null = null;
     for (const s of seqsOf(d)) {
-      for (const h of HANDLES) {
+      for (const h of SEQ_HANDLES) {
         const ms = s[h];
         if (ms == null || ms < f.win.startMs || ms > f.win.endMs) continue;
         const dist = Math.abs(f.timeToX(ms) - x) - (h === 'drop' ? 0.5 : 0);

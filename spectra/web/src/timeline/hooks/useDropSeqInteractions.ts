@@ -1,8 +1,15 @@
 /** A hand on the drop-sequence layer (drop-detection plan, phase 4):
  * dragging a handle or its line, Shift-dragging the whole sequence, the
- * "＋ Add a drop" click, and the keyboard (C L D · ← → · Enter · Delete ·
- * N P · Ctrl+Z / Ctrl+Y · Escape). ../dropEdit.ts holds the arithmetic;
- * ./useDropEditor.ts does the saving.
+ * "＋ Add a drop" click, and the keyboard (C L D R · ← → · K · Enter ·
+ * Delete · N P · Ctrl+Z / Ctrl+Y · Escape). ../dropEdit.ts holds the
+ * arithmetic; ./useDropEditor.ts does the saving.
+ *
+ * THE PRE-DROP (predrop plan step 4) is dragged and stepped like the other
+ * handles, on its kind's own rail and inside its kind's lead range
+ * (../dropEdit.ts snapPreDrop / stepPreDrop / clampPreDrop) — on one of his
+ * own sequences too, where it is the only handle that moves (his key is
+ * "his:<drop id>"). R selects it; K switches its kind, the server refusing
+ * (with its own sentence) a kind its lead does not fit.
  *
  * SMOOTH BY CONSTRUCTION: a drag moves only a GHOST, kept in a ref the
  * canvas layer reads every frame — no React render per pointer move — and
@@ -19,10 +26,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FrameGeom } from '../canvas/TimelineCanvas';
 import type { DropLive, Hit } from '../canvas/frame';
-import { fmtHundredths, type DisplaySeq, type DropRails, type Handle } from '../dropSequences';
 import {
-  KEY_SAVE_IDLE_MS, addPlacement, changedHandles, clampHandle, dropKeyAction, editable,
-  shiftTimes, snapHandle, snapRadiusMs, stepHandle, timesOf, type HandleTimes,
+  fmtHundredths, type DisplaySeq, type DropRails, type PreDropKind, type SeqHandle,
+} from '../dropSequences';
+import {
+  KEY_SAVE_IDLE_MS, OTHER_PRE_DROP_KIND, addPlacement, changedHandles, clampBasis, clampHandle,
+  clampPreDrop, dropKeyAction, editable, editableHandle, ghostLanded, shiftTimes, snapHandle,
+  snapPreDrop, snapRadiusMs, stepHandle, stepPreDrop, timesOf, type HandleTimes, type SnapGuide,
 } from '../dropEdit';
 import type { DropEditor } from './useDropEditor';
 
@@ -31,12 +41,19 @@ const DRAG_SLOP_PX = 3;
 
 interface DragState {
   key: string;
-  handle: Handle;
+  handle: SeqHandle;
   whole: boolean;
   orig: HandleTimes;
   x0: number;
   moved: boolean;
+  /** the pre-drop's kind (it decides the rail and the lead range) */
+  preKind: PreDropKind | null;
+  /** a pre-drop he placed holds the drop back; an automatic one does not */
+  prePlaced: boolean;
 }
+
+/** A handle's name in an undo label ("pre_drop" reads "pre-drop"). */
+const word = (h: string) => h.replace('_', '-');
 
 /** Marks the parts of the page that keep a drop sequence's keyboard focus
  * when clicked (the graph, the strip, the toolbar, the review card). */
@@ -56,7 +73,7 @@ export function useDropSeqInteractions(opts: {
   const live = useRef<DropLive>({ ghost: null, guide: null, addAt: null });
   const drag = useRef<DragState | null>(null);
   const keyEdit = useRef<{ key: string; orig: HandleTimes; timer: ReturnType<typeof setTimeout> | null } | null>(null);
-  const [selHandle, setSelHandle] = useState<Handle>('drop');
+  const [selHandle, setSelHandle] = useState<SeqHandle>('drop');
   const [adding, setAddingState] = useState(false);
   const [focus, setFocus] = useState(false);
   const optsRef = useRef(opts);
@@ -70,9 +87,7 @@ export function useDropSeqInteractions(opts: {
     const g = live.current.ghost;
     if (g?.pending) {
       const s = byKey.get(g.key);
-      if (!s || (s.charge === g.times.charge && s.lull === g.times.lull && s.drop === g.times.drop)) {
-        live.current.ghost = null;
-      }
+      if (!s || ghostLanded(s, g)) live.current.ghost = null;
     }
   }, [byKey]);
 
@@ -82,7 +97,7 @@ export function useDropSeqInteractions(opts: {
     if (on) setFocus(true);
   }, []);
 
-  const select = useCallback((key: string | null, handle: Handle = 'drop') => {
+  const select = useCallback((key: string | null, handle: SeqHandle = 'drop') => {
     setSelectedKey(key);
     setSelHandle(handle);
     if (key) setFocus(true);
@@ -124,7 +139,7 @@ export function useDropSeqInteractions(opts: {
     const g = live.current.ghost;
     live.current.guide = null;
     if (g && g.key === k.key) {
-      const handles = Object.keys(changedHandles(k.orig, g.times)).join(' + ');
+      const handles = Object.keys(changedHandles(k.orig, g.times)).map(word).join(' + ');
       save(k.key, k.orig, g.times, `moved ${handles || 'handle'} (keys)`);
     }
   }, [save]);
@@ -133,22 +148,33 @@ export function useDropSeqInteractions(opts: {
 
   // ── the keyboard ────────────────────────────────────────────────────────
 
-  const step = useCallback((handle: Handle, dir: 1 | -1, nudge = false) => {
+  const step = useCallback((handle: SeqHandle, dir: 1 | -1, nudge = false) => {
     const s = selected;
-    if (!s || !editable(s)) return;
+    if (!s || !editableHandle(s, handle)) return;
     const times = currentTimes(s);
     const at = times[handle];
     if (at == null) return;
-    const g = stepHandle(handle, at, dir, rails, nudge);
-    if (!g) return;
-    const ms = clampHandle(times, handle, g.ms);
+    let g: SnapGuide | null;
+    let ms: number;
+    if (handle === 'pre_drop') {
+      const kind = s.preDrop?.kind;
+      if (!kind || times.drop == null) return;
+      g = stepPreDrop(kind, at, dir, rails, nudge);
+      if (!g) return;
+      ms = clampPreDrop(kind, times.drop, g.ms);
+    } else {
+      g = stepHandle(handle, at, dir, rails, nudge);
+      if (!g) return;
+      ms = clampHandle(clampBasis(times, !!s.preDrop?.moved), handle, g.ms);
+    }
+    const held = handle === 'pre_drop' ? 'held inside its lead range' : 'held by the gap';
     const next = { ...times, [handle]: ms };
     if (!keyEdit.current || keyEdit.current.key !== s.key) {
       flushKeyEdit();
       keyEdit.current = { key: s.key, orig: timesOf(s), timer: null };
     }
     live.current.ghost = { key: s.key, times: next };
-    live.current.guide = { ...g, ms, what: ms === g.ms ? g.what : `${g.what} (held by the gap)` };
+    live.current.guide = { ...g, ms, what: ms === g.ms ? g.what : `${g.what} (${held})` };
     setSelHandle(handle);
     if (keyEdit.current.timer) clearTimeout(keyEdit.current.timer);
     keyEdit.current.timer = setTimeout(flushKeyEdit, KEY_SAVE_IDLE_MS);
@@ -198,8 +224,21 @@ export function useDropSeqInteractions(opts: {
       setSelHandle(a.handle);
       return true;
     }
-    if (!editable(selected)) return a.kind === 'step';
-    if (a.kind === 'step') { step(selHandle, a.dir, a.nudge); return true; }
+    if (a.kind === 'step') {
+      if (editableHandle(selected, selHandle)) step(selHandle, a.dir, a.nudge);
+      return true;
+    }
+    if (a.kind === 'pre_drop_kind') {
+      // switch the pre-drop's kind (spike ⇄ vocal intro); the server says why
+      // when its lead does not fit the other kind
+      const p = selected.preDrop;
+      if (p && editableHandle(selected, 'pre_drop')) {
+        flushKeyEdit();
+        void editor.preDropKind(selected.key, OTHER_PRE_DROP_KIND[p.kind]);
+      }
+      return true;
+    }
+    if (!editable(selected)) return false;
     if (a.kind === 'confirm') {
       flushKeyEdit();
       if (selected.look === 'confident' || selected.look === 'suggested') void editor.confirm(selected.key, what(selected));
@@ -237,10 +276,11 @@ export function useDropSeqInteractions(opts: {
     flushKeyEdit();
     select(hit.key, hit.handle);
     const s = byKey.get(hit.key);
-    if (!hit.chip && s && editable(s)) {
+    if (!hit.chip && s && editableHandle(s, hit.handle)) {
       drag.current = {
-        key: s.key, handle: hit.handle, whole: ev.shiftKey, orig: timesOf(s),
-        x0: rel(ev).x, moved: false,
+        // only a sequence that is wholly his to move moves as a whole
+        key: s.key, handle: hit.handle, whole: ev.shiftKey && editable(s), orig: timesOf(s),
+        x0: rel(ev).x, moved: false, preKind: s.preDrop?.kind ?? null, prePlaced: !!s.preDrop?.moved,
       };
     }
     return true;
@@ -254,13 +294,21 @@ export function useDropSeqInteractions(opts: {
     d.moved = true;
     const ms = g.xToTime(Math.max(0, Math.min(g.w, x)));
     const radius = snapRadiusMs(g.w, g.win.startMs, g.win.endMs);
-    const guide = snapHandle(d.handle, ms, rails, radius, ev.altKey);
+    const pre = d.handle === 'pre_drop' ? d.preKind : null;
+    const guide = d.handle === 'pre_drop'
+      ? snapPreDrop(pre ?? 'spike', ms, rails, radius, ev.altKey)
+      : snapHandle(d.handle, ms, rails, radius, ev.altKey);
     let times: HandleTimes;
     let shown = guide;
     if (d.whole) {
       times = shiftTimes(d.orig, guide.ms - (d.orig[d.handle] ?? guide.ms));
+    } else if (d.handle === 'pre_drop') {
+      if (!pre || d.orig.drop == null) return true;
+      const v = clampPreDrop(pre, d.orig.drop, guide.ms);
+      times = { ...d.orig, pre_drop: v };
+      if (v !== guide.ms) shown = { ...guide, ms: v, what: `${guide.what} (held inside its lead range)` };
     } else {
-      const v = clampHandle(d.orig, d.handle, guide.ms);
+      const v = clampHandle(clampBasis(d.orig, d.prePlaced), d.handle, guide.ms);
       times = { ...d.orig, [d.handle]: v };
       if (v !== guide.ms) shown = { ...guide, ms: v, what: `${guide.what} (held by the gap)` };
     }
@@ -279,7 +327,7 @@ export function useDropSeqInteractions(opts: {
       if (g && g.key === d.key && !g.pending) live.current.ghost = null;
       return true;
     }
-    const label = d.whole ? 'moved the whole sequence' : `moved ${d.handle}`;
+    const label = d.whole ? 'moved the whole sequence' : `moved ${word(d.handle)}`;
     save(d.key, d.orig, g.times, label);
     return true;
   }, [save]);
@@ -293,7 +341,7 @@ export function useDropSeqInteractions(opts: {
     if (hit?.kind !== 'drop-seq') return undefined;
     if (hit.chip) return 'pointer';
     const s = byKey.get(hit.key);
-    return s && editable(s) ? 'ew-resize' : 'pointer';
+    return s && editableHandle(s, hit.handle) ? 'ew-resize' : 'pointer';
   }, [adding, byKey]);
 
   const onDoubleHit = useCallback((hit: Hit): boolean => {
