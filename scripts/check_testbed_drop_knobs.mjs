@@ -48,6 +48,10 @@ ok(k.dropKnobsRelevant([{ engine: 'drops', kind: 'lull' }, null]), 'a drops lane
 ok(k.dropKnobsRelevant([{ engine: 'librosa', kind: 'beat' }, { engine: 'drops', kind: 'drop' }]),
   'a drops lane in slot B shows them');
 ok(!k.dropKnobsRelevant([{ engine: 'edges', kind: 'bass_up' }, null]), 'no drops lane, no sliders');
+ok(k.dropKnobsRelevant([{ engine: 'predrops', kind: 'pre_drop' }, null]),
+  'a pre-drops lane shows them too: the same thresholds pick the drops it reads before');
+ok(!k.isDropKind('pre_drop') && !k.isDropKind('spike'),
+  'a pre-drop kind is not scored at one beat like a drop');
 ok(k.isDropKind('drop_confident') && k.isDropKind('charge') && !k.isDropKind('beat'),
   'drop kinds are recognised, others are not');
 

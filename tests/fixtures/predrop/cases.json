@@ -1,0 +1,2049 @@
+{
+ "cut": {
+  "before_ms": 6500,
+  "after_beats": 4.0,
+  "after_pad_ms": 200
+ },
+ "cases": [
+  {
+   "id": "c0",
+   "uri": "spotify:track:04x1x0L8BYyIv1XlcJxWfi",
+   "title": "Lo Siento BB:/",
+   "drop_ms": 119082,
+   "set": "detected",
+   "beat_len": 348.2904742555291,
+   "ceilings": {
+    "low": 0.12069982290267944,
+    "mid": 0.013886851258575916,
+    "high": 0.0030465880408883095
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.36366020179699277,
+     "ms": 117306,
+     "lead": 1776
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.071650411107185,
+     "ms": 118548,
+     "lead": 534
+    },
+    "pre_drop": {
+     "ms": 118548,
+     "kind": "intro",
+     "lead_ms": 534,
+     "score": 1.072,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c1",
+   "uri": "spotify:track:13i1xqfyIJrM451izr3M01",
+   "title": "Koto",
+   "drop_ms": 185026,
+   "set": "random",
+   "beat_len": 603.7432078889112,
+   "ceilings": {
+    "low": 0.14872069492936138,
+    "mid": 0.02553472709842028,
+    "high": 0.005613669529557233
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.25471252765018,
+     "ms": 184485,
+     "lead": 541
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.40981574979407953,
+     "ms": 181048,
+     "lead": 3978
+    },
+    "pre_drop": {
+     "ms": 184485,
+     "kind": "spike",
+     "lead_ms": 541,
+     "score": 1.255,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c2",
+   "uri": "spotify:track:14QaXYIK3K3QPtezqxRRPN",
+   "title": "PIToRRO DE COCO",
+   "drop_ms": 107523,
+   "set": "detected",
+   "beat_len": 615.3215054866167,
+   "ceilings": {
+    "low": 0.09839390624314562,
+    "mid": 0.019547009272500873,
+    "high": 0.0026663846266455965
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.6370248102123526,
+     "ms": 106657,
+     "lead": 866
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.0649082447281824,
+     "ms": 106518,
+     "lead": 1005
+    },
+    "pre_drop": {
+     "ms": 106518,
+     "kind": "intro",
+     "lead_ms": 1005,
+     "score": 1.065,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c3",
+   "uri": "spotify:track:15A9Anb6bHQNiwhk9VAnC4",
+   "title": "Space",
+   "drop_ms": 22671,
+   "set": "random",
+   "beat_len": 510.85568326947634,
+   "ceilings": {
+    "low": 0.12296261619776494,
+    "mid": 0.020759032061323558,
+    "high": 0.0039074715226888705
+   },
+   "expect": {
+    "spike": {
+     "status": "none",
+     "score": 0.0,
+     "ms": null,
+     "lead": null
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.2124940568040872,
+     "ms": 18540,
+     "lead": 4131
+    },
+    "pre_drop": {
+     "ms": 18540,
+     "kind": "intro",
+     "lead_ms": 4131,
+     "score": 1.212,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c4",
+   "uri": "spotify:track:1YLJVmuzeM2YSUkCCaTNUB",
+   "title": "Dog Days Are Over",
+   "drop_ms": 188811,
+   "set": "detected",
+   "beat_len": 801.0680907877169,
+   "ceilings": {
+    "low": 0.09503514610230922,
+    "mid": 0.014987274636514478,
+    "high": 0.00303894774406217
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.5370885123306108,
+     "ms": 188404,
+     "lead": 407
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.3917591153089302,
+     "ms": 188300,
+     "lead": 511
+    },
+    "pre_drop": {
+     "ms": 188300,
+     "kind": "intro",
+     "lead_ms": 511,
+     "score": 1.392,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c5",
+   "uri": "spotify:track:1iLbUmb2b2btyAAcQ68a1p",
+   "title": "Milo J: Bzrp Music Sessions, Vol. 57/66",
+   "drop_ms": 165077,
+   "set": "detected",
+   "beat_len": 487.60666395774075,
+   "ceilings": {
+    "low": 0.1708300361037253,
+    "mid": 0.0257308132201433,
+    "high": 0.0038703823182731807
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.034193218591672,
+     "ms": 164078,
+     "lead": 999
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.42856173444156626,
+     "ms": 160753,
+     "lead": 4324
+    },
+    "pre_drop": {
+     "ms": 164078,
+     "kind": "spike",
+     "lead_ms": 999,
+     "score": 1.034,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c6",
+   "uri": "spotify:track:1khmgu0pveJbkbpbkyvcQv",
+   "title": "La Romana",
+   "drop_ms": 147507,
+   "set": "detected",
+   "beat_len": 383.1172977459932,
+   "ceilings": {
+    "low": 0.15964602500200273,
+    "mid": 0.02212396739982069,
+    "high": 0.004767266735434532
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.3191519228507411,
+     "ms": 146961,
+     "lead": 546
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.1508741650244312,
+     "ms": 143466,
+     "lead": 4041
+    },
+    "pre_drop": {
+     "ms": 143466,
+     "kind": "intro",
+     "lead_ms": 4041,
+     "score": 1.151,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c7",
+   "uri": "spotify:track:1khmgu0pveJbkbpbkyvcQv",
+   "title": "La Romana",
+   "drop_ms": 253276,
+   "set": "detected",
+   "beat_len": 383.1172977459932,
+   "ceilings": {
+    "low": 0.15964602500200273,
+    "mid": 0.02212396739982069,
+    "high": 0.004767266735434532
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.39319372939291786,
+     "ms": 252069,
+     "lead": 1207
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.293103448275862,
+     "ms": 250733,
+     "lead": 2543
+    },
+    "pre_drop": {
+     "ms": 250733,
+     "kind": "intro",
+     "lead_ms": 2543,
+     "score": 1.293,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c8",
+   "uri": "spotify:track:1zp23gHCrilG1NGfmjMy0f",
+   "title": "Ponle Dembow",
+   "drop_ms": 51065,
+   "set": "approved",
+   "beat_len": 464.3962848297214,
+   "ceilings": {
+    "low": 0.1509382247924805,
+    "mid": 0.02354309353977442,
+    "high": 0.00330670262221247
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.0,
+     "ms": 49718,
+     "lead": 1347
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.0572955627015073,
+     "ms": 50113,
+     "lead": 952
+    },
+    "pre_drop": {
+     "ms": 50113,
+     "kind": "intro",
+     "lead_ms": 952,
+     "score": 1.057,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c9",
+   "uri": "spotify:track:1zp23gHCrilG1NGfmjMy0f",
+   "title": "Ponle Dembow",
+   "drop_ms": 112316,
+   "set": "detected",
+   "beat_len": 464.3962848297214,
+   "ceilings": {
+    "low": 0.1509382247924805,
+    "mid": 0.02354309353977442,
+    "high": 0.00330670262221247
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.0,
+     "ms": 111375,
+     "lead": 941
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.4595549234400855,
+     "ms": 111364,
+     "lead": 952
+    },
+    "pre_drop": {
+     "ms": 111364,
+     "kind": "intro",
+     "lead_ms": 952,
+     "score": 1.46,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c10",
+   "uri": "spotify:track:1zp23gHCrilG1NGfmjMy0f",
+   "title": "Ponle Dembow",
+   "drop_ms": 121695,
+   "set": "approved",
+   "beat_len": 464.3962848297214,
+   "ceilings": {
+    "low": 0.1509382247924805,
+    "mid": 0.02354309353977442,
+    "high": 0.00330670262221247
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.2207655451321433,
+     "ms": 120809,
+     "lead": 886
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.7276399832274704,
+     "ms": 121220,
+     "lead": 475
+    },
+    "pre_drop": {
+     "ms": 120809,
+     "kind": "spike",
+     "lead_ms": 886,
+     "score": 1.221,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c11",
+   "uri": "spotify:track:2DEZmgHKAvm41k4J3R2E9Y",
+   "title": "Safaera",
+   "drop_ms": 17056,
+   "set": "detected",
+   "beat_len": 626.9592476489028,
+   "ceilings": {
+    "low": 0.14336701884865763,
+    "mid": 0.01914870389737189,
+    "high": 0.004489889412652705
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.0891493915831834,
+     "ms": 16568,
+     "lead": 488
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.447981676428276,
+     "ms": 16127,
+     "lead": 929
+    },
+    "pre_drop": {
+     "ms": 16568,
+     "kind": "spike",
+     "lead_ms": 488,
+     "score": 1.089,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c12",
+   "uri": "spotify:track:2DEZmgHKAvm41k4J3R2E9Y",
+   "title": "Safaera",
+   "drop_ms": 245465,
+   "set": "detected",
+   "beat_len": 626.9592476489028,
+   "ceilings": {
+    "low": 0.14336701884865763,
+    "mid": 0.01914870389737189,
+    "high": 0.004489889412652705
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.1193964171233759,
+     "ms": 244884,
+     "lead": 581
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.210437809717095,
+     "ms": 244455,
+     "lead": 1010
+    },
+    "pre_drop": {
+     "ms": 244455,
+     "kind": "intro",
+     "lead_ms": 1010,
+     "score": 1.21,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c13",
+   "uri": "spotify:track:2DNXgvkyv35vTWvdgjs7qn",
+   "title": "Someone New",
+   "drop_ms": 135840,
+   "set": "detected",
+   "beat_len": 650.1246072163831,
+   "ceilings": {
+    "low": 0.09508698567748039,
+    "mid": 0.01844110473990439,
+    "high": 0.0019614212517626507
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.3906990137110164,
+     "ms": 135411,
+     "lead": 429
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.1999027677092393,
+     "ms": 135097,
+     "lead": 743
+    },
+    "pre_drop": {
+     "ms": 135097,
+     "kind": "intro",
+     "lead_ms": 743,
+     "score": 1.2,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c14",
+   "uri": "spotify:track:2Fy9W90SBb9wuAJDBdESNs",
+   "title": "Wagon Wheel",
+   "drop_ms": 39370,
+   "set": "detected",
+   "beat_len": 394.7368421052632,
+   "ceilings": {
+    "low": 0.09942629046738148,
+    "mid": 0.016900738682597876,
+    "high": 0.002768656413536519
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.4072988079737638,
+     "ms": 38697,
+     "lead": 673
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.8399792138999752,
+     "ms": 38824,
+     "lead": 546
+    },
+    "pre_drop": {
+     "ms": 38697,
+     "kind": "spike",
+     "lead_ms": 673,
+     "score": 1.407,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c15",
+   "uri": "spotify:track:2XIc1pqjXV3Cr2BQUGNBck",
+   "title": "LA NOCHE DE ANOCHE",
+   "drop_ms": 41897,
+   "set": "detected",
+   "beat_len": 545.6529647144416,
+   "ceilings": {
+    "low": 0.1392832949757576,
+    "mid": 0.022755051776766764,
+    "high": 0.0032076735398732124
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.1584913120272808,
+     "ms": 41502,
+     "lead": 395
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.5991467536943943,
+     "ms": 41491,
+     "lead": 406
+    },
+    "pre_drop": {
+     "ms": 41502,
+     "kind": "spike",
+     "lead_ms": 395,
+     "score": 1.158,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c16",
+   "uri": "spotify:track:2XIc1pqjXV3Cr2BQUGNBck",
+   "title": "LA NOCHE DE ANOCHE",
+   "drop_ms": 135555,
+   "set": "detected",
+   "beat_len": 545.6529647144416,
+   "ceilings": {
+    "low": 0.1392832949757576,
+    "mid": 0.022755051776766764,
+    "high": 0.0032076735398732124
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.25682624174762,
+     "ms": 135183,
+     "lead": 372
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.9295873463875651,
+     "ms": 135172,
+     "lead": 383
+    },
+    "pre_drop": {
+     "ms": 135183,
+     "kind": "spike",
+     "lead_ms": 372,
+     "score": 1.257,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c17",
+   "uri": "spotify:track:2sTDlCxmuZCTDKKk9f1qus",
+   "title": "WHERE SHE GOES",
+   "drop_ms": 189610,
+   "set": "detected",
+   "beat_len": 417.97283176593515,
+   "ceilings": {
+    "low": 0.10816855169832712,
+    "mid": 0.018483425630256553,
+    "high": 0.0017553575336933139
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.45075673718983017,
+     "ms": 189174,
+     "lead": 436
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.1368813318511,
+     "ms": 189174,
+     "lead": 436
+    },
+    "pre_drop": {
+     "ms": 189174,
+     "kind": "intro",
+     "lead_ms": 436,
+     "score": 1.137,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c18",
+   "uri": "spotify:track:2zgRRcBuseLg2AJMPhvD7l",
+   "title": "Long Distance Runaround - 2024 Steven Wilson Remix",
+   "drop_ms": 102560,
+   "set": "random",
+   "beat_len": 325.079915479222,
+   "ceilings": {
+    "low": 0.1087863406538955,
+    "mid": 0.017123089060187304,
+    "high": 0.0032827965170144965
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.0389716068601555,
+     "ms": 100901,
+     "lead": 1659
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.5201252572083949,
+     "ms": 99299,
+     "lead": 3261
+    },
+    "pre_drop": {
+     "ms": 100901,
+     "kind": "spike",
+     "lead_ms": 1659,
+     "score": 1.039,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c19",
+   "uri": "spotify:track:3E8WZzcp6nscGt9YvBX9MW",
+   "title": "Eyes Cut Deeper (feat. In\u00e9z)",
+   "drop_ms": 70350,
+   "set": "approved",
+   "beat_len": 383.1172977459932,
+   "ceilings": {
+    "low": 0.11898402031511068,
+    "mid": 0.022954351035878062,
+    "high": 0.004880918015260249
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.153847389793973,
+     "ms": 69537,
+     "lead": 813
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.4552180441561051,
+     "ms": 69560,
+     "lead": 790
+    },
+    "pre_drop": {
+     "ms": 69537,
+     "kind": "spike",
+     "lead_ms": 813,
+     "score": 1.154,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c20",
+   "uri": "spotify:track:3E8WZzcp6nscGt9YvBX9MW",
+   "title": "Eyes Cut Deeper (feat. In\u00e9z)",
+   "drop_ms": 150865,
+   "set": "approved",
+   "beat_len": 383.1172977459932,
+   "ceilings": {
+    "low": 0.11898402031511068,
+    "mid": 0.022954351035878062,
+    "high": 0.004880918015260249
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.176991141133336,
+     "ms": 150064,
+     "lead": 801
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.5657327021165163,
+     "ms": 149867,
+     "lead": 998
+    },
+    "pre_drop": {
+     "ms": 150064,
+     "kind": "spike",
+     "lead_ms": 801,
+     "score": 1.177,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c21",
+   "uri": "spotify:track:3NhstUmrlhaN1M6hP8zMbb",
+   "title": "BABY NUEVA",
+   "drop_ms": 50282,
+   "set": "random",
+   "beat_len": 510.85568326947634,
+   "ceilings": {
+    "low": 0.1663158233463764,
+    "mid": 0.02434636089950799,
+    "high": 0.005989123857580125
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.0470391190994293,
+     "ms": 48810,
+     "lead": 1472
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.4047791587111387,
+     "ms": 48880,
+     "lead": 1402
+    },
+    "pre_drop": {
+     "ms": 48810,
+     "kind": "spike",
+     "lead_ms": 1472,
+     "score": 1.047,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c22",
+   "uri": "spotify:track:3NhstUmrlhaN1M6hP8zMbb",
+   "title": "BABY NUEVA",
+   "drop_ms": 123518,
+   "set": "random",
+   "beat_len": 510.85568326947634,
+   "ceilings": {
+    "low": 0.1663158233463764,
+    "mid": 0.02434636089950799,
+    "high": 0.005989123857580125
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.2957570996145304,
+     "ms": 122371,
+     "lead": 1147
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.4874089533922638,
+     "ms": 122847,
+     "lead": 671
+    },
+    "pre_drop": {
+     "ms": 122371,
+     "kind": "spike",
+     "lead_ms": 1147,
+     "score": 1.296,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c23",
+   "uri": "spotify:track:3NhstUmrlhaN1M6hP8zMbb",
+   "title": "BABY NUEVA",
+   "drop_ms": 164176,
+   "set": "random",
+   "beat_len": 510.85568326947634,
+   "ceilings": {
+    "low": 0.1663158233463764,
+    "mid": 0.02434636089950799,
+    "high": 0.005989123857580125
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.15324345585467,
+     "ms": 162704,
+     "lead": 1472
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.35789502596684336,
+     "ms": 162762,
+     "lead": 1414
+    },
+    "pre_drop": {
+     "ms": 162704,
+     "kind": "spike",
+     "lead_ms": 1472,
+     "score": 1.153,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c24",
+   "uri": "spotify:track:3NhstUmrlhaN1M6hP8zMbb",
+   "title": "BABY NUEVA",
+   "drop_ms": 221021,
+   "set": "approved",
+   "beat_len": 510.85568326947634,
+   "ceilings": {
+    "low": 0.1663158233463764,
+    "mid": 0.02434636089950799,
+    "high": 0.005989123857580125
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.19120468678559543,
+     "ms": 219965,
+     "lead": 1056
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.1492052266880395,
+     "ms": 219965,
+     "lead": 1056
+    },
+    "pre_drop": {
+     "ms": 219965,
+     "kind": "intro",
+     "lead_ms": 1056,
+     "score": 1.149,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c25",
+   "uri": "spotify:track:3nNmRE0DxHC6ZaKkrpUumS",
+   "title": "FINA",
+   "drop_ms": 84943,
+   "set": "approved",
+   "beat_len": 476.0015866719556,
+   "ceilings": {
+    "low": 0.1277332609891891,
+    "mid": 0.014918068107217549,
+    "high": 0.004893873250111937
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.2524172342746882,
+     "ms": 84536,
+     "lead": 407
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.3823962993345553,
+     "ms": 80870,
+     "lead": 4073
+    },
+    "pre_drop": {
+     "ms": 84536,
+     "kind": "spike",
+     "lead_ms": 407,
+     "score": 1.252,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c26",
+   "uri": "spotify:track:3nNmRE0DxHC6ZaKkrpUumS",
+   "title": "FINA",
+   "drop_ms": 158208,
+   "set": "detected",
+   "beat_len": 476.0015866719556,
+   "ceilings": {
+    "low": 0.1277332609891891,
+    "mid": 0.014918068107217549,
+    "high": 0.004893873250111937
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.10980061463717,
+     "ms": 157570,
+     "lead": 638
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.0116749226193242,
+     "ms": 157570,
+     "lead": 638
+    },
+    "pre_drop": {
+     "ms": 157570,
+     "kind": "spike",
+     "lead_ms": 638,
+     "score": 1.11,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c27",
+   "uri": "spotify:track:4Jc7252S1P99DjQ1lNGEOc",
+   "title": "CYBERTRUCK",
+   "drop_ms": 16590,
+   "set": "random",
+   "beat_len": 394.7368421052632,
+   "ceilings": {
+    "low": 0.16592177167534827,
+    "mid": 0.026345451753586494,
+    "high": 0.0032412967330310485
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.1604322062995087,
+     "ms": 14645,
+     "lead": 1945
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.7137063827281183,
+     "ms": 16201,
+     "lead": 389
+    },
+    "pre_drop": {
+     "ms": 14645,
+     "kind": "spike",
+     "lead_ms": 1945,
+     "score": 1.16,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c28",
+   "uri": "spotify:track:4Jc7252S1P99DjQ1lNGEOc",
+   "title": "CYBERTRUCK",
+   "drop_ms": 131105,
+   "set": "approved",
+   "beat_len": 394.7368421052632,
+   "ceilings": {
+    "low": 0.16592177167534827,
+    "mid": 0.026345451753586494,
+    "high": 0.0032412967330310485
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.536845800951122,
+     "ms": 130710,
+     "lead": 395
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.0353656590079887,
+     "ms": 129131,
+     "lead": 1974
+    },
+    "pre_drop": {
+     "ms": 129131,
+     "kind": "intro",
+     "lead_ms": 1974,
+     "score": 1.035,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c29",
+   "uri": "spotify:track:4MUMWxe9088SuTFKpprQ57",
+   "title": "Low (LUNAX Remix)",
+   "drop_ms": 57100,
+   "set": "approved",
+   "beat_len": 429.5840194744756,
+   "ceilings": {
+    "low": 0.1286168098449707,
+    "mid": 0.019720204174518585,
+    "high": 0.003298708936199546
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.0981345994251352,
+     "ms": 56389,
+     "lead": 711
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.5280085357743657,
+     "ms": 55948,
+     "lead": 1152
+    },
+    "pre_drop": {
+     "ms": 56389,
+     "kind": "spike",
+     "lead_ms": 711,
+     "score": 1.098,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c30",
+   "uri": "spotify:track:4MUMWxe9088SuTFKpprQ57",
+   "title": "Low (LUNAX Remix)",
+   "drop_ms": 130100,
+   "set": "approved",
+   "beat_len": 429.5840194744756,
+   "ceilings": {
+    "low": 0.1286168098449707,
+    "mid": 0.019720204174518585,
+    "high": 0.003298708936199546
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.1341195469565426,
+     "ms": 129428,
+     "lead": 672
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.5530866691438151,
+     "ms": 129579,
+     "lead": 521
+    },
+    "pre_drop": {
+     "ms": 129428,
+     "kind": "spike",
+     "lead_ms": 672,
+     "score": 1.134,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c31",
+   "uri": "spotify:track:4MjDJD8cW7iVeWInc2Bdyj",
+   "title": "MONACO",
+   "drop_ms": 172816,
+   "set": "detected",
+   "beat_len": 429.5840194744756,
+   "ceilings": {
+    "low": 0.2114348557591438,
+    "mid": 0.020655214414000474,
+    "high": 0.005465233942959419
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.3531173843853046,
+     "ms": 170877,
+     "lead": 1939
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.0303804961661123,
+     "ms": 172341,
+     "lead": 475
+    },
+    "pre_drop": {
+     "ms": 172341,
+     "kind": "intro",
+     "lead_ms": 475,
+     "score": 1.03,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c32",
+   "uri": "spotify:track:4UEuIEv9Wc3wtiWUplGJ7q",
+   "title": "Ser Bichote",
+   "drop_ms": 138648,
+   "set": "detected",
+   "beat_len": 580.4953560371517,
+   "ceilings": {
+    "low": 0.09467128582298759,
+    "mid": 0.011432434897869832,
+    "high": 0.0021385835949331564
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.11798064219460169,
+     "ms": 138067,
+     "lead": 581
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.3217753598705015,
+     "ms": 136953,
+     "lead": 1695
+    },
+    "pre_drop": {
+     "ms": 136953,
+     "kind": "intro",
+     "lead_ms": 1695,
+     "score": 1.322,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c33",
+   "uri": "spotify:track:4WuAr5SE1ZfXxu6OWtykkG",
+   "title": "Save Me Tonight",
+   "drop_ms": 94795,
+   "set": "random",
+   "beat_len": 476.0015866719556,
+   "ceilings": {
+    "low": 0.0791583128273482,
+    "mid": 0.01691857227124273,
+    "high": 0.0026652247062884226
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.042191975434118,
+     "ms": 94325,
+     "lead": 470
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.4176626948815258,
+     "ms": 91736,
+     "lead": 3059
+    },
+    "pre_drop": {
+     "ms": 94325,
+     "kind": "spike",
+     "lead_ms": 470,
+     "score": 1.042,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c34",
+   "uri": "spotify:track:4b2rlKIqyLxpxoIaG7sZ5K",
+   "title": "Save Me",
+   "drop_ms": 130157,
+   "set": "detected",
+   "beat_len": 476.0015866719556,
+   "ceilings": {
+    "low": 0.15433679342269896,
+    "mid": 0.020224631382152417,
+    "high": 0.004084840705618248
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.9455158920297682,
+     "ms": 129669,
+     "lead": 488
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.1139522467205065,
+     "ms": 129681,
+     "lead": 476
+    },
+    "pre_drop": {
+     "ms": 129681,
+     "kind": "intro",
+     "lead_ms": 476,
+     "score": 1.114,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c35",
+   "uri": "spotify:track:4kvCtReby19JPkePLwy8Pq",
+   "title": "Ode To Bourbon",
+   "drop_ms": 194209,
+   "set": "detected",
+   "beat_len": 359.9064243296743,
+   "ceilings": {
+    "low": 0.09133267048746335,
+    "mid": 0.019547364544123404,
+    "high": 0.0022578921145759495
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.5058725719996817,
+     "ms": 193466,
+     "lead": 743
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.3295701852649673,
+     "ms": 189948,
+     "lead": 4261
+    },
+    "pre_drop": {
+     "ms": 189948,
+     "kind": "intro",
+     "lead_ms": 4261,
+     "score": 1.33,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c36",
+   "uri": "spotify:track:4qhrMsB4w2pHYB3BhX5WPr",
+   "title": "Winny",
+   "drop_ms": 216954,
+   "set": "approved",
+   "beat_len": 429.5840194744756,
+   "ceilings": {
+    "low": 0.1654363179206848,
+    "mid": 0.023475972190499354,
+    "high": 0.005101622231304651
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.1582399643901857,
+     "ms": 216304,
+     "lead": 650
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.42416614492116206,
+     "ms": 216049,
+     "lead": 905
+    },
+    "pre_drop": {
+     "ms": 216304,
+     "kind": "spike",
+     "lead_ms": 650,
+     "score": 1.158,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c37",
+   "uri": "spotify:track:4uP3pUP18ennmz0tb3GphR",
+   "title": "Solo de Mi",
+   "drop_ms": 98070,
+   "set": "random",
+   "beat_len": 336.68144324112,
+   "ceilings": {
+    "low": 0.10251729834824795,
+    "mid": 0.019916777005419134,
+    "high": 0.002426960325101384
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.0090763514046253,
+     "ms": 97589,
+     "lead": 481
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.5039146562536835,
+     "ms": 96602,
+     "lead": 1468
+    },
+    "pre_drop": {
+     "ms": 97589,
+     "kind": "spike",
+     "lead_ms": 481,
+     "score": 1.009,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c38",
+   "uri": "spotify:track:5Ov5I7MxKWWM1AkCMUHqMa",
+   "title": "on fire",
+   "drop_ms": 101693,
+   "set": "approved",
+   "beat_len": 417.97283176593515,
+   "ceilings": {
+    "low": 0.13095756679773338,
+    "mid": 0.01655066221021116,
+    "high": 0.004951833658851683
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.36310058852552773,
+     "ms": 100903,
+     "lead": 790
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.293103448275862,
+     "ms": 100253,
+     "lead": 1440
+    },
+    "pre_drop": {
+     "ms": 100253,
+     "kind": "intro",
+     "lead_ms": 1440,
+     "score": 1.293,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c39",
+   "uri": "spotify:track:5VQpJ2AY2iMzrRZKgcvNjh",
+   "title": "Tenemos Que Hablar",
+   "drop_ms": 162997,
+   "set": "random",
+   "beat_len": 406.33888663145063,
+   "ceilings": {
+    "low": 0.09093000955879695,
+    "mid": 0.013225077749229968,
+    "high": 0.0028368582285475015
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.7500007643830267,
+     "ms": 162234,
+     "lead": 763
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.0017546926117842,
+     "ms": 159169,
+     "lead": 3828
+    },
+    "pre_drop": {
+     "ms": 159169,
+     "kind": "intro",
+     "lead_ms": 3828,
+     "score": 1.002,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c40",
+   "uri": "spotify:track:5XqCz18k96K8tx6DAYM97i",
+   "title": "PA' ROMPERLA",
+   "drop_ms": 117195,
+   "set": "random",
+   "beat_len": 638.5696040868455,
+   "ceilings": {
+    "low": 0.17720911741256745,
+    "mid": 0.019266301039606335,
+    "high": 0.005938419476151486
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.424286192559322,
+     "ms": 115802,
+     "lead": 1393
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.4434145096990494,
+     "ms": 114824,
+     "lead": 2371
+    },
+    "pre_drop": {
+     "ms": 115802,
+     "kind": "spike",
+     "lead_ms": 1393,
+     "score": 1.424,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c41",
+   "uri": "spotify:track:5fROvzNghPid8mbKNDYvpJ",
+   "title": "YO VISTO AS\u00cd",
+   "drop_ms": 72978,
+   "set": "detected",
+   "beat_len": 487.60666395774075,
+   "ceilings": {
+    "low": 0.15293612629175188,
+    "mid": 0.017386106718331577,
+    "high": 0.004199929377064109
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.1991417167199474,
+     "ms": 71029,
+     "lead": 1949
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.042065561918455,
+     "ms": 72358,
+     "lead": 620
+    },
+    "pre_drop": {
+     "ms": 72358,
+     "kind": "intro",
+     "lead_ms": 620,
+     "score": 1.042,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c42",
+   "uri": "spotify:track:5fROvzNghPid8mbKNDYvpJ",
+   "title": "YO VISTO AS\u00cd",
+   "drop_ms": 76162,
+   "set": "detected",
+   "beat_len": 487.60666395774075,
+   "ceilings": {
+    "low": 0.15293612629175188,
+    "mid": 0.017386106718331577,
+    "high": 0.004199929377064109
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.2559706913695,
+     "ms": 75773,
+     "lead": 389
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.02941883461392,
+     "ms": 72358,
+     "lead": 3804
+    },
+    "pre_drop": {
+     "ms": 72358,
+     "kind": "intro",
+     "lead_ms": 3804,
+     "score": 1.029,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c43",
+   "uri": "spotify:track:5q7AR3TkyCxlgxAjBMu4yL",
+   "title": "Therapy",
+   "drop_ms": 152317,
+   "set": "approved",
+   "beat_len": 603.7432078889112,
+   "ceilings": {
+    "low": 0.14502872824668883,
+    "mid": 0.014406405882909886,
+    "high": 0.0034049444645643232
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.5786359202083238,
+     "ms": 151791,
+     "lead": 526
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.1130366124764255,
+     "ms": 151930,
+     "lead": 387
+    },
+    "pre_drop": {
+     "ms": 151930,
+     "kind": "intro",
+     "lead_ms": 387,
+     "score": 1.113,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c44",
+   "uri": "spotify:track:5zF4cNLGhft49YhUZmDQqL",
+   "title": "Firework - Melad Remix",
+   "drop_ms": 34005,
+   "set": "random",
+   "beat_len": 499.20958482402864,
+   "ceilings": {
+    "low": 0.10893649049103259,
+    "mid": 0.01706298569217324,
+    "high": 0.002708362727425991
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.2772091825730298,
+     "ms": 33376,
+     "lead": 629
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.44189484785379834,
+     "ms": 33527,
+     "lead": 478
+    },
+    "pre_drop": {
+     "ms": 33376,
+     "kind": "spike",
+     "lead_ms": 629,
+     "score": 1.277,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c45",
+   "uri": "spotify:track:5zF4cNLGhft49YhUZmDQqL",
+   "title": "Firework - Melad Remix",
+   "drop_ms": 50070,
+   "set": "approved",
+   "beat_len": 499.20958482402864,
+   "ceilings": {
+    "low": 0.10893649049103259,
+    "mid": 0.01706298569217324,
+    "high": 0.002708362727425991
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.1461017903466832,
+     "ms": 49514,
+     "lead": 556
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.38561604487853635,
+     "ms": 46089,
+     "lead": 3981
+    },
+    "pre_drop": {
+     "ms": 49514,
+     "kind": "spike",
+     "lead_ms": 556,
+     "score": 1.146,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c46",
+   "uri": "spotify:track:6C1RD7YQVvt3YQj0CmuTeu",
+   "title": "Diles",
+   "drop_ms": 133909,
+   "set": "random",
+   "beat_len": 510.85568326947634,
+   "ceilings": {
+    "low": 0.14125175118446343,
+    "mid": 0.01955131649971008,
+    "high": 0.005398656688630565
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.2157786705273592,
+     "ms": 132407,
+     "lead": 1502
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.40615517111168087,
+     "ms": 132663,
+     "lead": 1246
+    },
+    "pre_drop": {
+     "ms": 132407,
+     "kind": "spike",
+     "lead_ms": 1502,
+     "score": 1.216,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c47",
+   "uri": "spotify:track:6C1RD7YQVvt3YQj0CmuTeu",
+   "title": "Diles",
+   "drop_ms": 166417,
+   "set": "random",
+   "beat_len": 510.85568326947634,
+   "ceilings": {
+    "low": 0.14125175118446343,
+    "mid": 0.01955131649971008,
+    "high": 0.005398656688630565
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.3585393686654852,
+     "ms": 165310,
+     "lead": 1107
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.6161185493682436,
+     "ms": 164718,
+     "lead": 1699
+    },
+    "pre_drop": {
+     "ms": 165310,
+     "kind": "spike",
+     "lead_ms": 1107,
+     "score": 1.359,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c48",
+   "uri": "spotify:track:6C1RD7YQVvt3YQj0CmuTeu",
+   "title": "Diles",
+   "drop_ms": 192377,
+   "set": "random",
+   "beat_len": 510.85568326947634,
+   "ceilings": {
+    "low": 0.14125175118446343,
+    "mid": 0.01955131649971008,
+    "high": 0.005398656688630565
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.0069902501605679,
+     "ms": 191746,
+     "lead": 631
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.49569972075618124,
+     "ms": 191189,
+     "lead": 1188
+    },
+    "pre_drop": {
+     "ms": 191746,
+     "kind": "spike",
+     "lead_ms": 631,
+     "score": 1.007,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c49",
+   "uri": "spotify:track:6C1RD7YQVvt3YQj0CmuTeu",
+   "title": "Diles",
+   "drop_ms": 216769,
+   "set": "random",
+   "beat_len": 510.85568326947634,
+   "ceilings": {
+    "low": 0.14125175118446343,
+    "mid": 0.01955131649971008,
+    "high": 0.005398656688630565
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.0250507844403138,
+     "ms": 216173,
+     "lead": 596
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.39529733021508057,
+     "ms": 216173,
+     "lead": 596
+    },
+    "pre_drop": {
+     "ms": 216173,
+     "kind": "spike",
+     "lead_ms": 596,
+     "score": 1.025,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c50",
+   "uri": "spotify:track:6C1RD7YQVvt3YQj0CmuTeu",
+   "title": "Diles",
+   "drop_ms": 249312,
+   "set": "random",
+   "beat_len": 510.85568326947634,
+   "ceilings": {
+    "low": 0.14125175118446343,
+    "mid": 0.01955131649971008,
+    "high": 0.005398656688630565
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.059579344651834,
+     "ms": 248716,
+     "lead": 596
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.6245458808481016,
+     "ms": 245918,
+     "lead": 3394
+    },
+    "pre_drop": {
+     "ms": 248716,
+     "kind": "spike",
+     "lead_ms": 596,
+     "score": 1.06,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c51",
+   "uri": "spotify:track:6IlWETqaryFF9u9XR3GnMJ",
+   "title": "Shadows",
+   "drop_ms": 48535,
+   "set": "detected",
+   "beat_len": 638.5696040868455,
+   "ceilings": {
+    "low": 0.09925502389669418,
+    "mid": 0.016779131814837447,
+    "high": 0.004497950337827201
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.3630716154823478,
+     "ms": 47932,
+     "lead": 603
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.348743529597444,
+     "ms": 46538,
+     "lead": 1997
+    },
+    "pre_drop": {
+     "ms": 46538,
+     "kind": "intro",
+     "lead_ms": 1997,
+     "score": 1.349,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c52",
+   "uri": "spotify:track:6IlWETqaryFF9u9XR3GnMJ",
+   "title": "Shadows",
+   "drop_ms": 224484,
+   "set": "approved",
+   "beat_len": 638.5696040868455,
+   "ceilings": {
+    "low": 0.09925502389669418,
+    "mid": 0.016779131814837447,
+    "high": 0.004497950337827201
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.2121564897407215,
+     "ms": 223636,
+     "lead": 848
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.3682602423174785,
+     "ms": 220304,
+     "lead": 4180
+    },
+    "pre_drop": {
+     "ms": 223636,
+     "kind": "spike",
+     "lead_ms": 848,
+     "score": 1.212,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c53",
+   "uri": "spotify:track:6bLU8e0LGyztE9iD5DWBQ1",
+   "title": "Hallucinogenics",
+   "drop_ms": 146294,
+   "set": "detected",
+   "beat_len": 731.4397171766427,
+   "ceilings": {
+    "low": 0.1423764564096928,
+    "mid": 0.02046229679137471,
+    "high": 0.0031386797630693765
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.6533151766245995,
+     "ms": 145898,
+     "lead": 396
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.377147095846052,
+     "ms": 145771,
+     "lead": 523
+    },
+    "pre_drop": {
+     "ms": 145771,
+     "kind": "intro",
+     "lead_ms": 523,
+     "score": 1.377,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c54",
+   "uri": "spotify:track:6it15CsDlkqB7N4lF0C1qM",
+   "title": "Caro",
+   "drop_ms": 63209,
+   "set": "approved",
+   "beat_len": 371.5170278637771,
+   "ceilings": {
+    "low": 0.1345597550272942,
+    "mid": 0.025317296572029604,
+    "high": 0.004231051448732616
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.0,
+     "ms": 61909,
+     "lead": 1300
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.2625515438537145,
+     "ms": 61909,
+     "lead": 1300
+    },
+    "pre_drop": {
+     "ms": 61909,
+     "kind": "intro",
+     "lead_ms": 1300,
+     "score": 1.263,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c55",
+   "uri": "spotify:track:7C46d7mrdoSsgd3rNOa4A7",
+   "title": "feel U luv Me",
+   "drop_ms": 208981,
+   "set": "approved",
+   "beat_len": 464.3962848297214,
+   "ceilings": {
+    "low": 0.10765106871724128,
+    "mid": 0.017230062335729563,
+    "high": 0.005126056326553225
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.0,
+     "ms": 207048,
+     "lead": 1933
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.0314739938940634,
+     "ms": 205294,
+     "lead": 3687
+    },
+    "pre_drop": {
+     "ms": 205294,
+     "kind": "intro",
+     "lead_ms": 3687,
+     "score": 1.031,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c56",
+   "uri": "spotify:track:7cRWofb8ObVKlDDYaQy6lR",
+   "title": "Buzz Lightyear - WRLD Remix",
+   "drop_ms": 75228,
+   "set": "approved",
+   "beat_len": 499.20958482402864,
+   "ceilings": {
+    "low": 0.17197596043348282,
+    "mid": 0.021097848229110212,
+    "high": 0.003251919804606586
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.1693743762808642,
+     "ms": 74739,
+     "lead": 489
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.4603322784104216,
+     "ms": 74810,
+     "lead": 418
+    },
+    "pre_drop": {
+     "ms": 74739,
+     "kind": "spike",
+     "lead_ms": 489,
+     "score": 1.169,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c57",
+   "uri": "spotify:track:7cRWofb8ObVKlDDYaQy6lR",
+   "title": "Buzz Lightyear - WRLD Remix",
+   "drop_ms": 154455,
+   "set": "approved",
+   "beat_len": 499.20958482402864,
+   "ceilings": {
+    "low": 0.17197596043348282,
+    "mid": 0.021097848229110212,
+    "high": 0.003251919804606586
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.1974460988155438,
+     "ms": 154076,
+     "lead": 379
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.3760678472686758,
+     "ms": 152845,
+     "lead": 1610
+    },
+    "pre_drop": {
+     "ms": 154076,
+     "kind": "spike",
+     "lead_ms": 379,
+     "score": 1.197,
+     "tier": "confident"
+    }
+   }
+  },
+  {
+   "id": "c58",
+   "uri": "spotify:track:7ucEkWU0SVy0XFdfXESgfY",
+   "title": "LOS PITS",
+   "drop_ms": 60244,
+   "set": "detected",
+   "beat_len": 638.5696040868455,
+   "ceilings": {
+    "low": 0.141178017258644,
+    "mid": 0.01631567791104314,
+    "high": 0.0036746613774448628
+   },
+   "expect": {
+    "spike": {
+     "status": "found",
+     "score": 1.0076783107871827,
+     "ms": 58351,
+     "lead": 1893
+    },
+    "intro": {
+     "status": "weak",
+     "score": 0.628212484268745,
+     "ms": 58015,
+     "lead": 2229
+    },
+    "pre_drop": {
+     "ms": 58351,
+     "kind": "spike",
+     "lead_ms": 1893,
+     "score": 1.008,
+     "tier": "suggested"
+    }
+   }
+  },
+  {
+   "id": "c59",
+   "uri": "spotify:track:7vFKcXQ39f74XNrZmXADIT",
+   "title": "Dopamine",
+   "drop_ms": 47850,
+   "set": "approved",
+   "beat_len": 417.97283176593515,
+   "ceilings": {
+    "low": 0.11704510554671292,
+    "mid": 0.02075193926692011,
+    "high": 0.005703818602487451
+   },
+   "expect": {
+    "spike": {
+     "status": "weak",
+     "score": 0.5570443678409204,
+     "ms": 45891,
+     "lead": 1959
+    },
+    "intro": {
+     "status": "found",
+     "score": 1.498289261235013,
+     "ms": 44555,
+     "lead": 3295
+    },
+    "pre_drop": {
+     "ms": 44555,
+     "kind": "intro",
+     "lead_ms": 3295,
+     "score": 1.498,
+     "tier": "confident"
+    }
+   }
+  }
+ ]
+}

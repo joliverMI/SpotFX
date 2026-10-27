@@ -42,11 +42,12 @@ export function clampDropFloor(v: number, fallback: number): number {
   return Math.max(MIN_DROP_FLOOR, Math.min(MAX_DROP_FLOOR, Math.round(v * 100) / 100));
 }
 
-/** The sliders only mean anything while a `drops` lane is selected in
- * either A/B slot — a knob shown for an engine it does not touch implies a
- * control that does nothing. */
+/** The sliders only mean anything while a `drops` lane — or a `predrops`
+ * lane, which finds a pre-drop before every drop the same thresholds
+ * detect — is selected in either A/B slot: a knob shown for an engine it
+ * does not touch implies a control that does nothing. */
 export function dropKnobsRelevant(lanes: ({ engine: string; kind?: string } | null | undefined)[]): boolean {
-  return lanes.some((l) => !!l && l.engine === 'drops');
+  return lanes.some((l) => !!l && (l.engine === 'drops' || l.engine === 'predrops'));
 }
 
 /** A drops lane is scored at ONE BEAT — the plan's own measure ("a drop

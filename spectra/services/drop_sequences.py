@@ -94,8 +94,10 @@ toggle them"). Every view sequence carries `parts`, one state per part:
            detection plays on its own, a suggested one waits (or plays
            while drop Testing is on, drop_firing.py);
   off      never plays, not even in Testing;
-  absent   the drop has no such part (the pre-drop, until pre-drop
-           detection exists, on every drop).
+  absent   the drop has no such part (the pre-drop on every drop until
+           the pre-drop gets its button and handle — predrop plan step 4 —
+           even where one is detected and the view's pre_drop_* fields
+           carry it).
 A charge, lull or pre-drop leads into its drop, so it plays only when its
 drop plays (drop_firing.py); a drop switched off keeps the sequence listed
 but silent, which is not a dismissal. Stored as `overrides[key].parts`
@@ -124,6 +126,28 @@ dismisses the detection a row stood in for, that dismissal is recorded
 `dismissed_for` his drop trigger with the override as it was before
 (`prior`), so switching his drop back on puts the detection back.
 
+PRE-DROPS (predrop plan step 3; spectra/services/predrop_detector.py is
+the binding statement for the two rules). A detected sequence carries the
+pre-drop the rules find before its drop (`pre_drop`: ms, kind, lead_ms,
+score, tier), and the view names it: `pre_drop_ms`, `pre_drop_kind`
+("spike" | "intro"), `pre_drop_auto` (where the detector puts it, as
+`auto` is for the handles), `pre_drop_tier`, `pre_drop_score`. His OWN
+grouped drops (`authored`) carry one computed against his drop's own
+moment: `pre_drop` on the group, memoised per song, detection stamp and
+drop time, and worked out only on the read-through path
+(`view_with_detection`, a worker thread) — a plain `view()` is the trigger
+clock's, which must never analyse, so it shows only what is memoised and
+leaves the key out where nothing is ("not worked out yet", never "none").
+Nothing plays from a pre-drop yet (drop_firing.PRE_DROPS_PLAY), and an
+added sequence has none until he places one (step 4).
+
+A DROP THE RE-ANCHOR MOVED keeps its overrides: a detection carries
+`reanchored_from` (where the first-spike rule put it), and an override
+made against that drop pairs with it at that distance (`_det_distance`).
+A confirmed or edited drop does not ask for review when the analysis has
+moved to where HIS drop already is (Eyes Cut Deeper drop 1: he moved it to
+70,350 by hand and the re-anchor puts it there).
+
 EVERY TIME IS SONG TIME, the frame his triggers are in.
 """
 from __future__ import annotations
@@ -144,7 +168,7 @@ from typing import Any, Optional
 import numpy as np
 
 from spectra import config
-from spectra.services import analysis_reader, drop_detector
+from spectra.services import analysis_reader, drop_detector, predrop_detector
 
 logger = logging.getLogger(__name__)
 
@@ -348,11 +372,13 @@ def song_inputs(uri: str) -> dict:
 def stamp_for(uri: str, controls: Any = None, *,
               inputs: Optional[dict] = None) -> str:
     """THE stamp a detection of `uri` made right now carries: 16 hex chars
-    of a SHA-1 over the detector version, the two tier thresholds, the
-    drop floor and the song's own inputs. Raises drop_detector.Unavailable."""
+    of a SHA-1 over the detector and pre-drop versions, the two tier
+    thresholds, the drop floor and the song's own inputs. Raises
+    drop_detector.Unavailable."""
     confident, suggested, floor = _thresholds(controls)
     payload = {
         "version": drop_detector.DETECTOR_VERSION,
+        "predrop_version": predrop_detector.PREDROP_VERSION,
         "settings": {"confident": confident, "suggested": suggested, "floor": floor},
         "song": inputs if inputs is not None else song_inputs(uri),
     }
@@ -428,6 +454,8 @@ def reset() -> None:
     global _cache
     _cache = None
     _in_flight.clear()
+    with _his_pre_drops_lock:
+        _his_pre_drops.clear()
 
 
 # ── his edits ──────────────────────────────────────────────────────────────
@@ -457,6 +485,18 @@ def _snapshot(seq: dict) -> dict:
     return {k: seq.get(k) for k in ("drop_ms", "lull_ms", "charge_ms", "score", "tier")}
 
 
+def _det_distance(seq: dict, ms: int) -> int:
+    """How far a detection sits from `ms` (an override key's drop): from
+    its drop, or — when the re-anchor moved it (`reanchored_from`) — from
+    where the detector first found it, whichever is nearer, so an override
+    made against the drop as it was keeps pairing with the drop as it is."""
+    d = abs(int(seq["drop_ms"]) - int(ms))
+    was = seq.get("reanchored_from")
+    if was is not None:
+        d = min(d, abs(int(was) - int(ms)))
+    return d
+
+
 def _resolve_detected_key(entry: dict, key: str) -> tuple[str, Optional[dict]]:
     """The override key an edit to `key` belongs to, and the detection it
     is made against (None when only an override answers). An existing
@@ -466,16 +506,19 @@ def _resolve_detected_key(entry: dict, key: str) -> tuple[str, Optional[dict]]:
         raise SequenceNotFound(f"not a detection key: {key!r}")
     reach = MATCH_BEATS * _beat_ms(entry)
     overrides = entry.get("overrides") or {}
+    dets = _detected_list(entry)
     okey = key if key in overrides else None
     if okey is None:
-        near = sorted((abs(drop_detector.key_ms(k) - k_ms), k) for k in overrides
+        # a key naming a detection measures from that detection (its first
+        # place too, when the re-anchor moved it)
+        anchor = next((d for d in dets if d.get("key") == key), None) or {"drop_ms": k_ms}
+        near = sorted((_det_distance(anchor, drop_detector.key_ms(k)), k) for k in overrides
                       if drop_detector.key_ms(k) is not None
-                      and abs(drop_detector.key_ms(k) - k_ms) <= reach)
+                      and _det_distance(anchor, drop_detector.key_ms(k)) <= reach)
         okey = near[0][1] if near else None
-    dets = _detected_list(entry)
     target_ms = drop_detector.key_ms(okey) if okey else k_ms
-    near_det = sorted((abs(int(d["drop_ms"]) - target_ms), i) for i, d in enumerate(dets)
-                      if abs(int(d["drop_ms"]) - target_ms) <= reach)
+    near_det = sorted((_det_distance(d, target_ms), i) for i, d in enumerate(dets)
+                      if _det_distance(d, target_ms) <= reach)
     det = dets[near_det[0][1]] if near_det else None
     if okey is None and det is None:
         raise SequenceNotFound(f"no sequence at {key!r} on this song")
@@ -1268,6 +1311,13 @@ class SequenceView:
     his_marks_near: list[dict] = field(default_factory=list)
     # one state per part (module docstring's PARTS): on | waiting | off | absent
     parts: dict = field(default_factory=dict)
+    # the pre-drop (module docstring's PRE-DROPS): where, which kind
+    # ("spike" | "intro"), where the detector puts it, and how sure
+    pre_drop_ms: Optional[int] = None
+    pre_drop_kind: Optional[str] = None
+    pre_drop_auto: Optional[int] = None
+    pre_drop_tier: Optional[str] = None
+    pre_drop_score: Optional[float] = None
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -1348,10 +1398,20 @@ def _detected_view(seq: dict, ov: Optional[dict], okey: Optional[str],
         was = snap.get("drop_ms")
         if was is None:
             was = drop_detector.key_ms(okey)
-        if was is not None and abs(int(seq["drop_ms"]) - int(was)) > REVIEW_BEATS * beat:
+        his = ov.get("drop_ms")
+        # moved TO his own drop: there is nothing to choose between
+        to_his = his is not None and abs(int(seq["drop_ms"]) - int(his)) <= REVIEW_BEATS * beat
+        if (was is not None and not to_his
+                and abs(int(seq["drop_ms"]) - int(was)) > REVIEW_BEATS * beat):
             v.needs_review = True
             v.notes.append(f"the analysis now finds this drop at {seq['drop_ms']} ms, "
                            f"not {was} ms: keep yours, or take the new place")
+    pre = seq.get("pre_drop")
+    if isinstance(pre, dict) and pre.get("ms") is not None:
+        v.pre_drop_ms = v.pre_drop_auto = int(pre["ms"])
+        v.pre_drop_kind = pre.get("kind")
+        v.pre_drop_tier = pre.get("tier")
+        v.pre_drop_score = pre.get("score")
     _drop_automatic_out_of_order(v)
     stored_parts = ov.get("parts") if isinstance(ov.get("parts"), dict) else None
     v.parts = _part_states(v, stored_parts, _legacy_his(ov))
@@ -1398,14 +1458,66 @@ def _drop_automatic_out_of_order(v: SequenceView) -> None:
     if v.charge_ms is not None and not v.moved.get("charge") and v.charge_ms > upper - floor:
         v.notes.append("automatic charge left out: it no longer sits before the lull or drop")
         v.charge_ms = None
+    if v.pre_drop_ms is not None and v.pre_drop_ms > v.drop_ms - floor:
+        v.notes.append("automatic pre-drop left out: it no longer sits before your drop")
+        v.pre_drop_ms = None
 
 
-def view(uri: str, *, triggers: Optional[list] = None) -> dict:
+# His own drops' pre-drops (module docstring's PRE-DROPS): (uri, detection
+# stamp, his drop's moment) -> predrop_detector.PreDrop.stored() or None.
+_his_pre_drops: "dict[tuple, Optional[dict]]" = {}
+_his_pre_drops_lock = threading.Lock()
+HIS_PRE_DROPS_MEMO = 512
+
+
+def his_pre_drop(uri: str, stamp: str, drop_ms: int, *,
+                 compute: bool = False) -> tuple[bool, Optional[dict]]:
+    """(known, pre-drop) for one of his drops at `drop_ms`: the memoised
+    answer, or — with `compute` — the rules' answer against that moment
+    (drop_detector.analyse, memoised on its own files). (False, None) when
+    it is not worked out yet; (True, None) when it is and there is none."""
+    key = (uri, stamp, int(drop_ms))
+    with _his_pre_drops_lock:
+        if key in _his_pre_drops:
+            return True, _his_pre_drops[key]
+    if not compute:
+        return False, None
+    try:
+        analysis = drop_detector.analyse(uri)
+    except drop_detector.Unavailable:
+        found = None
+    else:
+        pre = predrop_detector.detect(analysis.shape, int(drop_ms))
+        found = pre.stored() if pre is not None else None
+    with _his_pre_drops_lock:
+        _his_pre_drops[key] = found
+        while len(_his_pre_drops) > HIS_PRE_DROPS_MEMO:
+            _his_pre_drops.pop(next(iter(_his_pre_drops)))
+    return True, found
+
+
+def _attach_his_pre_drops(uri: str, stamp: str, groups: list[dict],
+                          compute: bool) -> None:
+    """`pre_drop` on each of his grouped drops whose answer is known (the
+    key left out where it is not worked out yet)."""
+    for g in groups:
+        d = g.get("drop")
+        if not d:
+            continue
+        known, pre = his_pre_drop(uri, stamp, int(d["timestamp_ms"]), compute=compute)
+        if known:
+            g["pre_drop"] = pre
+
+
+def view(uri: str, *, triggers: Optional[list] = None,
+         compute_pre_drops: bool = False) -> dict:
     """Detected sequences merged with his edits and his own triggers — the
     read the Timeline (phase 3) draws. Never detects: the stored detection
     is what it shows (`status: "not_detected"` when there is none yet).
     `triggers`: this song's stored triggers, when the caller already
-    holds them."""
+    holds them. `compute_pre_drops`: work out the pre-drops of his own
+    grouped drops that are not memoised yet — analysis I/O, so only the
+    read-through path (`view_with_detection`, off the event loop) asks."""
     entry = stored(uri)
     if triggers is None:
         from spectra.services import trigger_store
@@ -1413,6 +1525,8 @@ def view(uri: str, *, triggers: Optional[list] = None) -> dict:
     marks = his_marks(triggers)
     groups, lone = group_authored(marks)
     det = entry.get("detected")
+    if isinstance(det, dict) and det.get("stamp"):
+        _attach_his_pre_drops(uri, str(det["stamp"]), groups, compute_pre_drops)
     out: dict = {"uri": uri, "authored": groups, "authored_lone": lone}
     if not isinstance(det, dict):
         out.update({"status": "not_detected", "reason": "this song has not been "
@@ -1434,7 +1548,7 @@ def view(uri: str, *, triggers: Optional[list] = None) -> dict:
         if k is None:
             continue
         for i, s in enumerate(seqs):
-            d = abs(int(s["drop_ms"]) - k)
+            d = _det_distance(s, k)
             if d <= reach:
                 pairs.append((d, okey, i))
     pairs.sort()
@@ -1637,7 +1751,7 @@ def view_with_detection(uri: str) -> dict:
     """Read-through: detect when missing or stale, then the merged view.
     Synchronous — call it off the event loop."""
     result = ensure_detected(uri)
-    body = view(uri)
+    body = view(uri, compute_pre_drops=True)
     body["detection"] = result
     if result.get("status") == "unavailable" and body.get("status") == "not_detected":
         body["status"] = "unavailable"

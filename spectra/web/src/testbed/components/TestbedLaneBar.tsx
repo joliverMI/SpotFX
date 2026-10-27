@@ -27,10 +27,19 @@
  * `capture_offset_ms` in song time; drawing it from x=0 puts a real
  * transient EARLIER than the mark that names it, by the capture lag. When
  * the backend cannot establish that offset the lane SAYS SO rather than
- * implying an alignment it cannot justify. */
+ * implying an alignment it cannot justify.
+ *
+ * A MARK THAT CARRIES A GLYPH IS DRAWN AS ITS KIND (the Pre-drops lane,
+ * predrop plan step 3: a spike and a vocal intro each get the glyph the
+ * Drops panel draws for them), tinted like any other mark; a suggested one
+ * is drawn fainter, as a suggested drop is. */
 import { useState } from 'react';
+import Icon, { type IconName } from '../../components/Icon';
 import { fmtMs } from '../../lib/time';
 import type { TestbedEstimateMark, TestbedMetrics, TestbedReferenceMark, TestbedWaveform } from '../../types';
+
+/** A glyph-carrying mark's icon: the pre-drop kinds (the Drops panel's own). */
+export const MARK_GLYPH: Record<string, IconName> = { spike: 'preDrop', intro: 'preDropVoice' };
 
 function tintFor(offsetMs: number | undefined, toleranceMs: number): string {
   if (offsetMs == null) return 'unmatched';
@@ -215,19 +224,24 @@ export function EngineLane({
           // the tooltip; a drops-lane suggestion is drawn fainter.
           const text = `${fmtMs(m.time_ms)}${m.label ? ` · ${m.label}` : ''}`
             + `${matched ? ' (matched)' : ' (extra — no match to his marks)'}`;
+          const glyph = m.glyph ? MARK_GLYPH[m.glyph] : undefined;
+          const suggested = m.label === 'suggested' || m.tier === 'suggested';
           return (
             <button
               key={i}
               type="button"
               className={`testbed-lane-marker ${matched ? 'matched-tight' : 'extra'}`
-                + `${m.label === 'suggested' ? ' est-suggested' : ''}`}
+                + `${suggested ? ' est-suggested' : ''}${glyph ? ' est-glyph' : ''}`}
               style={{ left: pct(m.time_ms) }}
               onPointerEnter={() => setHover({ text, leftPct: pct(m.time_ms) })}
               onPointerLeave={() => setHover(null)}
               onClick={() => onMarkClick?.(m)}
               aria-label={text}
+              data-glyph={m.glyph}
               title={onMarkClick ? 'Click to review pushing this mark to your real triggers' : undefined}
-            />
+            >
+              {glyph && <Icon name={glyph} size={14} />}
+            </button>
           );
         })}
       </div>

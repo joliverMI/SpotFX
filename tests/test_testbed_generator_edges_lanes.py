@@ -179,7 +179,8 @@ def test_availability_listing_includes_every_engine():
     _seed_librosa(scfg, rms_bass_spike_at=20)
     avail = testbed_engines.availability_for(
         URI, stem_index=analysis_reader.stem_index(), count_marks=False)
-    assert set(avail.keys()) == {"librosa", "beat_this", "generator", "edges", "drops"}
+    assert set(avail.keys()) == {"librosa", "beat_this", "generator", "edges", "drops",
+                                 "predrops"}
     assert avail["generator"]["available"] is True
     assert avail["edges"]["available"] is True
     assert avail["generator"]["mark_count"] is None  # fast path never counts

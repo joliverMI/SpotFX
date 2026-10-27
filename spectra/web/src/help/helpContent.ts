@@ -2156,7 +2156,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Current (librosa) is the production pipeline\'s own already-computed analysis — always available once a song has been analysed, and it\'s exactly what generates today\'s automatic scene-change triggers.',
           'beat_this (CPJKU 2024) is a modern neural beat/downbeat tracker, measurably tighter on beat/downbeat timing than the current pipeline. It has to be precomputed offline first (scripts/testbed_precompute.py) — an engine lane reads "not computed" until that\'s been run for this song; nothing here ever runs a slow engine live while you\'re looking at the page.',
           'Every engine analyses the captured WAV, which usually starts a few seconds into the song — so an engine\'s marks are shifted by that same start-time correction before they are drawn or scored, and always agree with the waveform lane\'s own alignment. On a song where that start time is unknown, marks are left exactly as the engine reported them.',
-          'Two lanes are the exception, because they are already in song time: Generator (what the room fires) and Drops (it reads the stored audio shape, which is kept in song time from the moment it is captured). Neither is shifted.',
+          'Three lanes are the exception, because they are already in song time: Generator (what the room fires), Drops and Pre-drops (both read the stored audio shape, which is kept in song time from the moment it is captured). None of them is shifted.',
         ],
       },
       {
@@ -2185,6 +2185,18 @@ export const HELP_SECTIONS: HelpSection[] = [
           'The table scores the current sliders on your four test songs at once — Contra, Dopamine, Pop Off and 100 Millones — exactly the way the plan measured them: a drop counts as found within one beat of yours, extras are the detections with none of your drops nearby (hover the number for what of yours sits there instead — usually a scene change or a flare), and the lull and charge columns count how many land within one and two beats of your own. At the shipped values it finds 11 of your 13 drops, 9 of them confident, with nothing false on the three EDM songs. 100 Millones is not EDM: every chorus brings the bass back after a break, and you chose which one is the drop.',
           'A few things are guarded. A drop in a song\'s first or last 15 seconds is left out. At most one confident drop per 45 seconds of song — any beyond that become suggestions, strongest first. A later sequence\'s charge never starts inside the previous drop\'s two bars: it moves to the first beat after them, and a lull that would fall inside them is left out with its charge.',
           'Where one of your own charges, lulls or drops already sits within two beats of a detected drop, the detection stands down as "matches yours" — your own trigger already does it. That stand-down is applied when the sequences are shown on the Timeline, not in this lane: here the detector is scored against your marks, which it could not be if it stood down wherever you have one.',
+        ],
+      },
+      {
+        id: 'testbed-predrops',
+        title: 'The Pre-drops lane: spike and vocal intro',
+        keywords: 'pre-drop predrop spike vocal intro mid intro hit clap high band entry hush confident suggested dopamine fina eyes cut deeper re-anchor glyph',
+        body: [
+          'Some drops have a moment that leads into them: a PRE-DROP. It is one of two kinds. A SPIKE is one loud, short hit in the high band (above 4 kHz) before the drop, standing well above the quiet around it, the loudest thing in the last 3 seconds, with nothing comparable after it and the bass still out. A VOCAL INTRO is a line in the mid band (often a voice) that comes in sharply out of a hush, holds into the drop, and is not a build. Dopamine\'s first drop is the example: its voice enters 3.3 seconds out.',
+          'The "Pre-drops (spike and vocal intro)" engine shows the pre-drop the rules find before every drop the drop detector finds (at the drop sliders\' own values) and before every one of your own drop triggers. A drop carries at most one: when both kinds find something, the higher score names it. Pick "Pre-drops (both kinds)", or one kind alone. Each mark is drawn as its kind\'s glyph (the one the Drops panel uses); hover it for its score, how far before which drop it sits, and its tier.',
+          'Two levels of trust, as for drops. A spike is CONFIDENT at a score of 1.07 and up; a vocal intro at 1.18 and up AND entering within 3.5 seconds of the drop; anything else found is SUGGESTED, drawn fainter. Each kind looks a little wider than any scene can play from (a spike 0.25 to 3 seconds out, a vocal intro 0.35 to 4.5); a scene\'s own window decides which play there, once pre-drops play.',
+          'Nothing plays from a pre-drop yet: this lane, and the pre-drop each detected drop now carries, are there to look at. Your marks hold no pre-drops, so the lane\'s score is not a measure; picking it for Engine A shows your drops beside it instead.',
+          'One drop was being found ON its own pre-drop: Eyes Cut Deeper\'s first drop, where a clap carrying bass came before the bass returned. When a drop\'s own hit passes the spike test against a sustained bass return half a second to two seconds later, the drop now moves to that return and the hit becomes its pre-drop — on your library that moves exactly that one drop, to exactly where you had moved it by hand. Its lull and charge stay where they were.',
         ],
       },
       {

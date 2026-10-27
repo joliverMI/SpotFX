@@ -126,6 +126,29 @@ export interface DropSequenceView {
    * what, when (a hard cut on the drop, or early in the charge) and why.
    * Absent until the trigger clock has reached the sequence. */
   switch?: DropSwitchPlan;
+  /** THE PRE-DROP (spectra/services/predrop_detector.py, predrop plan step
+   * 3): where it is, which kind, where the detector puts it, how sure. All
+   * null when the drop has none. Absent from an older server. Nothing plays
+   * from it yet, and parts.pre_drop stays 'absent' until it gets its
+   * button (step 4). */
+  pre_drop_ms?: number | null;
+  pre_drop_kind?: PreDropKind | null;
+  pre_drop_auto?: number | null;
+  pre_drop_tier?: 'confident' | 'suggested' | null;
+  pre_drop_score?: number | null;
+}
+
+/** A pre-drop's kind: one loud hit in the high band, or a line in the mid
+ * band entering out of a hush (predrop_detector.KIND_SPIKE / KIND_INTRO). */
+export type PreDropKind = 'spike' | 'intro';
+
+/** A pre-drop as a detection stores it (predrop_detector.PreDrop.stored). */
+export interface PreDropFound {
+  ms: number;
+  kind: PreDropKind;
+  lead_ms: number;
+  score: number;
+  tier: 'confident' | 'suggested';
 }
 
 export interface DropSwitchPlan {
@@ -193,6 +216,10 @@ export interface AuthoredGroup {
   charge: HisMark | null;
   lull: HisMark | null;
   drop: HisMark;
+  /** the pre-drop the rules find before HIS drop: null when there is none,
+   * the key absent while it is not worked out yet (drop_sequences.py's
+   * PRE-DROPS — only the read-through view works it out) */
+  pre_drop?: PreDropFound | null;
 }
 
 /** One of his phase triggers in a `yours` row, enabled or switched off. */

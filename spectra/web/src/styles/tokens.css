@@ -2344,6 +2344,15 @@ kbd {
    shorter and fainter than a confident detection, whatever its tint — the
    plan's "solid = confident · faded = suggested". */
 .testbed-lane-marker.est-suggested { top: 8px; bottom: 8px; opacity: 0.55; }
+/* A mark drawn as its kind's glyph (the Pre-drops lane): the glyph takes
+   the tint as its stroke colour instead of a filled tick. */
+.testbed-lane-marker.est-glyph {
+  width: 16px; margin-left: -8px; top: 6px; bottom: auto; height: 16px;
+  background: transparent; display: flex; align-items: center; justify-content: center;
+}
+.testbed-lane-marker.est-glyph.matched-tight { color: var(--ok); }
+.testbed-lane-marker.est-glyph.extra { color: var(--text); opacity: 0.8; }
+.testbed-lane-marker.est-glyph.est-suggested { top: 6px; bottom: auto; opacity: 0.5; }
 .testbed-waveform-svg { width: 100%; height: 100%; display: block; }
 .testbed-waveform-caption {
   position: absolute; left: 6px; top: 3px; right: 6px; z-index: 1;

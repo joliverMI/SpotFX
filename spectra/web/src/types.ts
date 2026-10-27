@@ -1756,6 +1756,11 @@ export interface TestbedEstimateMark {
   time_ms: number;
   label: string | null;
   score: number | null;
+  /** draw the mark as this kind's glyph (the Pre-drops lane: 'spike' |
+   * 'intro'); absent on every other lane */
+  glyph?: string;
+  /** 'confident' | 'suggested', where the engine has tiers */
+  tier?: string;
 }
 
 export interface TestbedMatch {

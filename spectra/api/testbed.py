@@ -208,8 +208,9 @@ def _estimate_for(
     fires from — shifting them again here would hide, not show, a
     generator frame defect like data/transition-alignment-plan/report.md's
     own Finding 1 (see spectra/services/testbed_engines.py's module
-    docstring, "generator" entry). The `drops` engine is the other one: it
-    reads the stored audio shape, which is already in song time."""
+    docstring, "generator" entry). The `drops` and `predrops` engines are
+    the others: they read the stored audio shape, which is already in song
+    time."""
     engine_marks = testbed_engines.marks_for(
         engine, uri, window_beats=window_beats, sensitivity=sensitivity,
         direction=direction, transitions_per_minute=transitions_per_minute,
@@ -226,8 +227,18 @@ def _estimate_for(
 
 
 def _estimate_payload(estimate) -> list[dict]:
-    return [{"time_ms": m.time_ms, "label": m.label, "score": m.score}
-            for m in estimate]
+    """Each mark as the page reads it; `glyph`/`tier` only where an engine
+    sets them (the Pre-drops lane), so every other lane's payload is as
+    it was."""
+    out = []
+    for m in estimate:
+        d = {"time_ms": m.time_ms, "label": m.label, "score": m.score}
+        if m.glyph is not None:
+            d["glyph"] = m.glyph
+        if m.tier is not None:
+            d["tier"] = m.tier
+        out.append(d)
+    return out
 
 
 @router.get("/engine-marks")
