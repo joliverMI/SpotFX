@@ -15,7 +15,7 @@ from fastapi.responses import RedirectResponse, HTMLResponse
 
 import api.spotify_client as spotify_module
 from api.spotify_client import get_spotify
-from config import settings
+from services import spotify_auth_age
 
 router = APIRouter(prefix="/api/spotify", tags=["auth"])
 
@@ -42,6 +42,9 @@ async def callback(request: Request, code: str = "", error: str = ""):
     # Exchange code → token (spotipy caches it automatically)
     sp = get_spotify()
     sp.auth_manager.get_access_token(code, as_dict=False, check_cache=False)
+    # Spotify's refresh tokens die six months after this moment: start the
+    # recorded clock (services/spotify_auth_age.py).
+    spotify_auth_age.record_authorization()
 
     # Reset the shared client so the polling loop gets a fresh authenticated instance
     spotify_module._sp = None
@@ -51,12 +54,22 @@ async def callback(request: Request, code: str = "", error: str = ""):
 
 @router.get("/auth-status")
 async def auth_status():
-    """Quick check — is the Spotify token present and valid?"""
+    """Quick check — is the Spotify token present and valid? `sign_in` is
+    how old the sign-in is and the warning line, if one is due."""
+    sign_in = spotify_auth_age.status()
     try:
         sp = get_spotify()
         token = sp.auth_manager.get_cached_token()
         if token:
-            return {"authenticated": True}
+            return {"authenticated": True, "sign_in": sign_in}
     except Exception:
         pass
-    return {"authenticated": False, "login_url": "/api/spotify/login"}
+    return {"authenticated": False, "login_url": "/api/spotify/login", "sign_in": sign_in}
+
+
+@router.get("/auth-age")
+async def auth_age():
+    """How old SpotFX's Spotify sign-in is, when it runs out (Spotify's
+    refresh tokens die six months after sign-in), and the warning line from
+    14 days before. Reads two small files; never calls Spotify."""
+    return spotify_auth_age.status()

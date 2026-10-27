@@ -129,6 +129,11 @@ async def _never_sleeping() -> Optional[bool]:
     return False
 
 
+def _sign_in_status() -> dict:
+    from services import spotify_auth_age
+    return spotify_auth_age.status()
+
+
 @dataclass
 class JukeboxDeps:
     gateway: Any
@@ -140,6 +145,10 @@ class JukeboxDeps:
     clock: Callable[[], float] = time.monotonic          # same timebase as track.fetched_at
     now_ms: Callable[[], int] = lambda: int(time.time() * 1000)
     load_config: Callable[[], ProgramConfig] = store.load_config
+    # SpotFX's Spotify sign-in age (services/spotify_auth_age.py): every
+    # night and the line all stop when it lapses, so the master status
+    # carries its warning line.
+    sign_in: Callable[[], dict] = lambda: _sign_in_status()
 
 
 def production_deps() -> JukeboxDeps:
@@ -965,9 +974,16 @@ class JukeboxRunner:
     def status(self, count: int = 20) -> dict:
         self._ensure_loaded()
         n = self.night
+        try:
+            sign_in = self.deps.sign_in()
+        except Exception as exc:                                  # noqa: BLE001
+            sign_in = {"state": "unreadable", "warning": f"Couldn't read the Spotify sign-in's "
+                       f"age ({type(exc).__name__})."}
+        account = [sign_in["warning"]] if sign_in.get("warning") else []
         if n is None:
             return {"night": None, "running": False, "now": None, "next": [], "line": [],
-                    "warnings": [], "log": [], "history": self.history[:5]}
+                    "warnings": account, "spotify_auth": sign_in, "log": [],
+                    "history": self.history[:5]}
         items = self._project(count) if n.state == "running" else []
         track = self.deps.current_track() if n.state == "running" else None
         remaining = (self._remaining_ms(track, self.deps.clock())
@@ -981,8 +997,8 @@ class JukeboxRunner:
                 "cursor": n.cursor.model_dump(mode="json"),
                 "lap": {"set_songs": lap.set_songs, "slots": lap.slots,
                         "unbounded": lap.unbounded, "notes": lap.notes},
-                "warnings": list(n.warnings), "log": n.log[-60:],
-                "history": self.history[:5]}
+                "warnings": account + list(n.warnings), "spotify_auth": sign_in,
+                "log": n.log[-60:], "history": self.history[:5]}
 
     async def preview(self, cfg: ProgramConfig, count: int = 20) -> dict:
         """The program for `cfg` from its first song, with an empty line —
