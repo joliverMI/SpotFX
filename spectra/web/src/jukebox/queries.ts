@@ -205,6 +205,20 @@ export function usePlayNext() {
   });
 }
 
+/** Keep a song from every skip tonight — the room's vote and a paid skip —
+ * or let it be skipped again. */
+export function useSkipLock() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ uri, locked }: { uri: string; locked: boolean }) => {
+      const r = await spotfxPost<{ status: string; detail?: string }>('/jukebox/skip-lock', { uri, locked });
+      if (r.status === 'refused') throw new Error(r.detail || 'That could not change.');
+      return r;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status }),
+  });
+}
+
 /** Remove a song from the line (one already sent to Spotify is skipped as it starts). */
 export function useRemoveEntry() {
   const qc = useQueryClient();

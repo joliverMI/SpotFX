@@ -1,15 +1,17 @@
 // The guest screens: Welcome (first visit), Now (the main screen: what is
 // playing, its votes, the two big buttons, how close the room is to
-// skipping it, the next few songs), Queue (your songs, then everything
-// coming up, with ⇅ on the songs you may move) and Add.
+// skipping it — in credits mode the tip and skip buttons and the jail card —
+// the next few songs), Queue (your songs, then everything coming up, with ⇅
+// on the songs you may move), Add, and the Shop (credits: the balance, what
+// things cost, how to earn, the history).
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { NextSong, RunningView, SearchResult, View } from './types';
+import type { MySong, NextSong, RunningView, SearchResult, View, WalletView } from './types';
 import {
-  SEARCH_DEBOUNCE_MS, SEARCH_MIN, addStatus, addedText, badges, bumpOffer, bumpsLine, byLine, mmss,
-  progressNow, skipLine,
+  SEARCH_DEBOUNCE_MS, SEARCH_MIN, addOffer, addStatus, addedText, badges, bumpOffer, bumpsLine,
+  byLine, credits, jailCard, mmss, progressNow, signed, skipLine, skipOffer, tipOffer,
 } from './logic';
 import { Art, MyRow, OpenSpotify, SongRow, SpotifyIcon } from './bits';
-import { api, type Found } from './api';
+import { api, walletOf, type Found } from './api';
 
 export function Welcome({ view, busy, onShuffle, onGo, error }: {
   view: RunningView; busy: boolean; error: string;
@@ -32,10 +34,13 @@ export function Welcome({ view, busy, onShuffle, onGo, error }: {
         </button>
       </div>
       {error && <p className="g-error" role="alert">{error}</p>}
+      {view.start_credits !== undefined && (
+        <p className="g-welcome-credits">🎟 You start with {credits(view.start_credits)} — free, for tonight only.</p>
+      )}
       <ul className="g-how">
         {view.how.map((t) => (
           <li key={t.title} className="g-how-tile">
-            <span className="g-how-icon" aria-hidden="true">{t.icon === 'vote' ? '▲▼' : t.icon === 'queue' ? '☰' : '♪'}</span>
+            <span className="g-how-icon" aria-hidden="true">{t.icon === 'vote' ? '▲▼' : t.icon === 'queue' ? '☰' : t.icon === 'shop' ? '🎟' : '♪'}</span>
             <strong>{t.title}</strong>
             <span>{t.text}</span>
           </li>
@@ -54,10 +59,14 @@ export function Welcome({ view, busy, onShuffle, onGo, error }: {
   );
 }
 
-export function NowScreen({ view, elapsedMs, nowMs, busy, onVote, homeHint, onHomeHint }: {
+export function NowScreen({ view, elapsedMs, nowMs, busy, onVote, homeHint, onHomeHint, onTip,
+                           onSkip, onChip, onBreakOut }: {
   view: RunningView; elapsedMs: number; nowMs: number; busy: boolean;
   onVote: (v: 'up' | 'down' | 'none') => void; homeHint: boolean; onHomeHint: () => void;
+  onTip?: () => void; onSkip?: () => void; onChip?: () => void; onBreakOut?: () => void;
 }) {
+  const balance = view.me.credits ?? 0;
+  const creditsOn = view.features.credits;
   const now = view.now;
   if (!now) {
     return <div className="g-empty"><p>The music is starting…</p></div>;
@@ -96,16 +105,27 @@ export function NowScreen({ view, elapsedMs, nowMs, busy, onVote, homeHint, onHo
                   aria-pressed={now.my_vote === 1} disabled={busy} onClick={() => vote('up')}>
             <span className="g-vote-arrow" aria-hidden="true">{now.my_vote === 1 ? '✓' : '▲'}</span>
             <span>{now.my_vote === 1 ? 'Voted up' : 'Up'}</span>
+            {creditsOn && !!now.earn && <span className="g-vote-earn">+{now.earn} for voting</span>}
           </button>
           <button type="button" className={`g-vote g-vote-down${now.my_vote === -1 ? ' g-vote-on' : ''}`}
                   aria-pressed={now.my_vote === -1} disabled={busy} onClick={() => vote('down')}>
             <span className="g-vote-arrow" aria-hidden="true">{now.my_vote === -1 ? '✓' : '▼'}</span>
             <span>{now.my_vote === -1 ? 'Voted down' : 'Down'}</span>
+            {creditsOn && !!now.earn && <span className="g-vote-earn">+{now.earn} for voting</span>}
           </button>
         </div>
       ) : (
         <p className="g-why-not">{now.why_not}</p>
       )}
+      {creditsOn && now.mine && now.coming_in && (
+        <p className="g-coming-in" aria-live="polite">
+          Coming in: ▲ {credits(now.coming_in.ups)}{now.coming_in.tips ? ` · tips ${now.coming_in.tips}` : ''}
+        </p>
+      )}
+      {/* in jail, the way out comes first: right under the votes */}
+      {creditsOn && <JailCard view={view} busy={busy} onBreakOut={onBreakOut} />}
+      {creditsOn && <CreditActions view={view} balance={balance} busy={busy}
+                                   onTip={onTip} onSkip={onSkip} onChip={onChip} />}
       {skipLine(now.skip, now.votes.down) && (
         <p className="g-skip-line" aria-live="polite">{skipLine(now.skip, now.votes.down)}</p>
       )}
@@ -126,19 +146,29 @@ export function NowScreen({ view, elapsedMs, nowMs, busy, onVote, homeHint, onHo
   );
 }
 
-export function QueueScreen({ view, elapsedMs, nowMs, onMove }: {
+export function QueueScreen({ view, elapsedMs, nowMs, onMove, onNext }: {
   view: RunningView; elapsedMs: number; nowMs: number; onMove: (song: NextSong) => void;
+  onNext?: (song: MySong) => void;
 }) {
   // the line about bumps shows wherever a song could move; ⇅ only where
-  // THIS phone can move it now (not in a time-out, not out of bumps)
-  const movable = (s: NextSong) => !!bumpOffer(s, view.me.bumps, view.me.jail);
-  const canMove = (s: NextSong) => !!bumpOffer(s, view.me.bumps, view.me.jail)?.can;
+  // THIS phone can move it now (not in a time-out, not out of bumps); in
+  // credits mode a move is priced instead
+  const balance = view.features.credits ? (view.me.credits ?? 0) : undefined;
+  const movable = (s: NextSong) => !!bumpOffer(s, view.me.bumps, view.me.jail, balance);
+  const canMove = (s: NextSong) =>
+    balance !== undefined ? !!bumpOffer(s, view.me.bumps, view.me.jail, balance) && !view.me.jail?.in
+      : !!bumpOffer(s, view.me.bumps, view.me.jail)?.can;
   return (
     <div className="g-queue">
       <section aria-label="Your songs">
         <h2 className="g-h2">Your songs</h2>
         {view.mine.length ? (
-          <ul className="g-list">{view.mine.map((s) => <MyRow key={s.entry_id} song={s} elapsedMs={elapsedMs} nowMs={nowMs} />)}</ul>
+          <ul className="g-list">{view.mine.map((s) => (
+            <MyRow key={s.entry_id} song={s} elapsedMs={elapsedMs} nowMs={nowMs}
+                   credits={balance !== undefined} jail={view.me.jail} balance={balance ?? 0}
+                   onMove={balance !== undefined && s.bump ? () => onMove(s as unknown as NextSong) : undefined}
+                   onNext={onNext && s.next ? () => onNext(s) : undefined} />
+          ))}</ul>
         ) : (
           <p className="g-muted">None in line yet — tap ＋ to add one.</p>
         )}
@@ -146,7 +176,12 @@ export function QueueScreen({ view, elapsedMs, nowMs, onMove }: {
       <section aria-label="Coming up">
         <h2 className="g-h2">Coming up</h2>
         {view.next.some(movable) && (
-          <p className="g-muted g-small g-bumps-line">{bumpsLine(view.me.bumps, view.me.jail)}</p>
+          <p className="g-muted g-small g-bumps-line">
+            {balance !== undefined
+              ? (view.me.jail?.in ? 'No moving songs while you\'re in jail.'
+                : 'Tap ⇅ to move your song up, or someone else\'s down — each move has its price.')
+              : bumpsLine(view.me.bumps, view.me.jail)}
+          </p>
         )}
         {view.next.length ? (
           <ul className="g-list">{view.next.map((s) => (
@@ -173,6 +208,7 @@ export function AddScreen({ view, onAdded }: {
   const [added, setAdded] = useState<Set<string>>(new Set());
   const seq = useRef(0);
   const status = addStatus(view.requests, view.me.approved, view.me.jail);
+  const creditsOn = view.features.credits;
 
   const run = useCallback(async (q: string, offset: number) => {
     const mine = ++seq.current;
@@ -193,9 +229,9 @@ export function AddScreen({ view, onAdded }: {
     return () => window.clearTimeout(t);
   }, [query, run]);
 
-  const add = async (uri: string) => {
+  const add = async (uri: string, price?: number) => {
     setAdding(uri);
-    const r = await api.add(uri);
+    const r = await api.add(uri, price);
     setAdding('');
     if (r.ok) {
       setAdded((s) => new Set(s).add(uri));
@@ -211,6 +247,7 @@ export function AddScreen({ view, onAdded }: {
   const row = (r: SearchResult) => {
     const inLine = r.in_line || added.has(r.uri);
     const why = r.why_not;
+    const offer = addOffer(r);
     return (
       <li key={r.uri} className="g-row g-result">
         <Art song={{ ...r, kind: 'jukebox', by: { kind: 'other', name: '' }, mine: false }} size="small" />
@@ -221,14 +258,19 @@ export function AddScreen({ view, onAdded }: {
             {badges({ ...r, in_line: inLine }).map((b) => (
               <span key={b.kind} className={`g-badge g-badge-${b.kind}`}>{b.label}</span>
             ))}
+            {creditsOn && !r.known && <span className="g-badge g-badge-learn">learn first +1</span>}
           </div>
           {why && !inLine && <div className="g-row-why">{why}</div>}
+          {!why && !inLine && creditsOn && !offer.afford && (
+            <div className="g-row-why">Needs {credits(r.price ?? 0)} — you have {view.me.credits ?? 0}</div>
+          )}
         </div>
         <div className="g-result-actions">
           <button type="button" className="g-btn g-btn-primary g-add-btn"
-                  disabled={!status.canAdd || !r.can_add || inLine || adding !== ''}
-                  aria-label={`Add ${r.title}`} onClick={() => void add(r.uri)}>
-            {adding === r.uri ? '…' : inLine ? '✓' : 'Add'}
+                  disabled={!status.canAdd || !r.can_add || inLine || adding !== '' || !offer.afford}
+                  aria-label={`Add ${r.title}${r.price !== undefined ? ` for ${credits(r.price)}` : ''}`}
+                  onClick={() => void add(r.uri, r.price)}>
+            {adding === r.uri ? '…' : inLine ? '✓' : offer.label}
           </button>
           <OpenSpotify song={{ ...r, kind: 'jukebox', by: { kind: 'other', name: '' }, mine: false }} label={false} />
         </div>
@@ -260,6 +302,123 @@ export function AddScreen({ view, onAdded }: {
       {found?.more && (
         <button type="button" className="g-btn g-btn-ghost g-more" disabled={searching}
                 onClick={() => void run(found.query, found.next_offset)}>More from Spotify</button>
+      )}
+    </div>
+  );
+}
+
+/** Credits on the Now screen: tip the Adder (held a few seconds so a tap can
+ *  be undone), skip (it asks once), chip in. */
+function CreditActions({ view, balance, busy, onTip, onSkip, onChip }: {
+  view: RunningView; balance: number; busy: boolean;
+  onTip?: () => void; onSkip?: () => void; onChip?: () => void;
+}) {
+  const now = view.now;
+  if (!now) return null;
+  const tip = tipOffer(now.tip, balance);
+  const skip = skipOffer(now.skip, balance);
+  if (!tip && !skip) return null;
+  return (
+    <section className="g-credit-actions" aria-label="Credits">
+      {tip && tip.label && (
+        <button type="button" className="g-btn g-btn-tip" disabled={busy || !tip.can} onClick={onTip}>
+          💛 {tip.label}
+        </button>
+      )}
+      {tip && !tip.can && tip.why && <p className="g-muted g-small">{tip.why}</p>}
+      {skip && (
+        <>
+          <div className="g-skip-row">
+            <button type="button" className="g-btn g-btn-skip" disabled={busy || !skip.can} onClick={onSkip}>
+              ⏭ {skip.label}
+            </button>
+            {now.skip?.chip_in && (
+              <button type="button" className="g-btn g-btn-ghost" disabled={busy || !now.skip?.can_chip}
+                      onClick={onChip}>Chip in</button>
+            )}
+          </div>
+          <p className="g-muted g-small">{skip.why || skip.pot}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+function JailCard({ view, busy, onBreakOut }: { view: RunningView; busy: boolean; onBreakOut?: () => void }) {
+  const card = jailCard(view.me.jail);
+  if (!card) return null;
+  return (
+    <section className="g-jail-card" aria-label="Jail">
+      <h2>{card.title}</h2>
+      <p>{card.text}</p>
+      <button type="button" className="g-btn g-btn-primary" disabled={busy || !view.me.jail?.can_break_out}
+              onClick={onBreakOut}>
+        Break out · {card.fee}
+      </button>
+      {!view.me.jail?.can_break_out && (
+        <p className="g-small">You need {credits(card.fee)} — vote to earn +1 each.</p>
+      )}
+    </section>
+  );
+}
+
+/** The Shop (credits): the balance and how it was earned, six tiles with
+ *  tonight's prices, how to earn, the rule that credits are only for
+ *  tonight, and the history. */
+export function ShopScreen({ view, reload }: { view: RunningView; reload: number }) {
+  const [wallet, setWallet] = useState<WalletView | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let live = true;
+    void api.wallet().then((r) => {
+      if (!live) return;
+      if (r.ok) { setWallet(walletOf(r.data)); setError(''); }
+      else setError(r.refusal.detail);
+    });
+    return () => { live = false; };
+  }, [reload, view.me.credits]);
+  const balance = wallet?.balance ?? view.me.credits ?? 0;
+  const earned = wallet?.earned;
+  return (
+    <div className="g-shop">
+      <section className="g-balance" aria-label="Your credits">
+        <div className="g-balance-big">🎟 {balance}</div>
+        <div className="g-muted">{credits(balance)} to spend tonight</div>
+        {earned && (
+          <ul className="g-earned">
+            <li>Free {earned.free}</li><li>Votes {earned.votes}</li>
+            <li>Your songs {earned['your songs']}</li><li>Tips {earned.tips}</li>
+            <li>Spent {earned.spent}</li>
+          </ul>
+        )}
+      </section>
+      {error && <p className="g-error" role="alert">{error}</p>}
+      {wallet && (
+        <>
+          <ul className="g-tiles">
+            {wallet.shop.map((t) => (
+              <li key={t.id} className="g-tile">
+                <strong>{t.title}</strong>
+                <span className="g-tile-price">{t.price === null ? '—' : `🎟 ${t.price}`}</span>
+                <span className="g-small g-muted">{t.note}</span>
+              </li>
+            ))}
+          </ul>
+          <h2 className="g-h2">How to earn</h2>
+          <ul className="g-rules">{wallet.how_to_earn.map((h) => <li key={h}>{h}</li>)}</ul>
+          <p className="g-disclaimer">{wallet.disclaimer}</p>
+          <h2 className="g-h2">Your history</h2>
+          {wallet.history.length ? (
+            <ul className="g-history">
+              {wallet.history.map((h) => (
+                <li key={h.seq}>
+                  <span className="g-history-what">{h.what}{h.detail ? <span className="g-muted"> · {h.detail}</span> : null}</span>
+                  <span className={`g-history-delta${h.delta < 0 ? ' g-neg' : ''}`}>{signed(h.delta)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="g-muted">Nothing yet.</p>}
+        </>
       )}
     </div>
   );

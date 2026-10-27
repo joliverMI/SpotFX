@@ -11,7 +11,12 @@ directly, and a wrong or missing key is a plain 401.
   POST /api/jukebox/guest/vote    {phone, vote: up|down|none}
   POST /api/jukebox/guest/search  {phone, q, offset}     his library first, then Spotify
   POST /api/jukebox/guest/add     {phone, uri}           a song into the line (fair order)
-  POST /api/jukebox/guest/bump    {phone, entry_id, direction: up|down}  free play's bump
+  POST /api/jukebox/guest/bump    {phone, entry_id, direction: up|down, price?}  a bump
+  POST /api/jukebox/guest/tip     {phone, units}         credits: tip the song's Adder
+  POST /api/jukebox/guest/skip    {phone, how: pay|chip, amount?, price?}  credits: skip
+  POST /api/jukebox/guest/next    {phone, entry_id, price?}  credits: play your song next
+  POST /api/jukebox/guest/breakout {phone}               credits: break out of jail
+  GET  /api/jukebox/guest/wallet?phone=                  credits: the Shop and history
   GET  /api/jukebox/guest/view?phone=                    the screen, again
 
 What each does is services/jukebox/guests.py; every answer carries the
@@ -91,15 +96,42 @@ class SearchBody(BaseModel):
     offset: int = Field(default=0, ge=0, le=200)
 
 
+Price = Field(default=None, ge=0, le=1000)
+
+
 class AddBody(BaseModel):
     phone: Optional[str] = Phone
     uri: str = Field(max_length=200)
+    price: Optional[int] = Price
 
 
 class BumpBody(BaseModel):
     phone: Optional[str] = Phone
     entry_id: str = Field(max_length=40)
     direction: str = Field(max_length=8)
+    price: Optional[int] = Price
+
+
+class TipBody(BaseModel):
+    phone: Optional[str] = Phone
+    units: int = Field(default=1, ge=1, le=10)
+
+
+class SkipBody(BaseModel):
+    phone: Optional[str] = Phone
+    how: str = Field(default="pay", max_length=8)
+    amount: Optional[int] = Field(default=None, ge=1, le=1000)
+    price: Optional[int] = Price
+
+
+class NextBody(BaseModel):
+    phone: Optional[str] = Phone
+    entry_id: str = Field(max_length=40)
+    price: Optional[int] = Price
+
+
+class PhoneOnly(BaseModel):
+    phone: Optional[str] = Phone
 
 
 @router.post("/hello")
@@ -135,13 +167,43 @@ async def post_search(body: SearchBody, request: Request) -> JSONResponse:
 @router.post("/add")
 async def post_add(body: AddBody, request: Request) -> JSONResponse:
     _check(request)
-    return _answer(await guests.book.add(body.phone, body.uri))
+    return _answer(await guests.book.add(body.phone, body.uri, body.price))
 
 
 @router.post("/bump")
 async def post_bump(body: BumpBody, request: Request) -> JSONResponse:
     _check(request)
-    return _answer(await guests.book.bump(body.phone, body.entry_id, body.direction))
+    return _answer(await guests.book.bump(body.phone, body.entry_id, body.direction, body.price))
+
+
+@router.post("/tip")
+async def post_tip(body: TipBody, request: Request) -> JSONResponse:
+    _check(request)
+    return _answer(await guests.book.tip(body.phone, body.units))
+
+
+@router.post("/skip")
+async def post_skip(body: SkipBody, request: Request) -> JSONResponse:
+    _check(request)
+    return _answer(await guests.book.skip(body.phone, body.how, body.amount, body.price))
+
+
+@router.post("/next")
+async def post_next(body: NextBody, request: Request) -> JSONResponse:
+    _check(request)
+    return _answer(await guests.book.play_next(body.phone, body.entry_id, body.price))
+
+
+@router.post("/breakout")
+async def post_breakout(body: PhoneOnly, request: Request) -> JSONResponse:
+    _check(request)
+    return _answer(await guests.book.break_out(body.phone))
+
+
+@router.get("/wallet")
+async def get_wallet(request: Request, phone: Optional[str] = None) -> JSONResponse:
+    _check(request)
+    return _answer(await guests.book.wallet_view(phone))
 
 
 @router.get("/view")

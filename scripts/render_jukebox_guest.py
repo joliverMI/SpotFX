@@ -24,8 +24,13 @@ drawn locally), switched between "plain", "your song is next", "your song
 is playing", "your songs are in a time-out" and "no night". Free play's
 pieces are checked too (PR 2.3): the skip line under the vote buttons, the
 ⇅ on a song the phone may move and its sheet (whose button reaches the
-engine's bump), and the red time-out strip. Every store is repointed to a
-temp directory first; nothing touches a live service or his storage.
+engine's bump), and the red time-out strip. Credits mode is checked too (PR
+3.2): the credits chip, tip (with its three-second undo) and skip on Now, the
+chip-in and skip confirmations (each reaching the night's ledger, the paid
+skip reaching the engine), Queue's prices and the play-next confirmation,
+the Shop with its history, and the jail card with its break-out. Every store
+(the ledger included) is repointed to a temp directory first; nothing
+touches a live service or his storage.
 
     cd spectra/web && npx vite build --config vite.guest.config.ts
     .venv/bin/python scripts/render_jukebox_guest.py
@@ -95,6 +100,38 @@ class Scene:
         self.started_ms = int(time.time() * 1000) - 3_600_000
         self.added: list = []
         self.bumped: list = []
+        self.me = ME                       # the phone a credits scene is about
+        self.play_started = 1              # each phone's credits pass is its own play
+        self.jailed = False                # credits jail, until a break-out
+        self.calls: list = []              # the credits calls that reached the engine
+
+    # the engine calls credits mode makes, for the scene: they land
+    def quote_wait(self, rnd, fair=True, duration_ms=210_000) -> int:
+        return 20 * 60_000
+
+    def _starts_in(self, entry_id):
+        return next((it.starts_in_ms for it in self.state().get("next") or []
+                     if getattr(it, "entry_id", "") == entry_id), None)
+
+    async def play_next(self, entry_id, max_back=None) -> dict:
+        self.calls.append(("play_next", entry_id))
+        return {"status": "moved", "starts_in_ms": 101_000}
+
+    async def mark_paid(self, entry_id, paid, seq) -> dict:
+        self.calls.append(("mark_paid", entry_id, paid))
+        return {"status": "ok"}
+
+    async def skip_by_vote(self, started_ms, uri, reason="votes") -> dict:
+        self.calls.append(("skip", uri, reason))
+        return {"status": "skipped"}
+
+    async def pardon(self, phone, broke_out=False) -> dict:
+        self.calls.append(("pardon", phone, broke_out))
+        self.jailed = False
+        return {"status": "pardoned"}
+
+    async def jail(self, phone, songs=None) -> dict:
+        return {"status": "jailed"}
 
     async def bump(self, entry_id, up, max_back=None) -> dict:
         """The engine's bump, for the scene: it lands (the scene's line stays put)."""
@@ -133,7 +170,23 @@ class Scene:
                       title="El Apagón", artist="Bad Bunny", duration_ms=202000,
                       image="/__art/7.png", thumb="/__art/7.png", added_by=OTTER),
         ]
-        if self.name == "mine_playing":
+        if self.name == "credits":
+            # credits mode: Ana's song playing (so there is someone to tip), and
+            # this phone's own song far enough back to play next
+            line[0].state = "playing"
+            line.append(LineEntry(id="e4", uri="spotify:track:jbx0000000000000000004",
+                                  title="Mr. Brightside", artist="The Killers", duration_ms=222000,
+                                  image="/__art/3.png", thumb="/__art/3.png", added_by=self.me))
+            now = NowItem(kind="jukebox", uri=line[0].uri, title="Dopamine", entry_id="e1",
+                          started_ms=self.play_started)
+            duration, remaining = 159000, 101000
+            nxt = [ProgramItem("jukebox", line[1].uri, "Pop Off", "Wooli", 196000, entry_id="e2"),
+                   ProgramItem("set", sets[2].uri, sets[2].title, sets[2].artist, 249000, set_index=2),
+                   ProgramItem("jukebox", line[2].uri, "El Apagón", "Bad Bunny", 202000, entry_id="e3"),
+                   ProgramItem("set", sets[3].uri, sets[3].title, sets[3].artist, 270000, set_index=3),
+                   ProgramItem("jukebox", line[3].uri, "Mr. Brightside", "The Killers", 222000,
+                               entry_id="e4")]
+        elif self.name == "mine_playing":
             now = NowItem(kind="jukebox", uri=line[0].uri, title="Dopamine", entry_id="e1",
                           started_ms=1)
             duration, remaining = 159000, 101000
@@ -159,6 +212,8 @@ class Scene:
                                   title="Mr. Brightside", artist="The Killers", duration_ms=222000,
                                   image="/__art/3.png", thumb="/__art/3.png", added_by=ME))
             jail = {ME: 13}
+        if self.name == "credits" and self.jailed:
+            jail = {self.me: 10 ** 9}           # credits mode's jail: until they break out
         line += self.added
         nxt += [ProgramItem("jukebox", e.uri, e.title, e.artist, e.duration_ms, entry_id=e.id)
                 for e in self.added]
@@ -166,7 +221,7 @@ class Scene:
                 "now": now, "is_playing": True,
                 "duration_ms": duration, "remaining_ms": remaining,
                 "next": with_start_times(nxt, remaining), "line": line, "set_items": sets,
-                "plays": 10, "jail": jail}
+                "plays": 10, "jail": jail, "no_skip": []}
 
 
 class Catalog:
@@ -209,12 +264,15 @@ def build_server(tmp: Path, scene: Scene):
     from services.jukebox import guests, store
     for attr in ("CONFIG_FILE", "NIGHT_FILE", "SHOW_FILE", "GUEST_LINK_FILE", "GUESTS_FILE"):
         setattr(store, attr, tmp / f"{attr.lower()}.json")
+    from services.jukebox import ledger
+    ledger.LEDGER_DIR = tmp / "ledger"
     jukebox_guest_router.KEY_FILE = tmp / "guest_key"
     from datetime import datetime, timedelta
     from models.jukebox import ShowConfig
     from services.jukebox.library import Song
     ends = datetime.now(guests.HOUSE_TZ) + timedelta(hours=3)
-    store.save_show(ShowConfig(night_ends=f"{ends.hour:02d}:{ends.minute:02d}"))
+    # free play for the phase-2 scenes; credits_pass switches to credits and back
+    store.save_show(ShowConfig(night_ends=f"{ends.hour:02d}:{ends.minute:02d}", play_mode="free"))
     catalog = Catalog()
     library = [catalog.songs[0]["uri"], catalog.songs[6]["uri"]]
     book = guests.Guests(guests.GuestDeps(
@@ -427,6 +485,114 @@ async def run() -> int:
                 for p in problems:
                     failures.append(f"{name} {shot}: {p}")
 
+            def ledger_kinds(pid: str) -> list:
+                w = book._wallet
+                return [e.kind for e in w.led.history(pid)] if w else []
+
+            async def credits_pass(phone: tuple) -> None:
+                from models.jukebox import ShowConfig
+                from services.jukebox import store
+                name = phone[0]
+                cme = ("C" * 21) + str(PHONES.index(phone))
+                show = store.load_show()
+                store.save_show(ShowConfig(**{**show.model_dump(), "play_mode": "credits"}))
+                scene.name, scene.me, scene.jailed = "credits", cme, False
+                scene.play_started = 2 + PHONES.index(phone)   # a fresh play: a fresh skip pot
+                calls = lambda kind: sum(1 for c in scene.calls if c[0] == kind)  # noqa: E731
+                skips0, nexts0, pardons0 = calls("skip"), calls("play_next"), calls("pardon")
+                book._wallet_for("render-night", store.load_show()).led.grant(cme, "host_gift", 60)
+                book._wallet = None            # reopened from the ledger, as after a restart
+                try:
+                    if not await fresh(phone, cme):
+                        failures.append(f"{name}: credits: the page never loaded")
+                        return
+                    if await wait_for("!!document.querySelector('.g-welcome .g-btn-go')", 4):
+                        if not await evaluate(ws, nid, "!!document.querySelector('.g-welcome-credits')"):
+                            failures.append(f"{name}: credits: the welcome screen doesn't name the credits")
+                        await tap(".g-btn-go")
+                    if not await wait_for("!!document.querySelector('.g-credit-actions .g-btn-skip:not([disabled])')"
+                                          " && /🎟 6[0-9]/.test(document.querySelector('.g-credits-chip')?.textContent || '')"):
+                        failures.append(f"{name}: credits: no credits chip, or no skip button on Now")
+                        return
+                    await check(phone, "14-credits-now")
+                    # tip: held three seconds with an Undo, then it lands in the ledger
+                    await tap(".g-btn-tip")
+                    if not await wait_for("!!document.querySelector('.g-toast-undo .g-undo')", 2):
+                        failures.append(f"{name}: credits: a tip has no undo")
+                    await check(phone, "15-tip-undo")
+                    await tap(".g-undo")
+                    await asyncio.sleep(3.5)
+                    if "tip_out" in ledger_kinds(cme):
+                        failures.append(f"{name}: credits: Undo didn't stop the tip")
+                    await tap(".g-btn-tip")
+                    if not await wait_for("!document.querySelector('.g-toast-undo')", 6) or \
+                            not await wait_for("!!document.querySelector('.g-toast')", 4):
+                        failures.append(f"{name}: credits: the tip never landed")
+                    if "tip_out" not in ledger_kinds(cme):
+                        failures.append(f"{name}: credits: the tip isn't in the ledger")
+                    await wait_for("!document.querySelector('.g-toast')", 7)
+                    # chip in: the sheet of amounts, one of them reaching the pot
+                    await tap(".g-skip-row .g-btn-ghost")
+                    if not await wait_for("!!document.querySelector('.g-sheet .g-amounts .g-btn-primary')", 4):
+                        failures.append(f"{name}: credits: Chip in has no amounts")
+                    await check(phone, "16-chip-in-sheet")
+                    await tap(".g-sheet .g-amounts .g-btn-primary")
+                    if not await wait_for("!document.querySelector('.g-sheet')", 6) or \
+                            "skip_pledge" not in ledger_kinds(cme):
+                        failures.append(f"{name}: credits: chipping in didn't reach the pot")
+                    await wait_for("!document.querySelector('.g-toast')", 7)
+                    # skip: it asks once, then pays the rest and the engine skips
+                    await tap(".g-btn-skip")
+                    if not await wait_for("!!document.querySelector('.g-sheet .g-btn-primary:not([disabled])')", 4):
+                        failures.append(f"{name}: credits: the skip asks nothing")
+                    await check(phone, "17-skip-confirm")
+                    await tap(".g-sheet .g-btn-primary")
+                    if not await wait_for("!document.querySelector('.g-sheet')", 6) or \
+                            calls("skip") != skips0 + 1 or "skip" not in ledger_kinds(cme):
+                        failures.append(f"{name}: credits: the paid skip didn't reach the engine")
+                    await wait_for("!document.querySelector('.g-toast')", 7)
+                    # Queue: prices on your song, and play next asks once
+                    await tap(".g-tab:nth-child(2)")
+                    if not await wait_for("[...document.querySelectorAll('.g-queue button')]"
+                                          ".some((b) => /Play next · \\d/.test(b.textContent))", 6):
+                        failures.append(f"{name}: credits: no priced Play next on your song")
+                    await check(phone, "18-credits-queue")
+                    await evaluate(ws, nid, """(() => { const b = [...document.querySelectorAll('.g-queue button')]
+                      .find((x) => /Play next · \\d/.test(x.textContent)); b?.setAttribute('data-render', 'next'); return !!b; })()""")
+                    await tap("[data-render=next]")
+                    if not await wait_for("!!document.querySelector('.g-sheet .g-btn-primary:not([disabled])')", 4):
+                        failures.append(f"{name}: credits: play next asks nothing")
+                    await check(phone, "19-play-next-confirm")
+                    await tap(".g-sheet .g-btn-primary")
+                    if not await wait_for("!document.querySelector('.g-sheet')", 6) or \
+                            calls("play_next") != nexts0 + 1 or "play_next" not in ledger_kinds(cme):
+                        failures.append(f"{name}: credits: play next didn't reach the engine and the ledger")
+                    await wait_for("!document.querySelector('.g-toast')", 7)
+                    # the Shop: the balance, the prices, the history
+                    await tap(".g-credits-chip")
+                    if not await wait_for("document.querySelectorAll('.g-shop .g-history li').length >= 5"
+                                          " && document.querySelectorAll('.g-shop .g-tile').length >= 5", 6):
+                        failures.append(f"{name}: credits: the Shop has no tiles or no history")
+                    await check(phone, "20-shop")
+                    # jail: the card on Now, and a break-out that reaches the engine
+                    scene.jailed = True
+                    await tap(".g-tab:nth-child(1)")
+                    if not await wait_for("!!document.querySelector('.g-jail-card .g-btn-primary:not([disabled])')"
+                                          " && !!document.querySelector('.g-strip-jail')", 8):
+                        failures.append(f"{name}: credits: no jail card with a break-out")
+                    await check(phone, "21-jail-card")
+                    # the red strip is the way out, on every screen: one tap opens the sheet
+                    await tap(".g-strip-btn")
+                    await wait_for("!!document.querySelector('.g-sheet .g-btn-primary:not([disabled])')", 4)
+                    await tap(".g-sheet .g-btn-primary")
+                    if not await wait_for("!document.querySelector('.g-jail-card')", 8) or \
+                            calls("pardon") != pardons0 + 1 or ("pardon", cme, True) not in scene.calls \
+                            or "jail_breakout" not in ledger_kinds(cme):
+                        failures.append(f"{name}: credits: breaking out didn't reach the engine and the ledger")
+                finally:
+                    store.save_show(ShowConfig(**{**store.load_show().model_dump(), "play_mode": "free"}))
+                    scene.name, scene.me, scene.jailed, scene.play_started = "plain", ME, False, 1
+
             for phone in PHONES:
                 name = phone[0]
                 print(name)
@@ -547,6 +713,8 @@ async def run() -> int:
                 if await evaluate(ws, nid, "!!document.querySelector('.g-move-btn')"):
                     failures.append(f"{name}: ⇅ is offered during a time-out")
                 await check(phone, "13-time-out-queue")
+                # ── credits mode (PR 3.2) ──
+                await credits_pass(phone)
                 # ── no night ──
                 scene.name = "idle"
                 await fresh(phone, None)

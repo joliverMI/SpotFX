@@ -148,6 +148,12 @@ class Ledger:
     def tipped_on(self, giver: str, song_ref: str) -> int:
         return self._tipped.get((giver, song_ref), 0)
 
+    def is_refunded(self, spend_seq: int) -> bool:
+        return int(spend_seq) in self._refunded
+
+    def voted_paid(self, voter: str, song_ref: str) -> bool:
+        return (voter, song_ref) in self._voted
+
     # ── writing ─────────────────────────────────────────────────────────────
 
     def _apply(self, e: Entry) -> None:

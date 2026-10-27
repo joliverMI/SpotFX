@@ -19,6 +19,12 @@ export function phoneState(p: GuestPhone): PhoneState {
   return p.joined ? 'in' : 'welcome';
 }
 
+/** Credits mode's jail lasts until the guest breaks out (or you pardon). */
+function jailWords(p: GuestPhone): string {
+  return p.jail_kind === 'breakout' ? 'in jail (until they break out)'
+    : `in a time-out (${songs(p.jail_left ?? 0)} to go)`;
+}
+
 export const PHONE_WORDS: Record<PhoneState, string> = {
   blocked: 'blocked for the night',
   waiting: 'waiting for your approval',
@@ -33,7 +39,8 @@ function songs(n: number): string {
 
 export function phoneLine(p: GuestPhone): string {
   const parts = [PHONE_WORDS[phoneState(p)]];
-  if (p.jail_left) parts[0] += ` (${songs(p.jail_left)} to go)`;
+  if (p.jail_left) parts[0] = jailWords(p);
+  if (p.credits !== undefined) parts.push(`🎟 ${p.credits}`);
   else if (p.jail_count && p.jail_count > 0 && p.jail_at) parts.push(`net ▼ ${p.jail_count} of ${p.jail_at}`);
   if (p.waiting) parts.push(`${p.waiting} in line`);
   if (p.played) parts.push(`${p.played} played`);
@@ -67,7 +74,8 @@ export function adderName(e: LineEntry, phones: GuestPhone[]): string {
  * do to each: hold or let go of a waiting song; play it next (when the show
  * lets the host); remove any (a song already sent to Spotify is skipped as
  * it starts). A song whose adder is in a time-out says so. */
-export function lineRows(line: LineEntry[], phones: GuestPhone[], playNext = false) {
+export function lineRows(line: LineEntry[], phones: GuestPhone[], playNext = false,
+                         noSkip: string[] = []) {
   const jailed = new Set(phones.filter((p) => p.jail_left).map((p) => p.id));
   const waiting = line.filter((e) => e.state === 'queued');
   return line
@@ -81,6 +89,8 @@ export function lineRows(line: LineEntry[], phones: GuestPhone[], playNext = fal
       jailed: e.state === 'queued' && jailed.has(e.added_by),
       canHold: e.state === 'queued',
       canPlayNext: playNext && e.state === 'queued' && waiting[0]?.id !== e.id,
+      skipLocked: noSkip.includes(e.uri),
+      paid: e.paid ?? 0,
       doomed: e.doomed,
     }));
 }

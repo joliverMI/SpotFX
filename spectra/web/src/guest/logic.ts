@@ -5,7 +5,10 @@
 // the time-out). Times count from when THIS phone received the view (never
 // the server's clock against the phone's — the two can disagree). Whether a
 // skip, a bump or a time-out happens is SpotFX's; this only says it.
-import type { BumpsInfo, By, Features, JailInfo, MySong, NextSong, SkipInfo, Strip, StripTone } from './types';
+import type {
+  BumpsInfo, By, Features, JailInfo, MySong, NextQuote, NextSong, SearchResult, SkipInfo, Strip,
+  StripTone, TipInfo,
+} from './types';
 
 export function mmss(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -44,6 +47,10 @@ export function stripText(strip: Strip, elapsedMs: number, nowMs: number,
                           canAdd: boolean, locale?: string): StripText {
   const left = strip.starts_in_ms === null ? null : Math.max(0, strip.starts_in_ms - elapsedMs);
   if (strip.tone === 'jail') {
+    if (strip.jail_kind === 'breakout') {
+      return { tone: 'jail', label: "You're in jail",
+               detail: `Tap here to break out (${strip.jail_fee ?? 10} credits)` };
+    }
     const n = strip.jail_left ?? 0;
     return { tone: 'jail', label: "You're in a time-out",
              detail: `Your songs sit out ${n} more song${n === 1 ? '' : 's'}` };
@@ -105,12 +112,13 @@ export function wantsHomeScreenHint(ua: string, maxTouchPoints: number,
   return /iPhone|iPod|iPad/.test(ua) || (/Macintosh/.test(ua) && maxTouchPoints > 1);
 }
 
-export type Tab = 'now' | 'queue' | 'add' | 'board';
+export type Tab = 'now' | 'queue' | 'add' | 'shop' | 'board';
 
 /** The bottom bar: only what tonight's page can do (free play has no Shop;
- *  Add and Board arrive when SpotFX says they are open). */
+ *  Add, Shop and Board arrive when SpotFX says they are open). */
 export function tabsFor(f: Features): Tab[] {
-  return ['now', 'queue', ...(f.add ? ['add' as Tab] : []), ...(f.board ? ['board' as Tab] : [])];
+  return ['now', 'queue', ...(f.add ? ['add' as Tab] : []), ...(f.shop ? ['shop' as Tab] : []),
+          ...(f.board ? ['board' as Tab] : [])];
 }
 
 export function byLine(by: By, mine: boolean): string {
@@ -192,6 +200,8 @@ export function addedText(startsInMs: number | null, nowMs: number, locale?: str
 /** Under the vote buttons: how close the room is to skipping the song. */
 export function skipLine(skip: SkipInfo | undefined, downs: number): string {
   if (!skip || skip.skipping) return '';
+  if (skip.locked) return 'The host has kept this song from skips.';
+  if (skip.mode === 'paid') return '';           // credits: the skip button says it all
   if (skip.needed === 0) {
     return skip.grace_left_ms > 0 ? 'The room has voted to skip it — it goes in a few seconds.'
       : 'The room has voted to skip it.';
@@ -212,11 +222,19 @@ export function bumpsLine(bumps: BumpsInfo | undefined, jail: JailInfo | undefin
 export interface BumpOffer { dir: 'up' | 'down'; label: string; can: boolean; why: string }
 
 /** What the move sheet offers for one song: your own up, others' down —
- *  and why not, when this phone can't right now. Null: nothing to offer. */
+ *  and why not, when this phone can't right now. Null: nothing to offer.
+ *  In credits mode (`balance` given) a move has its price instead of an
+ *  hourly count. */
 export function bumpOffer(song: NextSong, bumps: BumpsInfo | undefined,
-                          jail: JailInfo | undefined): BumpOffer | null {
+                          jail: JailInfo | undefined, balance?: number): BumpOffer | null {
   if (song.kind !== 'jukebox' || song.committed || !song.bump) return null;
   const dir = song.bump;
+  if (balance !== undefined) {
+    const price = song.bump_price ?? 0;
+    const label = `${dir === 'up' ? 'Move it up' : 'Move it down'} one place · ${price}`;
+    if (jail?.in) return { dir, label, can: false, why: jailWhy(jail) };
+    return { dir, label, can: balance >= price, why: balance >= price ? '' : needs(price, balance) };
+  }
   const label = dir === 'up' ? 'Move it up one place' : 'Move it down one place';
   let why = '';
   if (jail?.in) why = `You're in a time-out — you can move songs again after ${songs(jail.songs_left)}.`;
@@ -239,3 +257,85 @@ export function myStatus(m: MySong, elapsedMs: number, nowMs: number, locale?: s
   const where = m.state === 'next' ? 'Next' : `#${m.place ?? '—'}`;
   return `${where} · ${inWords(left)} · ~${clockAt(nowMs, left, locale)}`;
 }
+
+// ── credits mode (PR 3.2) ────────────────────────────────────────────────
+
+export function credits(n: number): string {
+  return `${n} credit${n === 1 ? '' : 's'}`;
+}
+
+export function needs(price: number, balance: number): string {
+  return `That needs ${credits(price)} — you have ${balance}.`;
+}
+
+function jailWhy(jail: JailInfo): string {
+  return jail.kind === 'breakout'
+    ? `You're in jail — break out (${credits(jail.fee ?? 10)}) to move songs again.`
+    : `You're in a time-out — you can move songs again after ${songs(jail.songs_left)}.`;
+}
+
+export interface Offer { label: string; can: boolean; why: string }
+
+/** The skip button in credits mode: the rest of the price (what's left
+ *  after the pot), and the pot itself. Null: nothing to buy. */
+export function skipOffer(skip: SkipInfo | undefined, balance: number): (Offer & { pot: string; price: number; need: number }) | null {
+  if (!skip || skip.mode !== 'paid' || skip.skipping) return null;
+  const price = skip.price ?? 0;
+  const need = skip.need ?? price;
+  const pot = skip.pot ?? 0;
+  const label = pot > 0 ? `Skip · ${need} more` : `Skip · ${price}`;
+  const why = skip.why || (balance < need ? needs(need, balance) : '');
+  const potLine = pot > 0
+    ? `Pot ${pot} of ${price}${skip.pot_mine ? ` · ${skip.pot_mine} yours` : ''} · it comes back if the song ends first`
+    : `The price falls ${skip.per_down_pct ?? 15}% with every net ▼${skip.chip_in ? ' · or chip in with others' : ''}`;
+  return { label, can: !why && !!skip.can, why, pot: potLine, price, need };
+}
+
+/** The tip button: tip the guest whose song this is. Null: nothing to say. */
+export function tipOffer(tip: TipInfo | undefined, balance: number): Offer | null {
+  if (!tip) return null;
+  if (!tip.to) return { label: '', can: false, why: tip.why };
+  const why = tip.why || (balance < tip.unit ? needs(tip.unit, balance) : '');
+  return { label: `Tip ${tip.to} · ${tip.unit}`, can: tip.can && !why, why };
+}
+
+/** Play next on one of your songs. */
+export function nextOffer(q: NextQuote | undefined, balance: number, jail?: JailInfo): Offer | null {
+  if (!q) return null;
+  const label = `Play next · ${q.price}`;
+  if (jail?.in) return { label, can: false, why: jailWhy(jail) };
+  if (!q.allowed) return { label, can: false, why: q.why };
+  return { label, can: balance >= q.price, why: balance >= q.price ? '' : needs(q.price, balance) };
+}
+
+/** The Add button on a search result in credits mode. */
+export function addOffer(r: SearchResult): { label: string; afford: boolean } {
+  if (r.price === undefined) return { label: 'Add', afford: true };
+  return { label: `Add · ${r.price}`, afford: r.afford !== false };
+}
+
+/** The jail card (credits): why, and the way out. */
+export function jailCard(jail: JailInfo | undefined): { title: string; text: string; fee: number } | null {
+  if (!jail?.in || jail.kind !== 'breakout') return null;
+  return {
+    title: "You're in jail",
+    text: (jail.count >= jail.at
+      ? `Your songs got ${jail.count} more ▼ than ▲ tonight (the bar at this party is ${jail.at}). `
+      : `Your songs got too many ▼ tonight (the bar at this party is ${jail.at} more ▼ than ▲). `) +
+      'They keep their places but wait until you break out. You can still vote — +1 each.',
+    fee: jail.fee ?? 10,
+  };
+}
+
+/** A history row's amount: "+2", "−4". */
+export function signed(delta: number): string {
+  return delta >= 0 ? `+${delta}` : `−${-delta}`;
+}
+
+/** After a vote: the "+1 credit" toast, when it paid. */
+export function earnedToast(earned: number | undefined): string {
+  return earned && earned > 0 ? `+${credits(earned)} for voting` : '';
+}
+
+/** How long the page holds a tip before sending it, so a mis-tap can be undone. */
+export const TIP_UNDO_MS = 3000;

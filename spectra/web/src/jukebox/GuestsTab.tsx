@@ -13,6 +13,7 @@ import { useToast } from '../components/Toast';
 import { lineRows, phoneActions, phoneLine, type PhoneAction } from './jukeboxGuests';
 import {
   useGuests, useHoldEntry, useHostPhone, useJukeboxShow, usePlayNext, useRemoveEntry, useSaveShow,
+  useSkipLock,
 } from './queries';
 import type { GuestField, GuestPhone, JukeboxStatus, ShowConfig } from './types';
 
@@ -36,10 +37,16 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
   const hold = useHoldEntry();
   const remove = useRemoveEntry();
   const playNext = usePlayNext();
+  const skipLock = useSkipLock();
   const onError = (e: unknown) => toast(errText(e), 'error');
   const phones = guestsQ.data?.phones ?? [];
   const show = showQ.data?.show;
-  const rows = lineRows(status?.line ?? [], phones, (show?.free_play_next ?? 'host') === 'host');
+  const credits = show?.play_mode === 'credits';
+  const noSkip = status?.no_skip ?? [];
+  const rows = lineRows(status?.line ?? [], phones,
+                        credits || (show?.free_play_next ?? 'host') === 'host', noSkip);
+  const now = status?.running ? status.now : null;
+  const nowLocked = !!now?.uri && noSkip.includes(now.uri);
   const allFields = showQ.data?.guest_fields ?? [];
   const fields = allFields.filter((f) => f.card !== FREE_PLAY);
   const freeFields = allFields.filter((f) => f.card === FREE_PLAY);
@@ -72,6 +79,11 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
             <span className="jukebox-muted">{`${guestsQ.data.crowd} phone${guestsQ.data.crowd === 1 ? '' : 's'} here in the last 15 min`}</span>
           ) : null}
         </div>
+        {credits && (
+          <p className="jukebox-muted" data-testid="jukebox-free-play-off">
+            The guest page is on credits (the Credits tab&apos;s Mode card), so these rules wait for free play.
+          </p>
+        )}
         {show ? <div className="jukebox-settings">{ruleRows(freeFields)}</div>
           : <p className="jukebox-muted">Reading the rules…</p>}
       </section>
@@ -81,6 +93,21 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
           <span className="card-title jukebox-card-title">The line</span>
           <span className="jukebox-muted">{rows.length ? `${rows.length} waiting` : running ? 'empty — slots pass' : 'no night running'}</span>
         </div>
+        {now && now.uri && (now.kind === 'set' || now.kind === 'jukebox') && (
+          <div className="jukebox-item jukebox-now-row" data-testid="jukebox-now-skip">
+            <span className="jukebox-item-words">
+              <span className="jukebox-song-title">Now: {now.title || now.uri}</span>
+              <span className="jukebox-song-artist">{nowLocked ? 'kept from skips' : 'can be skipped'}</span>
+            </span>
+            <span className="jukebox-guest-actions">
+              <InfoTip topic="jukebox-skip-lock" text="Keep a song from every skip tonight — the room's vote and a paid skip alike.">
+                <button onClick={() => skipLock.mutate({ uri: now.uri, locked: !nowLocked }, { onError })}>
+                  {nowLocked ? 'Let it be skipped' : 'Keep from skips'}
+                </button>
+              </InfoTip>
+            </span>
+          </div>
+        )}
         {rows.length > 0 && (
           <ol className="jukebox-next">
             {rows.map((r) => (
@@ -88,8 +115,10 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
                 <span className="jukebox-item-words">
                   <span className="jukebox-song-title">{r.entry.title || r.entry.uri}</span>
                   <span className="jukebox-song-artist">
-                    {[r.entry.artist, `added by ${r.by}`, r.round, r.sent ? 'sent to Spotify' : '',
+                    {[r.entry.artist, `added by ${r.by}`, r.round, r.paid ? `paid 🎟 ${r.paid}` : '',
+                      r.sent ? 'sent to Spotify' : '',
                       r.held ? 'on hold' : '', r.jailed ? 'sits out a time-out' : '',
+                      r.skipLocked ? 'kept from skips' : '',
                       r.doomed ? 'removed: skipped as it starts' : ''].filter(Boolean).join(' · ')}
                   </span>
                 </span>
@@ -97,6 +126,9 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
                   {r.canPlayNext && (
                     <button onClick={() => playNext.mutate(r.entry.id, { onError })}>Play next</button>
                   )}
+                  <button onClick={() => skipLock.mutate({ uri: r.entry.uri, locked: !r.skipLocked }, { onError })}>
+                    {r.skipLocked ? 'Allow skips' : 'Keep from skips'}
+                  </button>
                   {r.canHold && (
                     <button onClick={() => hold.mutate({ id: r.entry.id, held: !r.held }, { onError })}>
                       {r.held ? 'Let go' : 'Hold'}

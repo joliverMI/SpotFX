@@ -299,3 +299,54 @@ h1, h2 { margin: 0; }
 .g-row-jailed { color: var(--danger); font-weight: 600; }
 .g-strip-jail { background: #7f1d1d; border-color: var(--danger); }
 .g-strip-jail span { color: #fecaca; }
+button.g-strip-btn { box-sizing: border-box; width: calc(100% - 2 * var(--gutter)); text-align: left;
+  font: inherit; color: inherit; cursor: pointer;
+  -webkit-tap-highlight-color: transparent; }
+
+/* ── credits mode: the chip, tip and skip, the jail card, the Shop ───── */
+.g-header-chips { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.g-credits-chip {
+  min-height: 44px; min-width: 44px; padding: 0 12px; border-radius: 22px;
+  border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 22%, var(--surface2));
+  font-weight: 800; font-size: 15px; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.g-name-chip { max-width: 46vw; }
+.g-welcome-credits { margin: 0; padding: 10px 12px; border-radius: var(--radius);
+                     background: color-mix(in srgb, var(--accent) 18%, var(--surface)); font-weight: 700; }
+.g-vote-earn { font-size: 12px; font-weight: 600; opacity: 0.85; }
+.g-coming-in { margin: 10px 0 0; text-align: center; font-weight: 700; color: var(--ok); }
+.g-credit-actions { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.g-credit-actions p { margin: 0; }
+.g-btn-tip { width: 100%; background: color-mix(in srgb, #facc15 20%, var(--surface2)); border-color: #a16207; }
+.g-skip-row { display: flex; gap: 8px; }
+.g-btn-skip { flex: 1; }
+.g-jail-card {
+  margin-top: 14px; padding: 14px; border-radius: var(--radius);
+  background: #450a0a; border: 1px solid var(--danger); display: flex; flex-direction: column; gap: 8px;
+}
+.g-jail-card h2 { font-size: 18px; }
+.g-jail-card p { margin: 0; }
+.g-row-buys { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.g-btn-small { min-height: 44px; padding: 0 12px; font-size: 14px; }
+.g-badge-learn { background: #78350f; color: #fde68a; }
+.g-toast-undo { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+                background: var(--surface2); color: var(--text); border: 1px solid var(--accent); }
+.g-undo { min-height: 44px; }
+.g-amounts { flex-wrap: wrap; justify-content: flex-start; }
+.g-shop { display: flex; flex-direction: column; gap: 10px; }
+.g-balance { text-align: center; padding: 14px; border-radius: var(--radius); background: var(--surface);
+             border: 1px solid var(--border); }
+.g-balance-big { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.g-earned { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-wrap: wrap; justify-content: center;
+            gap: 4px 12px; font-size: 13px; color: var(--muted); }
+.g-tiles { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.g-tile { padding: 10px; border-radius: var(--radius); background: var(--surface); display: flex;
+          flex-direction: column; gap: 2px; min-width: 0; }
+.g-tile-price { font-weight: 800; color: var(--accent2); }
+.g-disclaimer { font-size: 13px; color: var(--muted); margin: 4px 0 0; }
+.g-history { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.g-history li { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px;
+                border-radius: 8px; background: var(--surface); font-size: 14px; }
+.g-history-what { min-width: 0; }
+.g-history-delta { font-weight: 800; color: var(--ok); font-variant-numeric: tabular-nums; flex: none; }
+.g-history-delta.g-neg { color: var(--danger); }
