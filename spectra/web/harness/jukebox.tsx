@@ -108,7 +108,16 @@ let show = {
   preset: RUNNING ? 'medium' : null,
   approve_new_phones: false,
   economy: Object.fromEntries(SNAP.fields.map((f: { key: string; default: number | boolean }) => [f.key, f.default])),
+  ...Object.fromEntries(SNAP.guest_fields.map((f: { key: string; default: string | number | boolean }) => [f.key, f.default])),
 };
+
+// tonight's phones (the Guests tab): one waiting for approval, one blocked
+const PHONES = [
+  { id: 'phoneAAAAAAAAAAAAAAAAA', name: 'Disco Ana', joined: true, created_ms: NOW - 50 * MIN, joined_ms: NOW - 50 * MIN, renames: 1, approved: true, blocked: false, name_locked: false, waiting: 1, played: 2, votes: 9 },
+  { id: 'phoneBBBBBBBBBBBBBBBBB', name: 'Lucky Otter', joined: true, created_ms: NOW - 40 * MIN, joined_ms: NOW - 39 * MIN, renames: 0, approved: true, blocked: false, name_locked: true, waiting: 1, played: 1, votes: 6 },
+  { id: 'phoneCCCCCCCCCCCCCCCCC', name: 'Velvet Moose', joined: true, created_ms: NOW - 6 * MIN, joined_ms: NOW - 5 * MIN, renames: 0, approved: false, blocked: false, name_locked: false, waiting: 0, played: 0, votes: 0 },
+  { id: 'phoneDDDDDDDDDDDDDDDDD', name: 'Witty Gecko', joined: false, created_ms: NOW - 2 * MIN, joined_ms: null, renames: 0, approved: true, blocked: true, name_locked: false, waiting: 0, played: 0, votes: 1 },
+];
 
 const preview = (): JukeboxPreview => {
   if (!config.playlist) return { status: 'refused', reason: 'no_playlist', detail: 'No set playlist is linked — link one first.' };
@@ -122,9 +131,9 @@ const preview = (): JukeboxPreview => {
   };
 };
 
-const J = (n: number, title: string, artist: string, s: number) => ({
+const J = (n: number, title: string, artist: string, s: number, by = 'host', round = 1) => ({
   id: `entry${n}`, uri: `spotify:track:guestharness${String(n).padStart(8, '0')}`, title, artist,
-  duration_ms: s * 1000, added_by: 'host',
+  duration_ms: s * 1000, added_by: by, round,
 });
 
 const status = (): JukeboxStatus => {
@@ -139,8 +148,8 @@ const status = (): JukeboxStatus => {
   }
   const line = [
     { ...J(1, 'Bad Romance', 'Lady Gaga', 294), state: 'committed' as const, doomed: false, commit_check: 'next' as const },
-    { ...J(2, 'Take On Me', 'a-ha', 225), state: 'queued' as const, doomed: false, commit_check: '' as const },
-    { ...J(3, 'Murder on the Dancefloor', 'Sophie Ellis-Bextor', 230), state: 'queued' as const, doomed: false, commit_check: '' as const },
+    { ...J(2, 'Take On Me', 'a-ha', 225, PHONES[0].id), state: 'queued' as const, doomed: false, commit_check: '' as const },
+    { ...J(3, 'Murder on the Dancefloor', 'Sophie Ellis-Bextor', 230, PHONES[1].id, 2), state: 'queued' as const, doomed: false, commit_check: '' as const, held: true },
   ];
   let at = 38_000;
   const nextItems: ProgramItem[] = [];
@@ -199,12 +208,19 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes('/api/jukebox/preview')) return json(preview());
   if (url.includes('/api/jukebox/show/preset')) {
     show = { ...show, preset: body?.preset ?? null, approve_new_phones: body?.preset === 'large' };
-    return json({ show, fields: SNAP.fields, presets: SNAP.presets, config });
+    return json({ show, fields: SNAP.fields, guest_fields: SNAP.guest_fields, presets: SNAP.presets, config });
   }
   if (url.includes('/api/jukebox/show')) {
-    if (method === 'PUT') show = { ...show, economy: { ...show.economy, ...(body?.economy ?? {}) } };
-    return json({ show, fields: SNAP.fields, presets: SNAP.presets });
+    if (method === 'PUT') {
+      const { economy, ...rest } = body ?? {};
+      show = { ...show, ...rest, economy: { ...show.economy, ...(economy ?? {}) } };
+    }
+    return json({ show, fields: SNAP.fields, guest_fields: SNAP.guest_fields, presets: SNAP.presets });
   }
+  if (url.includes('/api/jukebox/guests')) {
+    return json(RUNNING ? { running: true, phones: PHONES, pending: 1 } : { running: false, phones: [] });
+  }
+  if (url.includes('/api/jukebox/line/')) return json({ status: 'refused', reason: 'harness', detail: 'This is the mocked harness — nothing changed.' });
   if (url.includes('/api/jukebox/price-check')) {
     const g = new URL(url, 'http://x').searchParams.get('guests') ?? '15';
     return json((SNAP.price_check as Record<string, unknown>)[g] ?? SNAP.price_check['15']);

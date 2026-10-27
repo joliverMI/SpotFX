@@ -119,6 +119,7 @@ def test_the_harness_snapshot_is_the_servers_own_answer():
     path = pathlib.Path(__file__).resolve().parent.parent / "spectra/web/harness/jukeboxShowSnapshot.json"
     snap = json.loads(path.read_text(encoding="utf-8"))
     assert snap["fields"] == show.fields()
+    assert snap["guest_fields"] == json.loads(json.dumps(show.guest_fields()))
     assert snap["presets"] == show.presets()
     assert snap["price_check"] == {str(g): json.loads(json.dumps(show.price_check(EconomyConfig(), g)))
                                    for g in (4, 8, 15, 30)}

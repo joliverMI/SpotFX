@@ -9,6 +9,8 @@ directly, and a wrong or missing key is a plain 401.
   POST /api/jukebox/guest/join    {phone, name?}         "Let's go"
   POST /api/jukebox/guest/name    {phone, name?, shuffle} a new name
   POST /api/jukebox/guest/vote    {phone, vote: up|down|none}
+  POST /api/jukebox/guest/search  {phone, q, offset}     his library first, then Spotify
+  POST /api/jukebox/guest/add     {phone, uri}           a song into the line (fair order)
   GET  /api/jukebox/guest/view?phone=                    the screen, again
 
 What each does is services/jukebox/guests.py; every answer carries the
@@ -82,6 +84,17 @@ class VoteBody(BaseModel):
     vote: str = Field(max_length=8)
 
 
+class SearchBody(BaseModel):
+    phone: Optional[str] = Phone
+    q: str = Field(default="", max_length=120)
+    offset: int = Field(default=0, ge=0, le=200)
+
+
+class AddBody(BaseModel):
+    phone: Optional[str] = Phone
+    uri: str = Field(max_length=200)
+
+
 @router.post("/hello")
 async def post_hello(body: HelloBody, request: Request) -> JSONResponse:
     _check(request)
@@ -104,6 +117,18 @@ async def post_name(body: NameBody, request: Request) -> JSONResponse:
 async def post_vote(body: VoteBody, request: Request) -> JSONResponse:
     _check(request)
     return _answer(await guests.book.vote(body.phone, body.vote))
+
+
+@router.post("/search")
+async def post_search(body: SearchBody, request: Request) -> JSONResponse:
+    _check(request)
+    return _answer(await guests.book.search(body.phone, body.q, body.offset))
+
+
+@router.post("/add")
+async def post_add(body: AddBody, request: Request) -> JSONResponse:
+    _check(request)
+    return _answer(await guests.book.add(body.phone, body.uri))
 
 
 @router.get("/view")

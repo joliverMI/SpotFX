@@ -163,6 +163,11 @@ class JukeboxDeps:
     # The defaults do nothing: only production_deps() wires the real one.
     guest_link_start: Callable[[str], Awaitable[Any]] = _no_guest_link
     guest_link_end: Callable[[str], Awaitable[Any]] = _no_guest_link
+    # Do the lights already know this song (its audio shape is captured)?
+    # The line's "Ready" badge. Blocking (it may read the shape index), so
+    # only ever called through `to_thread`; production_deps() wires the
+    # library's own answer.
+    known: Callable[[str], bool] = lambda uri: False
 
 
 def production_deps() -> JukeboxDeps:
@@ -183,8 +188,11 @@ def production_deps() -> JukeboxDeps:
 
     from services.jukebox import guest_link
 
+    from services.jukebox import library
+
     return JukeboxDeps(gateway=default_gateway(), current_track=lambda: state.current_track,
                        device_name=device_name, sleeping=sleeping, absorb_busy=absorb_busy,
+                       known=library.known,
                        guest_link_start=lambda nid: guest_link.controller.on_night_start(nid),
                        guest_link_end=lambda nid: guest_link.controller.on_night_end(nid))
 
@@ -323,7 +331,7 @@ class JukeboxRunner:
     def _fills(self) -> list[program.Fill]:
         line = self.night.line
         live = [e for e in line if e.state == "committed" and not e.doomed]
-        queued = [e for e in line if e.state == "queued" and e.ready]
+        queued = [e for e in line if e.state == "queued" and e.ready and not e.held]
         return ([program.Fill(e.id, e.uri, e.title, e.artist, e.duration_ms, True) for e in live]
                 + [program.Fill(e.id, e.uri, e.title, e.artist, e.duration_ms, False)
                    for e in queued])
@@ -913,6 +921,7 @@ class JukeboxRunner:
                     "detail": sentence("spotify_error", _err(exc))}
         if not meta:
             return {"status": "refused", "reason": "track_unknown", "detail": sentence("track_unknown")}
+        known = await self._known(meta["uri"])
         async with self._get_lock():
             if not self.running:
                 return {"status": "refused", "reason": "not_running",
@@ -921,11 +930,91 @@ class JukeboxRunner:
                               artist=meta.get("artist", ""),
                               duration_ms=int(meta.get("duration_ms") or 0),
                               image=meta.get("image") or "", thumb=meta.get("thumb") or "",
+                              explicit=bool(meta.get("explicit")), known=known,
                               added_ms=self.deps.now_ms(), added_by=added_by)
             self.night.line.append(entry)
             self._log(f"{added_by} added {entry.title or entry.uri}")
             await self._persist()
             return {"status": "added", "entry": entry.model_dump(mode="json")}
+
+    async def _known(self, uri: str) -> bool:
+        try:
+            return bool(await self.deps.to_thread(self.deps.known, uri))
+        except Exception:                                         # noqa: BLE001
+            return False
+
+    def fair_index(self, rnd: int, fair: bool) -> int:
+        """Where a new song of round `rnd` goes in the line: ahead of the
+        first WAITING song with a higher round (fair order: 1st songs before
+        2nd songs), else at the back. Never ahead of a song already sent to
+        Spotify or playing — those aren't waiting."""
+        line = self.night.line
+        if fair:
+            for i, e in enumerate(line):
+                if e.state == "queued" and e.round > rnd:
+                    return i
+        return len(line)
+
+    def _starts_in(self, entry_id: str) -> Optional[int]:
+        """When an entry in the line would start, from now (None: not within
+        the projection — far beyond anything the night will reach)."""
+        n = self.night
+        track = self.deps.current_track()
+        on = track is not None and str(getattr(track, "spotify_uri", "")) == n.now.uri
+        remaining = self._remaining_ms(track, self.deps.clock()) if on else 0
+        waiting = sum(1 for e in n.line if e.state in ("queued", "committed"))
+        items = program.with_start_times(self._project(min(600, 3 * waiting + 60)), remaining)
+        for it in items:
+            if it.entry_id == entry_id:
+                return it.starts_in_ms
+        return None
+
+    async def add_entry(self, entry: LineEntry, *, fair: bool = True,
+                        latest_start_ms: Optional[int] = None) -> dict:
+        """A guest's song (services/jukebox/guests.py): placed by fair order
+        (its `round`), then refused — and taken back out — if it would start
+        later than `latest_start_ms` from now (it would play after the night
+        ends). Answers where it landed and when it plays."""
+        async with self._get_lock():
+            self._ensure_loaded()
+            if not self.running:
+                return {"status": "refused", "reason": "not_running",
+                        "detail": sentence("not_running")}
+            idx = self.fair_index(entry.round, fair)
+            self.night.line.insert(idx, entry)
+            starts = self._starts_in(entry.id)
+            if latest_start_ms is not None and (starts is None or starts > latest_start_ms):
+                self.night.line.remove(entry)
+                return {"status": "refused", "reason": "too_late", "starts_in_ms": starts}
+            self._log(f"{entry.added_by if entry.added_by == 'host' else 'a guest'} added "
+                      f"{entry.title or entry.uri} (song {entry.round} of theirs tonight)")
+            await self._persist()
+            return {"status": "added", "entry": entry.model_dump(mode="json"),
+                    "starts_in_ms": starts}
+
+    async def hold(self, entry_id: str, held: bool) -> dict:
+        """The host holds a waiting song (it keeps its place; slots pass it)
+        or lets it go. A song already sent to Spotify can't be held — remove
+        it to have it skipped as it starts."""
+        async with self._get_lock():
+            self._ensure_loaded()
+            if not self.running:
+                return {"status": "refused", "reason": "not_running",
+                        "detail": sentence("not_running")}
+            e = self._entry(entry_id)
+            if e is None:
+                return {"status": "refused", "reason": "no_entry", "detail": sentence("no_entry")}
+            if e.state == "committed":
+                return {"status": "refused", "reason": "committed_fixed",
+                        "detail": sentence("committed_fixed")}
+            if e.state != "queued":
+                return {"status": "refused", "reason": "already_played",
+                        "detail": sentence("already_played")}
+            if e.held != held:
+                e.held = held
+                self._log(f"{'held' if held else 'let go of'} {e.title or e.uri}")
+                await self._persist()
+            return {"status": "held" if held else "released", "entry": e.model_dump(mode="json")}
 
     async def remove(self, entry_id: str) -> dict:
         async with self._get_lock():
@@ -1052,7 +1141,7 @@ class JukeboxRunner:
         remaining = self._remaining_ms(track, self.deps.clock()) if on else 0
         items = program.with_start_times(self._project(count), remaining)
         duration = int(getattr(track, "duration_ms", 0) or 0) if on else 0
-        return {"running": True, "night_id": n.id, "now": n.now,
+        return {"running": True, "night_id": n.id, "started_ms": n.started_ms, "now": n.now,
                 "is_playing": bool(on and getattr(track, "is_playing", False)),
                 "duration_ms": duration, "remaining_ms": remaining,
                 "next": items, "line": list(n.line), "set_items": n.set_items}

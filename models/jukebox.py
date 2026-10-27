@@ -144,6 +144,17 @@ class LineEntry(_Model):
     thumb: str = ""
     added_ms: int = 0
     added_by: str = "host"          # "host", or the phone id of the guest who added it
+    # Fair order (phase 2.2): this was its adder's 1st, 2nd, ... song tonight;
+    # a guest's new song goes ahead of every waiting song with a HIGHER
+    # round. The host's own adds count as 1st songs.
+    round: int = 1
+    # The host held it: it keeps its place in the line but isn't sent to
+    # Spotify (slots pass it) until he lets it go.
+    held: bool = False
+    explicit: bool = False
+    # The lights already know it (its audio shape is captured): the guest
+    # page's "Ready" badge. Not `ready`, which is phase 4's commit gate.
+    known: bool = False
     ready: bool = True
     state: LineState = "queued"
     # A committed song he removed: it is already in Spotify's queue and can't
@@ -302,14 +313,31 @@ class EconomyConfig(_Model):
 Preset = Literal["small", "medium", "large"]
 
 
+# Explicit songs (report §4, "Add a song"): not allowed (the default), allowed
+# for +2 credits ("extra" — in free play simply allowed), or only after a set
+# time of the night.
+ExplicitRule = Literal["no", "extra", "after"]
+_HHMM = r"^([01][0-9]|2[0-3]):[0-5][0-9]$"
+
+
 class ShowConfig(_Model):
-    """The saved show settings this phase has: which party-size preset was
-    last applied, whether new phones need his approval (the Large preset
-    turns it on, report §3.5 and §12), and every economy setting. Only an
-    edit writes it (services/jukebox/show.py is the one validator)."""
+    """The saved show settings: which party-size preset was last applied,
+    whether new phones need his approval (the Large preset turns it on,
+    report §3.5 and §12), every economy setting, and the guests' own rules
+    (report §4's Show, Add a song and Guests cards: when the night ends and
+    requests close, explicit songs, how many phones, renames, the word
+    filter). Only an edit writes it (services/jukebox/show.py is the one
+    validator). Times are house time (America/New_York), "HH:MM"."""
     preset: Optional[Preset] = None
     approve_new_phones: bool = False
     economy: EconomyConfig = Field(default_factory=EconomyConfig)
+    night_ends: str = Field("00:00", pattern=_HHMM)          # the night window's end
+    last_call_min: int = Field(20, ge=0, le=60)               # requests close this long before
+    explicit: ExplicitRule = "no"
+    explicit_after: str = Field("22:00", pattern=_HHMM)       # with explicit = "after"
+    max_phones: int = Field(40, ge=5, le=100)
+    renames_per_night: int = Field(3, ge=0, le=10)
+    word_filter: bool = True
 
 
 # ── the guest link (N1: services/jukebox/guest_link.py) ──────────────────────
@@ -384,6 +412,12 @@ class GuestPhone(_Model):
     created_ms: int = 0
     joined_ms: Optional[int] = None
     renames: int = 0
+    # The host's controls (phase 2.2): a phone that joined while approval
+    # was on waits for his yes; a blocked phone is out for the night; a
+    # locked name can't be changed by the phone.
+    approved: bool = True
+    blocked: bool = False
+    name_locked: bool = False
 
 
 class GuestBook(_Model):

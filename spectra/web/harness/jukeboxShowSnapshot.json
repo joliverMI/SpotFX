@@ -909,5 +909,97 @@
    },
    "songs_in_line": 2
   }
- }
+ },
+ "guest_fields": [
+  {
+   "key": "night_ends",
+   "card": "Requests",
+   "label": "The night ends at",
+   "unit": "house time",
+   "kind": "time",
+   "default": "00:00",
+   "min": null,
+   "max": null,
+   "choices": null
+  },
+  {
+   "key": "last_call_min",
+   "card": "Requests",
+   "label": "Requests close before the end (last call)",
+   "unit": "min",
+   "kind": "int",
+   "default": 20,
+   "min": 0,
+   "max": 60,
+   "choices": null
+  },
+  {
+   "key": "explicit",
+   "card": "Requests",
+   "label": "Explicit songs",
+   "unit": "",
+   "kind": "choice",
+   "default": "no",
+   "min": null,
+   "max": null,
+   "choices": [
+    {
+     "value": "no",
+     "label": "not allowed"
+    },
+    {
+     "value": "extra",
+     "label": "allowed (+2 credits with credits on)"
+    },
+    {
+     "value": "after",
+     "label": "allowed after a set time"
+    }
+   ]
+  },
+  {
+   "key": "explicit_after",
+   "card": "Requests",
+   "label": "Explicit songs allowed after",
+   "unit": "house time",
+   "kind": "time",
+   "default": "22:00",
+   "min": null,
+   "max": null,
+   "choices": null
+  },
+  {
+   "key": "max_phones",
+   "card": "Guests",
+   "label": "Most phones tonight",
+   "unit": "phones",
+   "kind": "int",
+   "default": 40,
+   "min": 5,
+   "max": 100,
+   "choices": null
+  },
+  {
+   "key": "renames_per_night",
+   "card": "Guests",
+   "label": "Name changes per night",
+   "unit": "changes",
+   "kind": "int",
+   "default": 3,
+   "min": 0,
+   "max": 10,
+   "choices": null
+  },
+  {
+   "key": "word_filter",
+   "card": "Guests",
+   "label": "Word filter on names",
+   "unit": "",
+   "kind": "bool",
+   "default": true,
+   "min": null,
+   "max": null,
+   "choices": null
+  }
+ ]
 }

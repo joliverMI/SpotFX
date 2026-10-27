@@ -11093,7 +11093,28 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   (`scripts/check_jukebox_guest_logic.mjs`), both run by
   `tests/test_jukebox_guest_page.py`. Web push (iPhone alerts from a Home
   Screen icon, Android lock-screen alerts) is NOT built: it needs the HTTPS
-  link (G4) to test. Guests can't add songs until PR 2.2.
+  link (G4) to test.
+- **SEARCH AND ADD, AND THE HOST'S CONTROLS (PR 2.2)** are
+  `services/jukebox/guests.py` too (its docstring is the binding statement):
+  a guest's song goes in by FAIR ORDER — `LineEntry.round` is its adder's
+  Nth song tonight (played + waiting + 1; the host's own adds are 1st songs)
+  and `night.JukeboxRunner.add_entry` places it ahead of the first WAITING
+  song with a higher round, never ahead of one sent to Spotify — and is
+  refused, and taken back out, if the projection starts it after the night
+  ends. Requests close `last_call_min` before `night_ends`; both, explicit
+  songs, max phones, renames and the word filter are `ShowConfig` top-level
+  keys behind `show.apply_patch` (`show.GUEST_FIELDS`, and Sonic sets them,
+  asking first). A HELD song (`LineEntry.held`) keeps its place and is left
+  out of `_fills`, so slots pass it. Search is his profile library first
+  (`services/jukebox/library.py`, `known` = the audio-shape index) then
+  Spotify, 10 a page, cached, on `gateway.search_gateway()` — a gateway of
+  its own so a party searching never queues ahead of the engine's commit —
+  and every disk read or Spotify call goes through `to_thread`
+  (`tests/test_jukebox_guest_add.py` proves the loop keeps ticking, with a
+  red control). The host's controls are the master's routes
+  (`GET/POST /api/jukebox/guests`, `POST /api/jukebox/line/{id}/hold`) and
+  the Jukebox page's Guests tab; approving, blocking and renaming a phone
+  are a named Sonic exclusion. Pardon waits for the jail (PR 2.3).
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his program settings, one validator:

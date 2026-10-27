@@ -34,8 +34,12 @@ excluded" from "forgotten":
     controls over phones yet; when credits arrive, giving them joins this
     domain and asks first;
   * a guest's own acts on the guest page — joining, the name a phone picks,
-    its votes — are the guests', never the host's to make by voice
-    (`jukebox_status` reads how many phones are on the page);
+    its votes, the songs it adds — are the guests', never the host's to make
+    by voice (`jukebox_status` reads how many phones are on the page);
+  * the host's controls over a PHONE (approve, block, rename, lock its name;
+    PR 2.2) — they act on a person standing in his room, by name, and a
+    misheard name would block or rename the wrong guest; they are the Guests
+    tab's buttons, where each phone is shown;
   * the jukebox LINE — adding, removing and moving songs is the guests'
     turn and the host's page;
   * reordering the SET PLAYLIST — it rewrites his playlist's order in
@@ -80,6 +84,11 @@ RUN_OUTS: tuple[str, ...] = ("again", "jukebox_only", "end")
 PRESETS: tuple[str, ...] = ("small", "medium", "large")
 SIM_PROGRAMS: tuple[str, ...] = ("saved", "preset")
 SHOW_KEYS: tuple[str, ...] = ("approve_new_phones",)
+#: the guests' own rules (phase 2.2, top level in SpotFX's ShowConfig): when
+#: the night ends and requests close, explicit songs, phones, renames, the
+#: word filter — the same one validator a page edit runs
+GUEST_RULE_KEYS: tuple[str, ...] = ("night_ends", "last_call_min", "explicit", "explicit_after",
+                                    "max_phones", "renames_per_night", "word_filter")
 
 _PROGRAM_LABELS = {
     "mode": "where the jukebox slots go",
@@ -318,6 +327,7 @@ async def _op_get_jukebox_settings() -> dict:
                         "manual_slot_runs": len(cfg.get("manual") or [])},
             "preset": (show.get("show") or {}).get("preset"),
             "approve_new_phones": (show.get("show") or {}).get("approve_new_phones"),
+            "guest_rules": {k: (show.get("show") or {}).get(k) for k in GUEST_RULE_KEYS},
             "economy": (show.get("show") or {}).get("economy") or {},
             "economy_fields": fields,
             "presets": show.get("presets") or []}
@@ -387,7 +397,7 @@ async def _op_set_jukebox_setting(key: str, value: Any, confirm_id: Optional[str
                               "jukebox no slots)"}
         path, patch = "/api/jukebox/config", {key: value}
         old = cfg.get(key)
-    elif key in SHOW_KEYS:
+    elif key in SHOW_KEYS or key in GUEST_RULE_KEYS:
         path, patch = "/api/jukebox/show", {key: value}
         old = (show.get("show") or {}).get(key)
     elif key in econ_keys:
@@ -396,16 +406,18 @@ async def _op_set_jukebox_setting(key: str, value: Any, confirm_id: Optional[str
     else:
         return {"status": "rejected",
                 "reason": f"{key!r} is not a Jukebox setting Sonic changes — call "
-                          "get_jukebox_settings for the program keys, approve_new_phones and "
-                          "every economy key (the playlist and Manual slots are set on the page)"}
+                          "get_jukebox_settings for the program keys, approve_new_phones, the "
+                          "guest rules and every economy key (the playlist and Manual slots are "
+                          "set on the page)"}
     dry, err = await _request("PUT", path, params={"dry_run": "true"}, body=patch)
     if err:
         return err
     new = ((dry.get("config") or {}).get(key) if path.endswith("/config")
-           else (dry.get("show") or {}).get(key) if key in SHOW_KEYS
+           else (dry.get("show") or {}).get(key) if key in SHOW_KEYS or key in GUEST_RULE_KEYS
            else ((dry.get("show") or {}).get("economy") or {}).get(key))
     label = _PROGRAM_LABELS.get(key) or next(
-        (f.get("label") for f in show.get("fields") or [] if f.get("key") == key), key)
+        (f.get("label") for f in (show.get("fields") or []) + (show.get("guest_fields") or [])
+         if f.get("key") == key), key)
     if new == old:
         if isinstance(confirm_id, str):
             _PENDING.pop(confirm_id, None)
@@ -595,15 +607,18 @@ OPERATIONS: dict[str, SonicOperation] = {
         handler=_op_jukebox_night_report),
     "set_jukebox_setting": SonicOperation(
         name="set_jukebox_setting", domain="jukebox", kind="write",
-        summary="Change one Jukebox setting — a program setting, phone approval or one credits "
-                "setting (asks him first).",
+        summary="Change one Jukebox setting — a program setting, phone approval, a guest rule "
+                "(last call, explicit songs, phones, renames) or one credits setting (asks him "
+                "first).",
         instructions=(
             _INSTR_COMMON + _INSTR_CONFIRM
             + "Keys: mode (auto | jukebox_first — never manual, which is placed on the page), "
             "every (1-5), run (1-3), run_out (again | jukebox_only | end), commit_lead_s "
-            "(15-90), approve_new_phones (true/false), or any economy key from "
-            "get_jukebox_settings. SpotFX validates first; an out-of-range value is refused "
-            "with its reason before he is asked."),
+            "(15-90), approve_new_phones (true/false), the guest rules — night_ends and "
+            "explicit_after (\"HH:MM\", house time), last_call_min (0-60), explicit (no | extra "
+            "| after), max_phones (5-100), renames_per_night (0-10), word_filter (true/false) — "
+            "or any economy key from get_jukebox_settings. SpotFX validates first; an "
+            "out-of-range value is refused with its reason before he is asked."),
         input_schema={"type": "object",
                       "properties": {"key": {"type": "string"},
                                      "value": {"type": ["number", "integer", "boolean", "string"]},

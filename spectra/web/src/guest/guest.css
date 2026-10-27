@@ -263,3 +263,26 @@ h1, h2 { margin: 0; }
 .g-sheet p { margin: 0; }
 .g-sheet-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .g-steps { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
+
+/* ── Add ─────────────────────────────────────────────────────────────── */
+.g-add { display: flex; flex-direction: column; gap: 8px; }
+.g-add-status { margin: 0; font-size: 14px; color: var(--muted); }
+.g-add-status-off { color: var(--danger); font-weight: 600; }
+.g-h2-spotify { display: flex; align-items: center; gap: 6px; }
+.g-result { align-items: flex-start; }
+.g-result-actions { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: none; }
+.g-add-btn { min-width: 64px; padding: 0 14px; }
+.g-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.g-badge { padding: 0 8px; border-radius: 10px; font-size: 12px; font-weight: 700;
+           background: var(--surface2); color: var(--muted); }
+.g-badge-ready { background: #15803d; color: #fff; }
+.g-badge-explicit { background: #7f1d1d; color: #fecaca; }
+.g-badge-in-line { background: var(--accent); color: #fff; }
+.g-row-why { font-size: 13px; color: var(--danger); margin-top: 2px; }
+.g-more { width: 100%; margin-top: 4px; }
+.g-toast {
+  position: fixed; left: var(--gutter); right: var(--gutter); z-index: 15;
+  bottom: calc(var(--tabbar-h) + var(--sa-bottom) + 12px);
+  padding: 12px 16px; border-radius: var(--radius); background: var(--ok); color: #052e16;
+  font-weight: 700; text-align: center; animation: g-pop 0.3s ease-out;
+}

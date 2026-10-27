@@ -85,5 +85,23 @@ ok(L.byLine({ kind: 'guest', name: 'Disco Ana' }, false) === 'Added by Disco Ana
 ok(L.byLine({ kind: 'guest', name: 'Disco Ana' }, true) === 'Added by you', 'your own: "you"');
 ok(L.byLine({ kind: 'set', name: "Host's set" }, false) === "Host's set", "the host's set");
 
+console.log('adding a song (PR 2.2)');
+const held = L.stripText({ tone: 'queued', title: 'Dopamine', place: 2, starts_in_ms: 60_000, held: true, count: 1 }, 0, nine, false);
+ok(held.label === 'Your song is on hold' && held.detail.includes('keeps its place'), 'a held song says so in the strip');
+ok(L.stripText({ tone: 'playing', title: 'D', place: null, starts_in_ms: null, held: true, count: 1 }, 0, nine, false).tone === 'playing',
+   'a song that is playing is playing, held or not');
+const b = L.badges({ known: true, long: true, duration_ms: 372_000, explicit: true, in_line: true });
+ok(JSON.stringify(b.map((x) => x.label)) === '["Ready","6:12","Explicit","In line"]', `badges: ${b.map((x) => x.label).join(', ')}`);
+ok(L.badges({ known: false, long: false, duration_ms: 200_000, explicit: false, in_line: false }).length === 0, 'a plain song has none');
+const req = (o) => ({ open: true, detail: '', closes_at: '11:40', max_waiting: 2, waiting: 0, ...o });
+ok(L.addStatus(req({}), true).canAdd && L.addStatus(req({}), true).text === 'You can add 2 more songs · requests close at 11:40',
+   'open: how many more, and when requests close');
+ok(!L.addStatus(req({ waiting: 2 }), true).canAdd, 'two in line: no more until one plays');
+ok(L.addStatus(req({ open: false, detail: 'closed!' }), true).text === 'closed!', 'after last call: the server\'s own sentence');
+ok(!L.addStatus(req({}), false).canAdd, 'a phone waiting for approval can\'t add');
+ok(L.addedText(25 * 60_000, nine, 'en-US') === 'Added — plays in 25 min (~9:55)', `the confirmation: ${L.addedText(25 * 60_000, nine, 'en-US')}`);
+ok(L.addedText(null, nine) === 'Added to the line.', 'no start time: just added');
+ok(L.SEARCH_DEBOUNCE_MS >= 300 && L.SEARCH_MIN === 2, 'searches wait for typing to stop, and need two letters');
+
 console.log(failures === 0 ? '\nPASS' : `\nFAIL (${failures})`);
 process.exit(failures === 0 ? 0 : 1);

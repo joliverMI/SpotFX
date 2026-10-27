@@ -16,7 +16,7 @@ import {
   wantsHomeScreenHint, type BannerKind, type Tab,
 } from './logic';
 import { Sheet } from './bits';
-import { NowScreen, QueueScreen, Welcome } from './screens';
+import { AddScreen, NowScreen, QueueScreen, Welcome } from './screens';
 
 const TOKEN_KEY = 'jukebox.token';
 const HINT_KEY = 'jukebox.homeHintDone';
@@ -50,6 +50,7 @@ export default function GuestApp() {
   const [error, setError] = useState('');
   const [banner, setBanner] = useState<BannerKind | null>(null);
   const [sheet, setSheet] = useState<'name' | 'home' | null>(null);
+  const [toast, setToast] = useState('');
   const [nowMs, setNowMs] = useState(() => Date.now());
   const tapped = useRef(false);
   const lastTone = useRef<StripTone | null>(null);
@@ -145,6 +146,12 @@ export default function GuestApp() {
   }, []);
 
   useEffect(() => {
+    if (!toast) return undefined;
+    const t = window.setTimeout(() => setToast(''), 5000);
+    return () => window.clearTimeout(t);
+  }, [toast]);
+
+  useEffect(() => {
     if (!banner) return undefined;
     const t = window.setTimeout(() => setBanner(null), 9000);
     return () => window.clearTimeout(t);
@@ -236,7 +243,11 @@ export default function GuestApp() {
                      homeHint={homeHint} onHomeHint={openHome} />
         )}
         {tab === 'queue' && <QueueScreen view={view} elapsedMs={elapsed} nowMs={nowMs} />}
+        {tab === 'add' && (
+          <AddScreen view={view} onAdded={(v, text) => { show(v); setToast(text); }} />
+        )}
       </main>
+      {toast && <div className="g-toast" role="status">{toast}</div>}
       <nav className="g-tabbar" aria-label="Screens">
         {tabs.map((t) => (
           <button key={t} type="button" className={`g-tab${tab === t ? ' g-tab-on' : ''}`}
@@ -270,12 +281,13 @@ function NameSheet({ view, busy, error, onClose, onSave, onShuffle }: {
   onClose: () => void; onSave: (name: string) => void; onShuffle: () => void;
 }) {
   const [name, setName] = useState(view.me.name);
-  const left = view.me.renames_left;
+  const left = view.me.name_locked ? 0 : view.me.renames_left;
   return (
     <Sheet title="Your name tonight" onClose={onClose}>
       <input className="g-input" value={name} maxLength={20} autoComplete="off" aria-label="Your name"
-             onChange={(e) => setName(e.target.value)} disabled={left === 0} />
-      <p className="g-muted g-small">{left === 0 ? "That's all the name changes for tonight."
+             onChange={(e) => setName(e.target.value)} disabled={left === 0 || view.me.name_locked} />
+      <p className="g-muted g-small">{view.me.name_locked ? 'The host has set your name for tonight.'
+        : left === 0 ? "That's all the name changes for tonight."
         : `${left} change${left === 1 ? '' : 's'} left tonight.`}</p>
       {error && <p className="g-error" role="alert">{error}</p>}
       <div className="g-sheet-actions">

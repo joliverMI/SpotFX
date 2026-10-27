@@ -87,7 +87,21 @@ PRESETS: dict[str, dict[str, Any]] = {
               "why": "Jukebox first, the set fills any gap — the only shape that fits ~2 songs a guest; new phones need your approval."},
 }
 
-SHOW_KEYS = frozenset({"economy", "approve_new_phones"})
+# The guests' own rules (report §4's Show, Add a song and Guests cards), top
+# level in ShowConfig beside the approval switch: key, card, label, unit.
+GUEST_FIELDS: list[tuple[str, str, str, str]] = [
+    ("night_ends", "Requests", "The night ends at", "house time"),
+    ("last_call_min", "Requests", "Requests close before the end (last call)", "min"),
+    ("explicit", "Requests", "Explicit songs", ""),
+    ("explicit_after", "Requests", "Explicit songs allowed after", "house time"),
+    ("max_phones", "Guests", "Most phones tonight", "phones"),
+    ("renames_per_night", "Guests", "Name changes per night", "changes"),
+    ("word_filter", "Guests", "Word filter on names", ""),
+]
+EXPLICIT_WORDS = {"no": "not allowed", "extra": "allowed (+2 credits with credits on)",
+                  "after": "allowed after a set time"}
+
+SHOW_KEYS = frozenset({"economy", "approve_new_phones"} | {k for k, *_ in GUEST_FIELDS})
 
 
 def fields() -> list[dict]:
@@ -109,6 +123,32 @@ def fields() -> list[dict]:
     return out
 
 
+def guest_fields() -> list[dict]:
+    """The guests' rules as the page draws them, ranges and choices read
+    off ShowConfig's own fields."""
+    out = []
+    model_fields = ShowConfig.model_fields
+    default = ShowConfig()
+    for key, card, label, unit in GUEST_FIELDS:
+        f = model_fields[key]
+        lo = hi = None
+        for m in f.metadata:
+            lo = getattr(m, "ge", lo)
+            hi = getattr(m, "le", hi)
+        value = getattr(default, key)
+        if key == "explicit":
+            kind, choices = "choice", [{"value": k, "label": v} for k, v in EXPLICIT_WORDS.items()]
+        elif isinstance(value, bool):
+            kind, choices = "bool", None
+        elif isinstance(value, int):
+            kind, choices = "int", None
+        else:
+            kind, choices = "time", None
+        out.append({"key": key, "card": card, "label": label, "unit": unit, "kind": kind,
+                    "default": value, "min": lo, "max": hi, "choices": choices})
+    return out
+
+
 def _first_error(exc: ValidationError, prefix: str = "") -> str:
     first = exc.errors()[0]
     where = ".".join(str(p) for p in first.get("loc", ())) or "settings"
@@ -117,8 +157,9 @@ def _first_error(exc: ValidationError, prefix: str = "") -> str:
 
 def apply_patch(current: ShowConfig, patch: dict) -> ShowConfig:
     """THE validator: `current` with a PARTIAL patch on top —
-    {"economy": {key: value, ...}, "approve_new_phones": bool} — validated
-    whole. Raises ValueError naming the first bad key; changes nothing."""
+    {"economy": {key: value, ...}, "approve_new_phones": bool, and any of
+    GUEST_FIELDS} — validated whole. Raises ValueError naming the first bad
+    key; changes nothing."""
     if not isinstance(patch, dict):
         raise ValueError("expected a JSON object")
     unknown = sorted(set(patch) - SHOW_KEYS)
@@ -132,8 +173,9 @@ def apply_patch(current: ShowConfig, patch: dict) -> ShowConfig:
         raise ValueError(f"unknown economy setting(s): {', '.join(unknown)}")
     merged = current.model_dump(mode="json")
     merged["economy"] = {**merged["economy"], **eco_patch}
-    if "approve_new_phones" in patch:
-        merged["approve_new_phones"] = patch["approve_new_phones"]
+    for key in SHOW_KEYS - {"economy"}:
+        if key in patch:
+            merged[key] = patch[key]
     try:
         return ShowConfig.model_validate(merged)
     except ValidationError as exc:
@@ -194,4 +236,5 @@ def read(show: Optional[ShowConfig] = None) -> dict:
     the presets."""
     from services.jukebox import store
     show = show or store.load_show()
-    return {"show": show.model_dump(mode="json"), "fields": fields(), "presets": presets()}
+    return {"show": show.model_dump(mode="json"), "fields": fields(),
+            "guest_fields": guest_fields(), "presets": presets()}

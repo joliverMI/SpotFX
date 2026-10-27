@@ -70,6 +70,14 @@ process on its own port (phase 2) and never reaches these routes.
                                       is skipped as it starts; a playing one
                                       is skipped now
   POST   /api/jukebox/line/{id}/move  {to} — place among the waiting songs
+  POST   /api/jukebox/line/{id}/hold  {held} — the host holds a waiting song
+                                      (it keeps its place; slots pass it) or
+                                      lets it go
+  GET    /api/jukebox/guests          tonight's phones (services/jukebox/
+                                      guests.py): name, approval, block, name
+                                      lock, songs, votes
+  POST   /api/jukebox/guests/{phone}  {approved?, blocked?, name_locked?,
+                                      name?} — the host's controls over a phone
 
 A refusal is a RECORDED outcome answered with 200 and its reason
 (`{"status": "refused", "reason": ..., "detail": ...}`), never a silence —
@@ -81,6 +89,7 @@ import asyncio
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from models.jukebox import ProgramConfig
@@ -202,6 +211,34 @@ async def delete_line(entry_id: str) -> dict:
 @router.post("/line/{entry_id}/move")
 async def post_move(entry_id: str, body: MoveBody) -> dict:
     return await night.runner.move(entry_id, body.to)
+
+
+class HoldBody(BaseModel):
+    held: bool
+
+
+class PhoneBody(BaseModel):
+    approved: Optional[bool] = None
+    blocked: Optional[bool] = None
+    name_locked: Optional[bool] = None
+    name: Optional[str] = Field(default=None, max_length=64)
+
+
+@router.post("/line/{entry_id}/hold")
+async def post_hold(entry_id: str, body: HoldBody) -> dict:
+    return await night.runner.hold(entry_id, body.held)
+
+
+@router.get("/guests")
+async def get_guests() -> dict:
+    return guests.book.phones()
+
+
+@router.post("/guests/{phone}")
+async def post_guest(phone: str, body: PhoneBody) -> JSONResponse:
+    code, out = await guests.book.host_set(phone, approved=body.approved, blocked=body.blocked,
+                                           name_locked=body.name_locked, name=body.name)
+    return JSONResponse(out, status_code=code)
 
 
 @router.post("/set/move")

@@ -6,7 +6,7 @@ whose event loop runs the music (the plan's risk 7).
 
 FOUR THINGS IT KEEPS TRUE:
   * NOTHING BUT GUEST ROUTES ANSWER. app.ROUTES is the whole surface: the
-    page and its files, and five calls under /g/. No docs, no OpenAPI, no
+    page and its files, and seven calls under /g/. No docs, no OpenAPI, no
     master route; anything else is a 404. Tailscale Funnel publishes this
     port and only this port (services/jukebox/guest_link.py).
   * IT FORWARDS A SHORT ALLOWLIST, NAMING THE PHONE. Each /g/ call becomes
