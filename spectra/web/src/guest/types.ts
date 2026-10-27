@@ -102,11 +102,12 @@ export interface Strip {
   jail_fee?: number;
 }
 
-/** The jail (free play): a time-out of N songs when your songs get the
- *  bar's net ▼. */
+/** The jail: when your songs get the bar's net ▼. Free play ("timeout"): a
+ *  time-out of N songs. Credits ("breakout"): held until you pay the fee or
+ *  the host pardons you. */
 export interface JailInfo {
   in: boolean; songs_left: number; count: number; at: number; on: boolean;
-  kind?: 'timeout' | 'breakout';   // free play: a time-out of N songs; credits: until you break out
+  kind?: 'timeout' | 'breakout';
   fee?: number;
   can_break_out?: boolean;
 }

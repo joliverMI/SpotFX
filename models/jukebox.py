@@ -155,9 +155,10 @@ class LineEntry(_Model):
     # The lights already know it (its audio shape is captured): the guest
     # page's "Ready" badge. Not `ready`, which is phase 4's commit gate.
     known: bool = False
-    # Places it has been pushed back tonight (free play's bumps, PR 2.3) —
-    # whether by a down-bump of its own, or as the song an up-bump stepped
-    # past: never more than the show's `bump_down_max_places`.
+    # Places it has been pushed back tonight (free play's bumps, PR 2.3;
+    # also a play next it was jumped past, PR 3.2) — whether by a down-bump
+    # of its own, or as the song an up-bump or a play next stepped past:
+    # never more than the show's `bump_down_max_places`.
     pushed_back: int = 0
     # CREDITS MODE (PR 3.2): what its adder paid for it (locked when added)
     # and the ledger entry that paid it — a refund points at it; and

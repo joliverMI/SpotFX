@@ -75,8 +75,10 @@ export function adderName(e: LineEntry, phones: GuestPhone[]): string {
 
 /** The jukebox songs still to play, in line order, with what the host can
  * do to each: hold or let go of a waiting song; play it next (when the show
- * lets the host); remove any (a song already sent to Spotify is skipped as
- * it starts). A song whose adder is in a time-out says so. */
+ * lets the host, or always in credits mode); keep it from every skip, or
+ * let it be skipped again; remove any (a song already sent to Spotify is
+ * skipped as it starts). A song whose adder is in a time-out says so, and
+ * in credits mode each row carries what its adder paid for it. */
 export function lineRows(line: LineEntry[], phones: GuestPhone[], playNext = false,
                          noSkip: string[] = []) {
   const jailed = new Set(phones.filter((p) => p.jail_left).map((p) => p.id));
