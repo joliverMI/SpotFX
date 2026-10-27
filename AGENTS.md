@@ -10943,6 +10943,44 @@ Three things:
   Spec: `tests/test_absorb_console.py` (the real router over the fake world),
   `scripts/check_absorb_page.mjs` §5; help topic `sonic-absorb`.
 
+## THE JUKEBOX — the host's set list with jukebox slots (phase 1: the program engine)
+
+Plan: `/home/javi/fleet-spotfx/data/jukebox-plan/report.md` (approved
+2026-10-27; built one PR per phase item in its §9 order). Phase 1 PR 1.1 is
+the engine only — no page, no guests. `services/jukebox/night.py`'s and
+`program.py`'s module docstrings are the binding statements. Five things:
+
+- **THE SET PLAYS AS SPOTIFY'S OWN CONTEXT; SPOTIFY NEVER SEES A SLOT.**
+  About `commit_lead_s` (45 s) before the song in front of a slot ends, the
+  engine sends the ONE song that fills it into Spotify's queue and reads
+  `/me/player/queue` back. Only that song is locked in place (`move` refuses
+  it, nothing passes it); a committed song he removes is SKIPPED as it
+  starts (`next_track`), with the next waiting song committed behind it.
+- **`program.project()` IS THE ONE DEFINITION** of what plays next — the
+  engine's commit decision is `project(...)[0]`, and the preview, the
+  status and `scripts/jukebox_dry_run.py` (read-only by construction:
+  `ReadOnlyGateway`) call the same function. The cursor moves only through
+  `on_set_start`/`on_jukebox_start`, fed by what the player is OBSERVED to
+  start, so a missed commit re-syncs by itself: an empty slot passes, a
+  missed one is OWED to the next gap (capped at one gap), a late commit is
+  carried, never sent twice.
+- **EVERY SPOTIFY CALL IS `services/jukebox/gateway.py`, off the loop,
+  spaced ≥ 0.5 s — reads included.** `main.py`'s poll calls
+  `on_track_state` synchronously and it only wakes the engine's own task;
+  never await Spotify there.
+- **HOUSE RULES**: never starts while `sleeping` is on or unreadable; a
+  confirmed "on" mid-night ends it (pausing only music the engine started),
+  "unreadable" twice in a row does. Absorb and a night exclude each other
+  in BOTH directions (`absorb_busy` here, Absorb's `jukebox_night` gate).
+- **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
+  Set Lists (`services/setlist_store.py`) is a different feature. Stores:
+  `storage/jukebox.json` (his settings, one validator:
+  `routers/jukebox_router.apply_config_patch`) and
+  `storage/jukebox_night.json`, isolated per test by conftest's
+  `_isolated_jukebox`. Tests: `tests/jukebox_world.py` models Spotify's
+  queue rule and a crossfade lock — reuse it; a script run OUTSIDE pytest
+  writes the real `storage/` unless it repoints `store.*_FILE` first.
+
 ## The music-analysis test bed (`/testbed`)
 
 Capability state and honest deployment status: `docs/SPECTRA_SPEC.md` §109.

@@ -27,8 +27,10 @@ cold:
    own piece of the runtime is `spectra/services/absorb_hold.py` — the
    light stand-down, read off the websocket's `absorb.lights_held`.
 2. **ONE START DOOR.** `POST /api/absorb/start` → `AbsorbRunner.start` →
-   `_gates` (no playlist, anchors off, analysis off, music playing, the
-   guard's `ready`, a night/camera run, the device, the playlist) then
+   `_gates` (no playlist, a Jukebox night running — services/jukebox/night.py,
+   which in turn refuses to start under an open window — anchors off,
+   analysis off, music playing, the guard's `ready`, a night/camera run, the
+   device, the playlist) then
    `guard.open` (the silence proof, River's hard block, the Order 27 rule).
    The page, the schedule and Sonic all go through it; a new caller must
    too. A refusal is a RECORDED run answered 200 — "did it run, why not?"

@@ -29,8 +29,9 @@ from services.websocket_manager import ws_manager
 from services.profile_manager import load_profile_by_uri, load_profile_by_title_artist, save_profile
 from services.audio_shape_service import audio_shape_service
 from models.song_profile import SongProfile
-from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager, setlist_router, timing_viz_router, debug_router, morph_router, color_sets_router, lock_history_router, gif_assets_router, scenes_v2_router, shape_map_router, sequencer_router, absorb_router
+from routers import spotify, profiles, events, control, settings_router, audio_shape_router, auth, ai_triggers_router, effect_params_router, gradients_router, palettes_router, triggerless, device_manager, setlist_router, timing_viz_router, debug_router, morph_router, color_sets_router, lock_history_router, gif_assets_router, scenes_v2_router, shape_map_router, sequencer_router, absorb_router, jukebox_router
 from services import absorb
+from services.jukebox import night as jukebox
 from routers.settings_router import apply_settings_override
 from services import effect_params
 
@@ -55,6 +56,10 @@ async def _on_state_update(app_state) -> None:
     # must see someone else's music (a guest stream included) before
     # anything else reacts to it. Inert unless a window is open.
     await absorb.runner.on_track_state(track)
+    # The Jukebox's program engine (services/jukebox/night.py): this only
+    # wakes its own task — any Spotify call it makes happens there, off this
+    # poll. Inert unless a night is running.
+    jukebox.runner.on_track_state(track)
     if track and track.spotify_uri.startswith("guest:"):
         # Guest-owned playback (services/guest_source drives the engine).
         # Skip profile handling entirely: auto-creating profiles or starting
@@ -188,10 +193,14 @@ async def lifespan(app: FastAPI):
     from services import absorb_schedule
     absorb_schedule.arm(absorb.recover_orphaned_run())
     absorb.install()
+    # The Jukebox: a night a dead process left running is followed again (or
+    # ended, if it is over 12 hours old). Nothing here calls Spotify or plays.
+    jukebox.runner.recover()
 
     # Launch background tasks
     tasks = [
         asyncio.create_task(absorb.run_supervised(), name="absorb-supervisor"),
+        asyncio.create_task(jukebox.runner.run_supervised(), name="jukebox-program"),
         asyncio.create_task(_song_polling_loop(_on_state_update), name=_song_task_name),
         asyncio.create_task(ledfx_client.latency_loop(), name="ledfx-latency"),
         asyncio.create_task(ledfx_client.poll_virtual_states(), name="ledfx-virtual-poll"),
@@ -278,6 +287,7 @@ app.include_router(scenes_v2_router.router)
 app.include_router(shape_map_router.router)
 app.include_router(sequencer_router.router)
 app.include_router(absorb_router.router)
+app.include_router(jukebox_router.router)
 
 # ── SPECTRA (her OWN process since the S3 split) ──────────────────────────────
 # SPECTRA runs standalone (python -m spectra under spectra.service) so this

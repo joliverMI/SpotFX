@@ -444,6 +444,18 @@ def _isolated_absorb_stores(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_jukebox(tmp_path, monkeypatch):
+    """The Jukebox's two stores (services/jukebox/store.py) and its one
+    process-wide runner (services/jukebox/night.py). Absorb's gate asks the
+    runner whether a night is running, so every test gets a fresh, idle one
+    reading from tmp_path — never his real storage/jukebox*.json."""
+    from services.jukebox import night, store
+    monkeypatch.setattr(store, "CONFIG_FILE", tmp_path / "jukebox.json")
+    monkeypatch.setattr(store, "NIGHT_FILE", tmp_path / "jukebox_night.json")
+    monkeypatch.setattr(night, "runner", night.JukeboxRunner())
+
+
+@pytest.fixture(autouse=True)
 def _isolated_absorb_hold():
     """SPECTRA's light stand-down rides the engine bridge singleton's last
     `absorb` state (spectra/services/absorb_hold.py) — a held window left by
