@@ -205,6 +205,21 @@ class FakeGateway:
         return [{"uri": u, "title": self.titles.get(u, u[-17:-14]), "artist": "Set",
                  "duration_ms": self.p.durations[u]} for u in self.p.context]
 
+    def reorder(self, pid, range_start, insert_before, snapshot_id=""):
+        """Spotify's rule: the item at range_start goes in front of the item
+        now at insert_before."""
+        self._rec("reorder", pid, range_start, insert_before, snapshot_id)
+        ctx = self.p.context
+        item = ctx[range_start]
+        dest = insert_before if insert_before <= range_start else insert_before - 1
+        ctx.pop(range_start)
+        ctx.insert(dest, item)
+        # the player keeps its place on the song it is playing
+        if self.p.current in ctx and self.p.ctx_pos >= 0:
+            self.p.ctx_pos = ctx.index(self.p.current)
+        self.snapshot = f"snap-{len(self.calls)}"
+        return self.snapshot
+
     def track(self, uri):
         self._rec("track", uri)
         if uri not in self.p.durations:

@@ -103,6 +103,14 @@ def test_preview_reads_the_set_and_changes_nothing(api):
     assert not writes & set(w.gw.names())
 
 
+def test_the_set_move_route(api):
+    w, c = api
+    c.put("/api/jukebox/config", json={"playlist": PLAYLIST_URI})
+    r = c.post("/api/jukebox/set/move", json={"from_index": 2, "to_index": 0}).json()
+    assert r["status"] == "moved" and r["set"][0]["title"] == "S2"
+    assert w.player.context[0].startswith("spotify:track:set002")
+
+
 # ── the dry run ─────────────────────────────────────────────────────────────
 
 def _fixture(tmp_path, n=8):

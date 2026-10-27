@@ -10979,6 +10979,18 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   callback, and reads it back as `GET /api/spotify/auth-age` and on the
   jukebox status's `spotify_auth`/`warnings` — a line from 14 days before the
   end. A sign-in older than the record reads `unknown`, never a guess.
+- **THE MASTER PAGE (PR 1.3)** is SPECTRA's `/jukebox` (Engine ▾ Jukebox,
+  `spectra/web/src/jukebox/`): a Set list editor and a READ-ONLY Live tab,
+  plus the sign-in line. It never re-derives where slots go — it draws the
+  server's `lap_items` (`GET /api/jukebox/preview`, the set cached 60 s) and
+  copies `manual_equivalent` on Auto → Manual; the click rules are
+  `jukeboxEditor.ts`, pure. Dragging a set song REORDERS HIS PLAYLIST IN
+  SPOTIFY (`POST /api/jukebox/set/move`), refused during a night within two
+  of the playing song. Proof: `node scripts/check_jukebox_editor.mjs`
+  (its mounted half needs a dev-only `jsdom`, absent by default — install
+  it with `npm install --no-save jsdom` in `spectra/web` to run it) and
+  `scripts/render_jukebox_page.py` (1400×876, 876×1400, 412×891 →
+  `docs/evidence/jukebox-page/`).
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his settings, one validator:

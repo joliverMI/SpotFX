@@ -156,6 +156,17 @@ class JukeboxGateway:
         """The repair path: skip a committed song he removed, as it starts."""
         self._call(self._client().next_track)
 
+    def reorder(self, pid: str, range_start: int, insert_before: int,
+                snapshot_id: str = "") -> Optional[str]:
+        """Move ONE playlist item (`PUT /playlists/{id}/items`, range_length
+        1); Spotify's own semantics: the item at `range_start` goes in front
+        of the item now at `insert_before`. Returns the new snapshot id. The
+        snapshot pins the edit to the version the positions were read from."""
+        res = self._call(self._client().playlist_reorder_items, pid, range_start=range_start,
+                         insert_before=insert_before, range_length=1,
+                         snapshot_id=snapshot_id or None) or {}
+        return res.get("snapshot_id")
+
     # ── reading the set and songs ───────────────────────────────────────────
 
     def resolve_playlist(self, link: str) -> Optional[dict]:

@@ -67,6 +67,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: '/house', label: 'House', match: exact('/house'), icon: 'home' },
       { to: '/testbed', label: 'Test Bed', match: exact('/testbed'), icon: 'flask' },
       { to: '/absorb', label: 'Absorb', match: exact('/absorb'), icon: 'absorb' },
+      { to: '/jukebox', label: 'Jukebox', match: exact('/jukebox'), icon: 'note' },
       { to: '/timeline', label: 'Timeline', match: exact('/timeline'), icon: 'timeline' },
     ],
   },
@@ -81,7 +82,7 @@ export const NAV_GROUPS: NavGroup[] = [
 export const ALL_NAV_ROUTES = [
   '/', '/scenes', '/colorsets', '/devices', '/rooms', '/room-effects', '/show',
   '/debug', '/status', '/timing', '/review', '/feedback', '/avsync', '/house',
-  '/testbed', '/timeline', '/settings', '/absorb',
+  '/testbed', '/timeline', '/settings', '/absorb', '/jukebox',
 ];
 
 /** Which group (if any) contains the current route — for highlighting the

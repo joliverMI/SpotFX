@@ -13,6 +13,7 @@ import ReviewPage from './review/ReviewPage';
 import ScenesPage from './scenes/ScenesPage';
 import TestbedPage from './testbed/TestbedPage';
 import AbsorbPage from './absorb/AbsorbPage';
+import JukeboxPage from './jukebox/JukeboxPage';
 import SettingsConsolePage from './settings/SettingsConsolePage';
 import StatusPage from './status/StatusPage';
 import BuilderPage from './timeline/BuilderPage';
@@ -36,6 +37,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/review', 'Review'],
   ['/testbed', 'Test Bed'],
   ['/absorb', 'Absorb Music'],
+  ['/jukebox', 'Jukebox'],
   ['/timing', 'Timing'],
   ['/avsync', 'AV Sync'],
   ['/show', 'Light Show'],
@@ -121,6 +123,7 @@ export default function App() {
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/testbed" element={<TestbedPage />} />
           <Route path="/absorb" element={<AbsorbPage />} />
+          <Route path="/jukebox" element={<JukeboxPage />} />
           <Route path="/timing" element={<TimingVizPage />} />
           <Route path="/avsync" element={<AvSyncPage />} />
           <Route path="/show" element={<LightShowPage />} />

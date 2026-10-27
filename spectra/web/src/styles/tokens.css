@@ -3957,3 +3957,71 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .drop-predrop-kind.empty { opacity: 0.35; cursor: default; border-style: dashed; }
 .drop-predrop-kind:disabled { opacity: 0.55; cursor: not-allowed; }
 .drop-predrop-tools { margin-top: 4px; }
+
+/* ── THE JUKEBOX (/jukebox, spectra/web/src/jukebox/) ─────────────────────── */
+.jukebox-page { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.jukebox-page button:disabled { opacity: 0.45; cursor: not-allowed; }
+.jukebox-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.jukebox-title { display: inline-flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 700; margin: 0; }
+.jukebox-title svg { color: var(--accent); }
+.jukebox-tabs { display: inline-flex; gap: 4px; margin-left: auto; }
+.jukebox-tabs button { height: 32px; padding: 0 14px; }
+.jukebox-tabs button.on, .jukebox-modes button.on { border-color: var(--accent); background: var(--surface2); color: var(--text); }
+.jukebox-sign-in { display: flex; align-items: center; gap: 8px; margin-bottom: 0; font-size: 13px; line-height: 1.4; }
+.jukebox-sign-in.warn { border-color: var(--warning); }
+.jukebox-sign-in.warn svg { color: var(--warning); flex: none; }
+.jukebox-sign-in.danger { border-color: var(--danger); }
+.jukebox-sign-in.danger svg { color: var(--danger); flex: none; }
+.jukebox-error { border-color: var(--danger); color: #fecaca; font-size: 13px; margin-bottom: 0; }
+.jukebox-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 12px; }
+.jukebox-grid > .card { margin-bottom: 0; min-width: 0; }
+.jukebox-list-card, .jukebox-log { grid-column: 1 / -1; }
+.jukebox-card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 32px; margin-bottom: 8px; }
+.jukebox-card-title { margin-bottom: 0; }
+.jukebox-muted { color: var(--text-muted); font-size: 13px; overflow-wrap: anywhere; }
+.jukebox-bad { color: #fecaca; font-size: 13px; overflow-wrap: anywhere; }
+.jukebox-small { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; margin-left: auto; }
+.jukebox-link { display: flex; gap: 8px; min-width: 0; }
+.jukebox-link input { flex: 1; min-width: 0; }
+.jukebox-link input:disabled { opacity: 0.6; cursor: not-allowed; }
+.jukebox-count { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 8px; font-size: 13px; }
+.jukebox-guests { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
+.jukebox-bar { display: flex; gap: 1px; height: 14px; border-radius: 4px; overflow: hidden; background: var(--border); }
+.jukebox-bar-seg { min-width: 1px; flex-basis: 0; }
+.jukebox-bar-seg.set { background: #4c3a6b; }
+.jukebox-bar-seg.slot { background: var(--accent); }
+.jukebox-bar-seg.current { background: var(--ok); }
+.jukebox-modes { display: flex; gap: 6px; flex-wrap: wrap; }
+.jukebox-modes button { height: 32px; padding: 0 14px; }
+.jukebox-auto { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
+.jukebox-auto label, .jukebox-runout { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+.jukebox-rule { font-size: 13px; color: var(--text-muted); margin: 10px 0; line-height: 1.45; }
+.jukebox-set { display: flex; flex-direction: column; gap: 4px; }
+.jukebox-row { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); min-width: 0; }
+.jukebox-row.current { border-color: var(--ok); }
+.jukebox-row.dragging { opacity: 0.85; }
+.jukebox-song { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.jukebox-handle-off { color: var(--text-muted); opacity: 0.35; cursor: not-allowed; font-size: 1.2em; line-height: 1;
+  min-width: 28px; min-height: 28px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.jukebox-num { color: var(--text-muted); font-size: 12px; min-width: 2.2em; text-align: right; font-variant-numeric: tabular-nums; }
+.jukebox-song-btn, .jukebox-song-words { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 1px; }
+.jukebox-song-btn { background: none; border: 0; padding: 2px 0; cursor: pointer; color: inherit; }
+.jukebox-song-btn:hover .jukebox-song-title { color: var(--accent); }
+.jukebox-song-title { font-size: 14px; overflow-wrap: anywhere; }
+.jukebox-song-artist { font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; }
+.jukebox-dur { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.jukebox-slots { display: flex; gap: 6px; flex-wrap: wrap; padding-left: 3.4em; }
+.jukebox-slot { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; border: 1px solid var(--accent); border-radius: 999px; padding: 2px 4px 2px 8px; color: var(--accent); }
+.jukebox-slot.fixed { opacity: 0.7; padding-right: 8px; }
+.jukebox-slot-btn, .jukebox-slot-x { background: none; border: 0; padding: 0 2px; color: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.jukebox-slot-x { font-size: 15px; line-height: 1; padding: 0 4px; }
+.jukebox-night { font-size: 14px; line-height: 1.45; margin: 0 0 8px; }
+.jukebox-now { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.jukebox-now-title { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.jukebox-tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; color: var(--text-muted); white-space: nowrap; }
+.jukebox-next { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.jukebox-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.jukebox-item.jukebox .jukebox-tag { border-color: var(--accent); color: var(--accent); }
+.jukebox-item.open { opacity: 0.6; }
+.jukebox-item-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.jukebox-log pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 320px; overflow: auto; margin: 8px 0 0; }

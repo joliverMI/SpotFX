@@ -190,3 +190,33 @@ def test_lap_counts_one_pass():
 def test_unbounded_gap_is_never_decremented():
     c = Cursor(gap_left=UNBOUNDED, started=True)
     assert program.on_jukebox_start(c).gap_left == UNBOUNDED
+
+
+def test_as_manual_copies_the_auto_pattern():
+    items = _set(6)
+    m = program.as_manual(_cfg(every=2, run=2), items)
+    assert [(x.after_uri, x.count) for x in m] == [(items[1].uri, 2), (items[3].uri, 2),
+                                                    (items[5].uri, 2)]
+    # copied as manual, the program is the same
+    manual = _cfg(mode="manual", manual=m)
+    auto = _cfg(every=2, run=2)
+    assert _labels(program.project(manual, items, Cursor(), _fills(9), 12)) == \
+        _labels(program.project(auto, items, Cursor(), _fills(9), 12))
+
+
+def test_as_manual_for_jukebox_first_is_a_slot_after_every_song():
+    m = program.as_manual(_cfg(mode="jukebox_first"), _set(3))
+    assert [x.count for x in m] == [1, 1, 1]
+
+
+def test_as_manual_matches_the_rule_and_the_lap_across_run_out_policies():
+    items = _set(4)
+    for run_out in ("again", "jukebox_only", "end"):
+        cfg = _cfg(every=2, run=2, run_out=run_out)
+        m = program.as_manual(cfg, items)
+        manual_cfg = _cfg(mode="manual", manual=m, run_out=run_out)
+        auto_out = program.project(cfg, items, Cursor(), _fills(24), 24)
+        manual_out = program.project(manual_cfg, items, Cursor(), _fills(24), 24)
+        assert _labels(auto_out) == _labels(manual_out)
+        if run_out in ("again", "end"):
+            assert program.lap(cfg, items).slots == sum(x.count for x in m)

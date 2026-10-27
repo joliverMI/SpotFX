@@ -183,7 +183,7 @@ def test_the_read_only_gateway_refuses_every_write():
     ro.playlist_items("p")
     ro.resolve_playlist("p")
     for name in ("add_to_queue", "next_track", "start_context", "set_shuffle",
-                 "set_repeat", "pause"):
+                 "set_repeat", "pause", "reorder"):
         with pytest.raises(PermissionError):
             getattr(ro, name)
     assert calls == ["playlist_items", "resolve_playlist"]
@@ -192,4 +192,4 @@ def test_the_read_only_gateway_refuses_every_write():
 def test_every_public_write_is_outside_the_read_only_allowlist():
     writes = {n for n in dir(JukeboxGateway) if not n.startswith("_")} - gw_mod.READ_ONLY_METHODS
     assert writes == {"add_to_queue", "next_track", "start_context", "set_shuffle",
-                      "set_repeat", "pause"}
+                      "set_repeat", "pause", "reorder"}
