@@ -1,0 +1,265 @@
+/* The guest page (src/guest/). SPECTRA's own tokens (purple on near-black,
+   styles/tokens.css) copied as values: the guest build ships none of
+   SPECTRA's stylesheet.
+
+   SAFE AREAS: the page draws under the notch / Dynamic Island and the home
+   bar (viewport-fit=cover) and pads itself with the --sa-* insets, which are
+   env(safe-area-inset-*) on a real phone. Nothing tappable or readable sits
+   in them: the header starts below the top inset, the tab bar's buttons end
+   above the bottom one.
+
+   TOUCH: every button and link is at least 44 px tall and wide. */
+:root {
+  --bg: #0a0612;
+  --surface: #140d1f;
+  --surface2: #1f1430;
+  --border: #372552;
+  --accent: #a855f7;
+  --accent2: #e879f9;
+  --text: #ece7f7;
+  --muted: #9585b5;
+  --danger: #f87171;
+  --ok: #4ade80;
+  --radius: 12px;
+  --sa-top: env(safe-area-inset-top, 0px);
+  --sa-bottom: env(safe-area-inset-bottom, 0px);
+  --sa-left: env(safe-area-inset-left, 0px);
+  --sa-right: env(safe-area-inset-right, 0px);
+  --tabbar-h: 60px;
+  --gutter: 16px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body {
+  font: 16px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: 0.6; }
+a { color: inherit; }
+h1, h2 { margin: 0; }
+
+.g-app {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding-left: var(--sa-left);
+  padding-right: var(--sa-right);
+}
+.g-center { align-items: center; justify-content: center; padding: calc(var(--sa-top) + 24px) var(--gutter) calc(var(--sa-bottom) + 24px); }
+.g-muted { color: var(--muted); }
+.g-small { font-size: 13px; }
+.g-h2 { font-size: 15px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+        letter-spacing: 0.04em; margin: 20px 0 8px; }
+
+/* ── header, strip, banner ───────────────────────────────────────────── */
+.g-header {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: calc(var(--sa-top) + 6px) var(--gutter) 6px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(8px);
+}
+.g-brand { font-weight: 800; font-size: 18px; color: var(--accent2); white-space: nowrap; }
+.g-name-chip {
+  min-height: 44px; min-width: 44px; max-width: 60%;
+  padding: 0 14px; border-radius: 22px;
+  border: 1px solid var(--border); background: var(--surface2);
+  font-weight: 600; font-size: 15px;
+  overflow-wrap: anywhere; text-align: center; line-height: 1.2;
+}
+.g-strip {
+  margin: 4px var(--gutter) 0; padding: 8px 14px; min-height: 48px;
+  border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border);
+  display: flex; flex-direction: column; justify-content: center; font-size: 14px;
+}
+.g-strip strong { font-size: 15px; }
+.g-strip span { color: var(--muted); }
+.g-strip-queued { border-color: var(--accent); }
+.g-strip-next { background: var(--accent); border-color: var(--accent); }
+.g-strip-next span, .g-strip-playing span { color: inherit; opacity: 0.9; }
+.g-strip-playing { background: #15803d; border-color: var(--ok); }
+.g-banner {
+  margin: 8px var(--gutter) 0; padding: 4px 4px 4px 14px; border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-weight: 700; background: var(--accent2); color: #1a0b24;
+  animation: g-pop 0.3s ease-out;
+}
+.g-banner-playing { background: var(--ok); }
+@keyframes g-pop { from { transform: scale(0.96); opacity: 0; } to { transform: none; opacity: 1; } }
+.g-error { color: var(--danger); margin: 8px 0; font-size: 14px; }
+.g-error-bar { margin: 8px var(--gutter) 0; }
+
+/* ── main + tab bar ──────────────────────────────────────────────────── */
+.g-main {
+  flex: 1;
+  padding: 12px var(--gutter) calc(var(--tabbar-h) + var(--sa-bottom) + 20px);
+}
+.g-tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+  display: flex; justify-content: space-around;
+  padding: 0 calc(var(--sa-right) + 8px) var(--sa-bottom) calc(var(--sa-left) + 8px);
+  background: var(--surface); border-top: 1px solid var(--border);
+}
+.g-tab {
+  flex: 1; max-width: 160px; min-height: var(--tabbar-h); min-width: 44px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  background: none; border: 0; color: var(--muted); font-size: 13px; font-weight: 600;
+}
+.g-tab-icon { font-size: 20px; line-height: 1; }
+.g-tab-on { color: var(--accent2); }
+
+/* ── buttons ─────────────────────────────────────────────────────────── */
+.g-btn {
+  min-height: 48px; min-width: 44px; padding: 0 18px; border-radius: 24px;
+  border: 1px solid var(--border); background: var(--surface2); font-weight: 700;
+}
+.g-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.g-btn-ghost { background: transparent; }
+.g-icon-btn {
+  width: 44px; height: 44px; flex: none; border: 0; background: transparent; font-size: 18px;
+  border-radius: 22px;
+}
+.g-input {
+  width: 100%; min-height: 48px; padding: 0 14px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface); font-size: 17px;
+}
+
+/* ── art and Spotify's mark ──────────────────────────────────────────── */
+.g-art { display: block; flex: none; border-radius: 6px; background: var(--surface2); }
+.g-art-small { width: 52px; height: 52px; border-radius: 4px; }
+.g-art-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 22px; }
+.g-open-spotify {
+  min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center;
+  gap: 6px; padding: 0 10px; border-radius: 22px; text-decoration: none; font-size: 14px; font-weight: 600;
+  border: 1px solid var(--border);
+}
+.g-open-spotify-icon { padding: 0; width: 44px; border: 0; flex: none; }
+.g-spotify-icon { flex: none; }
+
+/* ── Now ─────────────────────────────────────────────────────────────── */
+.g-now-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px;
+}
+/* the celebration goes AROUND the art, never over it */
+.g-now-mine { border-color: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 30%, transparent); }
+.g-now-top { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+/* The art takes what the screen has left once the header, the strip, the
+   title, the vote buttons and the tab bar are placed (about 640 px), so the
+   buttons never fall under the tab bar on any phone. */
+.g-now-art { width: clamp(132px, min(68vw, calc(100vh - 640px)), 300px);
+             height: clamp(132px, min(68vw, calc(100vh - 640px)), 300px); }
+@supports (height: 100dvh) {
+  .g-now-art { width: clamp(132px, min(68vw, calc(100dvh - 640px)), 300px);
+               height: clamp(132px, min(68vw, calc(100dvh - 640px)), 300px); }
+}
+.g-now-text { min-width: 0; }
+.g-now-label { font-size: 13px; color: var(--accent2); font-weight: 700; }
+.g-now-title { font-size: 22px; line-height: 1.2; margin: 2px 0; }
+.g-now-artist { color: var(--muted); }
+.g-now-by { font-size: 14px; margin-top: 2px; }
+.g-progress { margin-top: 12px; }
+.g-progress-bar { height: 6px; border-radius: 3px; background: var(--surface2); overflow: hidden; }
+.g-progress-bar > div { height: 100%; background: var(--accent); }
+.g-progress-times { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted);
+                    font-variant-numeric: tabular-nums; margin-top: 2px; }
+.g-attribution { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+                 margin-top: 6px; flex-wrap: wrap; }
+.g-attribution-from { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.g-tally { display: flex; justify-content: center; gap: 28px; margin: 12px 0 8px;
+           font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.g-tally-up { color: var(--ok); }
+.g-tally-down { color: var(--danger); }
+.g-votes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.g-vote {
+  min-height: 84px; border-radius: 18px; border: 2px solid var(--border); background: var(--surface2);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  font-size: 18px; font-weight: 800;
+}
+.g-vote-arrow { font-size: 28px; line-height: 1; }
+.g-vote-up.g-vote-on { background: #15803d; border-color: var(--ok); }
+.g-vote-down.g-vote-on { background: #9f1239; border-color: var(--danger); }
+.g-why-not { text-align: center; font-weight: 700; padding: 18px 8px; margin: 0;
+             background: var(--surface); border-radius: var(--radius); }
+.g-home-hint { width: 100%; margin-top: 12px; }
+.g-empty { text-align: center; padding: 40px 0; color: var(--muted); }
+
+/* A short screen (iPhone SE, 667 tall): the art beside the title, so the
+   vote buttons and the strip are on screen without scrolling. */
+@media (max-height: 740px) {
+  .g-now-top { flex-direction: row; align-items: flex-start; text-align: left; }
+  .g-now-art { width: 104px; height: 104px; }
+  .g-now-title { font-size: 19px; }
+  .g-now-card { padding: 12px; }
+  .g-tally { margin: 10px 0 8px; }
+  .g-vote { min-height: 76px; }
+}
+
+/* ── lists ───────────────────────────────────────────────────────────── */
+.g-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.g-row {
+  display: flex; align-items: center; gap: 12px; padding: 8px 4px 8px 8px;
+  border-radius: var(--radius); background: var(--surface); border: 1px solid transparent;
+}
+.g-row-set { opacity: 0.72; }
+.g-row-mine { border-color: var(--accent); opacity: 1; }
+.g-row-text { flex: 1; min-width: 0; }
+.g-row-title { font-weight: 700; line-height: 1.25; }
+.g-row-artist { color: var(--muted); font-size: 14px; }
+.g-row-meta { font-size: 13px; color: var(--muted); }
+.g-chip { display: inline-block; margin-left: 6px; padding: 0 8px; border-radius: 10px;
+          background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; }
+.g-chip-dim { background: var(--surface2); color: var(--muted); }
+
+/* ── welcome ─────────────────────────────────────────────────────────── */
+.g-welcome {
+  padding: calc(var(--sa-top) + 20px) var(--gutter) calc(var(--sa-bottom) + 96px);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.g-welcome-title { font-size: 26px; line-height: 1.15; }
+.g-welcome-lead { margin: 0 0 6px; color: var(--muted); }
+.g-field-label { font-weight: 700; font-size: 14px; }
+.g-name-row { display: flex; gap: 8px; }
+.g-name-row .g-input { flex: 1; min-width: 0; }
+.g-how { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 8px; }
+.g-how-tile {
+  display: grid; grid-template-columns: 40px 1fr; column-gap: 10px; align-items: start;
+  padding: 10px 12px; border-radius: var(--radius); background: var(--surface); font-size: 14px;
+}
+.g-how-tile strong { grid-column: 2; }
+.g-how-tile span:last-child { grid-column: 2; color: var(--muted); }
+.g-how-icon { grid-row: span 2; font-size: 20px; color: var(--accent2); text-align: center; }
+.g-rules { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 15px; }
+.g-privacy { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+.g-welcome-go {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+  padding: 12px calc(var(--sa-right) + var(--gutter)) calc(var(--sa-bottom) + 12px) calc(var(--sa-left) + var(--gutter));
+  background: linear-gradient(transparent, var(--bg) 30%);
+}
+.g-btn-go { width: 100%; min-height: 56px; font-size: 18px; }
+
+/* ── messages and sheets ─────────────────────────────────────────────── */
+.g-message { max-width: 420px; text-align: center; }
+.g-message h1 { font-size: 24px; margin: 4px 0 8px; }
+.g-message .g-rules { text-align: left; }
+.g-message-icon { font-size: 40px; color: var(--accent2); }
+.g-sheet-backdrop { position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, 0.6);
+                    display: flex; align-items: flex-end; }
+.g-sheet {
+  width: 100%; background: var(--surface); border-top-left-radius: 18px; border-top-right-radius: 18px;
+  padding: 8px calc(var(--sa-right) + var(--gutter)) calc(var(--sa-bottom) + 18px) calc(var(--sa-left) + var(--gutter));
+  display: flex; flex-direction: column; gap: 10px; max-height: 85vh; overflow-y: auto;
+}
+.g-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.g-sheet-head h2 { font-size: 18px; }
+.g-sheet p { margin: 0; }
+.g-sheet-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.g-steps { margin: 0; padding-left: 22px; display: grid; gap: 6px; }

@@ -12,7 +12,8 @@ process on its own port (phase 2) and never reaches these routes.
                                       can't change under a running night (409)
   GET    /api/jukebox/status          the night: what is playing, the next
                                       program items with start times, the
-                                      line, warnings, the log — reads only
+                                      line, warnings, the log, and how many
+                                      phones joined (`guests`) — reads only
   GET    /api/jukebox/preview         what the set-list editor draws for the
                                       saved settings: the whole set, one pass
                                       with its slots, the next items, the
@@ -83,7 +84,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
 from models.jukebox import ProgramConfig
-from services.jukebox import guest_link, night, night_report, show, simulator, store
+from services.jukebox import guest_link, guests, night, night_report, show, simulator, store
 from services.jukebox.night import sentence
 
 router = APIRouter(prefix="/api/jukebox", tags=["jukebox"])
@@ -135,7 +136,10 @@ async def put_config(request: Request, dry_run: bool = False) -> dict:
 
 @router.get("/status")
 async def get_status(count: int = 20) -> dict:
-    return night.runner.status(count=max(1, min(int(count), 60)))
+    out = night.runner.status(count=max(1, min(int(count), 60)))
+    running = (out.get("night") or {}).get("id") if out.get("running") else None
+    out["guests"] = guests.book.summary(running)
+    return out
 
 
 @router.get("/preview")

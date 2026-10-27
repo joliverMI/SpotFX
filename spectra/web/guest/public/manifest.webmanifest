@@ -1,0 +1,13 @@
+{
+  "name": "Jukebox",
+  "short_name": "Jukebox",
+  "description": "Vote on tonight's songs.",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0612",
+  "theme_color": "#0a0612",
+  "icons": [
+    { "src": "/icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

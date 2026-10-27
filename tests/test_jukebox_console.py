@@ -94,6 +94,29 @@ def test_status_says_no_night_and_then_the_running_night(spotfx):
     spotfx.post("/api/jukebox/night/start", json={})
     r = _run(jc._op_jukebox_status())
     assert r["running"] is True and "A night is running" in r["summary"]
+    assert r["guests"] == {"phones": 0, "joined": 0} and "guest page" not in r["summary"]
+
+
+def test_status_counts_the_phones_on_the_guest_page(spotfx):
+    """Sonic reads how many phones are on the guest page; their acts (names,
+    votes) stay theirs (the module's off-limits list)."""
+    from services.jukebox import guest_link, guests
+
+    async def go():
+        spotfx.put("/api/jukebox/config", json={"playlist": PLAYLIST_URI})
+        spotfx.post("/api/jukebox/night/start", json={})
+        guest_link.GuestLink().ensure_token()
+        token = store.load_guest_link()[1].token
+        for join in (True, False):
+            code, out = await guests.book.hello(None, token)
+            assert code == 200
+            if join:
+                await guests.book.join(out["phone"])
+    _run(go())
+    r = _run(jc._op_jukebox_status())
+    assert r["guests"] == {"phones": 2, "joined": 1}
+    assert "2 phones on the guest page (1 joined)." in r["summary"]
+    assert not any(n.startswith("vote") or "guest" in n for n in jc.OPERATIONS)
 
 
 def test_settings_read_the_program_and_every_economy_field(spotfx):

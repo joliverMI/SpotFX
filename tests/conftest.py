@@ -457,17 +457,25 @@ def _isolated_spotify_auth_age(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolated_jukebox(tmp_path, monkeypatch):
-    """The Jukebox's two stores (services/jukebox/store.py) and its one
-    process-wide runner (services/jukebox/night.py). Absorb's gate asks the
-    runner whether a night is running, so every test gets a fresh, idle one
-    reading from tmp_path — never his real storage/jukebox*.json."""
+    """The Jukebox's stores (services/jukebox/store.py), its one
+    process-wide runner (services/jukebox/night.py), and tonight's guests
+    (services/jukebox/guests.py) plus the guest app's key. Absorb's gate
+    asks the runner whether a night is running, so every test gets a fresh,
+    idle one reading from tmp_path — never his real storage/jukebox*.json."""
     from services.jukebox import ledger, night, store
     monkeypatch.setattr(ledger, "LEDGER_DIR", tmp_path / "jukebox_ledger")
     monkeypatch.setattr(store, "CONFIG_FILE", tmp_path / "jukebox.json")
     monkeypatch.setattr(store, "NIGHT_FILE", tmp_path / "jukebox_night.json")
     monkeypatch.setattr(store, "SHOW_FILE", tmp_path / "jukebox_show.json")
     monkeypatch.setattr(store, "GUEST_LINK_FILE", tmp_path / "jukebox_guest_link.json")
+    monkeypatch.setattr(store, "GUESTS_FILE", tmp_path / "jukebox_guests.json")
     monkeypatch.setattr(night, "runner", night.JukeboxRunner())
+    # tonight's phones (services/jukebox/guests.py) and the guest app's key
+    from services.jukebox import guests
+    from routers import jukebox_guest_router
+    monkeypatch.setattr(guests, "book", guests.Guests())
+    monkeypatch.setattr(jukebox_guest_router, "KEY_FILE", tmp_path / "jukebox_guest_key")
+    monkeypatch.setattr(jukebox_guest_router, "_key_cache", {})
     # The guest link publishes a port on the internet through Tailscale
     # Funnel. No test may ever run `tailscale`: the real command runner is
     # replaced by one that fails loudly; a test that needs one injects a fake.

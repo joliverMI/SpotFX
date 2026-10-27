@@ -11062,6 +11062,30 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   builds a `Ledger` must pass `persist=False` (or run under conftest's
   isolation) — the default persists to `storage/jukebox_ledger/` and
   replays on the next open.
+- **THE GUEST PAGE (PR 2.1) IS ITS OWN PROCESS, and `jukebox_guest/
+  __init__.py` is the binding statement.** `python -m jukebox_guest`
+  (127.0.0.1:8020, reference unit `deploy/spotfx-jukebox-guest.service`,
+  not installed by any build) serves the page built from
+  `spectra/web/src/guest/` (`npx vite build --config vite.guest.config.ts`
+  → `guest-dist/`) and answers EXACTLY `app.ROUTES` — no docs, no OpenAPI,
+  nothing of the master's; each `/g/` call becomes one of `app.FORWARDS` on
+  SpotFX's loopback address with the guest app's key (`jukebox_guest/key.py`,
+  `storage/jukebox_guest_key`) and the phone's code from its cookie. Never
+  give a guest route a body field that names a phone or a SpotFX path. What
+  a call does is `services/jukebox/guests.py` behind
+  `routers/jukebox_guest_router.py` (401 without the key): a NEW phone needs
+  tonight's party token (a night now always has one — `guest_link.
+  on_night_start` makes it, link on or off), a phone's view names other
+  phones only by name, a vote is keyed by the PLAY (`<uri>@<started_ms>`),
+  never on your own song, and the engine is read through its lean
+  `night.JukeboxRunner.guest_state` (no Spotify call — every phone polls it).
+  The page: four phones' renders with their safe areas, 44 px targets and the
+  votes above the fold (`scripts/render_jukebox_guest.py`, which plants a
+  problem to prove its own checks), the pure rules
+  (`scripts/check_jukebox_guest_logic.mjs`), both run by
+  `tests/test_jukebox_guest_page.py`. Web push (iPhone alerts from a Home
+  Screen icon, Android lock-screen alerts) is NOT built: it needs the HTTPS
+  link (G4) to test. Guests can't add songs until PR 2.2.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his program settings, one validator:
@@ -11069,7 +11093,9 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   `storage/jukebox_show.json` (the show settings — presets, approval,
   the economy; one validator: `services/jukebox/show.apply_patch`), and
   `storage/jukebox_guest_link.json` (the guest link's settings and state;
-  one validator: `services/jukebox/guest_link.apply_patch`), all
+  one validator: `services/jukebox/guest_link.apply_patch`), and
+  `storage/jukebox_guests.json` (tonight's phones and votes,
+  `services/jukebox/guests.py`), all
   isolated per test by conftest's `_isolated_jukebox`. Tests:
   `tests/jukebox_world.py` models Spotify's
   queue rule and a crossfade lock — reuse it; a script run OUTSIDE pytest

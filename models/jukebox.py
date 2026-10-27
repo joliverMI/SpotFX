@@ -2,7 +2,7 @@
 SpotFX — the Jukebox's data model (data/jukebox-plan/report.md, phase 1:
 the program engine). services/jukebox/ is the code that runs it.
 
-Four stores, each with one job (services/jukebox/store.py):
+Five stores, each with one job (services/jukebox/store.py):
 
   ProgramConfig  storage/jukebox.json        HIS program settings: which
                                              playlist is the set, where the
@@ -30,6 +30,11 @@ Four stores, each with one job (services/jukebox/store.py):
                                                opened is still open). One
                                                validator, services/jukebox/
                                                guest_link.apply_patch.
+  GuestBook      storage/jukebox_guests.json  tonight's phones (a random id,
+                                             the name each picked) and their
+                                             votes (phase 2.1, services/
+                                             jukebox/guests.py). One night's
+                                             worth; a new night starts empty.
 
 The code says `program`, never `setlist`: SpotFX already has a feature
 called Set Lists (services/setlist_store.py, setlist_runtime.py: per-playlist
@@ -115,11 +120,15 @@ class ProgramConfig(_Model):
 
 class SetItem(_Model):
     """One song of the set, in playlist order (duplicates kept: the playlist's
-    position is what Spotify plays by)."""
+    position is what Spotify plays by). `image`/`thumb` are the album art's
+    URLs on Spotify's own image servers (the guest page shows them unaltered
+    — Spotify's attribution rule, report §2.3); empty when Spotify gave none."""
     uri: str
     title: str = ""
     artist: str = ""
     duration_ms: int = 0
+    image: str = ""
+    thumb: str = ""
 
 
 class LineEntry(_Model):
@@ -131,8 +140,10 @@ class LineEntry(_Model):
     title: str = ""
     artist: str = ""
     duration_ms: int = 0
+    image: str = ""
+    thumb: str = ""
     added_ms: int = 0
-    added_by: str = "host"
+    added_by: str = "host"          # "host", or the phone id of the guest who added it
     ready: bool = True
     state: LineState = "queued"
     # A committed song he removed: it is already in Spotify's queue and can't
@@ -357,3 +368,28 @@ class GuestLinkState(_Model):
     host: str = ""                   # the host the open link was published on
     last_action: Optional[GuestLinkAction] = None
     self_test: Optional[dict] = None
+
+
+# ── tonight's guests (phase 2.1: services/jukebox/guests.py) ─────────────────
+
+class GuestPhone(_Model):
+    """One phone at tonight's party. `id` is a random code the guest page
+    keeps in a cookie and the phone's own storage — no account, no sign-in.
+    `joined` turns true on "Let's go"; renames before that are free (the
+    welcome screen's shuffle), after it they count against the night's
+    limit."""
+    id: str
+    name: str = ""
+    joined: bool = False
+    created_ms: int = 0
+    joined_ms: Optional[int] = None
+    renames: int = 0
+
+
+class GuestBook(_Model):
+    """One night's phones and votes. `votes` is keyed by the PLAY — the song
+    and the moment it started (`<uri>@<started_ms>`) — so a song that plays
+    twice is voted on twice; each play holds {phone id: +1 or -1}."""
+    night_id: str = ""
+    phones: dict[str, GuestPhone] = Field(default_factory=dict)
+    votes: dict[str, dict[str, int]] = Field(default_factory=dict)

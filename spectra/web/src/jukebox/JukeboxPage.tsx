@@ -321,6 +321,12 @@ function ProgramBar({ items, playhead }: { items: JukeboxPreview['lap_items']; p
 
 // ── the Live tab (read-only) ────────────────────────────────────────────────
 
+function guestsLine(g: JukeboxStatus['guests']): string {
+  if (!g || g.phones === 0) return 'Guest page: no phones yet';
+  const phones = `${g.phones} phone${g.phones === 1 ? '' : 's'}`;
+  return `Guest page: ${phones}, ${g.joined} joined`;
+}
+
 function LiveTab({ status }: { status: JukeboxStatus | undefined }) {
   const now = nowLine(status);
   const warnings = nightWarnings(status);
@@ -345,6 +351,12 @@ function LiveTab({ status }: { status: JukeboxStatus | undefined }) {
           </div>
         )}
         {warnings.map((w) => <p key={w} className="jukebox-bad">{w}</p>)}
+        {status?.running && (
+          <InfoTip topic="jukebox-guest-page"
+            text="The page guests open on their phones: they vote on every song and see what's coming up. Its own small app, reached only through tonight's party link.">
+            <p className="jukebox-muted" data-testid="jukebox-guests">{guestsLine(status.guests)}</p>
+          </InfoTip>
+        )}
       </section>
 
       {status?.running && (

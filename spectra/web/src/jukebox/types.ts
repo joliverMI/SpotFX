@@ -120,6 +120,9 @@ export interface JukeboxStatus {
   spotify_auth?: SpotifySignIn;
   log: string[];
   history: NightBrief[];
+  /** Phones on tonight's guest page (services/jukebox/guests.py): every
+   *  phone that opened the party link, and those that tapped Let's go. */
+  guests?: { phones: number; joined: number };
 }
 
 export interface SetMoveResult {
