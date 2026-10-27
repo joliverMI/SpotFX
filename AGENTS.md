@@ -10991,6 +10991,20 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   it with `npm install --no-save jsdom` in `spectra/web` to run it) and
   `scripts/render_jukebox_page.py` (1400×876, 876×1400, 412×891 →
   `docs/evidence/jukebox-page/`).
+- **THE CREDITS ECONOMY (PR 3.1) IS THE SIMULATOR'S, LINE FOR LINE.**
+  `services/jukebox/economy.py` is every price and earning rule of the
+  plan's §1 (D4 re-tune: two songs in line, 8 starting credits, the add
+  price doubling every 15 min), pure, with the planning simulator's own
+  rounding; the shipped values are `models.jukebox.EconomyConfig`'s
+  defaults. `tests/jukebox_economy_sim.py` is the plan's simulator with its
+  prices replaced by those functions, and `tests/test_jukebox_economy.py`
+  holds it to the plan's §3.2 numbers at 4/8/15/30 guests (it reproduces
+  them exactly; a drifted setting moves them — the red control). Change a
+  price or a default and that test tells you whether it is still the tuned
+  night. `services/jukebox/ledger.py` is the per-night APPEND-ONLY credits
+  file (`storage/jukebox_ledger/<night>.jsonl`): balances are derived, a
+  refund is a new entry, a tip is one three-entry group, and `verify()`
+  re-checks every rule from the entries alone.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his settings, one validator:

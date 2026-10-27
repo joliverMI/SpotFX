@@ -198,3 +198,76 @@ class JukeboxNight(_Model):
 class JukeboxNights(_Model):
     night: Optional[JukeboxNight] = None
     history: list[dict] = Field(default_factory=list)   # briefs of earlier nights
+
+
+# ── the credits economy (phase 3) ────────────────────────────────────────────
+
+class EconomyConfig(_Model):
+    """Every credits-economy setting of the plan's §4, with the tuned
+    starting values (report §0 and §3, re-tuned for two songs in line, D4)
+    as defaults and §4's ranges as bounds. services/jukebox/economy.py is
+    the only reader; the rulebook (§1) is what each one means.
+
+    "Per 4 songs" / "per 4 minutes" prices are stored per ONE song / minute
+    (0.25), the simulator's own shape, and rounded UP — so a single song
+    behind already costs the +1."""
+    # free credits
+    start_credits: int = Field(8, ge=0, le=20)            # half at once, half later
+    start_rest_after_min: float = Field(20.0, ge=0, le=60)
+    topup_every_min: float = Field(45.0, ge=0, le=90)     # 0 = off, else 15-90
+    topup_cap: int = Field(10, ge=6, le=40)               # top-ups pause at this many held
+    qr_bonus: int = Field(5, ge=1, le=10)
+    # earning
+    vote_reward: int = Field(1, ge=0, le=3)
+    adder_up_reward: int = Field(1, ge=0, le=3)
+    tips: bool = True
+    tip_unit: int = Field(1, ge=1, le=3)
+    tip_max_per_song: int = Field(3, ge=1, le=10)
+    gift_double_first: int = Field(5, ge=0, le=20)        # 0 = off
+    # adding a song
+    add_base: int = Field(4, ge=1, le=20)
+    add_free_min: float = Field(15.0, ge=0, le=30)
+    add_double_min: float = Field(15.0, ge=0, le=60)      # 0 = flat, else 10-60
+    add_cap: int = Field(60, ge=10, le=99)
+    long_over_min: float = Field(5.0, ge=4, le=8)
+    long_extra_per_min: int = Field(1, ge=0, le=5)
+    learn_first_extra: int = Field(1, ge=0, le=5)
+    max_waiting: int = Field(2, ge=1, le=3)               # songs in line per guest (D4)
+    fair_order: bool = True                               # 1st songs before 2nd songs
+    # bumps
+    bump_up_base: int = Field(2, ge=1, le=10)
+    bump_up_per_behind: float = Field(0.25, ge=0, le=2)
+    bump_down_base: int = Field(3, ge=1, le=10)
+    bump_down_per_ahead: float = Field(0.25, ge=0, le=2)
+    bump_down_max_places: int = Field(3, ge=0, le=10)
+    # play next
+    next_base: int = Field(8, ge=1, le=50)
+    next_per_min: float = Field(0.25, ge=0, le=2)
+    next_min_away_min: float = Field(10.0, ge=0, le=30)
+    # skip
+    skip_max: int = Field(40, ge=10, le=99)
+    skip_half_min: float = Field(20.0, ge=10, le=60)
+    skip_floor: int = Field(16, ge=4, le=40)
+    skip_crowd: bool = True
+    skip_down_pct: float = Field(15.0, ge=0, le=30)       # each net ▼ takes this % off
+    skip_min: int = Field(4, ge=1, le=20)
+    chip_in: bool = True
+    skip_grace_s: float = Field(20.0, ge=0, le=60)
+    # jail
+    jail_net_downs: int = Field(5, ge=3, le=15)
+    jail_scale: bool = True
+    jail_fee: int = Field(10, ge=1, le=40)
+
+    @field_validator("topup_every_min")
+    @classmethod
+    def _topup(cls, v: float) -> float:
+        if v != 0 and not 15 <= v <= 90:
+            raise ValueError("a top-up runs every 15-90 minutes, or 0 for off")
+        return v
+
+    @field_validator("add_double_min")
+    @classmethod
+    def _double(cls, v: float) -> float:
+        if v != 0 and not 10 <= v <= 60:
+            raise ValueError("the add price doubles every 10-60 minutes of wait, or 0 for flat")
+        return v

@@ -461,7 +461,8 @@ def _isolated_jukebox(tmp_path, monkeypatch):
     process-wide runner (services/jukebox/night.py). Absorb's gate asks the
     runner whether a night is running, so every test gets a fresh, idle one
     reading from tmp_path — never his real storage/jukebox*.json."""
-    from services.jukebox import night, store
+    from services.jukebox import ledger, night, store
+    monkeypatch.setattr(ledger, "LEDGER_DIR", tmp_path / "jukebox_ledger")
     monkeypatch.setattr(store, "CONFIG_FILE", tmp_path / "jukebox.json")
     monkeypatch.setattr(store, "NIGHT_FILE", tmp_path / "jukebox_night.json")
     monkeypatch.setattr(night, "runner", night.JukeboxRunner())
