@@ -11036,12 +11036,29 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   THAT night). Starting and stopping a night always ask; never test either
   anywhere but `tests/jukebox_world.py`'s fake world. A new jukebox
   setting or action owes this domain an op or a named exclusion.
+- **THE GUEST LINK (N1) SHIPS OFF AND NEVER RUNS `tailscale` IN A TEST**:
+  `services/jukebox/guest_link.py` (its docstring is the binding
+  statement) publishes ONE Funnel port (`:8443` → `127.0.0.1:8020`, the
+  guest app) only while a night runs — the night's start/end hooks
+  (`JukeboxDeps.guest_link_start/_end`, no-ops unless production_deps()
+  wires them) and a supervised reconcile that closes a Funnel left open
+  with no night. The model refuses a guest port of `:8000`/`:8010`; a
+  public port his `tailscale serve` already uses is refused; a read-back
+  showing anything else published closes it again; the self-test checks
+  only the plan while closed. `GuestLinkConfig.enabled` is False until G4
+  (his) — the commands have never met his Tailscale. conftest replaces
+  `guest_link.run_command` with one that fails loudly; drive a fake
+  (`tests/test_jukebox_guest_link.py::FakeTailscale`, his own Serve on
+  :443 included). The party token lives through a night (it is on the
+  printed cards) and is replaced when a night that used the link ends.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his program settings, one validator:
   `routers/jukebox_router.apply_config_patch`), `storage/jukebox_night.json`,
-  and `storage/jukebox_show.json` (the show settings — presets, approval,
-  the economy; one validator: `services/jukebox/show.apply_patch`), all
+  `storage/jukebox_show.json` (the show settings — presets, approval,
+  the economy; one validator: `services/jukebox/show.apply_patch`), and
+  `storage/jukebox_guest_link.json` (the guest link's settings and state;
+  one validator: `services/jukebox/guest_link.apply_patch`), all
   isolated per test by conftest's `_isolated_jukebox`. Tests:
   `tests/jukebox_world.py` models Spotify's
   queue rule and a crossfade lock — reuse it; a script run OUTSIDE pytest

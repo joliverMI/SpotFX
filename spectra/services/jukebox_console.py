@@ -36,6 +36,10 @@ excluded" from "forgotten":
     turn and the host's page;
   * reordering the SET PLAYLIST — it rewrites his playlist's order in
     Spotify; a drag on the page, where the set is shown song by song;
+  * the GUEST LINK (N1, SpotFX's services/jukebox/guest_link.py) —
+    switching it on publishes a port of Serenity on the internet through
+    Tailscale Funnel each night; that is his own act, after G4, never a
+    voice one;
   * linking the set playlist and placing Manual slots — the editor shows
     the set and the slots it makes, song by song, and Manual slots are
     placed by hand on it (Sonic reads which playlist is linked and how many

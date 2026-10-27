@@ -2,7 +2,7 @@
 SpotFX — the Jukebox's data model (data/jukebox-plan/report.md, phase 1:
 the program engine). services/jukebox/ is the code that runs it.
 
-Three stores, each with one job (services/jukebox/store.py):
+Four stores, each with one job (services/jukebox/store.py):
 
   ProgramConfig  storage/jukebox.json        HIS program settings: which
                                              playlist is the set, where the
@@ -24,6 +24,12 @@ Three stores, each with one job (services/jukebox/store.py):
                                              edit writes it
                                              (services/jukebox/show.py is
                                              the one validator).
+  GuestLinkConfig/   storage/                the guest link's settings (N1:
+  GuestLinkState     jukebox_guest_link.json  off until G4) and durable state
+                                               (whether a Funnel this process
+                                               opened is still open). One
+                                               validator, services/jukebox/
+                                               guest_link.apply_patch.
 
 The code says `program`, never `setlist`: SpotFX already has a feature
 called Set Lists (services/setlist_store.py, setlist_runtime.py: per-playlist
@@ -293,3 +299,61 @@ class ShowConfig(_Model):
     preset: Optional[Preset] = None
     approve_new_phones: bool = False
     economy: EconomyConfig = Field(default_factory=EconomyConfig)
+
+
+# ── the guest link (N1: services/jukebox/guest_link.py) ──────────────────────
+
+# The ports Tailscale Funnel can publish (its docs; report §8.3) and the two
+# the guest link must never reach: SpotFX's master (:8000) and SPECTRA (:8010).
+FUNNEL_PORTS: tuple[int, ...] = (443, 8443, 10000)
+MASTER_PORTS: tuple[int, ...] = (8000, 8010)
+PublicPort = Literal[443, 8443, 10000]
+
+
+class GuestLinkConfig(_Model):
+    """How the guests' public HTTPS link is published (report §8.3, N1).
+    `enabled` SHIPS OFF: until he turns it on (after G4 lets Funnel run on
+    Serenity), a night never touches Tailscale."""
+    enabled: bool = False
+    # his tailnet name for Serenity ("serenity.<tailnet>.ts.net"); empty =
+    # read from `tailscale status --json` when a night opens the link
+    public_host: str = ""
+    public_port: PublicPort = 8443
+    guest_port: int = Field(8020, ge=1024, le=65535)    # the guest app (phase 2)
+
+    @field_validator("guest_port")
+    @classmethod
+    def _not_master(cls, v: int) -> int:
+        if v in MASTER_PORTS:
+            raise ValueError(f"the guest link can never point at :{v} (the master and "
+                             "SPECTRA are never published)")
+        return v
+
+    @field_validator("public_host")
+    @classmethod
+    def _host(cls, v: str) -> str:
+        v = v.strip().rstrip(".").lower()
+        if v and ("/" in v or ":" in v or " " in v):
+            raise ValueError("public_host is a host name only, like serenity.<tailnet>.ts.net")
+        return v
+
+
+class GuestLinkAction(_Model):
+    what: str                        # open | close | status | host
+    ok: bool
+    detail: str = ""
+    at_ms: int = 0
+
+
+class GuestLinkState(_Model):
+    """What the link is doing, durable so a restart knows whether a Funnel
+    it opened is still open. The party token is in every printed card, so
+    it lives through a night and is replaced when the night ends."""
+    token: str = ""
+    token_created_ms: Optional[int] = None
+    funnel_open: bool = False
+    opened_ms: Optional[int] = None
+    opened_for_night: str = ""
+    host: str = ""                   # the host the open link was published on
+    last_action: Optional[GuestLinkAction] = None
+    self_test: Optional[dict] = None

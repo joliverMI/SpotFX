@@ -466,7 +466,17 @@ def _isolated_jukebox(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "CONFIG_FILE", tmp_path / "jukebox.json")
     monkeypatch.setattr(store, "NIGHT_FILE", tmp_path / "jukebox_night.json")
     monkeypatch.setattr(store, "SHOW_FILE", tmp_path / "jukebox_show.json")
+    monkeypatch.setattr(store, "GUEST_LINK_FILE", tmp_path / "jukebox_guest_link.json")
     monkeypatch.setattr(night, "runner", night.JukeboxRunner())
+    # The guest link publishes a port on the internet through Tailscale
+    # Funnel. No test may ever run `tailscale`: the real command runner is
+    # replaced by one that fails loudly; a test that needs one injects a fake.
+    from services.jukebox import guest_link
+
+    def _no_tailscale(argv, timeout):
+        raise AssertionError(f"a test tried to run {argv!r} — tests never run tailscale")
+    monkeypatch.setattr(guest_link, "run_command", _no_tailscale)
+    monkeypatch.setattr(guest_link, "controller", guest_link.GuestLink())
 
 
 @pytest.fixture(autouse=True)

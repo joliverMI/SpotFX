@@ -30,6 +30,19 @@ process on its own port (phase 2) and never reaches these routes.
                                       program (and approval, for Large)
   GET    /api/jukebox/price-check     the current rules on real examples,
                                       `?guests=` the room size
+  GET    /api/jukebox/guest-link      the guests' public link (N1): off/armed/
+                                      live/error, the link with tonight's party
+                                      token, what it would publish, the last
+                                      step and self-test
+  PUT    /api/jukebox/guest-link      a PARTIAL edit {enabled, public_host,
+                                      public_port, guest_port}; `?dry_run=true`.
+                                      enabled SHIPS FALSE; switching it off
+                                      while live closes the link at once
+  POST   /api/jukebox/guest-link/rotate     a fresh party token (refused
+                                      while a night runs: tonight's cards)
+  POST   /api/jukebox/guest-link/self-test  the plan alone while closed (no
+                                      Tailscale call); Funnel's own status and
+                                      the public address while live
   POST   /api/jukebox/simulate        {guests, nights, seed, program:
                                       "saved"|"preset"} — the party simulator:
                                       one model night under the SAVED economy,
@@ -63,7 +76,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
 from models.jukebox import ProgramConfig
-from services.jukebox import night, show, simulator, store
+from services.jukebox import guest_link, night, show, simulator, store
 from services.jukebox.night import sentence
 
 router = APIRouter(prefix="/api/jukebox", tags=["jukebox"])
@@ -260,3 +273,32 @@ async def post_simulate(body: SimulateBody = SimulateBody()) -> dict:
         raise HTTPException(status_code=409, detail="a simulation is already running")
     async with _simulating:
         return await asyncio.to_thread(run_simulation, body)
+
+
+# ── the guest link (N1; services/jukebox/guest_link.py) ─────────────────────
+
+@router.get("/guest-link")
+async def get_guest_link() -> dict:
+    return guest_link.controller.status()
+
+
+@router.put("/guest-link")
+async def put_guest_link(request: Request, dry_run: bool = False) -> dict:
+    try:
+        patch = await request.json()
+    except Exception:
+        raise HTTPException(status_code=422, detail="expected a JSON object")
+    try:
+        return await guest_link.controller.edit(patch, dry_run=dry_run)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/guest-link/rotate")
+async def post_guest_link_rotate() -> dict:
+    return await guest_link.controller.rotate()
+
+
+@router.post("/guest-link/self-test")
+async def post_guest_link_self_test() -> dict:
+    return await guest_link.controller.self_test()

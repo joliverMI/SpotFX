@@ -129,6 +129,10 @@ async def _default_to_thread(fn: Callable, *args: Any) -> Any:
     return await asyncio.to_thread(fn, *args)
 
 
+async def _no_guest_link(night_id: str) -> None:
+    return None
+
+
 async def _never_sleeping() -> Optional[bool]:
     return False
 
@@ -153,6 +157,12 @@ class JukeboxDeps:
     # night and the line all stop when it lapses, so the master status
     # carries its warning line.
     sign_in: Callable[[], dict] = lambda: _sign_in_status()
+    # The guest link (services/jukebox/guest_link.py, N1): opened when a
+    # night starts and closed when it ends — when it is switched on. Each
+    # answers (ok, sentence) or None for "nothing was done"; never raises.
+    # The defaults do nothing: only production_deps() wires the real one.
+    guest_link_start: Callable[[str], Awaitable[Any]] = _no_guest_link
+    guest_link_end: Callable[[str], Awaitable[Any]] = _no_guest_link
 
 
 def production_deps() -> JukeboxDeps:
@@ -171,8 +181,12 @@ def production_deps() -> JukeboxDeps:
         from services import absorb
         return bool(absorb.runner.open_window)
 
+    from services.jukebox import guest_link
+
     return JukeboxDeps(gateway=default_gateway(), current_track=lambda: state.current_track,
-                       device_name=device_name, sleeping=sleeping, absorb_busy=absorb_busy)
+                       device_name=device_name, sleeping=sleeping, absorb_busy=absorb_busy,
+                       guest_link_start=lambda nid: guest_link.controller.on_night_start(nid),
+                       guest_link_end=lambda nid: guest_link.controller.on_night_end(nid))
 
 
 def brief(night: Optional[JukeboxNight]) -> Optional[dict]:
@@ -388,6 +402,7 @@ class JukeboxRunner:
                     else "following what plays")
             self._log(f"night started ({started_by}) on {n.playlist_name or n.playlist_uri}: "
                       f"{len(n.set_items)} set songs, {self._rules_line()}; {what}")
+            await self._guest_link(d.guest_link_start, n.id)
             await self._persist()
             return {"status": "running", "reason": "", "detail": "", "night": brief(n)}
 
@@ -501,7 +516,21 @@ class JukeboxRunner:
                 self._log("paused the music")
             except Exception as exc:
                 self._log(f"couldn't pause the music ({_err(exc)})")
+        await self._guest_link(self.deps.guest_link_end, n.id)
         await self._persist()
+
+    async def _guest_link(self, hook: Callable[[str], Awaitable[Any]], night_id: str) -> None:
+        """The guest link's step, logged; a failure is a warning on a night
+        that plays on, never a stopped night."""
+        try:
+            out = await hook(night_id)
+        except Exception as exc:                                  # noqa: BLE001
+            out = (False, f"the guest link step failed ({_err(exc)})")
+        if not out:
+            return
+        ok, said = out
+        self._log(said)
+        self._warn("guest_link", None if ok else said)
 
     # ── the tick ────────────────────────────────────────────────────────────
 
