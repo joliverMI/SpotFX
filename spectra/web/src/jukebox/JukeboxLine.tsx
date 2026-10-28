@@ -13,6 +13,8 @@ export default function JukeboxLine<T>({
   items: T[];
   getId: (item: T) => string;
   getLabel: (item: T) => string;
+  /** fixed in place: the song playing and the one already sent to Spotify
+   *  (the engine's line leads with both) — never a waiting song */
   getSent: (item: T) => boolean;
   /** `id` is the waiting song moving; `to` is its new place among the waiting songs. */
   onReorder: (id: string, to: number) => void;

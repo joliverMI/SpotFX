@@ -46,6 +46,16 @@ code still works: every request carrying it acts as the kept phone
 (`alias`), and its page is handed the kept code on its next hello, so a
 merge made either way round never strands anyone.
 
+THE REPORT'S RECORDS (§9 3.3, §12 risk 3: "the post-party report measures
+the real night against the §3 bands"). The book keeps what the simulator
+measures and the ledger can't: one SAMPLE per song start (`_maybe_sample`, on
+the first poll after the engine's `plays` count moves — held credits of the
+phones here, the back of the line's wait and its add price, time-outs,
+phones here); each guest's FIRST LOOK at an add price (credits mode: their
+first search since their last add — the page disables an Add they can't
+afford, so the server never sees that want any other way); and adds TURNED
+AWAY as too late. services/jukebox/night_report.py reads them.
+
 VOTES (free play, the plan's §6). One vote per phone on the song playing —
 ▲ or ▼, changeable, withdrawable — keyed by the play (the song and the moment
 it started), so a song that plays twice is voted on twice. Only while it
@@ -163,7 +173,7 @@ from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable, Optional
 from zoneinfo import ZoneInfo
 
-from models.jukebox import GuestBook, GuestPhone, LineEntry, ShowConfig
+from models.jukebox import GuestBook, GuestPhone, LineEntry, NightSample, ShowConfig
 from services.jukebox import store
 
 logger = logging.getLogger(__name__)
@@ -175,6 +185,8 @@ BONUS_TRIES = 5                  # wrong bonus codes a phone may try a night
 GIFT_MAX = 20                    # the most credits one host gift gives a phone
 NEXT_SHOWN = 8                   # upcoming songs on the Now and Queue screens
 POLL_MS = 3000                   # how often the page asks again while it is open
+SERIES_KEPT = 600                # the report's samples, one per song start (a long night is ~80)
+SAMPLE_SONG_MS = 216_000         # the model's own sample song: a known 3.6-minute song
 SEARCH_PAGE = 10                 # Spotify results a page (report §9, PR 2.2)
 LIBRARY_HITS = 5                 # his own songs shown first
 QUERY_MIN, QUERY_MAX = 2, 60
@@ -1843,7 +1855,61 @@ class Guests:
                 await self._close_night()
             return gate
         await self._credits_tick(book, phone, gs, self.deps.show())
+        await self._maybe_sample(book, gs)
         return 200, {"status": "ok", "view": self._view(book, phone, gs)}
+
+    async def _maybe_sample(self, book: GuestBook, gs: dict) -> None:
+        """One report sample per song start (the simulator's own series):
+        taken on the first poll after the engine's `plays` count moves."""
+        plays = int(gs.get("plays") or 0)
+        if book.sampled_plays == plays:
+            return
+        from services.jukebox import wallet
+        async with self._get_lock():
+            if book.sampled_plays == plays:
+                return
+            book.sampled_plays = plays
+            show = self.deps.show()
+            now = self.deps.now_ms()
+            here = [pid for pid, t in self._seen.items()
+                    if now - t <= PRESENT_WINDOW_MS and pid in book.phones
+                    and not book.phones[pid].merged_into]
+            back = self._back_wait_ms(gs)
+            held = price = None
+            if show.play_mode == "credits":
+                w = self._wallet_for(gs["night_id"], show)
+                held = sum(w.balance(pid) for pid in here)
+                price = (wallet.add_price(back, SAMPLE_SONG_MS, True, show.economy)
+                         if back is not None else None)
+            book.series.append(NightSample(
+                t_ms=now, held=held, back_wait_ms=back, price_back=price, present=len(here),
+                jailed=sum(1 for pid in book.phones if jailed_now(gs, pid))))
+            del book.series[:-SERIES_KEPT]
+            await self._save()
+
+    async def _first_look(self, book: GuestBook, phone: str, gs: dict, show: ShowConfig,
+                          wait_ms: Optional[int], balance: int) -> None:
+        """A guest's first look at an add price since their last add (credits
+        mode): one want, and whether their balance covered a known 3.6-minute
+        song at their place in line then (the model's "can afford it right
+        away") — the same for a 2nd song, with one already waiting."""
+        from services.jukebox import wallet
+        me = book.phones.get(phone)
+        if me is None or me.want_open or not (me.joined and me.approved):
+            return
+        async with self._get_lock():
+            if me.want_open:
+                return
+            price = wallet.add_price(wait_ms, SAMPLE_SONG_MS, True, show.economy)
+            ok = balance >= price
+            wc = book.wants
+            wc.wants += 1
+            wc.afford_now += ok
+            if waiting(gs.get("line") or [], phone):
+                wc.wish_more += 1
+                wc.afford_more += ok
+            me.want_open = True
+            await self._save()
 
     # ── finding and adding a song ───────────────────────────────────────────
 
@@ -1924,6 +1990,8 @@ class Guests:
             wait_ms = self.deps.runner().quote_wait(played + len(waiting(line, phone)) + 1,
                                                     show.economy.fair_order)
             balance = self._wallet_for(gs["night_id"], show).balance(phone)
+            if off == 0:
+                await self._first_look(book, phone, gs, show, wait_ms, balance)
         results = [result_view(m, known=bool(known.get(m["uri"])), in_line=m["uri"] in in_line,
                                explicit_ok=ok, explicit_why=why,
                                long_over_min=show.economy.long_over_min, library=m["uri"] in lib,
@@ -2010,12 +2078,18 @@ class Guests:
                                                      latest_start_ms=reqs["ends_at_ms"] - fresh_now_ms)
             if out.get("status") != "added":
                 if out.get("reason") == "too_late":
+                    book.refused["too_late"] = book.refused.get("too_late", 0) + 1
+                    book.phones[phone].want_open = False     # the model gives up that want
+                    await self._save()
                     return refusal("too_late", 409)
                 return 409, {"status": "refused", "reason": out.get("reason", "not_running"),
                              "detail": out.get("detail") or sentence("not_running")}
             if cost:
                 paid = await self._spend(gs, show, phone, "add", cost, entry.id)
                 await self.deps.runner().mark_paid(entry.id, cost, paid.seq)
+            if book.phones[phone].want_open:
+                book.phones[phone].want_open = False      # the want is answered
+                await self._save()
             gs = self.deps.state()
             return 200, {"status": "ok", "added": {"entry_id": entry.id, "title": entry.title,
                                                    "starts_in_ms": out.get("starts_in_ms"),
@@ -2178,6 +2252,7 @@ class Guests:
                 times = [t for t in (kept.jailed_ms, gone.jailed_ms) if t is not None]
                 kept.jailed_ms = min(times) if times else None
             kept.bumps_ms = sorted(kept.bumps_ms + gone.bumps_ms)
+            kept.want_open = kept.want_open or gone.want_open
             for votes in book.votes.values():
                 if retire in votes:
                     v = votes.pop(retire)

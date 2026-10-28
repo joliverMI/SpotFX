@@ -477,5 +477,5 @@ export interface NightReport {
   rows?: ReportRow[];
   comparison?: { guests: number; nights: number; program: string; rows: ReportRow[] } | null;
   guests?: number | null;
-  guests_from?: 'you' | 'the ledger' | null;
+  guests_from?: 'you' | 'the ledger' | 'the guest book' | null;
 }

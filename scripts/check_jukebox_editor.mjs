@@ -240,7 +240,10 @@ const REP = JSON.parse(readFileSync(join(web, 'harness/jukeboxReportSnapshot.jso
   const credits = Object.fromEntries(RW.creditFacts(REP.credits).map((f) => [f.label, f.value]));
   ok(credits['Held at the end'] === '8 (30%)' && credits['Guests who used credits'] === '3', 'the credits in words');
   const jail = REP.comparison.rows.find((r) => r.key === 'jails');
-  const c = RW.compareCells(jail);
+  ok(RW.compareCells(jail).night === '1' && !RW.compareCells(jail).why,
+    `the night's jail, from its guest book (${RW.compareCells(jail).night})`);
+  ok(REP.comparison.rows.every((r) => r.this_night !== null), 'the snapshot night measures every model row');
+  const c = RW.compareCells({ ...jail, this_night: null, why: 'no guest song has played yet' });
   ok(c.night === '–' && c.why && c.model !== '–', 'a measure the night could not take is "–" with its reason, beside the model');
   ok(RW.endLine({ ...REP.night, state: 'running' }).startsWith('Still running'), 'a running night is a report so far');
 }
@@ -424,10 +427,14 @@ function statusOf() {
   return {
     night: { id: 'n', state: 'running', started_ms: 1, started_by: 'press', ended_ms: null, end_reason: '', end_detail: '', playlist_name: 'Saturday set', playlist_uri: '', played: 3, jukebox_played: 1 },
     running: true,
-    now: { kind: 'set', uri: SET[1].uri, title: 'Dancing Queen', set_index: 1, entry_id: '', started_ms: 1 },
+    now: world.playing
+      ? { kind: 'jukebox', uri: 'spotify:track:p', title: 'Rasputin', set_index: null, entry_id: 'e0', started_ms: 1 }
+      : { kind: 'set', uri: SET[1].uri, title: 'Dancing Queen', set_index: 1, entry_id: '', started_ms: 1 },
     remaining_ms: 40_000,
     next: [{ kind: 'jukebox', uri: 'spotify:track:j', title: 'Bad Romance', artist: 'Lady Gaga', duration_ms: 1, set_index: null, entry_id: 'e1', committed: true, starts_in_ms: 40_000 }],
-    line: [{ id: 'e1', uri: 'spotify:track:j', title: 'Bad Romance', artist: 'Lady Gaga', duration_ms: 1, added_by: 'host', state: 'committed', doomed: false, commit_check: 'next' },
+    // the engine's line (night.line_view) leads with the song PLAYING when it is a jukebox song
+    line: [...(world.playing ? [{ id: 'e0', uri: 'spotify:track:p', title: 'Rasputin', artist: 'Boney M.', duration_ms: 1, added_by: 'pb', state: 'playing', doomed: false, commit_check: '' }] : []),
+           { id: 'e1', uri: 'spotify:track:j', title: 'Bad Romance', artist: 'Lady Gaga', duration_ms: 1, added_by: 'host', state: 'committed', doomed: false, commit_check: 'next' },
            { id: 'e2', uri: 'spotify:track:k', title: 'Take On Me', artist: 'a-ha', duration_ms: 1, added_by: 'pa', state: 'queued', doomed: false, commit_check: '', round: 1, paid: 6 },
            { id: 'e3', uri: 'spotify:track:m', title: 'Vogue', artist: 'Madonna', duration_ms: 1, added_by: 'pd', state: 'queued', doomed: false, commit_check: '', round: 1 }],
     warnings: [sign.warning, 'Shuffle is on in Spotify, so the set won\'t play in order.'], spotify_auth: sign,
@@ -671,6 +678,27 @@ console.log('\n§2 the editor, mounted — every click PUTs the slots the rule s
   const live = c.querySelector('[data-testid="jukebox-live-card"]')?.parentElement;
   for (const b of live ? [...live.querySelectorAll('button')] : []) await click(b);
   ok(writes().length === before, 'nothing else on the Live tab writes — only its own line\'s drag does, proven above');
+  P.unmount();
+}
+
+console.log('\n§2a2 the Live line while a guest\'s song plays — it stays put, above the sent song');
+{
+  world = newWorld('running');
+  world.playing = true;
+  const c = P.mount();
+  await P.settle();
+  await click(buttonByText(c, /^Live$/));
+  await P.settle();
+  const rowsL = [...c.querySelectorAll('[data-testid="jukebox-line"] .jukebox-item')];
+  ok(rowsL.length === 4 && text(rowsL[0]).includes('Rasputin') && text(rowsL[1]).includes('Bad Romance'),
+    `the playing song leads the line, above the song sent to Spotify (${rowsL.map((r) => text(r).slice(0, 14)).join(' | ')})`);
+  ok(!rowsL[0].querySelector('.light-show-step-handle') && !rowsL[1].querySelector('.light-show-step-handle')
+    && !!rowsL[2].querySelector('.light-show-step-handle') && !!rowsL[3].querySelector('.light-show-step-handle'),
+  'neither the playing song nor the sent one can be dragged; the waiting songs can');
+  await click(buttonByText(c, /^Guests$/));
+  await P.settle();
+  ok([...c.querySelectorAll('[data-testid="jukebox-guest-line"] .jukebox-next .jukebox-item')].length === 3,
+    'the Guests tab\'s line still lists only the songs still to play');
   P.unmount();
 }
 

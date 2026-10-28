@@ -408,7 +408,7 @@ function LiveTab({ status }: { status: JukeboxStatus | undefined }) {
               items={line}
               getId={(e) => e.id}
               getLabel={(e) => e.title || e.uri}
-              getSent={(e) => e.state === 'committed'}
+              getSent={(e) => e.state !== 'queued'}
               onReorder={(id, to) => move.mutate({ id, to }, { onError })}
               renderRow={(e) => (
                 <span className="jukebox-item-words">
@@ -503,14 +503,15 @@ function ReportCard({ nightId }: { nightId: string }) {
     <section className="card jukebox-card jukebox-list-card" data-testid="jukebox-report">
       <div className="jukebox-card-head">
         <InfoTip topic="jukebox-report"
-          text="The night measured: what played, the line, and — once guests use credits — the credits, each beside the model's nights at the same party size, so the next party starts from real numbers.">
+          text="The night measured the model's way: what played, the line, the guests' songs and waits, the jail, quiet guests and — in credits mode — the credits, prices and what guests could afford, each beside the model's nights at the same party size, so the next party starts from real numbers.">
           <span className="card-title jukebox-card-title">The night's report</span>
         </InfoTip>
         <label className="jukebox-guests">
           <span>compare with a party of</span>
           <select aria-label="Compare with a party of" value={size ?? ''}
             onChange={(e) => setSize(e.target.value ? Number(e.target.value) : null)}>
-            <option value="">{r?.guests_from === 'the ledger' ? `${r.guests} (the ledger)` : '—'}</option>
+            <option value="">{r?.guests_from === 'the ledger' || r?.guests_from === 'the guest book'
+              ? `${r.guests} (${r.guests_from})` : '—'}</option>
             {COMPARE_SIZES.map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
         </label>

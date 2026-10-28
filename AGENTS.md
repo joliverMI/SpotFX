@@ -11059,17 +11059,26 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   (`tests/test_jukebox_guest_link.py::FakeTailscale`, his own Serve on
   :443 included). The party token lives through a night (it is on the
   printed cards) and is replaced when a night that used the link ends.
-- **THE POST-PARTY REPORT (a skeleton)**: `services/jukebox/night_report.py`
-  (`GET /api/jukebox/report`, the Live tab's last card, Sonic's
-  `jukebox_night_report`) measures the latest night from what it records —
-  what played, the line, and its credits ledger when guests used one — with
-  each measure keyed by `simulator.ROWS`, so it sits beside the model's
-  nights at the party size (the ledger's phones, or `?guests=`). A measure
-  the night can't take is None WITH its reason (`why`), never a 0; the
-  ledger's own `verify()` rides along. It reads only. A test fixture that
-  builds a `Ledger` must pass `persist=False` (or run under conftest's
-  isolation) — the default persists to `storage/jukebox_ledger/` and
-  replays on the next open.
+- **THE POST-PARTY REPORT**: `services/jukebox/night_report.py` (`GET
+  /api/jukebox/report`, the Live tab's last card, Sonic's
+  `jukebox_night_report`; its module docstring is the binding statement)
+  measures the latest night from its record, its credits ledger and its
+  GUEST BOOK — every `simulator.ROWS` row, the model's way, so it sits
+  beside the model's nights at the party size (the ledger's phones, a
+  free-play night's joined phones, or `?guests=`). The book's REPORT
+  RECORDS (`guests.py`: one `NightSample` per song start, taken on the
+  first poll after the engine's `plays` moves; each guest's first look at
+  an add price — their first search since their last add, since the page
+  disables an Add they can't afford; adds turned away as too late) are what
+  the ledger can't hold; a NEW model row needs its record added there, not
+  guessed in the report. The book holds only the latest night
+  (`load_book`). A measure the night can't take is None WITH its reason
+  (`why`), never a 0; the ledger's own `verify()` rides along. It reads
+  only. A test fixture that builds a `Ledger` must pass `persist=False` (or
+  run under conftest's isolation) — the default persists to
+  `storage/jukebox_ledger/` and replays on the next open. The Live tab's
+  harness renders `jukeboxReportSnapshot.json`, held to the report by
+  `tests/test_jukebox_report.py` — regenerate it when the report changes.
 - **THE GUEST PAGE (PR 2.1) IS ITS OWN PROCESS, and `jukebox_guest/
   __init__.py` is the binding statement.** `python -m jukebox_guest`
   (127.0.0.1:8020, reference unit `deploy/spotfx-jukebox-guest.service`,
