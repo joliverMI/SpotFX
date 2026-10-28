@@ -13,8 +13,10 @@
 //      within two of the playing one can't move; and the words.
 //   2. The page, mounted: clicking a set song / a slot / × in Manual PUTs
 //      exactly the slots the rule says; Auto → Manual copies the server's
-//      own `manual_equivalent`; the sign-in warning shows; the Live tab is
-//      read-only (no control in it writes) and shows the night.
+//      own `manual_equivalent`; the sign-in warning shows; the Live tab
+//      shows the night and is read-only except its own jukebox line, which
+//      drags the same way the Guests tab's does (report.md §7.2: both host
+//      views carry it) — one shared component, JukeboxLine.tsx, for both.
 //   3. Help: every topic is a real HELP_SECTIONS entry, the menu row's "?"
 //      maps /jukebox to `jukebox`, /jukebox is in the Engine menu — and,
 //      behaviourally, hovering the page's own controls opens each topic,
@@ -623,6 +625,30 @@ console.log('\n§2 the editor, mounted — every click PUTs the slots the rule s
     `the Live line names who added each song (never a phone's code) and what they paid (${liveRows[1]})`);
   ok(liveRows[2]?.includes('added by Lucky Otter') && liveRows[2].includes('sits out a time-out')
     && liveRows[0]?.includes('added by the host'), 'and which songs sit out a time-out');
+  // the Live tab's own draggable line (§7.2: both host views carry it) — the
+  // same reorder rules as the Guests tab's: only the waiting songs carry a
+  // handle, and the move goes through the engine's own /move
+  const lineEls = [...c.querySelectorAll('[data-testid="jukebox-line"] .jukebox-item')];
+  ok(!lineEls[0]?.querySelector('.light-show-step-handle') && !!lineEls[1]?.querySelector('.light-show-step-handle')
+    && !!lineEls[2]?.querySelector('.light-show-step-handle'),
+    'only the waiting songs carry a ⠿ handle on the Live tab\'s own line too');
+  const liveRectAt = (i) => ({ x: 0, y: i * 60, left: 0, top: i * 60, right: 400, bottom: i * 60 + 50, width: 400, height: 50, toJSON() {} });
+  lineEls.slice(1).forEach((li, i) => { li.getBoundingClientRect = () => liveRectAt(i); });
+  const livePev = (type, y) => {
+    const ev = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, clientX: 200, clientY: y, button: 0 });
+    Object.defineProperty(ev, 'pointerId', { value: 4 });
+    Object.defineProperty(ev, 'isPrimary', { value: true });
+    Object.defineProperty(ev, 'pointerType', { value: 'touch' });
+    return ev;
+  };
+  P.actSync(() => lineEls[2].querySelector('.light-show-step-handle').dispatchEvent(livePev('pointerdown', 85)));
+  for (const y of [80, 70, 45, 20, 10]) P.actSync(() => document.dispatchEvent(livePev('pointermove', y)));
+  P.actSync(() => document.dispatchEvent(livePev('pointerup', 10)));
+  await P.settle();
+  const liveDragMove = world.requests.filter((r) => r.url === '/api/jukebox/line/e3/move').at(-1);
+  ok(liveDragMove?.method === 'POST' && JSON.stringify(liveDragMove.body) === '{"to":0}',
+    `dragging the Live tab's own line POSTs the move too (${JSON.stringify(liveDragMove?.body)})`);
+  world.requests = [];
   const econ = $(c, '[data-testid="jukebox-economy"]');
   ok(!!econ && text($(c, '[data-testid="jukebox-economy-credits"]')) === '25 credits held · 8.3 a guest · 60 made tonight · 42% still unspent',
     `the economy card says the credits right now (${text($(c, '[data-testid="jukebox-economy-credits"]'))})`);
@@ -644,7 +670,7 @@ console.log('\n§2 the editor, mounted — every click PUTs the slots the rule s
     'picking a party size asks for the report at that size');
   const live = c.querySelector('[data-testid="jukebox-live-card"]')?.parentElement;
   for (const b of live ? [...live.querySelectorAll('button')] : []) await click(b);
-  ok(writes().length === before, 'nothing on the Live tab writes — it is read-only');
+  ok(writes().length === before, 'nothing else on the Live tab writes — only its own line\'s drag does, proven above');
   P.unmount();
 }
 

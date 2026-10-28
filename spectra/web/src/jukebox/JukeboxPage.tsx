@@ -12,8 +12,10 @@
  *             two or more ahead of the playing song during a night), with
  *             each song's slots after it. In Manual, click a set song for a
  *             slot after it, a slot for another right after it, × to remove.
- *   Live      READ-ONLY: the night, what is playing, the next 20 program
- *             items with when they start, the jukebox line, the log.
+ *   Live      the night, what is playing, the next 20 program items with
+ *             when they start, the jukebox line, the log — read-only except
+ *             for the line itself, which drags to reorder the same way the
+ *             Guests tab's own line does (§7.2: both host views carry it).
  *   Credits   the party-size presets, the price check, and every credits
  *             setting (CreditsTab.tsx, phase 3.3).
  *   Simulate  the party simulator: a model night under the saved settings,
@@ -38,6 +40,7 @@ import { useToast } from '../components/Toast';
 import SortableList from '../lightshow/SortableList';
 import CreditsTab from './CreditsTab';
 import GuestsTab from './GuestsTab';
+import JukeboxLine from './JukeboxLine';
 import SimulateTab from './SimulateTab';
 import {
   activityLine, creditsLine, eventWords, freePlayLine, liveLineWords, priceRows, roomLine,
@@ -50,7 +53,7 @@ import {
 } from './jukeboxEditor';
 import {
   useGuests, useJukeboxConfig, useJukeboxEconomy, useJukeboxPreview, useJukeboxReport, useJukeboxStatus,
-  useMoveSetSong, useReloadSet, useSaveJukeboxConfig,
+  useMoveEntry, useMoveSetSong, useReloadSet, useSaveJukeboxConfig,
 } from './queries';
 import type { JukeboxPreview, JukeboxStatus, ProgramConfig, RunOut, SetItem, SlotMode } from './types';
 
@@ -326,7 +329,7 @@ function ProgramBar({ items, playhead }: { items: JukeboxPreview['lap_items']; p
   );
 }
 
-// ── the Live tab (read-only) ────────────────────────────────────────────────
+// ── the Live tab (read-only except its own draggable line, §7.2) ───────────
 
 function guestsLine(g: JukeboxStatus['guests']): string {
   if (!g || g.phones === 0) return 'Guest page: no phones yet';
@@ -335,16 +338,19 @@ function guestsLine(g: JukeboxStatus['guests']): string {
 }
 
 function LiveTab({ status }: { status: JukeboxStatus | undefined }) {
+  const toast = useToast();
+  const onError = (e: unknown) => toast(errText(e), 'error');
   const now = nowLine(status);
   const warnings = nightWarnings(status);
   const line = status?.line ?? [];
   const phones = useGuests(!!status?.running).data?.phones ?? [];
+  const move = useMoveEntry();
   return (
     <div className="jukebox-grid">
       <section className="card jukebox-card" data-testid="jukebox-live-card">
         <div className="jukebox-card-head">
           <InfoTip topic="jukebox-live"
-            text="What the night is doing, read-only: the song playing, the next items in the program and when they start, and the jukebox line.">
+            text="What the night is doing: the song playing, the next items in the program and when they start, and the jukebox line, which you can drag to reorder (nothing else here writes).">
             <span className="card-title jukebox-card-title">Live</span>
           </InfoTip>
         </div>
@@ -398,16 +404,19 @@ function LiveTab({ status }: { status: JukeboxStatus | undefined }) {
             <span className="jukebox-muted">{line.length ? `${line.length} song${line.length === 1 ? '' : 's'}` : 'empty — slots pass'}</span>
           </div>
           {line.length > 0 && (
-            <ol className="jukebox-next">
-              {line.map((e) => (
-                <li key={e.id} className={`jukebox-item ${e.state === 'committed' ? 'jukebox' : 'set'}`}>
-                  <span className="jukebox-item-words">
-                    <span className="jukebox-song-title">{e.title || e.uri}</span>
-                    <span className="jukebox-song-artist">{[e.artist, liveLineWords(e, phones)].filter(Boolean).join(' · ')}</span>
-                  </span>
-                </li>
-              ))}
-            </ol>
+            <JukeboxLine
+              items={line}
+              getId={(e) => e.id}
+              getLabel={(e) => e.title || e.uri}
+              getSent={(e) => e.state === 'committed'}
+              onReorder={(id, to) => move.mutate({ id, to }, { onError })}
+              renderRow={(e) => (
+                <span className="jukebox-item-words">
+                  <span className="jukebox-song-title">{e.title || e.uri}</span>
+                  <span className="jukebox-song-artist">{[e.artist, liveLineWords(e, phones)].filter(Boolean).join(' · ')}</span>
+                </span>
+              )}
+            />
           )}
         </section>
       )}

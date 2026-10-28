@@ -10,8 +10,8 @@
 import { useState } from 'react';
 import InfoTip from '../components/InfoTip';
 import { useToast } from '../components/Toast';
-import SortableList from '../lightshow/SortableList';
 import BoardLists from './BoardLists';
+import JukeboxLine from './JukeboxLine';
 import {
   lineRows, mergeCandidates, mergeWords, phoneActions, phoneLine, phoneTakes, sinceWords,
   type PhoneAction,
@@ -74,7 +74,6 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
       onBad={(reason) => toast(reason, 'error')} />
   ));
 
-  const waitingRows = rows.filter((r) => !r.sent);
   const lineRowBody = (r: (typeof rows)[number]) => (
     <>
       <span className="jukebox-item-words">
@@ -173,28 +172,14 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
             </span>
           </div>
         )}
-        {rows.some((r) => r.sent) && (
-          <ol className="jukebox-next">
-            {rows.filter((r) => r.sent).map((r) => (
-              <li key={r.entry.id} className="jukebox-item jukebox">{lineRowBody(r)}</li>
-            ))}
-          </ol>
-        )}
-        {waitingRows.length > 0 && (
-          <SortableList
-            className="jukebox-next"
-            items={waitingRows}
-            getId={(r) => r.entry.id}
-            getLabel={(r) => r.entry.title || r.entry.uri}
-            onReorder={(from, to) => move.mutate({ id: waitingRows[from].entry.id, to }, { onError })}
-            renderItem={(r, _i, row) => (
-              <li ref={row.rowRef} style={row.rowStyle}
-                className={`jukebox-item set${row.isDragging ? ' dragging' : ''}`}>
-                {row.handle}
-                {lineRowBody(r)}
-              </li>
-            )} />
-        )}
+        <JukeboxLine
+          items={rows}
+          getId={(r) => r.entry.id}
+          getLabel={(r) => r.entry.title || r.entry.uri}
+          getSent={(r) => r.sent}
+          onReorder={(id, to) => move.mutate({ id, to }, { onError })}
+          renderRow={lineRowBody}
+        />
       </section>
 
       <section className="card jukebox-card jukebox-list-card" data-testid="jukebox-phones">

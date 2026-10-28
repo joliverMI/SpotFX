@@ -5,9 +5,10 @@ data/jukebox-plan/report.md).
 (jukeboxEditor.ts, pure) and mounts the REAL page under jsdom against a
 recording fake of SpotFX's /api/jukebox routes: each Manual click PUTs the
 slots the rule says, Auto → Manual copies the server's own pattern, the
-Live tab writes nothing, and hovering the page's own controls opens each of
-its five help topics. This test runs it so the proof fires on every full
-test run.
+Live tab is read-only except its own jukebox line (it drags the same way
+the Guests tab's does and nothing else on Live writes), and hovering the
+page's own controls opens each of its five help topics. This test runs it
+so the proof fires on every full test run.
 
 Skipped (not failed) when the frontend toolchain isn't installed — the
 same posture as tests/test_absorb_page.py. The script itself skips its

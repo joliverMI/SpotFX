@@ -11280,10 +11280,17 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   is one event. Names only: no event or line row may carry a phone's code
   (the Live line now names who added each song — `jukeboxEconomy.ts`'s
   `liveLineWords`). Reads only, on the loop, so it never replays the ledger
-  (`verify()` is the report's). §7's "draggable line" is the GUESTS tab's line (the
-  Live tab stays read-only, row 1.3): a waiting song drags by its ⠿ handle
-  through `night.move`, the same move Play next makes. Spec: `tests/test_jukebox_economy_live.py`,
-  `check_jukebox_editor.mjs`; help `jukebox-economy`.
+  (`verify()` is the report's). §7's "draggable line" is on BOTH host views,
+  as §7.2 itself specs it — the Live tab's own line is draggable too, not
+  just the Guests tab's (row 1.3's "read-only Live" was the phase-1
+  starting point before host controls existed, not a standing rule): a
+  waiting song drags by its ⠿ handle through `night.move`, the same move
+  Play next makes, and the song already sent to Spotify has no handle and
+  nothing passes it. ONE shared component, `JukeboxLine.tsx`, draws both
+  tabs' line (never two copies) — nothing else on the Live tab writes.
+  Spec: `tests/test_jukebox_economy_live.py`,
+  `check_jukebox_editor.mjs`; help `jukebox-economy`, `jukebox-live`,
+  `jukebox-guests`.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his program settings, one validator:

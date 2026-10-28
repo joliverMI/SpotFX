@@ -2353,12 +2353,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'jukebox-live',
         title: 'The Live tab',
-        keywords: 'live now playing coming up next line sent to spotify committed skipped log night read only',
+        keywords: 'live now playing coming up next line sent to spotify committed skipped log night read only drag reorder handle',
         body: [
-          'Read-only. It shows whether a night is running and since when, the song playing (a set song, a jukebox song, or something off the set — the Jukebox then waits until the set plays again), the next 20 program items with when each starts, and the jukebox line.',
+          'It shows whether a night is running and since when, the song playing (a set song, a jukebox song, or something off the set — the Jukebox then waits until the set plays again), the next 20 program items with when each starts, and the jukebox line. Everything here is read-only except the line itself, which you can drag to reorder — nothing else on this tab writes.',
           '"Sent to Spotify" marks the one song already in Spotify\'s queue. If it is removed, it is skipped the moment it starts and the next waiting song takes its slot.',
           'A night never starts while the house is sleeping (or while that can\'t be read), ends if sleeping comes on, and never runs while Absorb Music has a window open. The line under the night says how many phones are on the guest page tonight.',
-          'The jukebox line names who added each song (never a phone\'s code), whether it was their 1st or 2nd song, what they paid for it in credits mode, and whether it is on hold or sitting out a time-out. To act on a song or a phone, use the Guests tab.',
+          'The jukebox line names who added each song (never a phone\'s code), whether it was their 1st or 2nd song, what they paid for it in credits mode, and whether it is on hold or sitting out a time-out. Drag a waiting song by its ⠿ handle to any place among the waiting songs — the same move the Guests tab\'s own line makes (nothing passes the song already sent to Spotify). For every other action on a song or a phone, use the Guests tab.',
         ],
       },
       {
