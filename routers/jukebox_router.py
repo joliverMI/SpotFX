@@ -504,7 +504,7 @@ async def get_card() -> dict:
     return await asyncio.to_thread(_card_read)
 
 
-# ── the post-party report (PR 3.3's report, a skeleton) ─────────────────────
+# ── the post-party report (PR 3.3's report: every model row, the model's way) ──
 
 def build_report(guests: Optional[int], nights: int, now_ms: int) -> dict:
     runner = night.runner
