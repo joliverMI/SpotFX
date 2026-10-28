@@ -114,8 +114,8 @@ let show = {
 
 // tonight's phones (the Guests tab): one waiting for approval, one blocked
 const PHONES = [
-  { id: 'phoneAAAAAAAAAAAAAAAAA', name: 'Disco Ana', joined: true, created_ms: NOW - 50 * MIN, joined_ms: NOW - 50 * MIN, renames: 1, approved: true, blocked: false, name_locked: false, waiting: 1, played: 2, votes: 9, credits: 7 },
-  { id: 'phoneBBBBBBBBBBBBBBBBB', name: 'Lucky Otter', joined: true, created_ms: NOW - 40 * MIN, joined_ms: NOW - 39 * MIN, renames: 0, approved: true, blocked: false, name_locked: true, waiting: 1, played: 1, votes: 6, jail_left: 2, jail_count: 6, jail_at: 6, jails: 1 },
+  { id: 'phoneAAAAAAAAAAAAAAAAA', name: 'Disco Ana', joined: true, created_ms: NOW - 50 * MIN, joined_ms: NOW - 50 * MIN, renames: 1, approved: true, blocked: false, name_locked: false, waiting: 1, played: 2, votes: 9, credits: 7, lockstep: [{ id: 'phoneBBBBBBBBBBBBBBBBB', name: 'Lucky Otter', songs: 6 }] },
+  { id: 'phoneBBBBBBBBBBBBBBBBB', name: 'Lucky Otter', joined: true, created_ms: NOW - 40 * MIN, joined_ms: NOW - 39 * MIN, renames: 0, approved: true, blocked: false, name_locked: true, waiting: 1, played: 1, votes: 6, jail_left: 2, jail_count: 6, jail_at: 6, jails: 1, lockstep: [{ id: 'phoneAAAAAAAAAAAAAAAAA', name: 'Disco Ana', songs: 6 }] },
   { id: 'phoneCCCCCCCCCCCCCCCCC', name: 'Velvet Moose', joined: true, created_ms: NOW - 6 * MIN, joined_ms: NOW - 5 * MIN, renames: 0, approved: false, blocked: false, name_locked: false, waiting: 0, played: 0, votes: 0 },
   { id: 'phoneDDDDDDDDDDDDDDDDD', name: 'Witty Gecko', joined: false, created_ms: NOW - 2 * MIN, joined_ms: null, renames: 0, approved: true, blocked: true, name_locked: false, waiting: 0, played: 0, votes: 1 },
 ];

@@ -4033,6 +4033,7 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .jukebox-phone-blocked { opacity: 0.6; }
 .jukebox-phone-jailed { border-left: 3px solid var(--danger); padding-left: 6px; }
 .jukebox-phone-since { font-size: 12px; }
+.jukebox-phone-lockstep { display: block; font-size: 12px; color: var(--warning); }
 .jukebox-show-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
 .jukebox-show-row input[type='text'] { width: 18em; max-width: 100%; }
 .jukebox-saved-shows { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }

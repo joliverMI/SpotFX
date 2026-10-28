@@ -63,6 +63,19 @@ plays; never on your own song ("everyone else votes"); never on a song that
 isn't part of tonight's program. In credits mode a vote also earns
 (`vote_reward`, once per play).
 
+LOCKSTEP VOTING (§12's vote-farming guard: "the master flags phones that
+always vote identically within a second"). Each vote's moment is kept
+(`GuestBook.vote_ms`), and `lockstep` flags a PAIR of phones that, over the
+span both were voting (from the later one's first vote to the earlier one's
+last), voted on every song the same way within LOCKSTEP_WINDOW_MS of each
+other — at least LOCKSTEP_MIN_PLAYS songs. A song one of the two added is
+left out (a guest can't vote on their own song); a song only one of them
+voted on inside that span clears the flag ("always"). It is only a flag on
+the Guests tab, beside Zero and Merge: it never refuses a vote, holds
+credits or moves anyone — one person with two phones and two friends who
+tap together look the same to it, and the host can tell them apart. A
+merged phone is one guest and a blocked one is out, so neither is flagged.
+
 FREE PLAY (report §6, PR 2.3): nothing costs anything, and counts keep it
 fair; every number is a show setting (§4's Free play card).
   THE ROOM'S SKIP. The song playing is skipped once it has `free_skip_downs`
@@ -179,6 +192,8 @@ from services.jukebox import store
 logger = logging.getLogger(__name__)
 HOUSE_TZ = ZoneInfo("America/New_York")
 PLAYS_KEPT = 300                 # plays whose votes are kept (the report reads them)
+LOCKSTEP_WINDOW_MS = 1000        # §12: "vote identically within a second"
+LOCKSTEP_MIN_PLAYS = 5           # songs voted together before a pair is flagged (~20 min)
 PRESENT_WINDOW_MS = 15 * 60_000  # "guests" in the crowd-scaled rules: phones seen this recently
 BUMP_WINDOW_MS = 60 * 60_000     # free play's bumps: so many in any hour
 BONUS_TRIES = 5                  # wrong bonus codes a phone may try a night
@@ -406,6 +421,60 @@ def fun_name(rng: random.Random, taken: set[str]) -> str:
     while f"{base} {n}".lower() in taken:
         n += 1
     return f"{base} {n}"
+
+
+def lockstep(book: GuestBook) -> dict[str, list[tuple[str, int]]]:
+    """§12's vote-farming flag (LOCKSTEP VOTING above): phone id -> the
+    phones it votes in lockstep with, each with how many songs, most first.
+    Pure; reads the book only. Candidate pairs come from the songs two
+    phones voted on the same way within the window, so a party's cost is
+    its votes, not every pair of phones."""
+    live = {pid for pid, p in book.phones.items() if not p.merged_into and not p.blocked}
+    mine: dict[str, dict[str, tuple[int, int]]] = {pid: {} for pid in live}
+    untimed: set[str] = set()                  # a play with a vote cast before times were kept
+    together: dict[tuple[str, str], int] = {}
+    for key, votes in book.votes.items():
+        times = book.vote_ms.get(key, {})
+        if any(pid not in times for pid in votes):
+            untimed.add(key)
+        cast = sorted((times[pid], pid, v) for pid, v in votes.items()
+                      if pid in live and pid in times)
+        for t, pid, v in cast:
+            mine[pid][key] = (v, t)
+        for i, (ta, a, va) in enumerate(cast):
+            for tb, b, vb in cast[i + 1:]:
+                if tb - ta > LOCKSTEP_WINDOW_MS:
+                    break
+                if va == vb:
+                    pair = (a, b) if a < b else (b, a)
+                    together[pair] = together.get(pair, 0) + 1
+    out: dict[str, list[tuple[str, int]]] = {}
+    for (a, b), n in together.items():
+        if n < LOCKSTEP_MIN_PLAYS:
+            continue
+        ma, mb = mine[a], mine[b]
+        start = max(min(t for _, t in ma.values()), min(t for _, t in mb.values()))
+        end = min(max(t for _, t in ma.values()), max(t for _, t in mb.values()))
+        same, always = 0, True
+        for key in ma.keys() | mb.keys():
+            if key in untimed or book.play_by.get(key) in (a, b):
+                continue
+            va, vb = ma.get(key), mb.get(key)
+            if va is None or vb is None:
+                if start <= (va or vb)[1] <= end:
+                    always = False
+                    break
+                continue
+            if va[0] != vb[0] or abs(va[1] - vb[1]) > LOCKSTEP_WINDOW_MS:
+                always = False
+                break
+            same += 1
+        if always and same >= LOCKSTEP_MIN_PLAYS:
+            out.setdefault(a, []).append((b, same))
+            out.setdefault(b, []).append((a, same))
+    for rows in out.values():
+        rows.sort(key=lambda r: (-r[1], r[0]))
+    return out
 
 
 def play_key(now: Any) -> str:
@@ -1257,14 +1326,18 @@ class Guests:
                 self._count_release(book, gs, adder)      # before this vote moves the count
                 book.play_by[key] = adder
             plays = book.votes.setdefault(key, {})
+            times = book.vote_ms.setdefault(key, {})
             if values[vote]:
                 plays[phone] = values[vote]
+                times[phone] = self.deps.now_ms()
             else:
                 plays.pop(phone, None)
+                times.pop(phone, None)
             while len(book.votes) > PLAYS_KEPT:
                 old = next(iter(book.votes))
                 book.votes.pop(old)
                 book.play_by.pop(old, None)
+                book.vote_ms.pop(old, None)
             if adder:
                 await self._maybe_jail(book, gs, adder)
             show = self.deps.show()
@@ -2128,6 +2201,7 @@ class Guests:
         at = economy.jail_threshold(self._crowd(), show.economy)
         credits = show.play_mode == "credits"
         w = self._wallet_for(gs["night_id"], show) if credits else None
+        flagged = lockstep(book)
         out = []
         for p in sorted(book.phones.values(), key=lambda p: p.created_ms):
             if p.merged_into:
@@ -2143,10 +2217,13 @@ class Guests:
                         "jail_left": jailed_now(gs, p.id),
                         "jail_kind": jail_kind_of(gs, p.id),
                         "jail_count": jail_count(book, p.id, gs), "jail_at": at,
+                        "lockstep": [{"id": q, "name": book.phones[q].name, "songs": n}
+                                     for q, n in flagged.get(p.id, [])],
                         **({"credits": w.balance(p.id)} if credits else {})})
         return {"running": True, "phones": out,
                 "pending": sum(1 for p in book.phones.values() if not p.approved and not p.blocked),
                 "jailed": sum(1 for p in out if p["jail_left"]), "crowd": self._crowd(),
+                "lockstep": len(flagged),
                 "play_mode": show.play_mode}
 
     async def host_set(self, phone: str, *, approved: Optional[bool] = None,
@@ -2266,10 +2343,15 @@ class Guests:
                 kept.jailed_ms = min(times) if times else None
             kept.bumps_ms = sorted(kept.bumps_ms + gone.bumps_ms)
             kept.want_open = kept.want_open or gone.want_open
-            for votes in book.votes.values():
+            for key, votes in book.votes.items():
                 if retire in votes:
-                    v = votes.pop(retire)
-                    votes.setdefault(into, v)
+                    times = book.vote_ms.get(key, {})
+                    t = times.pop(retire, None)
+                    if into not in votes:
+                        votes[into] = votes[retire]
+                        if t is not None:
+                            times[into] = t
+                    votes.pop(retire)
             for key, by in list(book.play_by.items()):
                 if by == retire:
                     book.play_by[key] = into

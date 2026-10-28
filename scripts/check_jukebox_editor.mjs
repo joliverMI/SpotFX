@@ -310,6 +310,10 @@ const PHONES = [
     `a merge says what moves and that the guest keeps the first phone's name (${mw})`);
   ok(GW.phoneLine({ ...PHONES[0], merged_from: ['Lucky Otter'] }).endsWith('merged with Lucky Otter'),
     'a kept phone names the phones merged into it');
+  ok(GW.lockstepWords(PHONES[0]) === '', 'no flag, no words');
+  const lw = GW.lockstepWords({ ...PHONES[0], lockstep: [{ id: 'pd', name: 'Lucky Otter', songs: 7 }, { id: 'pb', name: 'Velvet Moose', songs: 5 }] });
+  ok(lw === 'Votes with Lucky Otter and Velvet Moose — the same way, within a second, on every song (7 so far)',
+    `a lockstep flag names who and how many songs (${lw})`);
   const EW = await bundle(`export * from ${JSON.stringify(join(web, 'src/jukebox/jukeboxEconomy.ts'))};`, 'econ');
   ok(EW.signed(3) === '+3' && EW.signed(-6) === '−6' && EW.signed(0) === '', 'credits read signed, nothing for none');
   ok(EW.freePlayLine({ votes: 1, time_outs: 2 }) === 'Free play: nothing costs anything — 1 vote and 2 time-outs so far tonight.',
@@ -933,7 +937,9 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
   ok(appr?.method === 'POST' && JSON.stringify(appr.body) === '{"approved":true}', 'Approve POSTs {approved: true} for that phone');
   await P.settle();
   ok(!buttonByText([...c.querySelectorAll('[data-testid="jukebox-phone"]')][1], /^Approve$/), 'the approved phone loses its Approve button');
-  world.phones = world.phones.map((p) => (p.id === 'pa' ? { ...p, credits: 6 } : p));
+  world.phones = world.phones.map((p) => (
+    p.id === 'pa' ? { ...p, credits: 6, lockstep: [{ id: 'pd', name: 'Lucky Otter', songs: 6 }] }
+      : p.id === 'pd' ? { ...p, lockstep: [{ id: 'pa', name: 'Disco Ana', songs: 6 }] } : p));
   await click(buttonByText(phones[0], /^Lock name$/));
   ok(JSON.stringify(world.requests.filter((r) => r.url === '/api/jukebox/guests/pa').at(-1)?.body) === '{"name_locked":true}',
     'Lock name POSTs {name_locked: true}');
@@ -944,6 +950,14 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
     'every phone says when it first opened the page');
   ok(!!buttonByText(rowsZ[0], /^Zero$/) && !buttonByText(rowsZ[3], /^Zero$/) && !buttonByText(rowsZ[2], /^Merge…$/),
     'Zero only on a phone holding credits; neither on a blocked one');
+  // §12's vote-farming flag: on both phones, and nowhere else
+  const flagOf = (row) => text(row.querySelector('[data-testid="jukebox-phone-lockstep"]'));
+  ok(flagOf(rowsZ[0]).includes('Votes with Lucky Otter') && flagOf(rowsZ[3]).includes('Votes with Disco Ana')
+    && !rowsZ[1].querySelector('[data-testid="jukebox-phone-lockstep"]'),
+    `the phones that vote in lockstep are flagged, the others not (${flagOf(rowsZ[0])})`);
+  await click(buttonByText(rowsZ[1], /^Merge…$/));
+  ok(buttonByText(rowsZ[1], /^Merge$/).disabled, 'an unflagged phone\'s Merge… picks nothing: nothing merges until a phone is picked');
+  await click(buttonByText(rowsZ[1], /^Cancel$/));
   await click(buttonByText(rowsZ[0], /^Zero$/));
   ok(!world.requests.some((r) => r.url === '/api/jukebox/guests/pa/zero') && !!buttonByText(rowsZ[0], /^Keep$/),
     'Zero asks once before taking anything back');
@@ -956,7 +970,8 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
   await click(buttonByText(rowA, /^Merge…$/));
   const pick = rowA.querySelector('select[aria-label="The phone that joins Disco Ana"]');
   ok(!!pick && [...pick.options].map((o) => o.value).join(',') === ',pb,pd', 'the picker offers every other phone not blocked');
-  ok(buttonByText(rowA, /^Merge$/).disabled, 'nothing merges until a phone is picked');
+  ok(pick.value === 'pd' && !buttonByText(rowA, /^Merge$/).disabled,
+    'a flagged phone\'s Merge… starts with the phone it votes with already picked');
   const selSet = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value').set;
   P.actSync(() => { selSet.call(pick, 'pd'); pick.dispatchEvent(new dom.window.Event('change', { bubbles: true })); });
   ok(text(rowA.querySelector('[data-testid="jukebox-merge-words"]')).startsWith('Lucky Otter becomes part of Disco Ana'),
@@ -1046,7 +1061,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     'jukebox-credits', 'jukebox-presets', 'jukebox-price-check', 'jukebox-simulator', 'sonic-jukebox',
     'jukebox-report', 'jukebox-guest-page', 'jukebox-guests', 'jukebox-free-play', 'jukebox-credits-mode',
     'jukebox-skip-lock', 'jukebox-board', 'jukebox-gifts', 'jukebox-bonus-cards', 'jukebox-cards',
-    'jukebox-merge-phones', 'jukebox-economy', 'jukebox-shows'];
+    'jukebox-merge-phones', 'jukebox-economy', 'jukebox-shows', 'jukebox-lockstep'];
   const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
   const knownIds = new Set();
   for (const section of HELP_SECTIONS) {
@@ -1076,6 +1091,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     }
   };
   world = newWorld('running');
+  world.phones = world.phones.map((p) => (p.id === 'pa' ? { ...p, lockstep: [{ id: 'pd', name: 'Lucky Otter', songs: 5 }] } : p));
   const c = P.mount();
   await P.settle();
   hoverAll(c);
@@ -1098,7 +1114,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     if (id && id !== 'sonic-scene-backups') reached.add(id);
   }
   ok(topics.every((id) => reached.has(id)) && reached.size === topics.length,
-    `the page's own controls and its 💬 Sonic open exactly the twenty-three jukebox topics (${[...reached].sort().join(', ')})`);
+    `the page's own controls and its 💬 Sonic open exactly the twenty-four jukebox topics (${[...reached].sort().join(', ')})`);
   P.unmount();
 }
 

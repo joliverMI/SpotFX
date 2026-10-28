@@ -579,6 +579,11 @@ class GuestBook(_Model):
     night_id: str = ""
     phones: dict[str, GuestPhone] = Field(default_factory=dict)
     votes: dict[str, dict[str, int]] = Field(default_factory=dict)
+    # when each vote was last set (play key -> {phone id: ms}): §12's vote-
+    # farming guard compares the moments two phones voted
+    # (services/jukebox/guests.py's `lockstep`). A vote cast before this was
+    # kept has no time and is never compared.
+    vote_ms: dict[str, dict[str, int]] = Field(default_factory=dict)
     # which guest added each voted play (play key -> phone id): the jail
     # counts the net ▼ on a guest's songs from it. Host and set songs are
     # never here (they never go to jail).

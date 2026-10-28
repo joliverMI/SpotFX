@@ -14,7 +14,7 @@ import { useToast } from '../components/Toast';
 import BoardLists from './BoardLists';
 import JukeboxLine from './JukeboxLine';
 import {
-  lineRows, mergeCandidates, mergeWords, phoneActions, phoneLine, phoneTakes, sinceWords,
+  lineRows, lockstepWords, mergeCandidates, mergeWords, phoneActions, phoneLine, phoneTakes, sinceWords,
   type PhoneAction,
 } from './jukeboxGuests';
 import {
@@ -309,6 +309,14 @@ function PhoneRow({ p, phones, onSet, canGift = false, onGift, onZero, onMerge }
         <span className="jukebox-muted jukebox-phone-since" data-testid="jukebox-phone-since">
           {sinceWords(p.created_ms)}
         </span>
+        {(p.lockstep?.length ?? 0) > 0 && (
+          <InfoTip topic="jukebox-lockstep"
+            text="These phones have voted on every song together — the same way, within a second. That can be one guest with two phones farming votes, or two friends tapping together: it's only a flag. Merge… joins two phones into one guest.">
+            <span className="jukebox-phone-lockstep" data-testid="jukebox-phone-lockstep">
+              ⚑ {lockstepWords(p)}
+            </span>
+          </InfoTip>
+        )}
         {merging !== null && (
           <span className="jukebox-merge" data-testid="jukebox-merge">
             <label className="jukebox-merge-pick">
@@ -343,7 +351,8 @@ function PhoneRow({ p, phones, onSet, canGift = false, onGift, onZero, onMerge }
         {takes.includes('merge') && onMerge && merging === null && (
           <InfoTip topic="jukebox-merge-phones"
             text="Two phones, one guest (a cleared cookie, a second phone): pick the phone that joins this one. Its songs, votes, time-out and credits come here, and both codes keep working as one guest.">
-            <button onClick={() => setMerging('')}>Merge…</button>
+            <button onClick={() => setMerging(
+              p.lockstep?.find((r) => candidates.some((q) => q.id === r.id))?.id ?? '')}>Merge…</button>
           </InfoTip>
         )}
         {canGift && onGift && (giving === null ? (
