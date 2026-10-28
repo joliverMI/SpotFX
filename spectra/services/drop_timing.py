@@ -128,6 +128,34 @@ def fire_moment_ms(drop_ms: int, offset_ms: int, build_start_ms: Optional[int] =
     return shift_drop_ms(drop_ms, offset_ms, build_start_ms) + int(band_offset_ms)
 
 
+def his_fire_moment_ms(timestamp_ms: int, trigger_offset_ms: int, offset_ms: int,
+                      build_timestamp_ms: Optional[int] = None,
+                      build_trigger_offset_ms: int = 0,
+                      band_offset_ms: int = 0) -> int:
+    """THE MOMENT ONE OF HIS OWN AUTHORED DROP TRIGGERS FIRES — the exact
+    composition trigger_engine.tick()/_drop_shift_ms perform for a 'drop'
+    fire_response trigger, which `fire_moment_ms` above does NOT reproduce
+    for this case. `timestamp_ms`/`build_timestamp_ms` are the STORED,
+    offset-inclusive "fires at" moments drop_sequences.HisMark already
+    carries (timestamp + that trigger's own trigger_offset_ms);
+    `trigger_offset_ms`/`build_trigger_offset_ms` are each trigger's own
+    SpectraTrigger.trigger_offset_ms. The clamp floor runs against the RAW
+    stored timestamps (subtracting the offsets back out first) — exactly
+    as TriggerEngine._drop_shift_ms picks its build start from the real
+    triggers' own `timestamp_ms` — and only the drop's own
+    trigger_offset_ms (plus the drop band's offset) is summed on top,
+    never inside the clamp. This diverges from naively calling
+    `fire_moment_ms(timestamp_ms, offset_ms, build_timestamp_ms,
+    band_offset_ms)` only when the clamp actually engages AND a nonzero
+    trigger_offset_ms is in play on the drop or its lull/charge — the
+    common case (no clamp engaged) is algebraically identical either way."""
+    raw_ms = int(timestamp_ms) - int(trigger_offset_ms)
+    raw_build = (None if build_timestamp_ms is None
+                else int(build_timestamp_ms) - int(build_trigger_offset_ms))
+    applied = applied_offset_ms(raw_ms, int(offset_ms), raw_build)
+    return int(timestamp_ms) + applied + int(band_offset_ms)
+
+
 def build_gap_ms(start_ms: int, target_ms: Optional[int],
                  target_class: Optional[str], offset_ms: int) -> Optional[int]:
     """The gap a charge/lull starting at `start_ms` builds over, when its

@@ -123,6 +123,15 @@ FireMoment = Callable[[int, float, Optional[int]], int]
 """(drop mark ms, the drop's intensity, its build start ms) -> when it fires
 (annotate's THE FIRE MOMENT; trigger_engine.drop_fire_ms in production)."""
 
+HisFireMoment = Callable[[int, int, float, Optional[int], int], int]
+"""(his drop's own offset-inclusive timestamp_ms, its own trigger_offset_ms,
+intensity, its build's offset-inclusive timestamp_ms or None, the build's own
+trigger_offset_ms) -> when it fires. The drop's own clamp must run against
+the RAW stored timestamps (trigger_engine.his_drop_fire_ms in production),
+never the offset-inclusive ones `FireMoment`'s mark already is — a plain
+`FireMoment` would double-count a nonzero trigger_offset_ms inside the
+clamp floor; see drop_timing.his_fire_moment_ms."""
+
 ID_PREFIX = "drop-seq:"
 """Synthetic trigger ids the trigger clock fires members under:
 "drop-seq:<sequence key>:<charge|lull|drop>"."""
@@ -698,6 +707,7 @@ def protected_windows(uri: str, triggers: Optional[list] = None) -> list[Window]
 
 def annotate(view: dict, effective_mode: str, song_has_authored: bool,
              testing: bool = False, fire_ms: Optional[FireMoment] = None,
+             his_fire_ms: Optional[HisFireMoment] = None,
              his_intensity: Optional[dict] = None) -> dict:
     """The view with what fires HERE, for the Timeline: each sequence gains
     `fires` (bool) and `fires_reason`; the body gains `firing` (the room's
@@ -718,12 +728,19 @@ def annotate(view: dict, effective_mode: str, song_has_authored: bool,
     actually fire here (an off or still-waiting part left out).
 
     THE FIRE MOMENT (2026-10-28, the Drops panel's countdown and the top
-    bar's next-event box): every sequence that is not dismissed, and every
-    one of his own rows (`yours`), gains `fire_ms` — when its drop fires,
-    `fire_ms(drop_ms, intensity, build_start_ms)` (annotated_view hands in
-    trigger_engine.drop_fire_ms, the live reads drop_timing.fire_moment_ms
-    composes). Without one it is the drop's own mark. `his_intensity` maps
-    his drop triggers' ids to their intensity, for the band peek."""
+    bar's next-event box): every sequence that is not dismissed gains
+    `fire_ms` — when its drop fires, `fire_ms(drop_ms, intensity,
+    build_start_ms)` (annotated_view hands in trigger_engine.drop_fire_ms,
+    the live reads drop_timing.fire_moment_ms composes). Without one it is
+    the drop's own mark. Every one of his own rows (`yours`) gains it too,
+    but through `his_fire_ms` instead — a SEPARATE callable, because his
+    own `timestamp_ms`/his lull-or-charge's are already offset-inclusive
+    (SpectraTrigger.trigger_offset_ms folded in, HisMark's own "where it
+    fires"), and the drop timing shift's clamp must run against the RAW
+    stored timestamps, not those — see HisFireMoment/
+    drop_timing.his_fire_moment_ms. Without a reader it is the drop's own
+    (offset-inclusive) mark. `his_intensity` maps his drop triggers' ids
+    to their intensity, for the band peek."""
     seqs = {s.key: s for s in firing_sequences(view, testing)}
     # THE DROP-LED SWITCH's decisions this play (spectra/services/
     # drop_switch.py) — what each sequence did or will do to the scene,
@@ -778,11 +795,17 @@ def annotate(view: dict, effective_mode: str, song_has_authored: bool,
         drop = row.get("drop") or {}
         if drop.get("timestamp_ms") is not None:
             lull, charge = row.get("lull") or {}, row.get("charge") or {}
-            start = (lull.get("timestamp_ms") if lull.get("enabled") else None)
-            if start is None and charge.get("enabled"):
-                start = charge.get("timestamp_ms")
+            start_member = None
+            if lull.get("enabled"):
+                start_member = lull
+            elif charge.get("enabled"):
+                start_member = charge
+            start = start_member.get("timestamp_ms") if start_member else None
+            start_offset = int(start_member.get("offset_ms", 0) or 0) if start_member else 0
             intensity = (his_intensity or {}).get(str(drop.get("id")), DEFAULT_INTENSITY)
-            row["fire_ms"] = _fire_moment(fire_ms, int(drop["timestamp_ms"]), intensity, start)
+            row["fire_ms"] = _his_fire_moment(
+                his_fire_ms, int(drop["timestamp_ms"]),
+                int(drop.get("offset_ms", 0) or 0), intensity, start, start_offset)
         out_yours.append(row)
     if "yours" in (view or {}):
         out["yours"] = out_yours
@@ -801,6 +824,20 @@ def _fire_moment(fire_ms, drop_ms: int, intensity: float, start: Optional[int]) 
     try:
         return int(fire_ms(int(drop_ms), float(intensity),
                            int(start) if start is not None else None))
+    except Exception:                                    # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception("drop fire moment unreadable — its mark")
+        return int(drop_ms)
+
+
+def _his_fire_moment(his_fire_ms, drop_ms: int, drop_offset_ms: int, intensity: float,
+                     start: Optional[int], start_offset_ms: int) -> int:
+    if his_fire_ms is None:
+        return int(drop_ms)
+    try:
+        return int(his_fire_ms(int(drop_ms), int(drop_offset_ms), float(intensity),
+                              int(start) if start is not None else None,
+                              int(start_offset_ms)))
     except Exception:                                    # noqa: BLE001
         import logging
         logging.getLogger(__name__).exception("drop fire moment unreadable — its mark")
@@ -838,5 +875,14 @@ def annotated_view(uri: str, view: Optional[dict] = None,
             bands[key] = trigger_engine.drop_band_offset_ms(key)
         return trigger_engine.drop_fire_ms(drop_ms, intensity, start, offset_ms=offset,
                                            band_offset_ms=bands[key])
+
+    def his_fire_ms(timestamp_ms: int, trigger_offset_ms: int, intensity: float,
+                    build_timestamp_ms: Optional[int], build_trigger_offset_ms: int) -> int:
+        key = round(float(intensity), 4)
+        if key not in bands:
+            bands[key] = trigger_engine.drop_band_offset_ms(key)
+        return trigger_engine.his_drop_fire_ms(
+            timestamp_ms, trigger_offset_ms, intensity, build_timestamp_ms,
+            build_trigger_offset_ms, offset_ms=offset, band_offset_ms=bands[key])
     return annotate(view, mode, has_authored, testing=bool(controls.drop_testing),
-                    fire_ms=fire_ms, his_intensity=his_intensity)
+                    fire_ms=fire_ms, his_fire_ms=his_fire_ms, his_intensity=his_intensity)

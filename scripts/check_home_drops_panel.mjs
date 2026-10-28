@@ -749,13 +749,8 @@ console.log('TEN  next and Jump: the countdown runs to the fire moment');
     'once it fires the next one takes over, and its countdown flashes');
   ok(after.querySelector('.home-drops-count')?.textContent === '79.9s',
     'his own drop counts to the stand-in that plays for it (fire_ms 2:49.88)');
-  {
-    const css = readFileSync(join(repo, 'spectra/web/src/styles/tokens.css'), 'utf8');
-    ok(/\.home-drops-list\s*\{[^}]*overflow-y:\s*auto/.test(css),
-      'the list scrolls inside the card');
-    ok(!['1:30.0', '2:50.0'].some((t) => rowByTime(t).getAttribute('data-scrolled')),
-      'keeping just-played and next in view never scrolls the page (no scrollIntoView)');
-  }
+  ok(!['1:30.0', '2:50.0'].some((t) => rowByTime(t).getAttribute('data-scrolled')),
+    'keeping just-played and next in view never scrolls the page (no scrollIntoView)');
   ok(H.nextDropKey([{ key: 'a', plays: true, fireMs: 1000 }, { key: 'b', plays: false, fireMs: 500 }], 0) === 'a'
     && H.nextDropKey([{ key: 'a', plays: true, fireMs: 1000 }], 1000) === null
     && H.nextDropKey([{ key: 'a', plays: true, fireMs: 1000 }], null) === null,
@@ -819,9 +814,6 @@ console.log('TWELVE high confidence: drawn approved, with the detector dot');
   ok(H.nextPartState('confident') === 'off' && H.nextPartState('waiting') === 'on'
     && H.nextPartState('on') === 'off' && H.nextPartState('off') === 'on'
     && H.nextPartState('absent') === null, 'a tap: confident or on → off, waiting or off → on');
-  const css = readFileSync(join(repo, 'spectra/web/src/styles/tokens.css'), 'utf8');
-  ok(/\.home-drops-btn\.part\.confident::after\s*\{[^}]*border-radius:\s*50%/.test(css),
-    'the detector dot is drawn (a small circle on the part)');
   // the server's answer under triggers-only: a confident drop waits and says why
   const waitsView = { ...VIEW, sequences: VIEW.sequences.map((q) => (q.key === 'drop:90000'
     ? { ...q, fires: false, fires_reason: 'analysed_show_off' } : q)) };

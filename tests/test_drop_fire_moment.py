@@ -5,12 +5,21 @@ to "the moment it fires: mark + drop timing").
   1. drop_timing.fire_moment_ms is ONE definition: the mark, the drop band's
      offset and the drop timing offset (clamped against its build) — the
      same three terms trigger_engine.tick() sums into a drop's target.
-  2. PROVED FROM THE SHOW SIDE: TriggerEngine.drop_fire_ms names exactly the
-     position the real swept tick() fires the drop at — a stored drop of his
-     and a drop-sequence member alike.
+     drop_timing.his_fire_moment_ms is the twin for one of HIS OWN authored
+     drop triggers, whose stored "fires at" moment (and its lull/charge's)
+     is already offset-inclusive (SpectraTrigger.trigger_offset_ms folded
+     in) — the clamp must run against the RAW stored timestamps, never
+     those, or a nonzero trigger_offset_ms silently double-counts inside
+     the clamp floor.
+  2. PROVED FROM THE SHOW SIDE: TriggerEngine.drop_fire_ms/his_drop_fire_ms
+     name exactly the position the real swept tick() fires the drop at — a
+     stored drop of his (offsets and a clamped shift included) and a
+     drop-sequence member alike.
   3. drop_firing.annotate stamps `fire_ms` on every listed sequence and on
-     his own rows; annotated_view reads the room's live offset; GET
-     /api/upcoming carries it on drop events beside the unmoved `ms`.
+     his own rows (the latter through the separate `his_fire_ms`/
+     HisFireMoment callable, for the same raw-vs-offset-inclusive reason);
+     annotated_view reads the room's live offset; GET /api/upcoming carries
+     it on drop events beside the unmoved `ms`.
 """
 from __future__ import annotations
 
@@ -19,7 +28,7 @@ import asyncio
 import pytest
 
 from spectra.models.trigger import FireResponseAction, SpectraTrigger
-from spectra.services import drop_firing, drop_timing
+from spectra.services import drop_firing, drop_sequences, drop_timing
 from spectra.services.trigger_engine import TriggerEngine
 
 pytestmark = pytest.mark.drop_timing_live
@@ -36,6 +45,23 @@ def test_the_fire_moment_is_the_mark_plus_band_plus_clamped_offset():
     # a lull 300 ms ahead: the clamp holds the drop after its build
     assert drop_timing.fire_moment_ms(10_000, -400, 9_700) == 9_700 + drop_timing.MIN_BUILD_MS
     assert drop_timing.fire_moment_ms(10_000, 0) == 10_000
+
+
+def test_his_fire_moment_ms_clamps_against_raw_timestamps_not_offset_inclusive_ones():
+    # his drop's own fires-at is 10_000 (raw) + 150 (its own offset) =
+    # 10_150; his lull's is 9_700 (raw) + -80 (its own offset) = 9_620. A
+    # -400 drop timing offset clamps against the RAW gap (10_000 vs
+    # 9_700 + MIN_BUILD_MS = 9_800), never the offset-inclusive one.
+    assert drop_timing.his_fire_moment_ms(
+        10_150, 150, -400, build_timestamp_ms=9_620, build_trigger_offset_ms=-80) == 9_950
+    # naively feeding the offset-inclusive marks into fire_moment_ms (as if
+    # they were raw) clamps against the WRONG gap and gets a different,
+    # wrong answer — the divergence this helper exists to close
+    assert drop_timing.fire_moment_ms(10_150, -400, 9_620) == 9_750
+    # with no trigger_offset_ms anywhere the two formulas agree (the common,
+    # unclamped-or-offset-free case — every one of his drops until now)
+    assert (drop_timing.his_fire_moment_ms(10_000, 0, -400, build_timestamp_ms=9_700)
+            == drop_timing.fire_moment_ms(10_000, -400, 9_700))
 
 
 # ── 2. from the show side ─────────────────────────────────────────────────
@@ -93,6 +119,34 @@ def test_drop_fire_ms_names_where_tick_fires_his_stored_drop(offset, band):
     assert predicted == 10_000 + band + offset
 
 
+def test_his_drop_fire_ms_matches_tick_when_offsets_and_clamp_both_apply():
+    """A nonzero trigger_offset_ms on the drop AND its own lull, with the
+    drop timing offset actually clamped against the lull's build — the
+    exact shape that silently diverged before his_drop_fire_ms existed
+    (the Drops panel's countdown must never re-derive the fire moment from
+    the offset-inclusive marks alone)."""
+    rec = _Rec()
+    lull = SpectraTrigger(id="l", timestamp_ms=9_700, trigger_offset_ms=-80,
+                          source="authored",
+                          action=FireResponseAction(event_class="lull", intensity=0.5))
+    drop = SpectraTrigger(id="d", timestamp_ms=10_000, trigger_offset_ms=150,
+                          source="authored",
+                          action=FireResponseAction(event_class="drop", intensity=0.8))
+    engine = _engine([lull, drop], rec, offset=-400, band=0)
+    drop_display_ms = drop.timestamp_ms + drop.trigger_offset_ms
+    lull_display_ms = lull.timestamp_ms + lull.trigger_offset_ms
+    predicted = engine.his_drop_fire_ms(
+        drop_display_ms, drop.trigger_offset_ms, 0.8,
+        lull_display_ms, lull.trigger_offset_ms)
+    _sweep(engine, rec, 12_000)
+    fired = [p for p, c in rec.resp if c == "drop"]
+    assert fired == [predicted] == [9_950]
+    # the naive FireMoment path (what the yours-row display used before
+    # his_drop_fire_ms existed) disagrees — proving the divergence is real
+    naive = engine.drop_fire_ms(drop_display_ms, 0.8, lull_display_ms)
+    assert naive != fired[0]
+
+
 def test_drop_fire_ms_names_where_tick_fires_a_sequence_drop():
     view = {"uri": URI, "song": {"beat_ms": 500.0},
             "sequences": [{"key": "drop:10000", "state": "confident", "origin": "detected",
@@ -127,21 +181,56 @@ def test_annotate_stamps_every_listed_sequence_and_his_rows():
                        "drop": {"id": "h", "timestamp_ms": 40_000, "enabled": True},
                        "enabled": True, "detections": [], "detection": None}]}
     seen = []
+    his_seen = []
 
     def fire(d, i, s):
         seen.append((d, i, s))
         return d - 100
 
-    out = drop_firing.annotate(view, "analysed", False, fire_ms=fire, his_intensity={"h": 0.9})
+    def his_fire(ts, toff, i, bts, boff):
+        his_seen.append((ts, toff, i, bts, boff))
+        return ts - 100
+
+    out = drop_firing.annotate(view, "analysed", False, fire_ms=fire, his_fire_ms=his_fire,
+                               his_intensity={"h": 0.9})
     by = {s["key"]: s for s in out["sequences"]}
     assert by["drop:10000"]["fire_ms"] == 9_900
     assert by["drop:20000"]["fire_ms"] == 19_900       # a suggestion too (Testing may fire it)
     assert "fire_ms" not in by["drop:30000"]            # a removed drop has no moment
     assert out["yours"][0]["fire_ms"] == 39_900
-    assert (40_000, 0.9, 37_000) in seen                # his drop: its own intensity and lull
-    # without a reader: the mark
+    # his drop: its own offset-inclusive timestamp/offset, intensity, and his lull's
+    assert (40_000, 0, 0.9, 37_000, 0) in his_seen
+    # without a reader: the mark (bare), the offset-inclusive one for yours
     bare = drop_firing.annotate(view, "analysed", False)
     assert {s["key"]: s.get("fire_ms") for s in bare["sequences"]}["drop:10000"] == 10_000
+    assert bare["yours"][0]["fire_ms"] == 40_000
+
+
+def test_annotate_yours_row_fire_ms_matches_tick_with_offsets_and_clamp():
+    """The real drop_sequences.yours_rows grouping, through annotate()'s
+    actual HisFireMoment wiring, against a real swept tick() — proof the
+    Drops panel's own display path (not just the pure helper) lands on the
+    moment the room actually fires his drop at, offsets and clamp alike."""
+    rec = _Rec()
+    lull = SpectraTrigger(id="l", timestamp_ms=9_700, trigger_offset_ms=-80,
+                          source="authored",
+                          action=FireResponseAction(event_class="lull", intensity=0.5))
+    drop = SpectraTrigger(id="d", timestamp_ms=10_000, trigger_offset_ms=150,
+                          source="authored",
+                          action=FireResponseAction(event_class="drop", intensity=0.8))
+    engine = _engine([lull, drop], rec, offset=-400, band=0)
+    _sweep(engine, rec, 12_000)
+    fired = [p for p, c in rec.resp if c == "drop"]
+    assert fired == [9_950]
+
+    rows = drop_sequences.yours_rows([lull, drop], [])
+    view = {"uri": URI, "yours": rows}
+    out = drop_firing.annotate(
+        view, "full", True,
+        his_fire_ms=lambda ts, toff, i, bts, boff: engine.his_drop_fire_ms(
+            ts, toff, i, bts, boff),
+        his_intensity={"d": 0.8})
+    assert out["yours"][0]["fire_ms"] == fired[0] == 9_950
 
 
 @pytest.fixture

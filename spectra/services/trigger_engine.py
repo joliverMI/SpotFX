@@ -2304,6 +2304,29 @@ class TriggerEngine:
         offset = self._live_drop_offset_ms() if offset_ms is None else int(offset_ms)
         return drop_timing.fire_moment_ms(int(drop_ms), offset, build_start_ms, band)
 
+    def his_drop_fire_ms(self, timestamp_ms: int, trigger_offset_ms: int,
+                        intensity: float, build_timestamp_ms: Optional[int] = None,
+                        build_trigger_offset_ms: int = 0,
+                        offset_ms: Optional[int] = None,
+                        band_offset_ms: Optional[int] = None) -> int:
+        """WHEN ONE OF HIS OWN AUTHORED DROP TRIGGERS FIRES, read live —
+        `drop_fire_ms`'s own twin for the Drops panel's "yours" rows
+        (2026-10-28): `timestamp_ms`/`build_timestamp_ms` are the STORED,
+        offset-inclusive moments drop_sequences.HisMark carries;
+        `trigger_offset_ms`/`build_trigger_offset_ms` are each trigger's
+        own SpectraTrigger.trigger_offset_ms, so the clamp this composes
+        runs against the RAW stored timestamps — exactly as
+        `_drop_shift_ms` picks its build start from the real triggers'
+        own `timestamp_ms` — never the offset-inclusive ones, which would
+        silently double-count a nonzero trigger_offset_ms inside the
+        clamp floor. See drop_timing.his_fire_moment_ms."""
+        band = (self.drop_band_offset_ms(intensity) if band_offset_ms is None
+                else int(band_offset_ms))
+        offset = self._live_drop_offset_ms() if offset_ms is None else int(offset_ms)
+        return drop_timing.his_fire_moment_ms(
+            int(timestamp_ms), int(trigger_offset_ms), offset,
+            build_timestamp_ms, build_trigger_offset_ms, band)
+
     def drop_band_offset_ms(self, intensity: float) -> int:
         """The drop band's flare-kind offset at this drop intensity — the
         live peek tick() makes for a drop (0 when unreadable)."""
