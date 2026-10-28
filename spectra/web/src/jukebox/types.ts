@@ -18,6 +18,8 @@ export interface ProgramConfig {
   manual: ManualSlot[];
   run_out: RunOut;
   commit_lead_s: number;
+  /** §4: a song played next plays straight after the song playing, ahead of the set */
+  next_jumps_set?: boolean;
 }
 
 export interface SetItem {
@@ -160,6 +162,14 @@ export interface JukeboxEconomy {
   credits?: EconomyCredits | null; prices?: EconomyPrices | null; events?: EconomyEvent[];
 }
 
+/** His saved shows (SpotFX services/jukebox/shows.py): §4's "a show is a
+ *  saved set of these" — the show, the program and the guest link. */
+export interface SavedShowRow {
+  name: string; saved_ms: number; play_mode: 'free' | 'credits'; preset: Preset | null;
+  playlist: string | null; guest_link: boolean;
+}
+export interface ShowsRead { shows: SavedShowRow[]; current: string; error: string | null; max: number }
+
 export interface SetMoveResult {
   status: 'moved' | 'refused';
   reason?: string;
@@ -177,6 +187,8 @@ export type EconomyConfig = Record<string, number | boolean>;
 export type ExplicitRule = 'no' | 'extra' | 'after';
 
 export interface ShowConfig {
+  /** §4's Show card "Name": a show is saved under it */
+  name?: string;
   preset: Preset | null;
   approve_new_phones: boolean;
   economy: EconomyConfig;

@@ -73,7 +73,8 @@ process on its own port (phase 2) and never reaches these routes.
   DELETE /api/jukebox/line/{id}       a waiting song leaves; a committed one
                                       is skipped as it starts; a playing one
                                       is skipped now
-  POST   /api/jukebox/line/{id}/move  {to} — place among the waiting songs
+  POST   /api/jukebox/line/{id}/move  {to, play_next?} — place among the waiting
+                                      songs (the host's Play next may jump the set)
   POST   /api/jukebox/line/{id}/hold  {held} — the host holds a waiting song
                                       (it keeps its place; slots pass it) or
                                       lets it go
@@ -92,6 +93,11 @@ process on its own port (phase 2) and never reaches these routes.
   GET    /api/jukebox/board           the board (services/jukebox/board.py):
                                       tonight's top songs, every people board
                                       marked shown or not, the song playing
+  GET    /api/jukebox/shows           the saved shows (services/jukebox/shows.py)
+  POST   /api/jukebox/shows           {name} — save what is in force now under it
+  POST   /api/jukebox/shows/load      {name, guest_link?} — load a saved show whole
+                                      (guest_link false: leave the link as it is)
+  DELETE /api/jukebox/shows/{name}    delete a saved show
   POST   /api/jukebox/gift            {to: "everyone" | phone id, amount}
                                       the host's gift (credits mode)
   GET    /api/jukebox/bonus-codes     the printed bonus cards' codes
@@ -112,7 +118,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from models.jukebox import ProgramConfig
-from services.jukebox import (bonus_codes, guest_link, guests, night, night_report, show, simulator,
+from services.jukebox import (bonus_codes, guest_link, guests, night, night_report, show, shows, simulator,
                               store)
 from services.jukebox.night import sentence
 
@@ -200,6 +206,7 @@ class AddBody(BaseModel):
 
 class MoveBody(BaseModel):
     to: int
+    play_next: bool = False          # the host's Play next (it may jump the set; a drag never does)
 
 
 class SetMoveBody(BaseModel):
@@ -230,7 +237,7 @@ async def delete_line(entry_id: str) -> dict:
 
 @router.post("/line/{entry_id}/move")
 async def post_move(entry_id: str, body: MoveBody) -> dict:
-    return await night.runner.move(entry_id, body.to)
+    return await night.runner.move(entry_id, body.to, play_next=body.play_next)
 
 
 class HoldBody(BaseModel):
@@ -393,6 +400,95 @@ class PresetBody(BaseModel):
     preset: str
 
 
+# ── saved shows (§4: "a 'show' is a saved set of these") ────────────────────
+
+def _shows_read() -> dict:
+    try:
+        rows, error = shows.listing(), None
+    except ValueError as exc:
+        rows, error = [], str(exc)
+    return {"shows": rows, "current": store.load_show().name, "error": error, "max": shows.SHOWS_MAX}
+
+
+@router.get("/shows")
+async def get_shows() -> dict:
+    return await asyncio.to_thread(_shows_read)
+
+
+class ShowNameBody(BaseModel):
+    name: str = Field(max_length=200)
+
+
+class LoadShowBody(ShowNameBody):
+    # False leaves the guest link exactly as it is (Sonic's load: switching
+    # the link publishes a port on the internet, his own act on the page).
+    guest_link: bool = True
+
+
+def _refuse_shows(exc: ValueError) -> JSONResponse:
+    code = getattr(exc, "code", "unreadable")
+    status = 404 if code == "no_show" else 422 if code == "bad_name" else 409
+    return JSONResponse({"status": "refused", "reason": code,
+                         "detail": getattr(exc, "sentence", str(exc))}, status_code=status)
+
+
+@router.post("/shows")
+async def post_save_show(body: ShowNameBody) -> JSONResponse:
+    """Save what is in force now — the show, the program and whether the guest
+    link is on — under `name` (replacing a show of that name)."""
+    import time as _time
+    current = store.load_show()
+    try:
+        name, replaced = await asyncio.to_thread(
+            shows.save, body.name, current, store.load_config(),
+            store.load_guest_link()[0].enabled, int(_time.time() * 1000))
+    except ValueError as exc:
+        return _refuse_shows(exc)
+    store.save_show(current.model_copy(update={"name": name}))
+    return JSONResponse({"status": "saved", "name": name, "replaced": replaced,
+                         **await asyncio.to_thread(_shows_read)})
+
+
+@router.post("/shows/load")
+async def post_load_show(body: LoadShowBody) -> JSONResponse:
+    """Load a saved show whole, through the same steps a page edit takes: the
+    program through the engine (a running night refuses a different set
+    playlist, and nothing changes), the show (with the jail conversion a mode
+    switch needs) and — unless `guest_link` is false — the guest link."""
+    try:
+        name, saved = await asyncio.to_thread(shows.get, body.name)
+    except ValueError as exc:
+        return _refuse_shows(exc)
+    refusal = night.runner.apply_config(saved.program)
+    if refusal is not None:
+        return JSONResponse({"status": "refused", "reason": refusal[0], "detail": refusal[1]},
+                            status_code=409)
+    old = store.load_show()
+    store.save_config(saved.program)
+    store.save_show(saved.show)
+    if saved.show.play_mode != old.play_mode:
+        await night.runner.convert_jail_mode(saved.show.play_mode == "credits",
+                                             saved.show.free_jail_songs)
+    if body.guest_link:
+        link = await guest_link.controller.edit({"enabled": saved.guest_link})
+        enabled = link.get("config", {}).get("enabled", saved.guest_link)
+    else:
+        enabled = store.load_guest_link()[0].enabled
+    return JSONResponse({"status": "loaded", "name": name,
+                         "config": saved.program.model_dump(mode="json"),
+                         "guest_link": enabled, "guest_link_kept": not body.guest_link,
+                         **show.read(saved.show)})
+
+
+@router.delete("/shows/{name}")
+async def delete_show(name: str) -> JSONResponse:
+    try:
+        gone = await asyncio.to_thread(shows.delete, name)
+    except ValueError as exc:
+        return _refuse_shows(exc)
+    return JSONResponse({"status": "deleted", "name": gone, **await asyncio.to_thread(_shows_read)})
+
+
 @router.post("/show/preset")
 async def post_preset(body: PresetBody) -> dict:
     try:
@@ -504,7 +600,7 @@ async def get_card() -> dict:
     return await asyncio.to_thread(_card_read)
 
 
-# ── the post-party report (PR 3.3's report, a skeleton) ─────────────────────
+# ── the post-party report (PR 3.3's report: every model row, the model's way) ──
 
 def build_report(guests: Optional[int], nights: int, now_ms: int) -> dict:
     runner = night.runner

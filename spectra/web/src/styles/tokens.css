@@ -4033,6 +4033,10 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .jukebox-phone-blocked { opacity: 0.6; }
 .jukebox-phone-jailed { border-left: 3px solid var(--danger); padding-left: 6px; }
 .jukebox-phone-since { font-size: 12px; }
+.jukebox-show-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.jukebox-show-row input[type='text'] { width: 18em; max-width: 100%; }
+.jukebox-saved-shows { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.jukebox-saved-shows .jukebox-item { flex-wrap: wrap; }
 .jukebox-economy-prices { display: grid; grid-template-columns: repeat(auto-fill, minmax(11em, 1fr)); gap: 6px 12px; margin: 8px 0; }
 .jukebox-economy-prices div { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--border); padding: 2px 0; min-width: 0; }
 .jukebox-economy-prices dt { font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; min-width: 0; }
@@ -4053,6 +4057,7 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .jukebox-preset.on { border-color: var(--accent); background: var(--surface2); }
 .jukebox-preset-name { font-weight: 600; font-size: 14px; }
 .jukebox-check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.info-tip.jukebox-jump-row { display: flex; margin-top: 10px; }
 .jukebox-prices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
 .jukebox-price-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 4px 0 6px; }
 .jukebox-price-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 2px 0; border-bottom: 1px solid var(--border); min-width: 0; }

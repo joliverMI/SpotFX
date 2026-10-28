@@ -456,6 +456,24 @@ globalThis.fetch = async (url, init = {}) => {
     world.show = { ...world.show, preset: body.preset, approve_new_phones: body.preset === 'large' };
     return json({ show: world.show, fields: FIELDS, guest_fields: GF, presets: PRESETS, config: world.config });
   }
+  if (u.startsWith('/api/jukebox/shows')) {                      // his saved shows (§4)
+    world.saved = world.saved || [];
+    const read = () => ({ shows: world.saved, current: world.show.name || 'Saturday party', error: null, max: 30 });
+    if (method === 'POST' && u.endsWith('/load')) return json({ status: 'loaded', name: body.name });
+    if (method === 'POST') {
+      const replaced = world.saved.some((x) => x.name.toLowerCase() === body.name.toLowerCase());
+      world.saved = [{ name: body.name, saved_ms: 5, play_mode: 'credits', preset: null, playlist: null, guest_link: false },
+        ...world.saved.filter((x) => x.name.toLowerCase() !== body.name.toLowerCase())];
+      world.show = { ...world.show, name: body.name };
+      return json({ status: 'saved', name: body.name, replaced, ...read() });
+    }
+    if (method === 'DELETE') {
+      const name = decodeURIComponent(u.split('/api/jukebox/shows/')[1]);
+      world.saved = world.saved.filter((x) => x.name !== name);
+      return json({ status: 'deleted', name, ...read() });
+    }
+    return json(read());
+  }
   if (u.startsWith('/api/jukebox/show')) {
     if (method === 'PUT') {
       const { economy, ...rest } = body;
@@ -608,6 +626,10 @@ console.log('\n§2 the editor, mounted — every click PUTs the slots the rule s
     'Auto → Manual copies the server\'s own manual_equivalent');
   const sel = c.querySelector('select[aria-label="When the set runs out"]');
   ok(!!sel, 'the run-out choice is on the page');
+  const jump = c.querySelector('input[aria-label="Play next may jump the set"]');
+  ok(!!jump && !jump.checked, '"Play next may jump the set" is on the page, off by default');
+  await click(jump);
+  ok(JSON.stringify(puts().at(-1)?.body) === '{"next_jumps_set":true}', 'ticking it PUTs exactly that setting');
   P.unmount();
 }
 {
@@ -709,6 +731,31 @@ console.log('\n§2b the Credits tab, mounted — presets, the price check, each 
   await P.settle();
   await click(buttonByText(c, /^Credits$/));
   ok(c.querySelectorAll('.jukebox-preset').length === 3, 'the three party-size presets render');
+  // the show (§4): its name, and his saved shows — save, load (asks first), delete
+  const showCard = c.querySelector('[data-testid="jukebox-show-card"]');
+  const nameIn = showCard.querySelector('input[aria-label="The show\'s name"]');
+  ok(nameIn.value === 'Saturday party' && text(showCard).includes('No saved shows yet'), 'the show is named, nothing saved yet');
+  const tset = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set;
+  P.actSync(() => { tset.call(nameIn, 'Big night'); nameIn.dispatchEvent(new dom.window.Event('input', { bubbles: true })); });
+  await click(buttonByText(showCard, /^Save this show$/));
+  ok(JSON.stringify(world.requests.filter((r) => r.method === 'POST' && r.url === '/api/jukebox/shows').at(-1)?.body)
+    === '{"name":"Big night"}', 'Save this show POSTs exactly its name');
+  await P.settle();
+  ok(text(showCard).includes('Big night') && !!buttonByText(showCard, /^Load$/), 'the saved show is listed');
+  let answer = false;
+  let asked = '';
+  dom.window.confirm = (msg) => { asked = String(msg); return answer; };
+  await click(buttonByText(showCard, /^Load$/));
+  ok(!world.requests.some((r) => r.url === '/api/jukebox/shows/load'), 'Load asks first — said no, nothing is loaded');
+  ok(/the guest link goes (on|off)/.test(asked), `Load's question names what it does to the guest link (${asked})`);
+  answer = true;
+  await click(buttonByText(showCard, /^Load$/));
+  ok(JSON.stringify(world.requests.filter((r) => r.url === '/api/jukebox/shows/load').at(-1)?.body)
+    === '{"name":"Big night"}', 'said yes, it loads that show by name');
+  await click(buttonByText(showCard, /^Delete$/));
+  await P.settle();
+  ok(world.requests.some((r) => r.method === 'DELETE' && r.url === '/api/jukebox/shows/Big%20night')
+    && text(showCard).includes('No saved shows yet'), 'Delete removes it');
   ok(text($(c, '[data-testid="jukebox-price-check"]')).includes('55'), 'the price check shows the server\'s prices');
   await click(buttonByText(c, /Medium/));
   const pre = world.requests.filter((r) => r.method === 'POST' && r.url.startsWith('/api/jukebox/show/preset')).at(-1);
@@ -829,7 +876,8 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
   ok(!buttonByText(rows[1], /^Play next$/) && !!buttonByText(rows[2], /^Play next$/), 'Play next on a waiting song behind the first');
   await click(buttonByText(rows[2], /^Play next$/));
   const mv = world.requests.filter((r) => r.url === '/api/jukebox/line/e3/move').at(-1);
-  ok(mv?.method === 'POST' && JSON.stringify(mv.body) === '{"to":0}', 'Play next POSTs {to: 0} for that song');
+  ok(mv?.method === 'POST' && JSON.stringify(mv.body) === '{"to":0,"play_next":true}',
+    'Play next POSTs {to: 0, play_next: true} for that song (a drag sends no play_next, so it never jumps)');
   ok(!rows[0].textContent.includes('Hold') && rows[1].textContent.includes('Hold'), 'only a waiting song can be held');
   await click(buttonByText(rows[1], /^Hold$/));
   const holdReq = world.requests.filter((r) => r.url === '/api/jukebox/line/e2/hold').at(-1);
@@ -998,7 +1046,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     'jukebox-credits', 'jukebox-presets', 'jukebox-price-check', 'jukebox-simulator', 'sonic-jukebox',
     'jukebox-report', 'jukebox-guest-page', 'jukebox-guests', 'jukebox-free-play', 'jukebox-credits-mode',
     'jukebox-skip-lock', 'jukebox-board', 'jukebox-gifts', 'jukebox-bonus-cards', 'jukebox-cards',
-    'jukebox-merge-phones', 'jukebox-economy'];
+    'jukebox-merge-phones', 'jukebox-economy', 'jukebox-shows'];
   const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
   const knownIds = new Set();
   for (const section of HELP_SECTIONS) {
@@ -1050,7 +1098,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     if (id && id !== 'sonic-scene-backups') reached.add(id);
   }
   ok(topics.every((id) => reached.has(id)) && reached.size === topics.length,
-    `the page's own controls and its 💬 Sonic open exactly the twenty-two jukebox topics (${[...reached].sort().join(', ')})`);
+    `the page's own controls and its 💬 Sonic open exactly the twenty-three jukebox topics (${[...reached].sort().join(', ')})`);
   P.unmount();
 }
 

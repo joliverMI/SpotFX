@@ -1,8 +1,9 @@
 """The Jukebox's post-party report (services/jukebox/night_report.py; the
-plan's PR 3.3 "post-party report (the night's ledger next to the §3 bands)",
-a skeleton). Held: it measures what a night records — what played, the line,
-the credits ledger when there is one — and says by name what it can't
-measure yet, never a zero; a guest night's measures sit beside the model's
+plan's PR 3.3 "post-party report (the night's ledger next to the §3 bands)").
+Held: it measures every row of the simulator's table from what a night
+records — what played, the line, the credits ledger when there is one, and
+the guest book's report records — the model's way, and says by name what it
+can't measure, never a zero; a guest night's measures sit beside the model's
 nights (services/jukebox/simulator.py, the same rows); the ledger's own
 integrity check rides along; and it reads only."""
 from __future__ import annotations

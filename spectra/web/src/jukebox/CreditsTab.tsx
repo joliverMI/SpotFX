@@ -4,6 +4,11 @@
  * (the current rules on real examples, at a room size he picks) and every
  * economy setting, grouped as §4's cards.
  *
+ * The SHOW card names the show and keeps his saved shows (§4: "a 'show' is
+ * a saved set of these" — the show, the program and the guest link,
+ * SpotFX's services/jukebox/shows.py): save what is in force now under a
+ * name, load one back whole, delete one. Loading asks first.
+ *
  * Each setting saves on its own (Enter or leaving the field) through
  * SpotFX's one validator (services/jukebox/show.py) — an out-of-range value
  * is refused by name and nothing changes. The cards, labels and ranges are
@@ -14,9 +19,10 @@ import { useToast } from '../components/Toast';
 import { checkValue, groupFields, presetTitle, priceRows, rangeLine } from './jukeboxCredits';
 import { GUEST_COUNTS } from './jukeboxEditor';
 import {
-  useApplyPreset, useBonusCodes, useJukeboxShow, useMintBonus, usePriceCheck, useSaveShow, useVoidBonus,
+  useApplyPreset, useBonusCodes, useDeleteShow, useJukeboxShow, useLoadShow, useMintBonus, usePriceCheck,
+  useSavedShows, useSaveNamedShow, useSaveShow, useVoidBonus,
 } from './queries';
-import type { EconomyField } from './types';
+import type { EconomyField, ShowConfig } from './types';
 
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -39,6 +45,8 @@ export default function CreditsTab() {
   const mode = show.play_mode ?? 'credits';
   return (
     <div className="jukebox-grid">
+      <ShowCard show={show} />
+
       <section className="card jukebox-card" data-testid="jukebox-mode">
         <div className="jukebox-card-head">
           <InfoTip topic="jukebox-credits-mode"
@@ -243,5 +251,87 @@ function FieldRow({ f, value, onSave, onBad }: {
         onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
       <span className="jukebox-muted jukebox-field-range">{rangeLine(f)}</span>
     </label>
+  );
+}
+
+
+// ── the show: its name and his saved shows (§4) ────────────────────────────
+
+function savedWhen(ms: number): string {
+  if (!ms) return '';
+  const d = new Date(ms);
+  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, `
+    + `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function ShowCard({ show }: { show: ShowConfig }) {
+  const toast = useToast();
+  const q = useSavedShows();
+  const saveAs = useSaveNamedShow();
+  const load = useLoadShow();
+  const del = useDeleteShow();
+  const [name, setName] = useState<string | null>(null);
+  const onError = (e: unknown) => toast(errText(e), 'error');
+  const current = name ?? show.name ?? 'Saturday party';
+  const rows = q.data?.shows ?? [];
+  const taken = rows.find((r) => r.name.toLocaleLowerCase() === current.trim().toLocaleLowerCase());
+  const save = () => {
+    const n = current.trim();
+    if (!n) return;
+    if (taken && !window.confirm(`Replace the saved show “${taken.name}” with what is set now?`)) return;
+    saveAs.mutate(n, {
+      onSuccess: (r) => { setName(null); toast(`${r.replaced ? 'Replaced' : 'Saved'} “${r.name}”`, 'success'); },
+      onError,
+    });
+  };
+  return (
+    <section className="card jukebox-card jukebox-list-card" data-testid="jukebox-show-card">
+      <div className="jukebox-card-head">
+        <InfoTip topic="jukebox-shows"
+          text="A show is every setting on these tabs — the set playlist and slots, the guests' rules, the credits, the board and the guest link — saved under a name and loaded back whole before a party.">
+          <span className="card-title jukebox-card-title">The show</span>
+        </InfoTip>
+      </div>
+      <div className="jukebox-show-row">
+        <label className="jukebox-field jukebox-rule-wide">
+          <span className="jukebox-field-label">Name</span>
+          <input type="text" value={current} maxLength={60} aria-label="The show's name"
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') save(); }} />
+        </label>
+        <button type="button" disabled={!current.trim() || saveAs.isPending} onClick={save}>
+          {taken ? 'Save (replace)' : 'Save this show'}
+        </button>
+      </div>
+      {q.data?.error && <p className="jukebox-error">{q.data.error}</p>}
+      {rows.length === 0 ? (
+        <p className="jukebox-muted">No saved shows yet. Set everything up, name it and save it.</p>
+      ) : (
+        <ul className="jukebox-saved-shows" data-testid="jukebox-saved-shows">
+          {rows.map((r) => (
+            <li key={r.name} className="jukebox-item">
+              <span className="jukebox-item-words">
+                <span className="jukebox-song-title">{r.name}{r.name === show.name ? ' · in force' : ''}</span>
+                <span className="jukebox-song-artist">
+                  {[r.play_mode === 'credits' ? 'credits' : 'free play', r.preset ? `${r.preset} preset` : '',
+                    r.guest_link ? 'guest link on' : 'guest link off', `saved ${savedWhen(r.saved_ms)}`]
+                    .filter(Boolean).join(' · ')}
+                </span>
+              </span>
+              <span className="jukebox-guest-actions">
+                <button type="button" onClick={() => {
+                  if (!window.confirm(`Load “${r.name}”? Every setting on these tabs becomes that show's, and the guest link goes ${r.guest_link ? 'on' : 'off'}.`)) return;
+                  load.mutate(r.name, { onSuccess: () => toast(`Loaded “${r.name}”`, 'success'), onError });
+                }}>Load</button>
+                <button type="button" onClick={() => {
+                  if (!window.confirm(`Delete the saved show “${r.name}”?`)) return;
+                  del.mutate(r.name, { onError });
+                }}>Delete</button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

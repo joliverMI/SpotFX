@@ -106,6 +106,10 @@ class ProgramConfig(_Model):
     # current song ends"). Earlier keeps fewer songs locked in place; later
     # risks the player having already picked its next track (crossfade).
     commit_lead_s: float = Field(45.0, ge=15.0, le=90.0)
+    # §4's "Play next may jump the set" (off): a song played next (a guest's
+    # paid play next, the host's Play next) plays straight after the song
+    # playing — ahead of the next set song — instead of at the next slot.
+    next_jumps_set: bool = False
 
     @field_validator("manual")
     @classmethod
@@ -160,6 +164,10 @@ class LineEntry(_Model):
     # of its own, or as the song an up-bump or a play next stepped past:
     # never more than the show's `bump_down_max_places`.
     pushed_back: int = 0
+    # Played next while "Play next may jump the set" was on: it plays ahead
+    # of the next set song (services/jukebox/program.py's `project`) — what
+    # was bought stands even if the setting is switched off afterwards.
+    jump: bool = False
     # CREDITS MODE (PR 3.2): what its adder paid for it (locked when added)
     # and the ledger entry that paid it — a refund points at it; and
     # whether it has used its one "play next".
@@ -372,7 +380,10 @@ class ShowConfig(_Model):
     (report §4's Show, Add a song and Guests cards: when the night ends and
     requests close, explicit songs, how many phones, renames, the word
     filter). Only an edit writes it (services/jukebox/show.py is the one
-    validator). Times are house time (America/New_York), "HH:MM"."""
+    validator). Times are house time (America/New_York), "HH:MM".
+    `name` is §4's Show card "Name": what this set of settings is called —
+    a show is SAVED under it (services/jukebox/shows.py)."""
+    name: str = Field("Saturday party", min_length=1, max_length=60)
     preset: Optional[Preset] = None
     approve_new_phones: bool = False
     economy: EconomyConfig = Field(default_factory=EconomyConfig)
@@ -530,6 +541,20 @@ class WantCounts(_Model):
     afford_now: int = 0
     wish_more: int = 0
     afford_more: int = 0
+
+
+class SavedShow(_Model):
+    """One saved show (§4: "a 'show' is a saved set of these"): the show
+    settings, the program settings and whether the guest link is on — all of
+    §4's cards — as they were when he saved it."""
+    saved_ms: int = 0
+    show: ShowConfig = Field(default_factory=ShowConfig)
+    program: ProgramConfig = Field(default_factory=ProgramConfig)
+    guest_link: bool = False
+
+
+class SavedShows(_Model):
+    shows: dict[str, SavedShow] = Field(default_factory=dict)
 
 
 class BonusCode(_Model):

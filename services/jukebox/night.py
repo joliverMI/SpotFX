@@ -377,9 +377,19 @@ class JukeboxRunner:
         live = [e for e in line if e.state == "committed" and not e.doomed]
         queued = [e for e in line if e.state == "queued" and e.ready and not e.held
                   and not self._jailed(e.added_by)]
-        return ([program.Fill(e.id, e.uri, e.title, e.artist, e.duration_ms, True) for e in live]
-                + [program.Fill(e.id, e.uri, e.title, e.artist, e.duration_ms, False)
+        return ([program.Fill(e.id, e.uri, e.title, e.artist, e.duration_ms, True, e.jump)
+                 for e in live]
+                + [program.Fill(e.id, e.uri, e.title, e.artist, e.duration_ms, False, e.jump)
                    for e in queued])
+
+    def _plays_next(self, entry_id: str) -> bool:
+        """The first item to start that isn't already in Spotify's queue is
+        this song: it plays next as it stands (no play next can move it)."""
+        for it in self._project(6):
+            if it.kind == "jukebox" and it.committed:
+                continue
+            return it.kind == "jukebox" and it.entry_id == entry_id
+        return False
 
     def _project(self, count: int) -> list[program.ProgramItem]:
         n = self.night
@@ -1115,10 +1125,12 @@ class JukeboxRunner:
             await self._persist()
             return {"status": result, "entry": e.model_dump(mode="json")}
 
-    async def move(self, entry_id: str, to: int) -> dict:
+    async def move(self, entry_id: str, to: int, play_next: bool = False) -> dict:
         """Move a waiting song to place `to` among the WAITING songs (0 =
         next to be sent). A committed song can't move, and nothing can be
-        moved in front of it: it is already in Spotify's queue."""
+        moved in front of it: it is already in Spotify's queue. The host's
+        PLAY NEXT (`play_next`, to the front) also jumps the set when "Play
+        next may jump the set" is on; any other move (a drag) drops a jump."""
         async with self._get_lock():
             self._ensure_loaded()
             if not self.running:
@@ -1146,6 +1158,7 @@ class JukeboxRunner:
             for x in before[to:old]:
                 x.pushed_back += 1
             e.pushed_back += max(0, to - old)
+            e.jump = bool(play_next and to == 0 and self.cfg.next_jumps_set)
             self.night.line = [x for x in line if x.state != "queued"] + waiting
             self._log(f"moved {e.title or e.uri} to place {to + 1} in the line")
             await self._persist()
@@ -1361,18 +1374,22 @@ class JukeboxRunner:
             if e not in movable:
                 return self._refused("on_hold")
             i = movable.index(e)
-            if i == 0:
+            jumping = self.cfg.next_jumps_set
+            if i == 0 and (not jumping or e.jump or self._plays_next(e.id)):
                 return self._refused("at_front_next")
             passed = movable[:i]
             if max_back is not None and any(p.pushed_back >= max_back for p in passed):
                 return self._refused("next_pushed_max")
             line = self.night.line
-            line.remove(e)
-            line.insert(line.index(movable[0]), e)
+            if i > 0:                      # at the front already, it only takes the jump
+                line.remove(e)
+                line.insert(line.index(movable[0]), e)
             for p in passed:
                 p.pushed_back += 1
             e.nexted = True
-            self._log(f"a guest played {e.title or e.uri} next")
+            e.jump = jumping
+            self._log(f"a guest played {e.title or e.uri} next"
+                      + (" (ahead of the set)" if jumping else ""))
             await self._persist()
             return {"status": "moved", "place": 1, "starts_in_ms": self._starts_in(e.id)}
 
@@ -1494,7 +1511,7 @@ class JukeboxRunner:
                 "duration_ms": duration, "remaining_ms": remaining,
                 "next": items, "line": list(n.line), "set_items": n.set_items,
                 "plays": n.plays, "jail": dict(n.jail), "jail_kind": dict(n.jail_kind),
-                "no_skip": list(n.no_skip)}
+                "no_skip": list(n.no_skip), "next_jumps_set": self.cfg.next_jumps_set}
 
     async def read_set(self, cfg: ProgramConfig, refresh: bool = False) -> tuple[dict, list[SetItem]]:
         """The set for `cfg`: the running night's own copy when the night is

@@ -734,7 +734,8 @@ def build_view(book: GuestBook, phone_id: str, gs: dict, now_ms: int,
                     up_price, down_price = wallet.bump_prices(movable, entry.id, cfg)
                     song["bump_price"] = up_price if song["bump"] == "up" else down_price
                 if cr and added_by == phone_id:
-                    q = wallet.next_quote(it.starts_in_ms, front_eta, entry.nexted, cfg)
+                    front = jump_front_ms(gs) if gs.get("next_jumps_set") else front_eta
+                    q = wallet.next_quote(it.starts_in_ms, front, entry.nexted, cfg)
                     passed = [entries.get(x) for x in movable[:pos]]
                     if q["allowed"] and any(p is not None and p.pushed_back >= max_back
                                             for p in passed):
@@ -888,6 +889,17 @@ def song_titles(gs: dict) -> dict[str, str]:
     for it in gs.get("set_items") or []:
         titles.setdefault(it.uri, it.title)
     return titles
+
+
+def jump_front_ms(gs: dict) -> Optional[int]:
+    """When a song played next would start with "Play next may jump the set"
+    on: the first item to start that isn't already in Spotify's queue (a
+    jump plays straight after the song playing, or after the one sent)."""
+    for it in gs.get("next") or []:
+        if it.kind == "jukebox" and it.committed:
+            continue
+        return it.starts_in_ms
+    return None
 
 
 def merged_target(book: GuestBook, phone: Any) -> Any:
@@ -1688,10 +1700,11 @@ class Guests:
             runner = self.deps.runner()
             movable = [e.id for e in line if e.state == "queued" and not e.held
                        and not jailed_now(gs, e.added_by)]
-            if not movable or movable[0] == entry_id:
+            jumping = bool(gs.get("next_jumps_set"))     # §4: it may jump the set
+            if not movable or (movable[0] == entry_id and not jumping):
                 return refusal("at_front_next", 409)
-            q = wallet.next_quote(runner._starts_in(entry_id), runner._starts_in(movable[0]),
-                                  entry.nexted, show.economy)
+            front = jump_front_ms(gs) if jumping else runner._starts_in(movable[0])
+            q = wallet.next_quote(runner._starts_in(entry_id), front, entry.nexted, show.economy)
             if not q["allowed"]:
                 if entry.nexted:
                     return refusal("nexted", 409)

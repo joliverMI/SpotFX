@@ -9,7 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { spotfxDel, spotfxGet, spotfxPost, spotfxPut } from '../api/client';
 import type {
   BonusCodesRead, CardRead, GuestsRead, JukeboxBoardRead, JukeboxEconomy, JukeboxPreview, JukeboxStatus,
-  NightReport, PriceCheck,
+  NightReport, PriceCheck, ShowsRead,
   ProgramConfig, SetMoveResult, ShowRead, SimResult,
 } from './types';
 
@@ -168,6 +168,49 @@ export function useGuests(running: boolean) {
   });
 }
 
+const SHOWS_KEY = ['jukebox-shows'];
+
+/** His saved shows. */
+export function useSavedShows() {
+  return useQuery({ queryKey: SHOWS_KEY, queryFn: () => spotfxGet<ShowsRead>('/jukebox/shows') });
+}
+
+/** Save what is in force now under a name (replacing a show of that name). */
+export function useSaveNamedShow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) =>
+      spotfxPost<ShowsRead & { status: string; name: string; replaced: boolean }>('/jukebox/shows', { name }),
+    onSuccess: (r) => {
+      qc.setQueryData(SHOWS_KEY, r);
+      qc.invalidateQueries({ queryKey: SHOW_KEYS.show });
+    },
+  });
+}
+
+/** Load a saved show whole: the show, the program and the guest link. */
+export function useLoadShow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => spotfxPost<{ status: string; name: string }>('/jukebox/shows/load', { name }),
+    onSuccess: () => {
+      for (const key of [SHOWS_KEY, SHOW_KEYS.show, ['jukebox-price-check'], ['jukebox-board'],
+                         JUKEBOX_KEYS.config, JUKEBOX_KEYS.preview, JUKEBOX_KEYS.status]) {
+        qc.invalidateQueries({ queryKey: key });
+      }
+    },
+  });
+}
+
+export function useDeleteShow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) =>
+      spotfxDel<ShowsRead & { status: string; name: string }>(`/jukebox/shows/${encodeURIComponent(name)}`),
+    onSuccess: (r) => qc.setQueryData(SHOWS_KEY, r),
+  });
+}
+
 /** The Live tab's economy panel: credits now, prices now, recent events. */
 export function useJukeboxEconomy(running: boolean) {
   return useQuery({
@@ -300,7 +343,7 @@ export function usePlayNext() {
   return useMutation({
     mutationFn: async (id: string) => {
       const r = await spotfxPost<{ status: string; detail?: string }>(
-        `/jukebox/line/${encodeURIComponent(id)}/move`, { to: 0 });
+        `/jukebox/line/${encodeURIComponent(id)}/move`, { to: 0, play_next: true });
       if (r.status === 'refused') throw new Error(r.detail || 'It could not move.');
       return r;
     },
