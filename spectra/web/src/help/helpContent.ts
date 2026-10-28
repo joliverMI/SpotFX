@@ -2512,6 +2512,15 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'jukebox-shows',
+        title: 'Saved shows',
+        keywords: 'show name saved shows save load delete party settings set playlist saturday',
+        body: [
+          'A show is every Jukebox setting at once — the set playlist and where the slots go (and whether play next may jump the set), the guests\' rules and when the night ends, the mode and every credits setting, the board, and whether the guest link is on — saved under a name. The Show card at the top of the Credits tab names the show that is in force.',
+          'Save this show keeps what is set now under its name; saving under a name you already used replaces that show (it asks first). Load puts a saved show back whole (it asks first): during a night it can change everything but the set playlist, and a show with a different set playlist is refused until the night ends, with nothing changed. Loading here switches the guest link on or off as the show saved it; Sonic can load a show too ("load the Garden party show"), but leaves the guest link as it is. Loading never starts or stops a night. Delete removes a saved show; it keeps up to 30.',
+        ],
+      },
+      {
         id: 'jukebox-presets',
         title: 'Party size presets',
         keywords: 'preset small medium large party size guests program approval new phones',
@@ -2599,12 +2608,13 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'sonic-jukebox',
         title: 'Sonic on the Jukebox page: the night, the settings, the simulator',
-        keywords: 'sonic jukebox chat popup pop-up start the jukebox stop the night is the jukebox on what is playing line credits setting price preset small medium large simulate party confirm yes',
+        keywords: 'sonic jukebox chat popup pop-up start the jukebox stop the night is the jukebox on what is playing line credits setting price preset small medium large simulate party confirm yes saved show load give credits',
         body: [
           'The Jukebox page has the same floating 💬 button, scoped to the Jukebox. Ask it "is the jukebox on?", "what\'s playing?", "how did last night go?", "how much is a skip with 20 people?", "what are the jukebox settings?", "make the add price start at 5", "use the large preset", "simulate a party of 25", "start the jukebox", or "stop the night".',
           'It ASKS FIRST before every change — a setting, a preset, starting a night and stopping one — and nothing happens until you say yes. A yes covers exactly the question as it was asked: if a setting changed in between, or (for a stop) a different night is running, it asks again, and a question left unanswered expires after five minutes. A setting is checked by SpotFX before you are asked, so a value outside its range is refused with its reason and you are never asked about a change that would not be made.',
           'It goes through the very same routes as this page, so a start through Sonic is the same Start, refused for the same reasons — no set playlist linked, the house asleep, Absorb running, Spotify failing — and it tells you the reason in the page\'s own words. A night it starts is recorded as started by Sonic. The simulator through Sonic is the same model nights as the Simulate tab, reported as numbers; to watch one, use the tab.',
-          'Some things stay on this page: linking the set playlist and placing Manual slots (the editor shows the set song by song), reordering the set playlist (it rewrites your playlist in Spotify), and the jukebox line. There are no guests or credits to give yet — that arrives with the guest page.',
+          'It can load one of your saved shows — "load the Garden party show" — by its exact name, asking first (a close name is refused, naming the closest). Everything becomes that show\'s except the guest link, which stays as it is: switching the link puts a page on the internet, so that is yours, on the page. It can also give credits — "give everyone 2", "give Ana 3" — asking first, by a guest\'s exact name.',
+          'Some things stay on this page: linking the set playlist and placing Manual slots (the editor shows the set song by song), reordering the set playlist (it rewrites your playlist in Spotify), the jukebox line, saving and deleting a show (the Credits tab\'s Show card), the guest link, and the buttons on a guest\'s phone row.',
         ],
       },
       {

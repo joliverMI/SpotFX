@@ -32,6 +32,11 @@ excluded" from "forgotten":
   * the printed BONUS CARDS' codes (making, listing, voiding them) — they
     are for printing on cards, on the Credits tab's Bonus cards card and the
     printable card page; a code read aloud is a code given away;
+  * SAVING and DELETING a saved show (§4: "a 'show' is a saved set of
+    these") — saving replaces a show of the same name and deleting loses
+    one, both by a name heard aloud; they are the Credits tab's Show card.
+    Listing and LOADING one (asking first) are Sonic's — and Sonic's load
+    leaves the GUEST LINK as it is (below), whatever the show saved;
   * PRINTING THE CARDS (/jukebox/cards, the plan's N2) — the guest Wi-Fi's
     password is typed on that page at print time and never leaves it, so
     there is nothing for a voice to set; and printing is a sheet of paper
@@ -475,6 +480,59 @@ async def _op_apply_jukebox_preset(preset: str, confirm_id: Optional[str] = None
                                             f"{program_words(r.get('config') or {})}."}
 
 
+def _show_words(row: dict, link: bool = True) -> str:
+    return ", ".join(x for x in (
+        "credits" if row.get("play_mode") == "credits" else "free play",
+        f"{row['preset']} preset" if row.get("preset") else "",
+        ("guest link on" if row.get("guest_link") else "guest link off") if link else "") if x)
+
+
+async def _op_list_jukebox_shows() -> dict:
+    r, err = await _get("/api/jukebox/shows")
+    if err:
+        return err
+    rows = r.get("shows") or []
+    if r.get("error"):
+        return {"status": "rejected", "reason": r["error"]}
+    listing = [{"name": x["name"], "about": _show_words(x)} for x in rows]
+    summary = (f"{len(rows)} saved show{'' if len(rows) == 1 else 's'}: "
+               + "; ".join(f"{x['name']} ({x['about']})" for x in listing) if rows
+               else "No shows are saved yet.")
+    return {"status": "ok", "current": r.get("current"), "shows": listing,
+            "summary": f"{summary} In force now: {r.get('current')}."}
+
+
+async def _op_load_jukebox_show(name: str, confirm_id: Optional[str] = None) -> dict:
+    r, err = await _get("/api/jukebox/shows")
+    if err:
+        return err
+    if r.get("error"):
+        return {"status": "rejected", "reason": r["error"]}
+    rows = r.get("shows") or []
+    row = next((x for x in rows if str(x.get("name", "")).casefold() == str(name).strip().casefold()),
+               None)
+    if row is None:
+        close = difflib.get_close_matches(str(name), [x.get("name", "") for x in rows], n=3, cutoff=0.5)
+        hint = f" — the closest: {', '.join(close)}" if close else ""
+        return {"status": "rejected",
+                "reason": f"there's no saved show called {name!r}{hint}; a show is loaded only "
+                          "by its exact name"}
+    question = (f"Load the saved show “{row['name']}” ({_show_words(row, link=False)})? Every Jukebox setting "
+                "becomes that show's — the set playlist and slots, the guests' rules, the "
+                "credits and the board. The guest link stays as it is: switching it is yours, "
+                "on the page.")
+    refusal = _gate("load_jukebox_show", {"name": row["name"]}, row, confirm_id, question)
+    if refusal:
+        return refusal
+    _, err = await _request("POST", "/api/jukebox/shows/load",
+                            body={"name": row["name"], "guest_link": False})
+    if err:
+        return err
+    return {"status": "applied",
+            "summary": f"Loaded the show “{row['name']}” ({_show_words(row, link=False)}); the guest link "
+                       "was left as it was."}
+
+
 async def _op_start_jukebox_night(from_song: int = 1, confirm_id: Optional[str] = None) -> dict:
     st, err = await _get("/api/jukebox/status", params={"count": 1})
     if err:
@@ -726,6 +784,26 @@ OPERATIONS: dict[str, SonicOperation] = {
                                      "confirm_id": _CONFIRM_PROP},
                       "required": ["preset"], "additionalProperties": False},
         handler=_op_apply_jukebox_preset),
+    "list_jukebox_shows": SonicOperation(
+        name="list_jukebox_shows", domain="jukebox", kind="read",
+        summary="List his saved Jukebox shows (each a whole set of Jukebox settings, saved "
+                "under a name) and which one is in force.",
+        instructions=_INSTR_COMMON + "Reads only.",
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        handler=_op_list_jukebox_shows),
+    "load_jukebox_show": SonicOperation(
+        name="load_jukebox_show", domain="jukebox", kind="write",
+        summary="Load one of his saved shows by its exact name — every Jukebox setting becomes "
+                "that show's (asks him first).",
+        instructions=(
+            _INSTR_COMMON + _INSTR_CONFIRM
+            + "Call list_jukebox_shows first; a name that isn't exactly a saved show's (case "
+            "aside) is refused, naming the closest. During a night, a show with a different set "
+            "playlist is refused until the night ends, and nothing changes."),
+        input_schema={"type": "object",
+                      "properties": {"name": {"type": "string"}, "confirm_id": _CONFIRM_PROP},
+                      "required": ["name"], "additionalProperties": False},
+        handler=_op_load_jukebox_show),
     "start_jukebox_night": SonicOperation(
         name="start_jukebox_night", domain="jukebox", kind="write",
         summary="Start a Jukebox night on the linked set playlist (always asks him first).",

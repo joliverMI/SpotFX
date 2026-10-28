@@ -386,3 +386,28 @@ def test_a_gift_asks_first_naming_who_and_a_near_miss_is_refused(spotfx, monkeyp
     assert wal.balance(ana) == 9 and wal.balance(ben) == 6
     assert _run(jc._op_give_jukebox_credits("everyone", 50))["status"] == "rejected"
     assert "give_jukebox_credits" in jc.OPERATIONS and jc.OPERATIONS["give_jukebox_credits"].kind == "write"
+
+
+# ═══ saved shows (§4: "a 'show' is a saved set of these") ══════════════════
+
+def test_sonic_lists_saved_shows_and_loads_one_only_after_asking(spotfx):
+    from models.jukebox import ProgramConfig as PC
+    from services.jukebox import shows as shows_mod
+    assert "No shows are saved yet" in _run(jc._op_list_jukebox_shows())["summary"]
+    shows_mod.save("Garden party", m.ShowConfig(play_mode="free"), PC(every=3), True, 10)
+    listed = _run(jc._op_list_jukebox_shows())
+    assert listed["shows"] == [{"name": "Garden party", "about": "free play, guest link on"}]
+    near = _run(jc._op_load_jukebox_show("Garden part"))
+    assert near["status"] == "rejected" and "Garden party" in near["reason"]
+    ask = _run(jc._op_load_jukebox_show("garden PARTY"))
+    assert ask["status"] == "needs_confirmation" and "“Garden party”" in ask["question"]
+    assert "guest link stays as it is" in ask["question"]
+    assert store.load_config().every != 3 and not _writes(spotfx)            # asked, nothing done
+    assert store.load_guest_link()[0].enabled is False
+    done = _run(jc._op_load_jukebox_show("garden PARTY", confirm_id=ask["confirm_id"]))
+    assert done["status"] == "applied"
+    assert store.load_config().every == 3 and store.load_show().play_mode == "free"
+    # the show saved its link ON, but switching the link is his own act on the page
+    assert store.load_guest_link()[0].enabled is False
+    # saving and deleting stay the Credits tab's (named exclusions)
+    assert not {"save_jukebox_show", "delete_jukebox_show"} & set(jc.OPERATIONS)

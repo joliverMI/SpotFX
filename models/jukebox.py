@@ -380,7 +380,10 @@ class ShowConfig(_Model):
     (report §4's Show, Add a song and Guests cards: when the night ends and
     requests close, explicit songs, how many phones, renames, the word
     filter). Only an edit writes it (services/jukebox/show.py is the one
-    validator). Times are house time (America/New_York), "HH:MM"."""
+    validator). Times are house time (America/New_York), "HH:MM".
+    `name` is §4's Show card "Name": what this set of settings is called —
+    a show is SAVED under it (services/jukebox/shows.py)."""
+    name: str = Field("Saturday party", min_length=1, max_length=60)
     preset: Optional[Preset] = None
     approve_new_phones: bool = False
     economy: EconomyConfig = Field(default_factory=EconomyConfig)
@@ -538,6 +541,20 @@ class WantCounts(_Model):
     afford_now: int = 0
     wish_more: int = 0
     afford_more: int = 0
+
+
+class SavedShow(_Model):
+    """One saved show (§4: "a 'show' is a saved set of these"): the show
+    settings, the program settings and whether the guest link is on — all of
+    §4's cards — as they were when he saved it."""
+    saved_ms: int = 0
+    show: ShowConfig = Field(default_factory=ShowConfig)
+    program: ProgramConfig = Field(default_factory=ProgramConfig)
+    guest_link: bool = False
+
+
+class SavedShows(_Model):
+    shows: dict[str, SavedShow] = Field(default_factory=dict)
 
 
 class BonusCode(_Model):

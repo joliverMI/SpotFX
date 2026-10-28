@@ -11024,6 +11024,28 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   Credits tab's harness mocks a SNAPSHOT of those answers
   (`spectra/web/harness/jukeboxShowSnapshot.json`) — regenerate it when they
   change.
+- **SAVED SHOWS AND "PLAY NEXT MAY JUMP THE SET"** (§4's last two
+  settings). A SHOW is everything §4 lists — the ShowConfig (now with its
+  `name`), the ProgramConfig and whether the guest link is on — saved under
+  a name (`services/jukebox/shows.py`, `storage/jukebox_shows.json`, its
+  own store: an unreadable file RAISES and is never written over; 30 kept;
+  a name is unique without regard to case and saving under it replaces).
+  LOADING goes through the page's own steps (`POST /api/jukebox/shows/load`):
+  the program through `runner.apply_config` (a running night refuses
+  another set playlist, nothing changed), the jail conversion a mode switch
+  needs, then the guest link — unless the body says `guest_link: false`,
+  which Sonic's `load_jukebox_show` always does (switching the link is his
+  act on the page). Saving/deleting a show are named Sonic exclusions. A new
+  ShowConfig or ProgramConfig field rides in a saved show for free, so a
+  setting that must NOT travel with a show needs to be kept out of both.
+  JUMP (`ProgramConfig.next_jumps_set`, off): a play next — the guest's
+  paid one or the host's (`move(..., play_next=True)`) — marks the entry
+  `jump`, and `program.project()` plays a jump fill as soon as the slot
+  cursor has no slot open (`gap_left <= 0`), ahead of the next set song and
+  using NO slot; a drag drops the mark. It is priced by how far it really
+  jumps (`guests.jump_front_ms`). Spec: `tests/test_jukebox_shows.py`,
+  `tests/test_jukebox_play_next_jump.py`; help `jukebox-shows`,
+  `jukebox-slots`.
 - **THE PARTY SIMULATOR AND SONIC (PR 3.4)**: the simulator moved from
   tests into `services/jukebox/simulator.py` — ONE copy is both the
   economy's executable spec and the master view's Simulate tab

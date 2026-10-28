@@ -242,7 +242,7 @@ function SetListTab({ cfg, preview, loading, status }: {
               <option key={r} value={r}>{RUN_OUT_LABEL[r]}</option>))}
           </select>
         </label>
-        <InfoTip topic="jukebox-slots"
+        <InfoTip topic="jukebox-slots" className="jukebox-jump-row"
           text="Off: a song played next waits for the next jukebox slot. On: it plays straight after the song playing, ahead of the next set song — an extra song that uses no slot, priced by how far it jumps.">
           <label className="jukebox-field jukebox-check" data-testid="jukebox-jump-set">
             <input type="checkbox" checked={!!cfg.next_jumps_set} aria-label="Play next may jump the set"

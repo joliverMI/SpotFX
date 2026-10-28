@@ -67,7 +67,7 @@ let config: ProgramConfig = {
   mode: MANUAL ? 'manual' : 'auto',
   every: 1, run: 1,
   manual: MANUAL ? [{ after_uri: t(1), count: 2 }, { after_uri: t(4), count: 1 }, { after_uri: t(8), count: 3 }] : [],
-  run_out: 'again', commit_lead_s: 45,
+  run_out: 'again', commit_lead_s: 45, next_jumps_set: false,
 };
 
 function gapAfter(i: number, since: number): [number, number] {
@@ -105,6 +105,7 @@ function manualEquivalent(): ManualSlot[] {
 }
 
 let show = {
+  name: 'Saturday party',
   preset: RUNNING ? 'medium' : null,
   approve_new_phones: false,
   economy: Object.fromEntries(SNAP.fields.map((f: { key: string; default: number | boolean }) => [f.key, f.default])),
@@ -206,6 +207,16 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (url.includes('/api/jukebox/status')) return json(status());
   if (url.includes('/api/jukebox/preview')) return json(preview());
+  if (url.includes('/api/jukebox/shows')) {
+    // two saved shows; save/load/delete answer as the mocked harness
+    if (method !== 'GET') return json({ status: 'refused', reason: 'harness', detail: 'This is the mocked harness — nothing was saved or loaded.' }, 409);
+    return json({
+      current: show.name, error: null, max: 30, shows: [
+        { name: 'Saturday party', saved_ms: NOW - 3 * 86_400_000, play_mode: 'credits', preset: 'medium', playlist: PLAYLIST, guest_link: true },
+        { name: 'Movie night', saved_ms: NOW - 12 * 86_400_000, play_mode: 'free', preset: 'small', playlist: PLAYLIST, guest_link: false },
+      ],
+    });
+  }
   if (url.includes('/api/jukebox/show/preset')) {
     show = { ...show, preset: body?.preset ?? null, approve_new_phones: body?.preset === 'large' };
     return json({ show, fields: SNAP.fields, guest_fields: SNAP.guest_fields, presets: SNAP.presets, config });

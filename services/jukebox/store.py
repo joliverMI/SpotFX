@@ -19,7 +19,7 @@ from typing import Optional
 
 from config import BASE_DIR
 from models.jukebox import (BonusCodes, GuestBook, GuestLinkConfig, GuestLinkState, JukeboxNight,
-                            JukeboxNights, ProgramConfig, ShowConfig)
+                            JukeboxNights, ProgramConfig, SavedShows, ShowConfig)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ SHOW_FILE = BASE_DIR / "storage" / "jukebox_show.json"
 GUEST_LINK_FILE = BASE_DIR / "storage" / "jukebox_guest_link.json"
 GUESTS_FILE = BASE_DIR / "storage" / "jukebox_guests.json"
 BONUS_FILE = BASE_DIR / "storage" / "jukebox_bonus_codes.json"
+SHOWS_FILE = BASE_DIR / "storage" / "jukebox_shows.json"
 
 HISTORY_MAX = 20       # earlier nights kept (as briefs) beside the current one
 LOG_MAX = 300          # the night's own log lines
@@ -161,6 +162,25 @@ def load_bonus() -> BonusCodes:
 def save_bonus(codes: BonusCodes) -> None:
     with _lock:
         _write(BONUS_FILE, codes.model_dump(mode="json"))
+
+
+def load_shows() -> SavedShows:
+    """His saved shows. A file that is there but can't be read RAISES
+    ValueError rather than reading as empty: saving over it would lose every
+    show he saved."""
+    try:
+        text = SHOWS_FILE.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return SavedShows()
+    try:
+        return SavedShows.model_validate(json.loads(text))
+    except Exception as exc:
+        raise ValueError(f"the saved shows file can't be read ({exc})") from exc
+
+
+def save_shows(shows: SavedShows) -> None:
+    with _lock:
+        _write(SHOWS_FILE, shows.model_dump(mode="json"))
 
 
 # ── nights ───────────────────────────────────────────────────────────────────

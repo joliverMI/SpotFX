@@ -1225,6 +1225,18 @@ async def apply_jukebox_preset(preset: _JukeboxPresetEnum,
 
 
 @mcp.tool()
+async def list_jukebox_shows() -> dict:
+    """His saved Jukebox shows and which one is in force."""
+    return await _call("list_jukebox_shows")
+
+
+@mcp.tool()
+async def load_jukebox_show(name: str, confirm_id: Optional[str] = None) -> dict:
+    """Load a saved show by its exact name (the first call asks)."""
+    return await _call("load_jukebox_show", name=name, confirm_id=confirm_id)
+
+
+@mcp.tool()
 async def start_jukebox_night(from_song: int = 1, confirm_id: Optional[str] = None) -> dict:
     """Start a Jukebox night on the linked set playlist (always asks first)."""
     return await _call("start_jukebox_night", from_song=from_song, confirm_id=confirm_id)

@@ -117,7 +117,8 @@ PLAY_NEXT_WORDS = {"host": "host only", "off": "off"}
 PLAY_MODE_WORDS = {"free": "Free play", "credits": "Credits"}
 CHOICE_WORDS = {"explicit": EXPLICIT_WORDS, "free_play_next": PLAY_NEXT_WORDS}
 
-SHOW_KEYS = frozenset({"economy", "approve_new_phones", "play_mode"} | {k for k, *_ in GUEST_FIELDS})
+SHOW_KEYS = frozenset({"economy", "approve_new_phones", "play_mode", "name"}
+                      | {k for k, *_ in GUEST_FIELDS})
 
 
 def fields() -> list[dict]:
