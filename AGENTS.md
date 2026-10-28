@@ -11280,7 +11280,9 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   is one event. Names only: no event or line row may carry a phone's code
   (the Live line now names who added each song — `jukeboxEconomy.ts`'s
   `liveLineWords`). Reads only, on the loop, so it never replays the ledger
-  (`verify()` is the report's). Spec: `tests/test_jukebox_economy_live.py`,
+  (`verify()` is the report's). §7's "draggable line" is the GUESTS tab's line (the
+  Live tab stays read-only, row 1.3): a waiting song drags by its ⠿ handle
+  through `night.move`, the same move Play next makes. Spec: `tests/test_jukebox_economy_live.py`,
   `check_jukebox_editor.mjs`; help `jukebox-economy`.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:

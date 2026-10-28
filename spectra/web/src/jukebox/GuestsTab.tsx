@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import InfoTip from '../components/InfoTip';
 import { useToast } from '../components/Toast';
+import SortableList from '../lightshow/SortableList';
 import BoardLists from './BoardLists';
 import {
   lineRows, mergeCandidates, mergeWords, phoneActions, phoneLine, phoneTakes, sinceWords,
@@ -17,7 +18,7 @@ import {
 } from './jukeboxGuests';
 import {
   useGift, useGuests, useHoldEntry, useHostPhone, useJukeboxBoard, useJukeboxShow, useMergePhones,
-  usePlayNext, useRemoveEntry, useSaveShow, useSkipLock, useZeroPhone,
+  useMoveEntry, usePlayNext, useRemoveEntry, useSaveShow, useSkipLock, useZeroPhone,
 } from './queries';
 import type { GuestField, GuestPhone, JukeboxStatus, ShowConfig } from './types';
 
@@ -43,6 +44,7 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
   const hold = useHoldEntry();
   const remove = useRemoveEntry();
   const playNext = usePlayNext();
+  const move = useMoveEntry();
   const skipLock = useSkipLock();
   const gift = useGift();
   const zero = useZeroPhone();
@@ -71,6 +73,38 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
       onSave={(v) => save.mutate({ [f.key]: v }, { onError })}
       onBad={(reason) => toast(reason, 'error')} />
   ));
+
+  const waitingRows = rows.filter((r) => !r.sent);
+  const lineRowBody = (r: (typeof rows)[number]) => (
+    <>
+      <span className="jukebox-item-words">
+        <span className="jukebox-song-title">{r.entry.title || r.entry.uri}</span>
+        <span className="jukebox-song-artist">
+          {[r.entry.artist, `added by ${r.by}`, r.round, r.paid ? `paid 🎟 ${r.paid}` : '',
+            r.sent ? 'sent to Spotify' : '',
+            r.held ? 'on hold' : '', r.jailed ? 'sits out a time-out' : '',
+            r.skipLocked ? 'kept from skips' : '',
+            r.doomed ? 'removed: skipped as it starts' : ''].filter(Boolean).join(' · ')}
+        </span>
+      </span>
+      <span className="jukebox-guest-actions">
+        {r.canPlayNext && (
+          <button onClick={() => playNext.mutate(r.entry.id, { onError })}>Play next</button>
+        )}
+        <button onClick={() => skipLock.mutate({ uri: r.entry.uri, locked: !r.skipLocked }, { onError })}>
+          {r.skipLocked ? 'Allow skips' : 'Keep from skips'}
+        </button>
+        {r.canHold && (
+          <button onClick={() => hold.mutate({ id: r.entry.id, held: !r.held }, { onError })}>
+            {r.held ? 'Let go' : 'Hold'}
+          </button>
+        )}
+        {!r.doomed && (
+          <button onClick={() => remove.mutate(r.entry.id, { onError })}>Remove</button>
+        )}
+      </span>
+    </>
+  );
 
   return (
     <div className="jukebox-grid">
@@ -139,39 +173,27 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
             </span>
           </div>
         )}
-        {rows.length > 0 && (
+        {rows.some((r) => r.sent) && (
           <ol className="jukebox-next">
-            {rows.map((r) => (
-              <li key={r.entry.id} className={`jukebox-item ${r.sent ? 'jukebox' : 'set'}`}>
-                <span className="jukebox-item-words">
-                  <span className="jukebox-song-title">{r.entry.title || r.entry.uri}</span>
-                  <span className="jukebox-song-artist">
-                    {[r.entry.artist, `added by ${r.by}`, r.round, r.paid ? `paid 🎟 ${r.paid}` : '',
-                      r.sent ? 'sent to Spotify' : '',
-                      r.held ? 'on hold' : '', r.jailed ? 'sits out a time-out' : '',
-                      r.skipLocked ? 'kept from skips' : '',
-                      r.doomed ? 'removed: skipped as it starts' : ''].filter(Boolean).join(' · ')}
-                  </span>
-                </span>
-                <span className="jukebox-guest-actions">
-                  {r.canPlayNext && (
-                    <button onClick={() => playNext.mutate(r.entry.id, { onError })}>Play next</button>
-                  )}
-                  <button onClick={() => skipLock.mutate({ uri: r.entry.uri, locked: !r.skipLocked }, { onError })}>
-                    {r.skipLocked ? 'Allow skips' : 'Keep from skips'}
-                  </button>
-                  {r.canHold && (
-                    <button onClick={() => hold.mutate({ id: r.entry.id, held: !r.held }, { onError })}>
-                      {r.held ? 'Let go' : 'Hold'}
-                    </button>
-                  )}
-                  {!r.doomed && (
-                    <button onClick={() => remove.mutate(r.entry.id, { onError })}>Remove</button>
-                  )}
-                </span>
-              </li>
+            {rows.filter((r) => r.sent).map((r) => (
+              <li key={r.entry.id} className="jukebox-item jukebox">{lineRowBody(r)}</li>
             ))}
           </ol>
+        )}
+        {waitingRows.length > 0 && (
+          <SortableList
+            className="jukebox-next"
+            items={waitingRows}
+            getId={(r) => r.entry.id}
+            getLabel={(r) => r.entry.title || r.entry.uri}
+            onReorder={(from, to) => move.mutate({ id: waitingRows[from].entry.id, to }, { onError })}
+            renderItem={(r, _i, row) => (
+              <li ref={row.rowRef} style={row.rowStyle}
+                className={`jukebox-item set${row.isDragging ? ' dragging' : ''}`}>
+                {row.handle}
+                {lineRowBody(r)}
+              </li>
+            )} />
         )}
       </section>
 

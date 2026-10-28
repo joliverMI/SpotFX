@@ -308,6 +308,24 @@ export function usePlayNext() {
   });
 }
 
+/** Drag a waiting song to place `to` among the waiting songs (the host's
+ *  own move: nothing passes the song already sent to Spotify). */
+export function useMoveEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, to }: { id: string; to: number }) => {
+      const r = await spotfxPost<{ status: string; detail?: string; line?: JukeboxStatus['line'] }>(
+        `/jukebox/line/${encodeURIComponent(id)}/move`, { to });
+      if (r.status === 'refused') throw new Error(r.detail || 'It could not move.');
+      return r;
+    },
+    onSuccess: (r) => {
+      if (r.line) qc.setQueryData<JukeboxStatus>(JUKEBOX_KEYS.status, (old) => (old ? { ...old, line: r.line! } : old));
+      qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status });
+    },
+  });
+}
+
 /** Keep a song from every skip tonight — the room's vote and a paid skip —
  * or let it be skipped again. */
 export function useSkipLock() {

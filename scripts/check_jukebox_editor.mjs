@@ -751,6 +751,27 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
   ok(rows.length === 3 && rows[1].textContent.includes('added by Disco Ana') && rows[1].textContent.includes('1st song'),
     'the line shows each song with who added it and their round');
   ok(rows[2].textContent.includes('sits out a time-out'), 'a song whose guest is in a time-out says so');
+  // the host's draggable line (§7): a waiting song drags to a new place; the
+  // song already sent to Spotify has no handle — nothing passes it
+  ok(!rows[0].querySelector('.light-show-step-handle') && !!rows[1].querySelector('.light-show-step-handle')
+    && !!rows[2].querySelector('.light-show-step-handle'), 'only the waiting songs carry a ⠿ handle');
+  const rectAt = (i) => ({ x: 0, y: i * 60, left: 0, top: i * 60, right: 400, bottom: i * 60 + 50, width: 400, height: 50, toJSON() {} });
+  rows.slice(1).forEach((li, i) => { li.getBoundingClientRect = () => rectAt(i); });
+  const pev = (type, y) => {
+    const ev = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, clientX: 200, clientY: y, button: 0 });
+    Object.defineProperty(ev, 'pointerId', { value: 3 });
+    Object.defineProperty(ev, 'isPrimary', { value: true });
+    Object.defineProperty(ev, 'pointerType', { value: 'touch' });
+    return ev;
+  };
+  P.actSync(() => rows[2].querySelector('.light-show-step-handle').dispatchEvent(pev('pointerdown', 85)));
+  for (const y of [80, 70, 45, 20, 10]) P.actSync(() => document.dispatchEvent(pev('pointermove', y)));
+  P.actSync(() => document.dispatchEvent(pev('pointerup', 10)));
+  await P.settle();
+  const dragMove = world.requests.filter((r) => r.url === '/api/jukebox/line/e3/move').at(-1);
+  ok(dragMove?.method === 'POST' && JSON.stringify(dragMove.body) === '{"to":0}',
+    `dragging the 2nd waiting song to the top moves it to place 0 among the waiting (${JSON.stringify(dragMove?.body)})`);
+  world.requests = [];
   ok(!buttonByText(rows[1], /^Play next$/) && !!buttonByText(rows[2], /^Play next$/), 'Play next on a waiting song behind the first');
   await click(buttonByText(rows[2], /^Play next$/));
   const mv = world.requests.filter((r) => r.url === '/api/jukebox/line/e3/move').at(-1);
