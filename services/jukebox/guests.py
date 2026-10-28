@@ -866,6 +866,18 @@ class GuestDeps:
     sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep
 
 
+def song_titles(gs: dict) -> dict[str, str]:
+    """Every song tonight's records can name, by URI and by line entry id —
+    what a ledger entry's `ref` points at, in words."""
+    titles: dict[str, str] = {}
+    for e in gs.get("line") or []:
+        titles[e.uri] = e.title
+        titles[e.id] = e.title
+    for it in gs.get("set_items") or []:
+        titles.setdefault(it.uri, it.title)
+    return titles
+
+
 def merged_target(book: GuestBook, phone: Any) -> Any:
     """The phone a merged code now belongs to (chains followed); any other
     code as given."""
@@ -1785,12 +1797,7 @@ class Guests:
         cfg = show.economy
         w = self._wallet_for(gs["night_id"], show)
         entries = w.led.history(phone)
-        titles: dict[str, str] = {}
-        for e in gs.get("line") or []:
-            titles[e.uri] = e.title
-            titles[e.id] = e.title
-        for it in gs.get("set_items") or []:
-            titles.setdefault(it.uri, it.title)
+        titles = song_titles(gs)
         names = {pid: p.name for pid, p in book.phones.items()}
         line = gs.get("line") or []
         played = sum(1 for e in line if e.added_by == phone and e.state in ("played", "playing"))
@@ -2184,6 +2191,8 @@ class Guests:
             for code, target in list(book.merged.items()):
                 if target == retire:
                     book.merged[code] = into
+                    if code in book.phones:
+                        book.phones[code].merged_into = into
             book.merged[retire] = into
             gone.merged_into = into
             self._seen.pop(retire, None)
@@ -2193,6 +2202,49 @@ class Guests:
                                                 "credits": moved}, **self.phones()}
 
     # ── the master's read ───────────────────────────────────────────────────
+
+    def economy(self) -> dict:
+        """The Live tab's economy panel (§9 3.3, §7's host Live view): the
+        credits right now (services/jukebox/economy_live.py — the report's
+        own vocabulary), the prices a guest sees right now, and the night's
+        recent events. In free play, what the room has done instead. Reads
+        only."""
+        from services.jukebox import economy, economy_live, wallet
+        gs = self._running()
+        show = self.deps.show()
+        if gs is None:
+            return {"running": False, "play_mode": show.play_mode}
+        book = self._book_for(gs["night_id"])
+        here = [p for p in book.phones.values() if not p.merged_into]
+        joined = [p for p in here if p.joined and p.approved and not p.blocked]
+        base = {"running": True, "play_mode": show.play_mode, "crowd": self._crowd(),
+                "joined": len(joined),
+                "jailed": sum(1 for p in here if jailed_now(gs, p.id)),
+                "votes": sum(len(v) for v in book.votes.values()),
+                "time_outs": sum(p.jails for p in here)}
+        if show.play_mode != "credits":
+            return {**base, "credits": None, "prices": None, "events": []}
+        cfg = show.economy
+        w = self._wallet_for(gs["night_id"], show)
+        started = int(gs.get("started_ms") or 0)
+        hours = (self.deps.now_ms() - started) / 3_600_000 if started else None
+        names = {pid: p.name for pid, p in book.phones.items()}
+        back_wait = self._back_wait_ms(gs)
+        first_wait = self.deps.runner().quote_wait(1, cfg.fair_order)
+        now = gs.get("now")
+        skip_now = None
+        if getattr(now, "kind", "") in ("set", "jukebox"):
+            votes = tally(book, play_key(now))
+            skip_now = wallet.skip_price(back_wait, votes["up"], votes["down"], self._crowd(), cfg)
+        prices = {"add_first": wallet.add_price(first_wait, 216_000, True, cfg),
+                  "add_back": wallet.add_price(back_wait, 216_000, True, cfg),
+                  "back_wait_min": round(back_wait / 60_000, 1) if back_wait is not None else None,
+                  "skip_now": skip_now, "next_from": economy.play_next_price(10, cfg),
+                  "jail_fee": cfg.jail_fee}
+        entries = list(w.led.entries)
+        return {**base, "credits": economy_live.credits_now(entries, hours, len(joined)),
+                "prices": prices,
+                "events": economy_live.events(entries, names, song_titles(gs))}
 
     def summary(self, night_id: Optional[str]) -> dict:
         """How many phones joined tonight (the master's Live tab)."""

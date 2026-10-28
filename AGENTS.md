@@ -11270,6 +11270,18 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   folded in `Guests.merge`/`JukeboxRunner.merge_phone` too. Sonic: a named
   exclusion. Spec: `tests/test_jukebox_zero_merge.py`; help
   `jukebox-merge-phones`.
+- **THE LIVE ECONOMY PANEL** (§9 3.3; `services/jukebox/economy_live.py` is
+  the binding statement): `GET /api/jukebox/economy`, the Live tab's "The
+  economy right now" card. Its credits ARE `night_report.credits_section`
+  read while the night runs (one vocabulary with the post-party report),
+  its prices are the guest Shop's own functions, and its recent events are
+  the ledger's GROUPS in words — votes, welcomes and top-ups counted, never
+  listed; one "Everyone +N" (one gift per DIFFERENT phone, moments apart)
+  is one event. Names only: no event or line row may carry a phone's code
+  (the Live line now names who added each song — `jukeboxEconomy.ts`'s
+  `liveLineWords`). Reads only, on the loop, so it never replays the ledger
+  (`verify()` is the report's). Spec: `tests/test_jukebox_economy_live.py`,
+  `check_jukebox_editor.mjs`; help `jukebox-economy`.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his program settings, one validator:

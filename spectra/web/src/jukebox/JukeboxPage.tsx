@@ -39,15 +39,18 @@ import SortableList from '../lightshow/SortableList';
 import CreditsTab from './CreditsTab';
 import GuestsTab from './GuestsTab';
 import SimulateTab from './SimulateTab';
+import {
+  activityLine, creditsLine, eventWords, freePlayLine, liveLineWords, priceRows, roomLine,
+} from './jukeboxEconomy';
 import { compareCells, creditFacts, endLine, nightFacts } from './jukeboxReport';
 import {
-  barSegments, canMove, clickSetSong, clickSlot, countLine, entryLine, GUEST_COUNTS, itemView,
+  barSegments, canMove, clickSetSong, clickSlot, countLine, GUEST_COUNTS, itemView,
   mmss, MODE_LABEL, nightLine, nightWarnings, nowLine, removeSlot, ruleLine, RUN_OUT_LABEL,
   signInView, slotsAfter, slotsByIndex, startsIn,
 } from './jukeboxEditor';
 import {
-  useJukeboxConfig, useJukeboxPreview, useJukeboxReport, useJukeboxStatus, useMoveSetSong,
-  useReloadSet, useSaveJukeboxConfig,
+  useGuests, useJukeboxConfig, useJukeboxEconomy, useJukeboxPreview, useJukeboxReport, useJukeboxStatus,
+  useMoveSetSong, useReloadSet, useSaveJukeboxConfig,
 } from './queries';
 import type { JukeboxPreview, JukeboxStatus, ProgramConfig, RunOut, SetItem, SlotMode } from './types';
 
@@ -335,6 +338,7 @@ function LiveTab({ status }: { status: JukeboxStatus | undefined }) {
   const now = nowLine(status);
   const warnings = nightWarnings(status);
   const line = status?.line ?? [];
+  const phones = useGuests(!!status?.running).data?.phones ?? [];
   return (
     <div className="jukebox-grid">
       <section className="card jukebox-card" data-testid="jukebox-live-card">
@@ -399,7 +403,7 @@ function LiveTab({ status }: { status: JukeboxStatus | undefined }) {
                 <li key={e.id} className={`jukebox-item ${e.state === 'committed' ? 'jukebox' : 'set'}`}>
                   <span className="jukebox-item-words">
                     <span className="jukebox-song-title">{e.title || e.uri}</span>
-                    <span className="jukebox-song-artist">{[e.artist, entryLine(e)].filter(Boolean).join(' · ')}</span>
+                    <span className="jukebox-song-artist">{[e.artist, liveLineWords(e, phones)].filter(Boolean).join(' · ')}</span>
                   </span>
                 </li>
               ))}
@@ -407,6 +411,8 @@ function LiveTab({ status }: { status: JukeboxStatus | undefined }) {
           )}
         </section>
       )}
+
+      {status?.running && <EconomyCard />}
 
       {status?.night && <ReportCard nightId={status.night.id} />}
 
@@ -417,6 +423,60 @@ function LiveTab({ status }: { status: JukeboxStatus | undefined }) {
         </details>
       )}
     </div>
+  );
+}
+
+// ── the economy right now (read-only; services/jukebox/economy_live.py) ─────
+
+function EconomyCard() {
+  const q = useJukeboxEconomy(true);
+  const e = q.data;
+  return (
+    <section className="card jukebox-card jukebox-list-card" data-testid="jukebox-economy">
+      <div className="jukebox-card-head">
+        <InfoTip topic="jukebox-economy"
+          text="The night's economy right now, read-only: the credits guests hold, what they cost, and what has happened lately. The same numbers the post-party report keeps.">
+          <span className="card-title jukebox-card-title">The economy right now</span>
+        </InfoTip>
+      </div>
+      {!e?.running ? (
+        <p className="jukebox-muted">{q.isError ? 'The economy couldn\'t be read from SpotFX.' : 'Reading…'}</p>
+      ) : (
+        <>
+          <p className="jukebox-muted" data-testid="jukebox-economy-room">{roomLine(e)}</p>
+          {!e.credits || !e.prices ? (
+            <p className="jukebox-night" data-testid="jukebox-economy-free">{freePlayLine(e)}</p>
+          ) : (
+            <>
+              <p className="jukebox-night" data-testid="jukebox-economy-credits">{creditsLine(e.credits)}</p>
+              <p className="jukebox-muted" data-testid="jukebox-economy-activity">{activityLine(e.credits)}</p>
+              <dl className="jukebox-economy-prices" data-testid="jukebox-economy-prices">
+                {priceRows(e.prices).map((r) => (
+                  <div key={r.label}><dt>{r.label}</dt><dd>{r.value}</dd></div>
+                ))}
+              </dl>
+              <span className="card-title jukebox-card-title">Lately</span>
+              {(e.events ?? []).length === 0 ? (
+                <p className="jukebox-muted">Nothing spent or given yet tonight.</p>
+              ) : (
+                <ol className="jukebox-next jukebox-economy-events" data-testid="jukebox-economy-events">
+                  {(e.events ?? []).map((ev, i) => {
+                    const w = eventWords(ev);
+                    return (
+                      <li key={`${ev.at_ms}-${i}`} className="jukebox-item">
+                        <span className="jukebox-dur">{w.when}</span>
+                        <span className="jukebox-item-words"><span className="jukebox-song-title">{w.text}</span></span>
+                        {w.credits && <span className="jukebox-dur">{w.credits}</span>}
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 

@@ -218,6 +218,20 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ show, fields: SNAP.fields, guest_fields: SNAP.guest_fields, presets: SNAP.presets });
   }
   if (url.includes('/api/jukebox/bonus-codes')) return json({ codes: [], unused: 0, used: 0 });
+  if (url.includes('/api/jukebox/economy')) {
+    return json(RUNNING ? {
+      running: true, play_mode: 'credits', crowd: 4, joined: 3, jailed: 1, votes: 41, time_outs: 1,
+      credits: { minted: 112, held: 38, held_per_guest: 12.7, unspent_share: 0.339, by_kind: {}, adds: 5,
+                 skips_hr: 0.8, nexts_hr: null, tips_hr: 2.4, add_price_median: 5, votes: 41, free: 32 },
+      prices: { add_first: 4, add_back: 9, back_wait_min: 31.6, skip_now: 21, next_from: 11, jail_fee: 10 },
+      events: [
+        { at_ms: NOW - 2 * MIN, kind: 'tip', who: 'Velvet Moose', what: 'tipped Disco Ana 2 on “Take On Me” (+2 bonus)', credits: -2 },
+        { at_ms: NOW - 9 * MIN, kind: 'add', who: 'Lucky Otter', what: 'added “Murder on the Dancefloor”', credits: -6 },
+        { at_ms: NOW - 14 * MIN, kind: 'host_gift', who: 'the host', what: 'gave 3 guests 2 each', credits: 2, phones: 3 },
+        { at_ms: NOW - 20 * MIN, kind: 'skip', who: 'Disco Ana', what: 'skipped “Rasputin”', credits: -16 },
+      ],
+    } : { running: false, play_mode: 'credits' });
+  }
   if (url.includes('/api/jukebox/guests')) {
     return json(RUNNING ? { running: true, phones: PHONES, pending: 1, jailed: 1, crowd: 4 } : { running: false, phones: [] });
   }

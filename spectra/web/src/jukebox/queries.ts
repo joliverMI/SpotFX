@@ -8,7 +8,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { spotfxDel, spotfxGet, spotfxPost, spotfxPut } from '../api/client';
 import type {
-  BonusCodesRead, CardRead, GuestsRead, JukeboxBoardRead, JukeboxPreview, JukeboxStatus, NightReport, PriceCheck,
+  BonusCodesRead, CardRead, GuestsRead, JukeboxBoardRead, JukeboxEconomy, JukeboxPreview, JukeboxStatus,
+  NightReport, PriceCheck,
   ProgramConfig, SetMoveResult, ShowRead, SimResult,
 } from './types';
 
@@ -164,6 +165,16 @@ export function useGuests(running: boolean) {
     queryKey: ['jukebox-guests'],
     queryFn: () => spotfxGet<GuestsRead>('/jukebox/guests'),
     refetchInterval: running ? 5000 : 30000,
+  });
+}
+
+/** The Live tab's economy panel: credits now, prices now, recent events. */
+export function useJukeboxEconomy(running: boolean) {
+  return useQuery({
+    queryKey: ['jukebox-economy'],
+    queryFn: () => spotfxGet<JukeboxEconomy>('/jukebox/economy'),
+    enabled: running,
+    refetchInterval: running ? 5000 : false,
   });
 }
 

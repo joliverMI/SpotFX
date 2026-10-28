@@ -289,3 +289,21 @@ def test_the_board_and_the_report_count_a_merged_guest_once():
     book = GuestBook(night_id="n1", phones={
         "new": GuestPhone(id="new", name="Ana"), "old": GuestPhone(id="old", name="Ana old", merged_into="new")})
     assert board._people({"new": 3, "old": 9}, book, 5) == [{"name": "Ana", "value": 3}]
+
+
+def test_a_chained_merge_points_every_retired_phone_at_the_guest():
+    """X into B, then B into C: X's stored `merged_into` reads C, the phone it
+    now belongs to — not B, itself retired (#469's review finding)."""
+    async def go():
+        w = await _night(set_s=300)
+        g = _setup(w)
+        x, b, c = await _phone(g), await _phone(g), await _phone(g)
+        assert (await g.merge(x, b))[0] == 200
+        assert (await g.merge(b, c))[0] == 200
+        book = g._book
+        assert book.phones[x].merged_into == c and book.phones[b].merged_into == c
+        assert book.merged == {x: c, b: c}
+        assert store.load_guests().phones[x].merged_into == c
+        assert (await g.view(x))[1]["view"]["me"]["name"] == book.phones[c].name
+        _sound(g, w)
+    _run(go())

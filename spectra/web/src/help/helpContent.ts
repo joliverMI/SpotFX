@@ -2358,6 +2358,18 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Read-only. It shows whether a night is running and since when, the song playing (a set song, a jukebox song, or something off the set — the Jukebox then waits until the set plays again), the next 20 program items with when each starts, and the jukebox line.',
           '"Sent to Spotify" marks the one song already in Spotify\'s queue. If it is removed, it is skipped the moment it starts and the next waiting song takes its slot.',
           'A night never starts while the house is sleeping (or while that can\'t be read), ends if sleeping comes on, and never runs while Absorb Music has a window open. The line under the night says how many phones are on the guest page tonight.',
+          'The jukebox line names who added each song (never a phone\'s code), whether it was their 1st or 2nd song, what they paid for it in credits mode, and whether it is on hold or sitting out a time-out. To act on a song or a phone, use the Guests tab.',
+        ],
+      },
+      {
+        id: 'jukebox-economy',
+        title: 'The economy right now',
+        keywords: 'economy live credits held per guest made unspent prices add skip play next break out recent events lately tips bumps',
+        body: [
+          'On the Live tab while a night runs, read-only: how many phones are here (seen in the last 15 minutes), joined and in a time-out; the credits guests hold now and per guest, how many were made tonight and how much is still unspent; songs added, skips, play next and tips an hour, votes paid and free credits handed out.',
+          'Prices now: what a guest pays for a 1st song added now, for a song at the back of the line (with how long it would wait), to skip the song playing, for play next and to break out of jail — the same prices their own Shop shows.',
+          'Lately: the newest 20 things that cost or gave credits, in words — songs added, bumps, play next, skips and chip-ins, tips (with their bonus), break-outs, bonus cards, your gifts, zeros and merges, refunds, and what a song\'s ▲ earned its guest. Votes, welcome credits and top-ups happen all the time, so they are counted instead of listed. In free play nothing costs anything, so it says what the room has done instead.',
+          'These are the same numbers the post-party report keeps, read while the night runs.',
         ],
       },
       {
