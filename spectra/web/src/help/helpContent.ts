@@ -2342,12 +2342,13 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'jukebox-slots',
         title: 'Where the jukebox slots go',
-        keywords: 'slots auto every other jukebox first manual click slot two in a row empty slot passes runs out again jukebox only end the night',
+        keywords: 'slots auto every other jukebox first manual click slot two in a row empty slot passes runs out again jukebox only end the night play next jump the set',
         body: [
           'Auto puts a jukebox slot after every 1 to 5 set songs, 1 to 3 slots in a row ("after every 1, 1 in a row" is every other). Jukebox first plays the set only when nobody has a song waiting. Manual is whatever you place.',
           'In Manual, click a set song to put a jukebox slot after it; click a slot to put another one right after it (two in a row; click again for three); × removes one. Slots stay with their song when you reorder the set. Switching from Auto or Jukebox first to Manual copies the pattern that was playing, so you start from it.',
           'An empty slot — nobody\'s song waiting when it comes up — is simply passed and the set continues, so there is never a gap in the music. A slot that MISSES (its song didn\'t reach Spotify in time) is owed to the next gap instead, so the jukebox never loses its turn.',
           'When the set runs out: Play the set again (Spotify loops it), Jukebox songs only (until the line is empty), or End the night with the last set song.',
+          'Play next may jump the set (off by default): off, a song played next — a guest\'s paid play next, or your Play next on the Guests tab — waits for the next jukebox slot. On, it plays straight after the song playing (or after the one already sent to Spotify), ahead of the next set song: an extra song that uses no slot, so the set\'s rhythm around it is unchanged. A guest pays by how far it jumps, so it costs more with this on. What a guest bought stands if you switch it off; dragging a song in the line drops its jump.',
         ],
       },
       {

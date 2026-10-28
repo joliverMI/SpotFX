@@ -85,7 +85,7 @@ HOUSE_TZ = "America/New_York"
 
 #: the program settings Sonic changes (ProgramConfig's scalar fields;
 #: the playlist and the manual slots are the page's — see the docstring)
-PROGRAM_KEYS: tuple[str, ...] = ("mode", "every", "run", "run_out", "commit_lead_s")
+PROGRAM_KEYS: tuple[str, ...] = ("mode", "every", "run", "run_out", "commit_lead_s", "next_jumps_set")
 MODES: tuple[str, ...] = ("auto", "jukebox_first")
 RUN_OUTS: tuple[str, ...] = ("again", "jukebox_only", "end")
 PRESETS: tuple[str, ...] = ("small", "medium", "large")
@@ -111,6 +111,7 @@ _PROGRAM_LABELS = {
     "run": "jukebox slots in a row",
     "run_out": "what happens when the set runs out",
     "commit_lead_s": "seconds before a slot that its song is sent to Spotify",
+    "next_jumps_set": "play next may jump the set",
     "approve_new_phones": "new phones need his approval",
     "play_mode": "the guest page's mode (credits, or free play)",
 }
@@ -628,7 +629,8 @@ OPERATIONS: dict[str, SonicOperation] = {
         instructions=(
             _INSTR_COMMON
             + "Call before set_jukebox_setting to learn the key names: the program keys (mode, "
-            "every, run, run_out, commit_lead_s), approve_new_phones, and every economy key in "
+            "every, run, run_out, commit_lead_s, next_jumps_set), approve_new_phones, and every "
+            "economy key in "
             "`economy_fields` (each with its label, unit and range)."),
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},
         handler=_op_get_jukebox_settings),
@@ -689,7 +691,8 @@ OPERATIONS: dict[str, SonicOperation] = {
             _INSTR_COMMON + _INSTR_CONFIRM
             + "Keys: mode (auto | jukebox_first — never manual, which is placed on the page), "
             "every (1-5), run (1-3), run_out (again | jukebox_only | end), commit_lead_s "
-            "(15-90), approve_new_phones (true/false), play_mode (credits | free — the guest "
+            "(15-90), next_jumps_set (true/false: a song played next plays straight after the "
+            "song playing, ahead of the next set song), approve_new_phones (true/false), play_mode (credits | free — the guest "
             "page's mode: credits turns on prices, the Shop and the credits chip), the guest "
             "rules — night_ends and "
             "explicit_after (\"HH:MM\", house time), last_call_min (0-60), explicit (no | extra "

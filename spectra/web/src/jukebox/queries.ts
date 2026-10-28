@@ -300,7 +300,7 @@ export function usePlayNext() {
   return useMutation({
     mutationFn: async (id: string) => {
       const r = await spotfxPost<{ status: string; detail?: string }>(
-        `/jukebox/line/${encodeURIComponent(id)}/move`, { to: 0 });
+        `/jukebox/line/${encodeURIComponent(id)}/move`, { to: 0, play_next: true });
       if (r.status === 'refused') throw new Error(r.detail || 'It could not move.');
       return r;
     },

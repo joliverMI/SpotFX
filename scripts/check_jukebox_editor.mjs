@@ -608,6 +608,10 @@ console.log('\n§2 the editor, mounted — every click PUTs the slots the rule s
     'Auto → Manual copies the server\'s own manual_equivalent');
   const sel = c.querySelector('select[aria-label="When the set runs out"]');
   ok(!!sel, 'the run-out choice is on the page');
+  const jump = c.querySelector('input[aria-label="Play next may jump the set"]');
+  ok(!!jump && !jump.checked, '"Play next may jump the set" is on the page, off by default');
+  await click(jump);
+  ok(JSON.stringify(puts().at(-1)?.body) === '{"next_jumps_set":true}', 'ticking it PUTs exactly that setting');
   P.unmount();
 }
 {
@@ -829,7 +833,8 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
   ok(!buttonByText(rows[1], /^Play next$/) && !!buttonByText(rows[2], /^Play next$/), 'Play next on a waiting song behind the first');
   await click(buttonByText(rows[2], /^Play next$/));
   const mv = world.requests.filter((r) => r.url === '/api/jukebox/line/e3/move').at(-1);
-  ok(mv?.method === 'POST' && JSON.stringify(mv.body) === '{"to":0}', 'Play next POSTs {to: 0} for that song');
+  ok(mv?.method === 'POST' && JSON.stringify(mv.body) === '{"to":0,"play_next":true}',
+    'Play next POSTs {to: 0, play_next: true} for that song (a drag sends no play_next, so it never jumps)');
   ok(!rows[0].textContent.includes('Hold') && rows[1].textContent.includes('Hold'), 'only a waiting song can be held');
   await click(buttonByText(rows[1], /^Hold$/));
   const holdReq = world.requests.filter((r) => r.url === '/api/jukebox/line/e2/hold').at(-1);

@@ -204,6 +204,11 @@ def test_program_keys_and_approval_go_to_their_own_stores(spotfx):
     assert "off → on" in ask["question"]
     _run(jc._op_set_jukebox_setting("approve_new_phones", True, confirm_id=ask["confirm_id"]))
     assert store.load_show().approve_new_phones is True
+    ask = _run(jc._op_set_jukebox_setting("next_jumps_set", True))   # §4's last Program setting
+    assert ask["status"] == "needs_confirmation" and "play next may jump the set: off → on" in ask["question"]
+    assert store.load_config().next_jumps_set is False                     # asked, not done
+    _run(jc._op_set_jukebox_setting("next_jumps_set", True, confirm_id=ask["confirm_id"]))
+    assert store.load_config().next_jumps_set is True
 
 
 def test_manual_mode_unknown_keys_and_unchanged_values(spotfx):

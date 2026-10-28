@@ -39,6 +39,11 @@ the player had already picked its next track). That slot is OWED and served
 in the next gap (`owe=True`), capped at one gap's worth — the jukebox never
 loses its turn to a timing fault, and the set's own rhythm is not shifted.
 
+A JUMP (§4's "Play next may jump the set"): a fill marked `jump` that is
+next in line plays straight after the item playing, even with no slot open —
+an extra item ahead of the next set song that uses no slot of any gap, so
+the set's own rhythm is unchanged around it.
+
 WHEN THE SET RUNS OUT (`run_out`): "again" wraps to the first set song
 (Spotify's repeat-context does the same, so the two agree); "jukebox_only"
 turns the gap after the last set song into a jukebox-first gap that ends the
@@ -69,6 +74,7 @@ class Fill:
     artist: str = ""
     duration_ms: int = 0
     committed: bool = False
+    jump: bool = False
 
 
 @dataclass
@@ -219,6 +225,12 @@ def project(cfg: ProgramConfig, set_items: Sequence[SetItem], cur: Cursor,
     guard = 0
     while len(out) < count and guard < 4 * count + 16:
         guard += 1
+        if c.gap_left <= 0 and pending and pending[0].jump:
+            f = pending.pop(0)                 # a jump: ahead of the set, no slot used
+            out.append(ProgramItem(kind="jukebox", uri=f.uri, title=f.title, artist=f.artist,
+                                   duration_ms=f.duration_ms, entry_id=f.entry_id,
+                                   committed=f.committed))
+            continue
         if c.gap_left > 0:
             if pending:
                 f = pending.pop(0)

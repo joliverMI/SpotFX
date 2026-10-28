@@ -73,7 +73,8 @@ process on its own port (phase 2) and never reaches these routes.
   DELETE /api/jukebox/line/{id}       a waiting song leaves; a committed one
                                       is skipped as it starts; a playing one
                                       is skipped now
-  POST   /api/jukebox/line/{id}/move  {to} — place among the waiting songs
+  POST   /api/jukebox/line/{id}/move  {to, play_next?} — place among the waiting
+                                      songs (the host's Play next may jump the set)
   POST   /api/jukebox/line/{id}/hold  {held} — the host holds a waiting song
                                       (it keeps its place; slots pass it) or
                                       lets it go
@@ -200,6 +201,7 @@ class AddBody(BaseModel):
 
 class MoveBody(BaseModel):
     to: int
+    play_next: bool = False          # the host's Play next (it may jump the set; a drag never does)
 
 
 class SetMoveBody(BaseModel):
@@ -230,7 +232,7 @@ async def delete_line(entry_id: str) -> dict:
 
 @router.post("/line/{entry_id}/move")
 async def post_move(entry_id: str, body: MoveBody) -> dict:
-    return await night.runner.move(entry_id, body.to)
+    return await night.runner.move(entry_id, body.to, play_next=body.play_next)
 
 
 class HoldBody(BaseModel):

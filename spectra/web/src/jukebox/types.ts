@@ -18,6 +18,8 @@ export interface ProgramConfig {
   manual: ManualSlot[];
   run_out: RunOut;
   commit_lead_s: number;
+  /** §4: a song played next plays straight after the song playing, ahead of the set */
+  next_jumps_set?: boolean;
 }
 
 export interface SetItem {
