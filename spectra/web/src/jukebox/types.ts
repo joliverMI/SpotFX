@@ -217,6 +217,8 @@ export interface GuestPhone {
   /** credits mode: "breakout" (until they pay) instead of a song time-out */
   jail_kind?: 'timeout' | 'breakout';
   credits?: number;
+  /** the names of phones the host merged into this one (§4 "merge two phones") */
+  merged_from?: string[];
 }
 
 /** The board (SpotFX services/jukebox/board.py): tonight's top songs and

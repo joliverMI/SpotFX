@@ -290,6 +290,21 @@ const PHONES = [
   ok(GW.phoneLine({ ...PHONES[3], credits: 7 })
     === 'in a time-out (3 songs to go) · 🎟 7 · 1 in line · 1 played · 3 votes',
     `the credits chip shows beside a time-out, never the ▼ count too (${GW.phoneLine({ ...PHONES[3], credits: 7 })})`);
+  // zero and merge (§4's host buttons, §12's cookie-reset guard)
+  ok(/^since \d\d:\d\d$/.test(GW.sinceWords(Date.UTC(2026, 9, 27, 1, 42))), 'a phone says when it first opened the page');
+  ok(JSON.stringify(GW.phoneTakes({ ...PHONES[0], credits: 4 }, PHONES)) === '["zero","merge"]'
+    && JSON.stringify(GW.phoneTakes(PHONES[0], PHONES)) === '["merge"]'
+    && JSON.stringify(GW.phoneTakes({ ...PHONES[0], credits: 0 }, PHONES)) === '["merge"]',
+    'Zero only while a phone holds credits; Merge while another phone could join');
+  ok(JSON.stringify(GW.phoneTakes({ ...PHONES[2], credits: 4 }, PHONES)) === '[]', 'a blocked phone gets neither');
+  ok(JSON.stringify(GW.phoneTakes(PHONES[0], [PHONES[0], PHONES[2]])) === '[]', 'no Merge with only a blocked phone to join it');
+  ok(JSON.stringify(GW.mergeCandidates(PHONES[0], PHONES).map((p) => p.id)) === '["pb","pd"]',
+    'the phones that could join: every other, not blocked');
+  const mw = GW.mergeWords({ ...PHONES[3], created_ms: 9 }, { ...PHONES[0], credits: 6 });
+  ok(mw.includes('Disco Ana becomes part of Lucky Otter') && mw.includes('6 credits') && mw.endsWith("they're called Disco Ana."),
+    `a merge says what moves and that the guest keeps the first phone's name (${mw})`);
+  ok(GW.phoneLine({ ...PHONES[0], merged_from: ['Lucky Otter'] }).endsWith('merged with Lucky Otter'),
+    'a kept phone names the phones merged into it');
   const kl = GW.lineRows(line, PHONES, false, ['u2']);
   ok(kl[1].skipLocked && !kl[0].skipLocked && !kl[2].skipLocked, 'a song the host kept from skips is marked, by its song');
   ok(GW.lineRows([{ ...line[1], paid: 6 }], PHONES)[0].paid === 6, 'what a guest paid for a song rides on its row');
@@ -419,6 +434,19 @@ globalThis.fetch = async (url, init = {}) => {
   }
   if (u.startsWith('/api/jukebox/guests')) {
     const id = u.split('/api/jukebox/guests/')[1];
+    if (method === 'POST' && id?.endsWith('/zero')) {
+      const pid = decodeURIComponent(id.split('/')[0]);
+      const was = world.phones.find((p) => p.id === pid)?.credits ?? 0;
+      world.phones = world.phones.map((p) => (p.id === pid ? { ...p, credits: 0 } : p));
+      return json({ status: 'ok', zeroed: { name: pid, credits: was }, running: world.running, phones: world.phones });
+    }
+    if (method === 'POST' && id?.endsWith('/merge')) {
+      const keep = decodeURIComponent(id.split('/')[0]);
+      const gone = world.phones.find((p) => p.id === body.retire);
+      world.phones = world.phones.filter((p) => p.id !== body.retire)
+        .map((p) => (p.id === keep ? { ...p, merged_from: [gone.name] } : p));
+      return json({ status: 'ok', merged: { name: keep, songs: 2, credits: 0 }, running: world.running, phones: world.phones });
+    }
     if (method === 'POST' && id) {
       const { pardon, ...patch } = body || {};
       world.phones = world.phones.map((p) => (p.id === decodeURIComponent(id)
@@ -744,9 +772,40 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
   ok(appr?.method === 'POST' && JSON.stringify(appr.body) === '{"approved":true}', 'Approve POSTs {approved: true} for that phone');
   await P.settle();
   ok(!buttonByText([...c.querySelectorAll('[data-testid="jukebox-phone"]')][1], /^Approve$/), 'the approved phone loses its Approve button');
+  world.phones = world.phones.map((p) => (p.id === 'pa' ? { ...p, credits: 6 } : p));
   await click(buttonByText(phones[0], /^Lock name$/));
   ok(JSON.stringify(world.requests.filter((r) => r.url === '/api/jukebox/guests/pa').at(-1)?.body) === '{"name_locked":true}',
     'Lock name POSTs {name_locked: true}');
+  // zero and merge (§4, §12): Zero asks once; Merge… picks the phone that joins
+  await P.settle();
+  const rowsZ = [...c.querySelectorAll('[data-testid="jukebox-phone"]')];
+  ok(rowsZ.every((r) => /^since \d\d:\d\d$/.test(text(r.querySelector('[data-testid="jukebox-phone-since"]')))),
+    'every phone says when it first opened the page');
+  ok(!!buttonByText(rowsZ[0], /^Zero$/) && !buttonByText(rowsZ[3], /^Zero$/) && !buttonByText(rowsZ[2], /^Merge…$/),
+    'Zero only on a phone holding credits; neither on a blocked one');
+  await click(buttonByText(rowsZ[0], /^Zero$/));
+  ok(!world.requests.some((r) => r.url === '/api/jukebox/guests/pa/zero') && !!buttonByText(rowsZ[0], /^Keep$/),
+    'Zero asks once before taking anything back');
+  await click(buttonByText(rowsZ[0], /^Take 6 back$/));
+  ok(world.requests.filter((r) => r.url === '/api/jukebox/guests/pa/zero').at(-1)?.method === 'POST',
+    'Take 6 back POSTs that phone\'s zero');
+  await P.settle();
+  ok(!buttonByText([...c.querySelectorAll('[data-testid="jukebox-phone"]')][0], /^Zero$/), 'a zeroed phone loses its Zero button');
+  const rowA = [...c.querySelectorAll('[data-testid="jukebox-phone"]')][0];
+  await click(buttonByText(rowA, /^Merge…$/));
+  const pick = rowA.querySelector('select[aria-label="The phone that joins Disco Ana"]');
+  ok(!!pick && [...pick.options].map((o) => o.value).join(',') === ',pb,pd', 'the picker offers every other phone not blocked');
+  ok(buttonByText(rowA, /^Merge$/).disabled, 'nothing merges until a phone is picked');
+  const selSet = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, 'value').set;
+  P.actSync(() => { selSet.call(pick, 'pd'); pick.dispatchEvent(new dom.window.Event('change', { bubbles: true })); });
+  ok(text(rowA.querySelector('[data-testid="jukebox-merge-words"]')).startsWith('Lucky Otter becomes part of Disco Ana'),
+    'it says what the merge will do before he confirms');
+  await click(buttonByText(rowA, /^Merge$/));
+  const mr = world.requests.filter((r) => r.url === '/api/jukebox/guests/pa/merge').at(-1);
+  ok(mr?.method === 'POST' && JSON.stringify(mr.body) === '{"retire":"pd"}', `Merge POSTs the phone that joins (${JSON.stringify(mr?.body)})`);
+  await P.settle();
+  const after = [...c.querySelectorAll('[data-testid="jukebox-phone"]')];
+  ok(after.length === 3 && text(after[0]).includes('merged with Lucky Otter'), 'one guest now: the merged phone leaves the list, the kept one names it');
   const puts2 = () => world.requests.filter((r) => r.method === 'PUT' && r.url.startsWith('/api/jukebox/show'));
   const lc = c.querySelector('input[aria-label="Requests close before the end (last call)"]');
   const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set;
@@ -825,7 +884,8 @@ console.log('\n§3 help — every topic is real and reachable from the page');
   const topics = ['jukebox', 'jukebox-set-list', 'jukebox-slots', 'jukebox-live', 'jukebox-sign-in',
     'jukebox-credits', 'jukebox-presets', 'jukebox-price-check', 'jukebox-simulator', 'sonic-jukebox',
     'jukebox-report', 'jukebox-guest-page', 'jukebox-guests', 'jukebox-free-play', 'jukebox-credits-mode',
-    'jukebox-skip-lock', 'jukebox-board', 'jukebox-gifts', 'jukebox-bonus-cards', 'jukebox-cards'];
+    'jukebox-skip-lock', 'jukebox-board', 'jukebox-gifts', 'jukebox-bonus-cards', 'jukebox-cards',
+    'jukebox-merge-phones'];
   const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
   const knownIds = new Set();
   for (const section of HELP_SECTIONS) {
@@ -877,7 +937,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     if (id && id !== 'sonic-scene-backups') reached.add(id);
   }
   ok(topics.every((id) => reached.has(id)) && reached.size === topics.length,
-    `the page's own controls and its 💬 Sonic open exactly the twenty jukebox topics (${[...reached].sort().join(', ')})`);
+    `the page's own controls and its 💬 Sonic open exactly the twenty-one jukebox topics (${[...reached].sort().join(', ')})`);
   P.unmount();
 }
 

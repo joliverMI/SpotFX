@@ -11254,6 +11254,22 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   never leaving), `scripts/render_jukebox_cards.py` (printed to a Letter
   PDF: one page, QRs ≥ 1 in, the longest Wi-Fi still fitting; `--out`),
   both run by `tests/test_jukebox_cards.py`; help `jukebox-cards`.
+- **ZERO AND MERGE A PHONE** (§4's host buttons, §12's cookie-reset and
+  second-phone guards; `guests.py`'s ZERO AND MERGE docstring section is the
+  binding statement). Zero is one `host_zero` ledger entry (balance to
+  exactly 0) and forgoes any welcome credits not yet had. Merge makes two
+  phones ONE GUEST: a `merge_out`/`merge_in` ledger group, after which the
+  ledger forwards every write naming the retired phone to the kept one
+  (`Ledger.owner`) and counts per-guest things (votes paid, tips a song, the
+  double-first allowance) as one — `verify()` re-checks all of it, replay
+  included. Songs, votes, time-out, jail count and bumps join the kept phone;
+  the guest keeps the FIRST phone's name. The retired code keeps working:
+  every guest call is resolved through `Guests.alias` (the `@_as_guest`
+  decorator — a new guest call naming a phone needs it), and hello hands
+  that page the kept code. A new per-phone record (book or engine) must be
+  folded in `Guests.merge`/`JukeboxRunner.merge_phone` too. Sonic: a named
+  exclusion. Spec: `tests/test_jukebox_zero_merge.py`; help
+  `jukebox-merge-phones`.
 - **NAMES**: the code says `program`, never `setlist` — SpotFX's existing
   Set Lists (`services/setlist_store.py`) is a different feature. Stores:
   `storage/jukebox.json` (his program settings, one validator:

@@ -1277,6 +1277,31 @@ class JukeboxRunner:
             await self._persist()
             return {"status": "pardoned"}
 
+    async def merge_phone(self, retire: str, into: str) -> dict:
+        """The host merged two phones into one guest (services/jukebox/
+        guests.py's `merge`): every song the retired phone added — waiting
+        or played — is the kept phone's now, and a time-out it was serving
+        carries over when it is longer than the kept phone's own."""
+        async with self._get_lock():
+            self._ensure_loaded()
+            if not self.running:
+                return self._refused("not_running")
+            n = self.night
+            songs = 0
+            for e in n.line:
+                if e.added_by == retire:
+                    e.added_by = into
+                    songs += 1
+            if retire in n.jail:
+                until, kind = n.jail.pop(retire), n.jail_kind.pop(retire, "timeout")
+                if until > n.plays and until > n.jail.get(into, n.plays):
+                    n.jail[into], n.jail_kind[into] = until, kind
+            else:
+                n.jail_kind.pop(retire, None)
+            self._log("the host merged two phones into one guest")
+            await self._persist()
+            return {"status": "merged", "songs": songs}
+
     async def convert_jail_mode(self, credits: bool, free_jail_songs: int) -> None:
         """A mode switch (services/jukebox/show.py's one validator path, the
         PUT /api/jukebox/show route) converts jails already running — the

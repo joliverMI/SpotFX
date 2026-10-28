@@ -49,7 +49,46 @@ export function phoneLine(p: GuestPhone): string {
   if (p.played) parts.push(`${p.played} played`);
   if (p.votes) parts.push(`${p.votes} vote${p.votes === 1 ? '' : 's'}`);
   if (p.name_locked) parts.push('name locked');
+  if (p.merged_from?.length) parts.push(`merged with ${p.merged_from.join(', ')}`);
   return parts.join(' · ');
+}
+
+const two = (n: number) => String(n).padStart(2, '0');
+
+/** When a phone first opened the page tonight, in the house's time ("since
+ *  21:42") — so a new phone late in the night stands out (report §12). */
+export function sinceWords(ms: number): string {
+  const d = new Date(ms);
+  return `since ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
+export type PhoneTake = 'zero' | 'merge';
+
+/** The host's two bigger buttons (§4): Zero while it holds credits (credits
+ *  mode), Merge while another phone could join it. Never on a blocked one. */
+export function phoneTakes(p: GuestPhone, phones: GuestPhone[]): PhoneTake[] {
+  if (p.blocked) return [];
+  const out: PhoneTake[] = [];
+  if ((p.credits ?? 0) > 0) out.push('zero');
+  if (mergeCandidates(p, phones).length) out.push('merge');
+  return out;
+}
+
+/** The phones that could join this one: any other, not blocked. */
+export function mergeCandidates(keep: GuestPhone, phones: GuestPhone[]): GuestPhone[] {
+  return phones.filter((q) => q.id !== keep.id && !q.blocked);
+}
+
+/** What a merge does, in words, before he confirms it. The guest keeps the
+ *  name of whichever phone came first tonight (the server's rule). */
+export function mergeWords(keep: GuestPhone, retire: GuestPhone): string {
+  const first = retire.created_ms < keep.created_ms ? retire : keep;
+  const bits = [retire.waiting || retire.played ? 'songs' : '', 'votes',
+                retire.jail_left ? 'time-out' : '',
+                retire.credits !== undefined ? `${retire.credits} credit${retire.credits === 1 ? '' : 's'}` : '']
+    .filter(Boolean);
+  return `${retire.name} becomes part of ${keep.name}: its ${bits.join(', ')} come here, both codes `
+    + `work as one guest, and they're called ${first.name}.`;
 }
 
 export type PhoneAction = 'approve' | 'pardon' | 'block' | 'unblock' | 'lock' | 'unlock' | 'rename';

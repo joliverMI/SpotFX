@@ -11,10 +11,13 @@ import { useState } from 'react';
 import InfoTip from '../components/InfoTip';
 import { useToast } from '../components/Toast';
 import BoardLists from './BoardLists';
-import { lineRows, phoneActions, phoneLine, type PhoneAction } from './jukeboxGuests';
 import {
-  useGift, useGuests, useHoldEntry, useHostPhone, useJukeboxBoard, useJukeboxShow, usePlayNext,
-  useRemoveEntry, useSaveShow, useSkipLock,
+  lineRows, mergeCandidates, mergeWords, phoneActions, phoneLine, phoneTakes, sinceWords,
+  type PhoneAction,
+} from './jukeboxGuests';
+import {
+  useGift, useGuests, useHoldEntry, useHostPhone, useJukeboxBoard, useJukeboxShow, useMergePhones,
+  usePlayNext, useRemoveEntry, useSaveShow, useSkipLock, useZeroPhone,
 } from './queries';
 import type { GuestField, GuestPhone, JukeboxStatus, ShowConfig } from './types';
 
@@ -42,6 +45,8 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
   const playNext = usePlayNext();
   const skipLock = useSkipLock();
   const gift = useGift();
+  const zero = useZeroPhone();
+  const merge = useMergePhones();
   const giveTo = (to: string, amount: number, who: string) => gift.mutate({ to, amount }, {
     onSuccess: (r) => toast(`Gave ${who} ${amount} credit${amount === 1 ? '' : 's'}${
       to === 'everyone' && r.gift ? ` (${r.gift.phones} phone${r.gift.phones === 1 ? '' : 's'})` : ''}`, 'success'),
@@ -185,9 +190,17 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
         {phones.length > 0 ? (
           <ul className="jukebox-phones">
             {phones.map((p) => (
-              <PhoneRow key={p.id} p={p} canGift={running && credits && p.joined && p.approved && !p.blocked}
+              <PhoneRow key={p.id} p={p} phones={phones} canGift={running && credits && p.joined && p.approved && !p.blocked}
                 onSet={(patch) => host.mutate({ id: p.id, ...patch }, { onError })}
-                onGift={(amount) => giveTo(p.id, amount, p.name)} />
+                onGift={(amount) => giveTo(p.id, amount, p.name)}
+                onZero={() => zero.mutate(p.id, {
+                  onSuccess: (r) => toast(`${r.zeroed?.name ?? p.name}: ${r.zeroed?.credits ?? 0} credits taken back`, 'success'),
+                  onError,
+                })}
+                onMerge={(retire) => merge.mutate({ keep: p.id, retire }, {
+                  onSuccess: (r) => toast(`One guest now: ${r.merged?.name ?? p.name}`, 'success'),
+                  onError,
+                })} />
             ))}
           </ul>
         ) : running && <p className="jukebox-muted">No phones yet: they join through tonight's party link.</p>}
@@ -254,14 +267,20 @@ function RuleRow({ f, show, onSave, onBad }: {
 
 const GIFT_MAX = 20;    // SpotFX guests.GIFT_MAX
 
-function PhoneRow({ p, onSet, canGift = false, onGift }: {
-  p: GuestPhone;
+function PhoneRow({ p, phones, onSet, canGift = false, onGift, onZero, onMerge }: {
+  p: GuestPhone; phones: GuestPhone[];
   onSet: (patch: { approved?: boolean; blocked?: boolean; name_locked?: boolean; name?: string;
                    pardon?: boolean }) => void;
   canGift?: boolean; onGift?: (amount: number) => void;
+  onZero?: () => void; onMerge?: (retire: string) => void;
 }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [giving, setGiving] = useState<string | null>(null);
+  const [zeroing, setZeroing] = useState(false);
+  const [merging, setMerging] = useState<string | null>(null);
+  const takes = phoneTakes(p, phones);
+  const candidates = mergeCandidates(p, phones);
+  const retiring = candidates.find((q) => q.id === merging) ?? null;
   const giveAmount = giving === null ? NaN : Number(giving);
   const giveOk = Number.isInteger(giveAmount) && giveAmount >= 1 && giveAmount <= GIFT_MAX;
   return (
@@ -279,8 +298,46 @@ function PhoneRow({ p, onSet, canGift = false, onGift }: {
             }} />
         )}
         <span className="jukebox-song-artist">{phoneLine(p)}</span>
+        <span className="jukebox-muted jukebox-phone-since" data-testid="jukebox-phone-since">
+          {sinceWords(p.created_ms)}
+        </span>
+        {merging !== null && (
+          <span className="jukebox-merge" data-testid="jukebox-merge">
+            <label className="jukebox-merge-pick">
+              <span>Merge into {p.name}:</span>
+              <select aria-label={`The phone that joins ${p.name}`} value={merging}
+                onChange={(e) => setMerging(e.target.value)}>
+                <option value="">Pick a phone…</option>
+                {candidates.map((q) => (
+                  <option key={q.id} value={q.id}>{q.name} ({sinceWords(q.created_ms)})</option>
+                ))}
+              </select>
+            </label>
+            {retiring && <span className="jukebox-muted" data-testid="jukebox-merge-words">{mergeWords(p, retiring)}</span>}
+            <span className="jukebox-guest-actions">
+              <button disabled={!retiring} onClick={() => { if (retiring && onMerge) onMerge(retiring.id); setMerging(null); }}>
+                Merge
+              </button>
+              <button onClick={() => setMerging(null)}>Cancel</button>
+            </span>
+          </span>
+        )}
       </span>
       <span className="jukebox-guest-actions">
+        {takes.includes('zero') && onZero && (zeroing ? (
+          <>
+            <button onClick={() => { onZero(); setZeroing(false); }}>Take {p.credits} back</button>
+            <button onClick={() => setZeroing(false)}>Keep</button>
+          </>
+        ) : (
+          <button onClick={() => setZeroing(true)}>Zero</button>
+        ))}
+        {takes.includes('merge') && onMerge && merging === null && (
+          <InfoTip topic="jukebox-merge-phones"
+            text="Two phones, one guest (a cleared cookie, a second phone): pick the phone that joins this one. Its songs, votes, time-out and credits come here, and both codes keep working as one guest.">
+            <button onClick={() => setMerging('')}>Merge…</button>
+          </InfoTip>
+        )}
         {canGift && onGift && (giving === null ? (
           <button onClick={() => setGiving('2')}>Give…</button>
         ) : (

@@ -40,7 +40,8 @@ excluded" from "forgotten":
     its votes, the songs it adds — are the guests', never the host's to make
     by voice (`jukebox_status` reads how many phones are on the page);
   * the host's controls over a PHONE (approve, block, rename, lock its name;
-    PR 2.2; pardon a guest in a time-out, PR 2.3) — they act on a person
+    PR 2.2; pardon a guest in a time-out, PR 2.3; zero its credits and
+    merge two phones into one guest, §4's host buttons) — they act on a person
     standing in his room, by name, and a misheard name would block, rename
     or free the wrong guest; they are the Guests tab's buttons, where each
     phone is shown;
