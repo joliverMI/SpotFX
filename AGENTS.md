@@ -12524,8 +12524,10 @@ Five things:
   coils there, its head quivering harder to the drop, never dark; Star is
   black from its dark point, then a thin, dim outline in its own shape grows
   out of the centre as it spins up, full size on the drop, and the drop's
-  pieces wear the set as it is at the drop (a drop with no pre-drop keeps
-  today's colours — re-sampling there would change untold drops); Sauron
+  pieces wear the set as it is at the drop — WIDENED 2026-10-28 (the
+  Admiral: "yes, the star should change color") to every drop that lands a
+  colour change, not just one whose pre-drop played: `fx/effects/
+  drop_colour_resample.py` tells Star so on every drop arm; Sauron
   is black through the breath, then its lids part to the iris's edge, the
   flames held down, a glare dimmer than the prototype (0.20 -> 0.36), and
   the drop opens it without its half-open slam; the strips keep their own

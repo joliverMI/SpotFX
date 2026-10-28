@@ -164,15 +164,21 @@ invariants not visible cold:
   composed brighter-wins over the black panel in `_star_phase_frame`. The
   drop is Star's own D3.
 - **THE DROP'S PIECES WEAR THE SET AS IT IS AT THE DROP** (the plan's 2.2:
-  "Star re-samples its palette as the colour fades"). A falling piece keeps
+  "Star re-samples its palette as the colour fades"; widened 2026-10-28,
+  the Admiral: "yes, the star should change color"). A falling piece keeps
   its palette POSITION (`g`, NaN when no palette was seen); after a
-  pre-drop that played (`_pd_seen`) `_drop_snap` recolours the pieces from
+  pre-drop that played (`_pd_seen`), OR when SpotFX tells the drop a
+  colour change landed with no pre-drop to fade across
+  (`fx/effects/drop_colour_resample.py`'s `drop_color_landed` key — the
+  SAME `ResponseEngine.on_event` drop-colour claim that tells a band to
+  skip its own colour-jump kind), `_drop_snap` recolours the pieces from
   the live palette every frame (`_palette_full`, nearest_set_grad's own
-  arithmetic, so an unchanged set gives the same colours back). Scoped to a
-  told pre-drop on purpose: Melt's gradient can roll, so re-sampling on
-  every drop would change untold drops. On a drop with NO pre-drop the
-  pieces still fly out in the colours they fell in with under the instant
-  colour change (about half a second) — left for his word.
+  arithmetic, so an unchanged OR held set gives the same colours back —
+  Melt's gradient can roll, but a held change never claims, so the told
+  key stays False and nothing resamples). On a drop with no pre-drop the
+  pieces now fly out in the NEW set too, under the instant colour change
+  (about half a second), landing on the drop's first rendered frame — the
+  told key reaches Star right before this drop's own phase arm.
 - **LIGHT AND IDENTITY.** The lull's light drops (-14% at a 0.8 s spike,
   -48% at 2 s, -45% at a 3.3 s vocal intro). Untold, `_pre_drop_step`
   clears the clock first, so the lull is today's frame for frame (proven

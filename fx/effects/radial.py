@@ -6,7 +6,8 @@ from PIL import Image
 
 import fx.effects.particle_handoff as particle_handoff
 import fx.effects.pre_drop as pre_drop
-from fx.effects import lull_dark, lull_handoff, phase_grammar, strip_phase
+from fx.effects import drop_colour_resample, lull_dark, lull_handoff, \
+    phase_grammar, strip_phase
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.twod import Twod
 from fx.utils import nonlinear_log
@@ -110,7 +111,13 @@ BAND_FALLBACK = np.linspace(0.12, 0.92, 8, dtype=np.float32)
 # by angle from the live palette, so the colour change fading across the
 # pre-drop shows in it. The drop is Star's own. Its thrown-back pieces wear
 # the set as it is at the drop, not as it was when they fell in (the plan's
-# 2.2: "Star re-samples its palette as the colour fades").
+# 2.2: "Star re-samples its palette as the colour fades") — WIDENED
+# 2026-10-28 (the Admiral: "yes, the star should change color") past the
+# pre-drop fade: a drop with no pre-drop changes the set instantly, right
+# before this phase arm lands, and SpotFX tells Star so
+# (fx/effects/drop_colour_resample.py), so the thrown-back pieces
+# re-sample then too (`_begin_snap`'s own comment is the binding statement
+# for the rule).
 PRE_DROP_LOOK = "outline"
 PRE_DROP_OUTLINE_R = 0.42       # its full size: shaped px, x the panel height
 PRE_DROP_OUTLINE_W = 1.6        # half-width: full within 0.6 px, gone by 1.6
@@ -189,6 +196,7 @@ class Radial2d(Twod):
     ADVANCED_KEYS = Twod.ADVANCED_KEYS + [
         "phase", "phase_progress", *lull_dark.KEYS, *phase_grammar.BREATH_KEYS,
         lull_handoff.DROP_KEY, phase_grammar.SHOCK_ON_KEY, *pre_drop.KEYS,
+        drop_colour_resample.KEY,
     ]
     # Star takes the BREATH-HOLD itself (in its own draw, like Pulse) and
     # never the shared Shockwave overlay — its drop is D3, the bands
@@ -334,6 +342,9 @@ class Radial2d(Twod):
             # THE PRE-DROP's told keys (ride only the lull arm; zeros on a
             # lull that plays none) — fx/effects/pre_drop.py
             **pre_drop.schema_fields(),
+            # THE DROP COLOUR RE-SAMPLE's told key (rides only the drop
+            # arm) — fx/effects/drop_colour_resample.py
+            **drop_colour_resample.schema_field(),
         }
     )
 
@@ -1123,10 +1134,16 @@ class Radial2d(Twod):
             "decay": max(0.05, float(self._config.get(
                 "drop_snap_decay_s", DEFAULT_DROP_SNAP_DECAY_S)) * scale),
         }
-        if self._pd_seen:
-            # THE PRE-DROP played: the colour faded across it, so the pieces
-            # wear the set as it is now (re-read every frame of the snap).
-            # The drop's edge then forgets it (_phase_edge).
+        if self._pd_seen or drop_colour_resample.landed(self._config):
+            # THE PRE-DROP played (colour faded across it), OR SpotFX told
+            # this drop a colour change landed on it with no pre-drop to
+            # fade across (fx/effects/drop_colour_resample.py — widened
+            # 2026-10-28, the Admiral: "yes, the star should change
+            # color"): the pieces wear the set as it is now, re-read every
+            # frame of the snap. `_phase_edge` clears `_pd_seen` on this
+            # same edge; the told key needs no clearing — SpotFX re-asserts
+            # it fresh (even False) on every drop arm, never left standing
+            # from the last one.
             self._snap["g"] = gpos.astype(np.float32)
 
     def _drop_snap(self, rgb, dt):

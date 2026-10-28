@@ -2698,11 +2698,20 @@ against that commit.
     from 0 to `PRE_DROP_OUTLINE_R` x the panel height (`1 - (1 - frac)^2`),
     turning with Star plus its own spin-up (`PRE_DROP_SPIN_FROM` -> `_TO`),
     dim, coloured round the set by angle from the cached palette, composed
-    brighter-wins; a falling lull piece keeps its palette position (`g`) and,
-    after a pre-drop that played (`_pd_seen`), `_drop_snap` recolours the
-    pieces from the live palette (`_palette_full`, nearest_set_grad's own
-    arithmetic) — the plan's 2.2, "Star re-samples its palette as the colour
-    fades"; a drop with no pre-drop keeps today's colours. SAURON ("glare"):
+    brighter-wins; a falling lull piece keeps its palette position (`g`)
+    and, after a pre-drop that played (`_pd_seen`), `_drop_snap` recolours
+    the pieces from the live palette every frame (`_palette_full`,
+    nearest_set_grad's own arithmetic) — the plan's 2.2, "Star re-samples
+    its palette as the colour fades". WIDENED 2026-10-28 (the Admiral:
+    "yes, the star should change color"): a drop with no pre-drop used to
+    keep today's colours while every other light switched, because there
+    is no pre-drop clock to tell Star the change landed — `fx/effects/
+    drop_colour_resample.py` (`drop_color_landed`, told on every drop arm
+    to `fx.device_model.DROP_COLOUR_RESAMPLE_EFFECTS`, radial only) carries
+    `ResponseEngine.on_event`'s own drop-colour claim instead, so
+    `_begin_snap` re-samples whenever EITHER signal says the colour moved.
+    A held change never claims, so the told key reads False and the
+    pieces keep their stored colours unchanged. SAURON ("glare"):
     on the pre-drop the lids part over `PRE_DROP_PART_S` to
     `PRE_DROP_LID_OPEN_TO` (Eye's lid pause, on the iris's edge), the
     flames' reach is held to `PRE_DROP_FLAMES` (`_flames(held=)`) and the

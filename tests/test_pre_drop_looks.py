@@ -443,6 +443,7 @@ def test_black_hole_light_over_the_lull_is_below_todays(tmp_path, lull_s,
 
 # ═══ Step 8: the Fish, Star and Sauron ═════════════════════════════════════
 
+from fx.effects import drop_colour_resample as dcr  # noqa: E402
 from fx.effects import fish as fish_mod  # noqa: E402
 from fx.effects import radial as star_mod  # noqa: E402
 from fx.effects import sauron as sauron_mod  # noqa: E402
@@ -475,13 +476,21 @@ def _told8(tmp_path, effect, lull_s=3.2, gap_s=0.8, kind="spike"):
 
 
 def _star(tmp_path, star_type, lull_s=3.2, gap_s=None, kind="spike",
-          today=False, **kw):
+          today=False, drop_colour_landed=None, **kw):
     scene = H.star_scene()
     at = None if gap_s is None else lull_s - gap_s
     arms = H.engine_arms("radial", lull_s, at_s=at, gap_s=gap_s, kind=kind,
                          scene=scene)
     if today:
         arms = _today(arms, "radial")
+    elif drop_colour_landed is not None:
+        # Simulates what scene_response._drive_phase tells radial on a
+        # drop whose colour change landed with no pre-drop to fade across
+        # (fx/effects/drop_colour_resample.py) — the engine_arms() helper
+        # above already drove the real _drive_phase, so "drop" already
+        # carries the key at its NOT_TOLD default (False); this overrides
+        # it the same way a real claimed/held colour change would.
+        arms["drop"].params[dcr.KEY] = bool(drop_colour_landed)
     strip = H.engine_arms("melt", lull_s, at_s=at, gap_s=gap_s, kind=kind,
                           scene=scene)
     return H.run_async(H.star_run(tmp_path, star_type, arms, strip,
@@ -637,13 +646,14 @@ def test_star_light_over_the_lull_is_below_todays(tmp_path, lull_s, gap_s,
     assert _lull_light(told) < _lull_light(today)
 
 
-def _old_hue_cells(run, within_s=0.35):
-    """Lit real cells in the drop's first `within_s` whose hue is the OLD
-    set's (FIREWORKS_CFG's blue to purple) rather than NEW_SET's warm."""
+def _old_hue_cells(run, within_s=0.35, phase="drop"):
+    """Lit real cells, within `within_s` of `phase` starting, whose hue is
+    the OLD set's (FIREWORKS_CFG's blue to purple) rather than NEW_SET's
+    warm."""
     import colorsys
     count = 0
     for (ph, t), f in zip(run.phase, run.frames):
-        if ph != "drop" or t > within_s:
+        if ph != phase or t > within_s:
             continue
         px = f.reshape(-1, 3)[MASK]
         for r, g, b in px[px.max(axis=1) > 60.0]:
@@ -669,6 +679,57 @@ def test_star_drop_pieces_wear_the_set_as_it_is_at_the_drop(
     control = _star(tmp_path, _pinned8("radial"), lull_s, today=True,
                     strip_pokes=change)
     assert _old_hue_cells(control) > 100, "the control shows the defect"
+
+
+def test_star_drop_with_no_pre_drop_wears_the_new_set_too(tmp_path):
+    """Widened 2026-10-28, the Admiral: "yes, the star should change
+    color" — a drop with NO pre-drop changes colour instantly, right
+    before this drop's own phase arm lands (fx/effects/
+    drop_colour_resample.py's `drop_colour_landed`, told the same way
+    scene_response._drive_phase tells every other told key). Before the
+    drop, the lull's pieces fall in with the OLD set; on the drop they
+    must fly back out in the NEW one, from its very first rendered
+    frame — not just eventually blending toward it."""
+    lull_s = 3.2
+    at_drop_edge = int(round(lull_s / DT))
+    change = {("lull", at_drop_edge): {"gradient": NEW_SET}}
+    told = _star(tmp_path, "radial", lull_s, gap_s=None,
+                strip_pokes=change, drop_colour_landed=True)
+    drop = [i for (ph, _t), i in zip(told.phase, told.info) if ph == "drop"]
+    assert drop[0]["snap"] and drop[0]["snap_resampled"]
+    assert _old_hue_cells(told, within_s=1.0, phase="lull") > 0, \
+        "before the drop, the falling pieces wore the OLD set"
+    assert _old_hue_cells(told) == 0, "none of the old hue survives the drop"
+    # the untold control (same strip poke, drop never told a colour landed
+    # — exactly what the room renders before this PR): the pieces fly out
+    # in the colours they fell in with.
+    control = _star(tmp_path, "radial", lull_s, gap_s=None,
+                    strip_pokes=change, drop_colour_landed=False)
+    cdrop = [i for (ph, _t), i in zip(control.phase, control.info)
+            if ph == "drop"]
+    assert not cdrop[0]["snap_resampled"]
+    assert _old_hue_cells(control) > 100, "the untold control keeps the old set"
+
+
+def test_star_drop_keeps_its_colours_when_the_change_is_held(tmp_path):
+    """The Admiral's own requirement: a held colour change (any named
+    hold — preview, Force Colour, house mode, a 2D gradient) leaves the
+    set unchanged, so Star must keep its current colours. A held change
+    never claims (ResponseEngine.drop_color_change never reaches
+    `_claim_drop_colour`), so this drop is told `drop_colour_landed=False`
+    exactly like the untold control above — proven here against a strip
+    whose gradient DID move (simulating some other, unrelated write), so
+    the assertion is about the GATE, not about nothing having changed."""
+    lull_s = 3.2
+    at_drop_edge = int(round(lull_s / DT))
+    change = {("lull", at_drop_edge): {"gradient": NEW_SET}}
+    held = _star(tmp_path, "radial", lull_s, gap_s=None,
+                strip_pokes=change, drop_colour_landed=False)
+    drop = [i for (ph, _t), i in zip(held.phase, held.info) if ph == "drop"]
+    assert drop[0]["snap"]
+    assert not drop[0]["snap_resampled"], \
+        "a held change never re-samples, even though the strip did move"
+    assert _old_hue_cells(held) > 100, "the pieces keep the colours they fell in with"
 
 
 # ── Sauron: black, the lids part to a dimmed glare, no slam on the drop ───
