@@ -343,7 +343,7 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
         </div>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, margin: '8px 0' }}>
-          <span style={{ color: 'var(--text-muted)' }}>Intensity</span>
+          <span style={{ color: 'var(--text-muted)' }}>Energy</span>
           <input type="range" min={0} max={1} step={0.01} value={intensity}
             onChange={(e) => setIntensity(Number(e.target.value))} style={{ flex: 1 }} />
           <span style={{ fontVariantNumeric: 'tabular-nums', width: 36 }}>{intensity.toFixed(2)}</span>
@@ -376,7 +376,7 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
             This kind produces no writes at this intensity — {timeline.result === 'no_visible_effect'
               ? 'its params don\'t match any live virtual\'s registered params (or its gain is 1.0 with no params at all).'
               : timeline.result === 'below_min_intensity'
-                ? `it only fires above intensity ${kind.min_intensity ?? '?'}; raise the intensity slider to see it.`
+                ? `it only fires above Energy ${kind.min_intensity ?? '?'}; raise the Energy slider to see it.`
                 : `result: ${timeline.result}.`}
           </div>
         )}

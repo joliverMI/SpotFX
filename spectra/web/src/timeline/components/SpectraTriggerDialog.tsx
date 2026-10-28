@@ -213,19 +213,10 @@ export default function SpectraTriggerDialog({
           </label>
         )}
 
-        {action.kind !== 'select_color_set' && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}
-            title="Fire intensity (0–1) — passed straight through to the action (bindings, response bands).">
-            <span style={{ width: 90, color: 'var(--text-muted)' }}>Intensity ⚡</span>
-            <input type="range" min={0} max={1} step={0.01} value={action.intensity}
-              onChange={(e) => setAction({ ...action, intensity: Number(e.target.value) })}
-              style={{ flex: 1 }} />
-            <input type="number" min={0} max={1} step={0.01} value={action.intensity}
-              onChange={(e) => setAction({ ...action, intensity: Math.max(0, Math.min(1, Number(e.target.value))) })}
-              style={{ width: 70, background: 'var(--bg)', color: 'var(--text)',
-                       border: '1px solid var(--border)', borderRadius: 6, padding: '5px 8px' }} />
-          </label>
-        )}
+        {/* No Intensity field (2026-10-28, the Energy plan's D4): the
+            trigger fires at Energy at its own moment (spectra/services/
+            energy.py); the stored value is read by nothing and stays as it
+            is, on the "to remove later" list. */}
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}>
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />

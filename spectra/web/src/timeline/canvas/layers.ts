@@ -5,6 +5,7 @@
 import type { CanvasFrame, CanvasLayer, Hit } from './frame';
 import { AVG_COLORS, MARK_ABBR, MARK_COLOR, computeBlendSpans } from './data';
 import type { MarkType } from '../types';
+import { energyFill } from '../../lib/energyAt';
 // Reused verbatim from the debug page (PR fm/planned-event-markers) — the
 // draw code only ever reads pre-placed f.data.plannedEvents, so it's the
 // same layer here as there; each page supplies its own placement (see
@@ -94,27 +95,26 @@ export const intensityBackground: CanvasLayer = {
       drawCurve(f, idx.map((i) => ({ x: dataX(f, ts[i]), y: y(series[i] ?? 0) })));
       return;
     }
-    // BY SECTION, AS BLOCKS (the Admiral, 2026-10-15: "the intensity
-    // graph should be by section, like the top bar timeline"). One filled
-    // block per librosa section at that section's own `energy_rms` — the
-    // SAME measured quantity the song timeline's energy terrain is built
-    // from (components/songStrip.ts::terrainPath), so the two surfaces
-    // read as one picture. It was a single stroked step-polyline before,
-    // which read as a continuous curve with corners rather than a level
-    // per section; each block now carries its own top edge and a faint
-    // boundary tick, so where one section ends and the next begins is
-    // legible at a glance.
-    if (mode === 'section') {
-      const secs = f.data.librosa?.sections;
+    // ENERGY, BY SECTION, AS BLOCKS (spectra/services/energy.py; the
+    // Admiral, 2026-10-28: "The background on the audio shape and the
+    // timeline should also include the Mark math (but always cap out at
+    // 1.0) ... fills the bar vertically at anything over 1.0, and is gone at
+    // anything under 0"). One filled block per section at its ENERGY — the
+    // number the engine acts on, Mark included — from the song's Energy
+    // timeline, already in SONG time (sections shifted by the measured
+    // capture offset), so no librosa offset is added here. 0 is an empty
+    // bar and 1.0 fills the whole plot to its top; every marker layer draws
+    // over it (z 0). The song strip's terrain draws the same timeline.
+    if (mode === 'section' || mode === 'triggers') {
+      const secs = f.data.energy?.status === 'ok' ? f.data.energy.sections : null;
       if (!secs?.length) return;
-      const off = f.view.librosaOffsetMs;
-      const y = (v: number) => f.mainH - Math.max(0, Math.min(1, v)) * f.mainH * 0.9;
+      const y = (v: number) => f.mainH - energyFill(v) * f.mainH;
       ctx.save();
       for (const sec of secs) {
-        const x0 = f.timeToX(sec.start_ms + off);
-        const x1 = f.timeToX(Math.max(sec.end_ms, sec.start_ms) + off);
+        const x0 = f.timeToX(sec.start_ms);
+        const x1 = f.timeToX(Math.max(sec.end_ms, sec.start_ms));
         if (x1 < 0 || x0 > f.w) continue;
-        const top = y(sec.energy_rms);
+        const top = y(sec.energy);
         const left = Math.max(-1, x0);
         const width = Math.min(f.w + 1, x1) - left;
         if (width <= 0) continue;
@@ -139,13 +139,6 @@ export const intensityBackground: CanvasLayer = {
       ctx.restore();
       return;
     }
-    // triggers: polyline through the intensity circles (0-1 → circle Y space)
-    const trigs = [...f.data.triggers].sort((a, b) => a.timestamp_ms - b.timestamp_ms);
-    if (trigs.length < 2) return;
-    drawCurve(f, trigs.map((t) => ({
-      x: f.timeToX(t.timestamp_ms + f.view.triggerOffsetMs),
-      y: circleY(f.mainH, t.intensity ?? 0.5),
-    })), false);
   },
 };
 

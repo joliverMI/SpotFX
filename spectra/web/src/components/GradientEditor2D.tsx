@@ -28,7 +28,7 @@ export default function GradientEditor2D({
           Top (high ⚡)
         </span>
         <ColorGradientPicker value={top} onChange={onChangeTop} gradient
-          swatchWidth="100%" swatchHeight={22} title="Top edge — high intensity" />
+          swatchWidth="100%" swatchHeight={22} title="Top edge — high Energy" />
       </div>
 
       <GradientSquarePreview top={top} bottom={bottom} size={160}
@@ -39,7 +39,7 @@ export default function GradientEditor2D({
           Bottom (low ⚡)
         </span>
         <ColorGradientPicker value={bottom} onChange={onChangeBottom} gradient
-          swatchWidth="100%" swatchHeight={22} title="Bottom edge — low intensity" />
+          swatchWidth="100%" swatchHeight={22} title="Bottom edge — low Energy" />
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>

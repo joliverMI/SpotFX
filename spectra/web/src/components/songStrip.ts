@@ -10,7 +10,8 @@
  * will never play is the same lie as a held room reading like a broken
  * one). */
 import { rankOpacity, rankTier, SCENE_TAB_HALF_WIDTH, FLARE_DOT_RADIUS } from '../debug/plannedEvents';
-import type { LibrosaSection } from '../timeline/types';
+import type { EnergySection } from '../types';
+import { energyFill } from '../lib/energyAt';
 import { PHASE_COLOR } from '../timeline/dropSequences';
 
 export type UpcomingKind =
@@ -243,35 +244,36 @@ export function trackX(ms: number, durationMs: number, widthPx: number): number 
 }
 
 /** THE ENERGY TERRAIN (approved idea 4) — a faint step profile of the
- * song's own section energies behind the markers, so the shape of the
- * song is legible at a glance even with nothing playing yet. Real
- * measured data: librosa's own per-section `energy_rms`
- * (`useLibrosa(uri)`, already cached app-wide by the Timeline/debug
- * pages), never a synthesised curve and never re-derived from a marker's
- * RANK — rank orders a boundary's energy CHANGE, which is a different
- * quantity (see spectra/services/midsong_generator.py's own planner).
+ * song's ENERGY behind the markers, so the shape of the song is legible at
+ * a glance even with nothing playing yet. Since 2026-10-28 it draws the
+ * song's Energy timeline (GET /api/energy/timeline, spectra/services/
+ * energy.py — the number the engine acts on, Mark included, in song time),
+ * the same blocks Home's audio shape and the Timeline page draw. FULL
+ * HEIGHT (the Admiral: "it should set the max to the top of the bar, so it
+ * fills the bar vertically at anything over 1.0, and is gone at anything
+ * under 0"): 0 is an empty strip, 1.0 reaches the panel's top edge, and the
+ * markers draw over it. Never a synthesised curve and never re-derived from
+ * a marker's RANK, which orders a boundary's energy CHANGE.
  *
- * Returns an SVG path `d` in the track's own pixel space, or null when
- * the song has no section analysis — in which case the strip draws no
- * terrain rather than inventing one. */
+ * Returns an SVG path `d` in the track's own pixel space, or null when the
+ * song has no Energy timeline — the strip then draws no terrain. */
 export function terrainPath(
-  sections: LibrosaSection[] | null | undefined,
+  sections: readonly EnergySection[] | null | undefined,
   durationMs: number,
   widthPx: number,
   heightPx: number = TRACK_HEIGHT,
 ): string | null {
   if (!sections || sections.length === 0 || durationMs <= 0 || widthPx <= 0) return null;
-  const k = heightPx / TRACK_HEIGHT;
   const x = (ms: number) => trackX(ms, durationMs, widthPx).toFixed(2);
-  const floorY = ((TRACK_HEIGHT - 1) * k).toFixed(2);
-  const yFor = (energy: number) => {
-    const level = Math.max(0.15, Math.min(1, energy));
-    return (((TRACK_HEIGHT - 2) - level * TERRAIN_HEIGHT) * k).toFixed(2);
-  };
+  const top = 1;                       // the panel's own 1px border
+  const floor = heightPx - 1;
+  const floorY = floor.toFixed(2);
+  const yFor = (v: number) => (floor - energyFill(v) * (floor - top)).toFixed(2);
   let d = `M${x(0)} ${floorY}`;
   for (const sec of sections) {
-    const y = yFor(sec.energy_rms);
-    d += ` L${x(sec.start_ms)} ${y} L${x(Math.min(sec.end_ms, durationMs))} ${y}`;
+    if (sec.start_ms >= durationMs) break;
+    const y = yFor(sec.energy);
+    d += ` L${x(Math.max(0, sec.start_ms))} ${y} L${x(Math.min(sec.end_ms, durationMs))} ${y}`;
   }
   d += ` L${x(durationMs)} ${floorY}Z`;
   return d;

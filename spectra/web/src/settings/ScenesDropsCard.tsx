@@ -153,6 +153,13 @@ export default function ScenesDropsCard() {
           <input type="number" min={0} max={1} step={0.05} {...field('pulse_flash_min_energy')} />
         </div>
         <div className="top-bar-group-field">
+          <InfoTip topic="energy-lookahead" text="A drop or a scene change this many seconds or less before the next section reads that section's Energy, louder or quieter. 0 = always the present.">
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+            title="A drop or a scene change this many seconds or less before the next section reads that section's Energy. 0 = always the present.">Energy look-ahead (s)</label>
+          </InfoTip>
+          <input type="number" min={0} max={4} step={0.5} {...field('energy_lookahead_s')} />
+        </div>
+        <div className="top-bar-group-field">
           <InfoTip topic="drop-colour-change" text="Every drop arrives in a new colour set, about opposite the one showing on the colour wheel — instantly, on the drop.">
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             <PowerButton

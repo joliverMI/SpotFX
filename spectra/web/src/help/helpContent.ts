@@ -403,11 +403,11 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         id: 'flare-min-intensity',
-        title: 'A flare kind\'s minimum intensity',
+        title: 'A flare kind\'s minimum Energy',
         keywords: 'flare kind minimum intensity min threshold only above 0.4 gate lane pool skip quiet',
         body: [
-          'Any flare kind can carry a minimum intensity: it fires only when the flare\'s intensity is ABOVE it. The Pulse colour flip has 0.4 unless you set another, so it never fires at or below 0.4. Every other kind has none and fires at any intensity, as before.',
-          'The intensity compared is the flare\'s own, before any band ×scale. A kind below its minimum sits that fire out the way a switched-off kind does: in a lane with alternatives, one of the others is picked instead; alone, its lane fires nothing that time, and the fire\'s record says why. The ▶ Preview honours it too: below the minimum it shows nothing and tells you so — raise the intensity slider to see it.',
+          'Any flare kind can carry a minimum Energy: it fires only when the flare\'s Energy is ABOVE it. The Pulse colour flip has 0.4 unless you set another, so it never fires at or below 0.4. Every other kind has none and fires at any Energy, as before.',
+          'The intensity compared is the flare\'s own, before any band ×scale. A kind below its minimum sits that fire out the way a switched-off kind does: in a lane with alternatives, one of the others is picked instead; alone, its lane fires nothing that time, and the fire\'s record says why. The ▶ Preview honours it too: below the minimum it shows nothing and tells you so — raise the Energy slider to see it.',
           'It is set by telling Sonic ("only fire the flip above 0.5"); 0 lets a kind fire at any intensity above zero.',
         ],
       },
@@ -1235,22 +1235,33 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         id: 'live-energy',
-        title: 'Live Energy — the number driving scene picks and flares',
-        keywords: 'energy intensity section bar top always visible live meter bridge librosa quiet loud',
+        title: 'Energy — the one number the engine acts on',
+        keywords: 'energy intensity section bar top always visible live meter song scale normalized quietest loudest mark look ahead drop scene change',
         body: [
-          'The ⚡ Energy meter, on every page, next to the room controls — the shared top-bar strip\'s first widget, alongside the device preview (below). It shows the SAME number the engine\'s automatic decisions read, not a lookalike recomputed for display: raw librosa section energy at the current playback position (0.00 = the quietest section this song, 1.00 = the loudest), fed by the read-only bridge (see "The read-only bridge"). That one value is wired directly into the drift conductor\'s pace, the sequencer\'s default scene pick, and automatic transition fires — everything the room does on its own without a hand-placed trigger or authored intensity.',
-          'Shows "—" when there\'s no live number to show: the bridge is down, nothing is playing, or this song has no section analysis yet. In every one of those cases the engine itself falls back to a 0.5 neutral internally — the meter doesn\'t fake that number, it tells you why there isn\'t one.',
-          'A hand-placed trigger or a mid-song "⟳ Generate" pick can carry its OWN authored/baked intensity instead of this live value at the moment it fires — this meter always shows the live bridge signal, which is what drives everything that ISN\'T an explicitly authored intensity.',
+          'The ⚡ Energy meter, on every page in the top bar. It shows the number the engine acts on — every flare, scene pick, ⚡ step, transition speed, gate and the Singles\' Pulse reads this same Energy, and nothing else.',
+          'How it is made: each section of the song is placed on the song\'s OWN scale — its quietest section is 0 and its loudest is 1 (a quiet intro or fade-out in the first or last 15 seconds doesn\'t set that range). Then the Mark math: x 0.8 x the song\'s Mark. A song you haven\'t marked stops at 0.75; at Mark 50% Energy never passes 0.4. It never goes above 1.0.',
+          'It is read at the show clock — the clock triggers fire on — and changes exactly at a section edge. A drop or a scene change that comes just before the next section (within the look-ahead, 2 s unless you change it) reads THAT section, so a drop placed just before the loud part reads the loud part.',
+          'Your triggers\' own stored ⚡ values are no longer used: a trigger fires at Energy at its own moment. The same Energy is drawn behind Home\'s audio shape, the Timeline page and the song timeline in the top bar — 0 is empty and 1.0 fills to the top.',
+          'Shows "—" when there is nothing to read: the bridge is down, nothing is playing, or this song has no section analysis yet. The engine then holds 0.5.',
+        ],
+      },
+      {
+        id: 'energy-lookahead',
+        title: 'Energy look-ahead',
+        keywords: 'energy look ahead lookahead drop scene change before section edge seconds next louder quieter',
+        body: [
+          'A drop or a scene change this many seconds or less before the next section of the song reads that next section\'s Energy, louder or quieter. 2 seconds by default: measured on your library, a drop up to 2 s before a section edge usually lands in a clearly louder section, and the effect fades by 4 s. 0 always reads the present.',
+          'Ordinary flares and the top bar read the present. A scene change the analysis generated already knows which section it came from and reads that one exactly, whatever this setting says.',
         ],
       },
       {
         id: 'intensity-mark',
-        title: 'Mark — the current song\'s intensity scale',
-        keywords: 'intensity mark scale factor genre bass ceiling cap gate hype auto automatic manual override percent percentage slider drag',
+        title: 'Mark — the current song\'s Energy scale',
+        keywords: 'energy intensity mark scale factor genre bass ceiling cap gate hype auto automatic manual override percent percentage slider drag',
         body: [
-          'Next to ⚡ Energy on the top-bar strip. Every song has an intensity SCALING FACTOR — a multiplier on the live energy number above, based on its genre and how bass-forward it measures against the analysed library. 100% means no adjustment; a hyped-up genre like EDM lands well above 100%, a mellow one well below.',
-          'Automatic scaling always tops out at a 75% delivered intensity, on ANY song, however hyped its genre — a deliberate gate, not a bug: the room only reaches full-scale hype effects on a track you\'ve personally marked as one, never automatically.',
-          'Tap the MARK box to set this song\'s factor by hand (0–200%) — the one way past that 75% ceiling. It opens a small panel with a real slider you can drag AND a number field next to it for the exact value — drag to get close, then type the precise percent (this factor drives how loud the room gets, so exact matters). A marked song keeps its number every time it plays again, not just this once. "Clear", in that same panel, removes the mark and returns the song to automatic scaling.',
+          'Next to ⚡ Energy in the top bar. Every song has a SCALE — part of the Mark math in Energy (each section\'s place on the song\'s own scale x 0.8 x this). Automatically it comes from the song\'s genre and how bass-forward it measures against your library: 100% means no adjustment, a hyped genre lands above 100%, a mellow one below.',
+          'A song you haven\'t marked never passes 0.75 Energy, however hyped — a deliberate gate: the room only reaches full-scale effects on a track you have marked.',
+          'Tap the MARK box to set this song\'s scale by hand (0–200%) — the one way past 0.75, up to 1.0. It opens a small panel with a slider AND a number field for the exact value. The new Energy reaches the room and the top bar at once. A marked song keeps its number every time it plays. "Clear" returns it to automatic.',
           'The box itself is one fixed size whatever it says, so nothing in the bar moves when the number changes. Below desktop width it folds away and the ⚡ Energy control beside it opens the same panel instead.',
         ],
       },
@@ -1771,12 +1782,12 @@ export const HELP_SECTIONS: HelpSection[] = [
             body: [
               'Into Fireworks: when a stale Fish or Orbits scene switches to Fireworks on a drop, its lull is told what is coming and leaves three pieces instead of one — three searching fish, or three blobs on a small ring. On the drop the room cuts to Fireworks and each of those three explodes into a giant firework where it stands, in its own colour.',
               'Out of Fireworks into the Black Hole: Fireworks plays its own drop first, and a second later (the swallow delay) the room cuts to the Black Hole, which pulls the whole burst cloud into its infall.',
-              'Out of Fireworks into Fish, Orbits, Squiggles or STAR: Fireworks plays its own drop first, and the switch waits for the next big bass hit — the next analysed flare at least as strong as the big-hit setting. The cut lands just before that flare fires, so the flare lands on the new scene and it comes in loud, taking the falling fireworks as its own pieces. If no big hit comes by one bar after the drop\'s tail, the cut lands there and the new scene fires its own flare anyway.',
+              'Out of Fireworks into Fish, Orbits, Squiggles or STAR: Fireworks plays its own drop first, and the switch waits for the next big bass hit — the next analysed flare whose Energy is at least the big-hit setting. The cut lands just before that flare fires, so the flare lands on the new scene and it comes in loud, taking the falling fireworks as its own pieces. If no big hit comes by one bar after the drop\'s tail, the cut lands there and the new scene fires its own flare anyway.',
               'If the next drop sequence starts while a switch is still waiting, the cut lands then, so two drops never fight over the room. Every one of these shows on the drop-sequence strip (⇄ after the drop) and on the Review page.',
             ],
             table: [
               ['Fireworks → Black Hole after', '1 second after the drop mark.'],
-              ['Fireworks: next big hit ≥', '0.6 — an analysed flare at least this strong (0-1) releases the switch.'],
+              ['Fireworks: next big hit ≥', '0.6 — an analysed flare whose Energy is at least this (0-1) releases the switch. Re-set with the other Energy gates when Energy shipped.'],
             ],
             kbd: false,
           },
@@ -3253,7 +3264,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       },
       {
         id: 'house-energy',
-        title: 'Energy: what the room sends, and when Spectra stops listening',
+        title: 'Power saving: what the room sends, and when Spectra stops listening',
         keywords: 'energy power network packets frames per second fps cap resting park parked dummy radial send on change keep alive keepalive audio listening paused microphone cpu mains off sconce wifi',
         body: [
           'While a mode drives the room Spectra keeps the house cheap to run. It applies only then — with no mode set, during a preview, a camera run or a night run, everything runs at full rate exactly as before.',

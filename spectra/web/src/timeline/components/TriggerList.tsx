@@ -100,14 +100,8 @@ export default function TriggerList({
                   style={{ color: 'var(--accent)', flex: 'none' }}>⤳</span>
               )}
               {t.labels.map((l) => <span key={l} className="chip">{l}</span>)}
-              <span
-                title={`Intensity ${(t.intensity ?? 0.5).toFixed(2)}`}
-                style={{ width: 40, height: 5, background: 'var(--surface2)', borderRadius: 3, overflow: 'hidden', flex: 'none' }}
-              >
-                <span style={{ display: 'block', height: '100%', borderRadius: 3,
-                               width: `${(t.intensity ?? 0.5) * 100}%`,
-                               background: (t.intensity ?? 0.5) === 0.5 ? 'var(--text-muted)' : 'var(--accent)' }} />
-              </span>
+              {/* no stored-intensity bar: a trigger fires at Energy at its
+                  moment, never its stored value (the Energy plan's D4) */}
             </div>
           );
         })}

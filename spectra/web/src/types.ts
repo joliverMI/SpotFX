@@ -603,6 +603,8 @@ export interface RoomControlState {
    * the Pulse flash flare fires only when the top bar's Energy is at least
    * this. Default 0.8; 0 = never gated; an unknown energy is never gated. */
   pulse_flash_min_energy: number;
+  /** Energy's look-ahead for a drop or a scene change, seconds (spectra/services/energy.py). */
+  energy_lookahead_s: number;
   /** THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py): a drop
    * sequence may switch the scene with a hard cut on its drop when the
    * showing scene is stale. The three stale thresholds are his to tune
@@ -1515,6 +1517,31 @@ export interface ReviewTimeline {
   uri: string;
   window: { start_wall_ms: number; end_wall_ms: number } | null;
   timeline: ReviewTimelineItem[];
+}
+
+/** GET /api/energy/timeline?uri= — the song's ENERGY timeline (spectra/
+ * services/energy.py): sections in SONG time, each with its place on the
+ * song's own 0..1 scale (`normalized`) and its Energy with the Mark math
+ * (`energy`, what the engine acts on and every screen draws). */
+export interface EnergySection {
+  start_ms: number;
+  end_ms: number;
+  raw: number;
+  normalized: number;
+  energy: number;
+}
+
+export interface EnergyTimeline {
+  uri: string;
+  status: 'ok' | 'unavailable';
+  sections: EnergySection[];
+  factor?: number;
+  marked?: boolean;
+  headroom?: number;
+  cap?: number;
+  capture_offset_ms?: number;
+  look_ahead_ms?: number;
+  reason?: string;
 }
 
 /** GET/PUT/DELETE /api/intensity-scale/mark?uri= — the 2026-08-15 per-track

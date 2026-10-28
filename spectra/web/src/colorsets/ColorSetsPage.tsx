@@ -561,7 +561,7 @@ export default function ColorSetsPage() {
               : 'Not sequenced — this colour set is never drawn by the automatic wheel-travel roll.'}
             flatNote={card.kind === 'group'
               ? 'Flat 1.0 — the same as no curve: multiplies onto every member set’s own score without changing it.'
-              : 'Eligible everywhere at weight 1.0. Pick a named profile (or an inline one-off) to shape it over intensity.'}
+              : 'Eligible everywhere at weight 1.0. Pick a named profile (or an inline one-off) to shape it over Energy.'}
             footer={card.kind === 'group' && (
               <div className="empty-note" style={{ padding: '6px 0 0', fontSize: 11 }}>
                 Multiplies onto each member set’s own curve — never overwrites it. A set under more than

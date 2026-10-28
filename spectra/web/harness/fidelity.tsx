@@ -84,6 +84,24 @@ const SECTIONS = (() => {
   }));
 })();
 
+/** The song's ENERGY timeline as GET /api/energy/timeline serves it
+ * (spectra/services/energy.py): each section on the song's own 0..1 scale,
+ * x 0.8 (an unmarked song at a 100% scale), capped at 0.75. */
+const ENERGY = (() => {
+  const raws = SECTIONS.map((sec) => sec.energy_rms);
+  const lo = Math.min(...raws);
+  const hi = Math.max(...raws);
+  return {
+    uri: URI, status: 'ok', factor: 1, marked: false, headroom: 0.8, cap: 0.75,
+    capture_offset_ms: 0, look_ahead_ms: 2000,
+    sections: SECTIONS.map((sec) => {
+      const n = hi > lo ? (sec.energy_rms - lo) / (hi - lo) : 1;
+      return { start_ms: sec.start_ms, end_ms: sec.end_ms, raw: sec.energy_rms,
+               normalized: n, energy: Math.min(0.75, n * 0.8) };
+    }),
+  };
+})();
+
 const BEATS = (() => {
   const out: { ms: number; downbeat?: boolean }[] = [];
   for (let b = 0; b < DURATION_MS; b += BEAT) {
@@ -278,6 +296,7 @@ const JSON_BY_URL: [RegExp, unknown][] = [
   }],
   [/\/audio-shape\/meta/, { uri: URI, timestamp_offset_ms: 0, captured_ms: DURATION_MS, complete: true }],
   [/\/audio-shape\/librosa/, { tempo_bpm: 84.7, librosa_offset_ms: 0, beats: BEATS, onsets: [], sections: SECTIONS }],
+  [/\/energy\/timeline/, ENERGY],
   [/\/audio-shape\/data/, SHAPE],
   [/\/settings-console\/registry/, { settings: [] }],
   [/\/settings-console\/log/, []],

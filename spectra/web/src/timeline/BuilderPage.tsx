@@ -6,6 +6,7 @@ import ShowCueBar from './components/ShowCueBar';
 import { useSticky } from '../lib/useSticky';
 import { fmtMs } from '../lib/time';
 import { useEvents, useSettings } from '../api/queries';
+import { useEnergyTimeline } from '../queries';
 import { useBuilderStore } from './store';
 import { useAnalysedPlan, useAudioShapeData, useAudioShapeMeta, useCalibrationStatus, useDropRails, useDropSequences, useLibrosa, useLiveShape, useProfileByUri, useSetlists, useShowArms } from './queries';
 import { FLARE_MARKER_COLOR, SCENE_MARKER_COLOR, songPositionMarkers } from '../debug/plannedEvents';
@@ -97,6 +98,7 @@ export default function BuilderPage() {
   const calibrating = !!calStatus?.active;
   const { data: storedShape } = useAudioShapeData(uri, meta?.capture_complete ?? false);
   const { data: librosa } = useLibrosa(uri);
+  const { data: energyTl } = useEnergyTimeline(uri);
   const { data: events } = useEvents();
   const { data: setlists } = useSetlists();
   const { data: analysedPlan, refetch: refetchAnalysedPlan } = useAnalysedPlan(uri);
@@ -337,6 +339,7 @@ export default function BuilderPage() {
     averages,
     meta: meta ?? null,
     librosa: librosa ?? null,
+    energy: energyTl ?? null,
     mfccDistances,
     triggers: workingTriggers,
     events: (events ?? []).map((e) => ({ id: e.id, name: e.name, color: e.color, event_type: e.event_type })),
@@ -348,7 +351,7 @@ export default function BuilderPage() {
     dropSeq: dropLayer,
     lightShow: lightShowCues,
     lightShowDrag: lightShowUi.liveMs,
-  }), [shape, averages, meta, librosa, mfccDistances, workingTriggers, events,
+  }), [shape, averages, meta, librosa, energyTl, mfccDistances, workingTriggers, events,
        calibrationTargetsMs, draggingIntensity, selectedIds, hoverTriggerId, analysedMarkers, dropLayer,
        lightShowCues, lightShowUi.liveMs]);
 
@@ -485,7 +488,7 @@ export default function BuilderPage() {
         id="shape"
         wrapHeader
         title={<>Audio Shape <HelpLink topic="builder-mouse" title="Canvas mouse actions" />
-          <HelpLink topic="builder-selection-keys" title="Selection & intensity keys" /></>}
+          <HelpLink topic="builder-selection-keys" title="Selection & Energy keys" /></>}
         headerExtra={
           // Wraps rather than widening the page on a phone (390 px).
           <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap',

@@ -72,7 +72,7 @@ export default function SequencingTab({ scene, scenes }: {
         attachField="entries"
         labelForEntry={sceneName}
         noneNote="Not in the sequencer — attach a curve to make this scene a candidate when the sequencer rolls at song transitions."
-        flatNote="Eligible everywhere at weight 1.0. Pick a named profile (or an inline one-off) to shape it over intensity."
+        flatNote="Eligible everywhere at weight 1.0. Pick a named profile (or an inline one-off) to shape it over Energy."
         footer={entry && (
           <div style={{ background: 'var(--surface2)', padding: 8, borderRadius: 'var(--radius)', marginTop: 8, fontSize: 11 }}>
             <div style={{ color: 'var(--text-muted)', marginBottom: 4 }}>
@@ -105,8 +105,8 @@ export default function SequencingTab({ scene, scenes }: {
           labelForEntry={sceneName}
           defaultPoints={DWELL_CURVE_DEFAULT}
           noneLabel="Default (16s → 4s)"
-          noneNote="No override — his default minimum: 16s held at intensity 0, 4s at intensity 1, linear between. A scene change requested before this clears fires this scene's own Update effect instead (spectra-help topic below)."
-          flatNote="A flat minimum, held regardless of intensity — edit the curve to change the value."
+          noneNote="No override — his default minimum: 16s held at Energy 0, 4s at Energy 1, linear between. A scene change requested before this clears fires this scene's own Update effect instead (spectra-help topic below)."
+          flatNote="A flat minimum, held regardless of Energy — edit the curve to change the value."
         />
       </div>
 

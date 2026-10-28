@@ -82,7 +82,7 @@ export default function StatusPage() {
               )}
             </div>
             <div><div className="k">Music bridge</div>
-              {st.bridge_connected ? 'connected (read-only)' : 'down — intensity holds at 0.5 neutral'}
+              {st.bridge_connected ? 'connected (read-only)' : 'down — Energy holds at 0.5 neutral'}
             </div>
             <div><div className="k">Sequencer</div>
               {st.sequencer_enabled ? 'enabled' : 'dark (its own switch, agent-enabled)'}

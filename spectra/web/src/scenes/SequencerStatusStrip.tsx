@@ -58,7 +58,7 @@ export default function SequencerStatusStrip({ scenes }: { scenes: SceneV2[] }) 
           </span>
           {!st.bridge_connected && (
             <span style={{ color: 'var(--warning)' }}
-              title="The read-only spot-effects feed is down — nothing ticks moments; intensity holds at the 0.5 neutral (stated degradation)">
+              title="The read-only spot-effects feed is down — nothing ticks moments; Energy holds at the 0.5 neutral (stated degradation)">
               bridge down
             </span>
           )}

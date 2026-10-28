@@ -258,7 +258,7 @@ export default function DriftGradientPanel({ compact = false }: { compact?: bool
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8,
                        display: 'flex', alignItems: 'center', gap: 8 }}>
             <label style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}
-              title="Above this intensity, colour-set selection is restricted to rainbow-marked sets only; at or below it, to single (non-rainbow) sets only.">
+              title="Above this Energy, colour-set selection is restricted to rainbow-marked sets only; at or below it, to single (non-rainbow) sets only.">
               Rainbow select limit
             </label>
             <input

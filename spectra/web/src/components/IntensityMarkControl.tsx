@@ -87,8 +87,8 @@ export default function IntensityMarkControl({
   const title = !uri || !mark
     ? 'No song playing — nothing to mark'
     : isMarked
-      ? `Manually marked at ${Math.round((mark.mark as number) * 100)}% — the automatic 75% ceiling doesn't apply to this song. Automatic would be ${autoPct}%. Tap to change.`
-      : `Automatic scale: ${autoPct}% (genre + bass, capped at a 75% delivered intensity). Tap to mark this track higher.`;
+      ? `Marked at ${Math.round((mark.mark as number) * 100)}% — this song's Energy can reach 1.0 (an unmarked song stops at 0.75). Automatic would be ${autoPct}%. Tap to change.`
+      : `Automatic scale: ${autoPct}% (genre + bass). Energy on an unmarked song stops at 0.75. Tap to mark this track.`;
 
   const parsed = parseFloat(draft);
   const sliderPct = Number.isNaN(parsed) ? minPct : Math.max(minPct, Math.min(maxPct, parsed));
@@ -97,14 +97,14 @@ export default function IntensityMarkControl({
     <div className="intensity-mark-wrap" ref={wrapRef}>
       <InfoTip
         topic="intensity-mark"
-        text="This song's intensity scaling factor. Automatic always tops out at 75%; Mark is the one way past that ceiling, up to 200%."
+        text="This song's Energy scale: Energy is each section's place on the song's own 0 to 1 scale x 0.8 x this Mark. An unmarked song stops at 0.75 Energy; marking it (up to 200%) is the one way past that."
       >
         <button
           type="button"
           className={`intensity-mark${isMarked ? ' intensity-mark-set' : ''}`}
           title={title}
           disabled={!uri || !mark}
-          aria-label={`Intensity mark${effectivePct != null ? ` ${effectivePct}%` : ' unavailable'}`}
+          aria-label={`Energy Mark${effectivePct != null ? ` ${effectivePct}%` : ' unavailable'}`}
           onClick={() => onOpenChange(!open)}
         >
           <small>Mark</small>
@@ -114,7 +114,7 @@ export default function IntensityMarkControl({
         </button>
       </InfoTip>
       {open && mark && pos && createPortal((
-        <div className="intensity-mark-panel" role="dialog" aria-label="Intensity mark"
+        <div className="intensity-mark-panel" role="dialog" aria-label="Energy Mark"
           style={{ top: pos.top, left: pos.left }}>
           <div className="intensity-mark-panel-row">
             <input
@@ -147,7 +147,7 @@ export default function IntensityMarkControl({
             )}
           </div>
           <span className="intensity-mark-panel-note">
-            Automatic would be {autoPct}% (always ≤125%, i.e. ≤75% delivered).
+            Automatic would be {autoPct}% (an unmarked song's Energy stops at 0.75).
           </span>
         </div>
       ), document.body)}

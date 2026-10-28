@@ -14,7 +14,7 @@ import type { DropTimingInfo } from './scenes/tabs/dropMarkDrag';
 import type {
   AmbientHueGroup, ColorWheelPosition, DeviceListing, DevicePreviewFavorites, DevicePreviewStatus,
   DeviceWriteResult, DriftProfile,
-  EngineStatus, FeedbackCapture, FeedbackEntry, FireResult, IntensityScaleMark,
+  EnergyTimeline, EngineStatus, FeedbackCapture, FeedbackEntry, FireResult, IntensityScaleMark,
   PreDropLooks, PreDropWindow, Registry,
   ReviewSession, ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult,
   SceneV2, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
@@ -1285,6 +1285,21 @@ export function useTranscribeSettingsAudio() {
   });
 }
 
+/* ── ENERGY (spectra/services/energy.py): one timeline per song, drawn by the
+   top bar, Home's audio shape, the Timeline page and the song strip ── */
+
+export function useEnergyTimeline(uri: string | null) {
+  return useQuery({
+    queryKey: ['spectra-energy-timeline', uri],
+    queryFn: () => apiGet<EnergyTimeline>(`/energy/timeline?uri=${encodeURIComponent(uri!)}`),
+    enabled: uri != null,
+    staleTime: 5000,
+    // a Mark set from another tab or by Sonic reaches this screen within 10 s;
+    // one set here invalidates it at once (the Mark mutations below)
+    refetchInterval: 10000,
+  });
+}
+
 /* ── intensity-scale mark (2026-08-15 ruling: the one way past the
    automatic 0.75 ceiling — "he marks the track; automatic never does") ── */
 
@@ -1303,7 +1318,10 @@ export function useSetIntensityScaleMark(uri: string | null) {
     mutationFn: (factor: number) =>
       apiPut<{ uri: string; mark: number }>(
         `/intensity-scale/mark?uri=${encodeURIComponent(uri!)}`, { factor }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-intensity-mark', uri] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['spectra-intensity-mark', uri] });
+      void qc.invalidateQueries({ queryKey: ['spectra-energy-timeline', uri] });
+    },
   });
 }
 
@@ -1313,7 +1331,10 @@ export function useClearIntensityScaleMark(uri: string | null) {
     mutationFn: () =>
       apiDel<{ uri: string; cleared: boolean }>(
         `/intensity-scale/mark?uri=${encodeURIComponent(uri!)}`),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-intensity-mark', uri] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['spectra-intensity-mark', uri] });
+      void qc.invalidateQueries({ queryKey: ['spectra-energy-timeline', uri] });
+    },
   });
 }
 
