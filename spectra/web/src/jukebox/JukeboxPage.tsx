@@ -408,7 +408,7 @@ function LiveTab({ status }: { status: JukeboxStatus | undefined }) {
               items={line}
               getId={(e) => e.id}
               getLabel={(e) => e.title || e.uri}
-              getSent={(e) => e.state === 'committed'}
+              getSent={(e) => e.state !== 'queued'}
               onReorder={(id, to) => move.mutate({ id, to }, { onError })}
               renderRow={(e) => (
                 <span className="jukebox-item-words">
