@@ -200,7 +200,7 @@ WHETHER A DROP PAINTS IT AT ALL (2026-10-12, his "toggled per scene, as
 well as globally, as well as a global setting for minimum energy"): the drop
 arm also tells this effect `drop_shock_on` — the room's `drop_shock_enabled`,
 the showing scene's own `drop_shock_enabled`, and the top bar's Energy
-(`bridge.intensity()`) against the room's `drop_shock_min_energy` (0.7),
+(`bridge.intensity(look_ahead=True)`, ENERGY since 2026-10-28 — `spectra/services/energy.py`; the 0.7 is re-set by `scripts/energy_parity.py`) against the room's `drop_shock_min_energy` (0.7),
 decided by `phase_grammar.shock_allowed`. False = no painter at all: the
 frame is this effect's own drop byte for byte (no reveal hold-back either).
 Untold reads True. It is an overlay, so nothing in this effect's own drop

@@ -65,7 +65,11 @@ THE RULE, in plain words (report section 5, method B):
   energy=1.0), so NEITHER 0.95 nor 0.7 ever let a real drop through on
   that measure — a default that would have switched generated drops off
   entirely, not what he asked for. Reverted once the top bar itself was
-  checked and found NOT to factor the mark in at all. Applied AFTER a
+  checked and found NOT to factor the mark in at all. (2026-10-28, ONE
+  ENERGY: the top bar's number now IS the mark-factored Energy —
+  spectra/services/energy.py — and `final_energy_at` reads it with the
+  look-ahead; the floor value is re-set to keep today's share by
+  scripts/energy_parity.py, on his word.) Applied AFTER a
   candidate clears a tier and the EDGES guard, BEFORE it is placed, at the
   drop's own moment — "during the drop", and in practice also "post drop"
   since a drop sits on the first bass spike of the hit that follows the
@@ -737,19 +741,20 @@ def place_sequence(p: Prep, drop_ms: int) -> tuple[Optional[int], Optional[int],
 
 
 def final_energy_at(uri: str, drop_ms: int) -> Optional[float]:
-    """THE DROP FLOOR's own reading: the offline equivalent of the top
-    bar's "⚡ Energy" number exactly as displayed — `analysis_reader.
-    section_energy_at`, the SAME value LiveEnergyReadout.tsx shows
-    verbatim via `bridge.intensity()`, with NO mark factored in (checked
-    against that component directly: it renders the raw number, never
-    rescaled by the adjacent "Mark" readout — see the module docstring's
-    DROP FLOOR section for why this isn't the mark-factored composite a
-    first pass of this feature built). At the drop's own moment ("during
-    the drop", and in practice also "post drop" since a drop sits on the
-    first bass spike of the hit that follows the break). `None` when this
-    song has no stored section energy yet — UNKNOWN, never "below the
-    floor"."""
-    return analysis_reader.section_energy_at(uri, drop_ms)
+    """THE DROP FLOOR's own reading: ENERGY at the drop (spectra/services/
+    energy.py — since 2026-10-28 the top bar's "⚡ Energy" number IS Energy,
+    the song-normalized section energy with the Mark math), with the
+    look-ahead every drop takes, so a drop just before the loud section
+    reads the loud section. `None` when this song has no stored section
+    energy yet — UNKNOWN, never "below the floor".
+
+    The detection STAMP does not carry the Energy definition, deliberately:
+    stored detections stay as they are on the day this ships, and every
+    song re-detects against Energy when the floor value itself changes —
+    the D5 re-set (scripts/energy_parity.py), so drops are never thinned
+    against a floor that was set on the old scale."""
+    from spectra.services import energy
+    return energy.energy_at(uri, drop_ms, look_ahead=True)
 
 
 def first_beat_at_or_after(song: SongData, t_ms: float) -> int:

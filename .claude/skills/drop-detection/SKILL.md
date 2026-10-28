@@ -527,12 +527,13 @@ settings-registry keys; the switch itself (a light-driving act) has no
 write op, by the same boundary every other fire keeps. The two detection thresholds
 (`drop_confident_score`/`drop_suggested_score`) AND the drop floor
 (`drop_floor`, 2026-10-06, the Admiral's own ask — a candidate is only
-generated where the top bar's own "⚡ Energy" number, EXACTLY AS
-DISPLAYED (the adjacent "Mark" readout is separate and never factored
-in), during or right after the drop reaches at least this, default 0.7
-(his own fallback — 0.95 kept 0 of his 11 detector-found drops, 0.7
-keeps 9 of 11); never removes a sequence he has confirmed, edited or
-added) are plain
+generated where the top bar's own "⚡ Energy" number reaches at least
+this at the drop, with the look-ahead — since 2026-10-28 that number IS
+ENERGY (`spectra/services/energy.py`: the song's normalized section
+energy with the Mark math), and `scripts/energy_parity.py` gives the floor
+that keeps today's share; never removes a sequence he has confirmed,
+edited or added; the detection stamp deliberately does not carry the
+Energy definition, so stored detections stay until the floor changes) are plain
 `settings_console.SETTINGS_REGISTRY` keys, not drop ops. A sequence
 numbered by Sonic is the SAME numbering the Timeline review list shows
 (song order among non-dismissed sequences) — never a raw store key.

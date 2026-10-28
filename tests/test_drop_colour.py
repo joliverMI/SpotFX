@@ -637,6 +637,7 @@ class Show:
             return {}
 
         self.engine = TriggerEngine(
+            energy_for=lambda uri, t: t.action.intensity,  # the moment's Energy, as the test declares it
             list_triggers=lambda uri: list(triggers),
             scene_change_mode=lambda: mode,
             drop_view=drop_view, drop_revision=lambda: 1,

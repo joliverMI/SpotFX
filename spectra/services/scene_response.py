@@ -1209,6 +1209,7 @@ class ResponseEngine:
         song_position: Callable[[], tuple[Optional[str], Optional[int]]] | None = None,
         flare_blocked: Callable[[], frozenset] | None = None,
         room_energy: Callable[[], Optional[float]] | None = None,
+        drop_energy: Callable[[], Optional[float]] | None = None,
         drop_colour_pool: Callable[[SceneV2, float], dict] | None = None,
         set_wheel: Callable[[str], Any] | None = None,
         group_ids_by_set: Callable[[], dict] | None = None,
@@ -1225,10 +1226,14 @@ class ResponseEngine:
         self._set_wheel = set_wheel or self._default_set_wheel
         self._group_ids_by_set = group_ids_by_set or self._default_group_ids_by_set
         self._drop_colour_claim_until: Optional[float] = None
-        # THE DROP SHOCKWAVE'S ENERGY FLOOR: the top bar's Energy right now
-        # (engine.py wires bridge.intensity()). None — scratch engines, the
-        # previews — is "unknown", which is never gated (_drop_shock_keys).
+        # THE PULSE-FLASH AND SHOCKWAVE FLOORS read Energy right now
+        # (spectra/services/energy.py; engine.py wires bridge.intensity()):
+        # the flash the present, the Shockwave — decided at a drop — with
+        # the look-ahead (`drop_energy`, falling back to `room_energy`).
+        # None — scratch engines, the previews — is "unknown", which is
+        # never gated (_drop_shock_keys).
         self._room_energy = room_energy or (lambda: None)
+        self._drop_energy = drop_energy
         # FLARES OFF (the Light Show, spectra/services/show_mods.py): the
         # virtuals no flare kind may write to right now. engine.py wires the
         # show's switches; None (scratch engines — the previews) = none.
@@ -3272,7 +3277,7 @@ class ResponseEngine:
         scene_on = bool(getattr(scene, "drop_shock_enabled", True))
         energy: Optional[float] = None
         try:
-            raw = self._room_energy()
+            raw = (self._drop_energy or self._room_energy)()
             energy = None if raw is None else float(raw)
         except Exception:                                # noqa: BLE001
             logger.exception("phase drive: energy unreadable — the drop "

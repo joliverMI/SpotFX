@@ -300,6 +300,16 @@ def _isolated_light_show(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_energy():
+    """Energy (spectra/services/energy.py) reuses a song's timeline and its
+    scale for a second; every test starts with none of another test's."""
+    from spectra.services import energy
+    energy.forget()
+    yield
+    energy.forget()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_drop_sequences(tmp_path, monkeypatch):
     """The drop detector's store (spectra/services/drop_sequences.py) is
     reached with no DI seam from services/engine.py's song-change edge, so

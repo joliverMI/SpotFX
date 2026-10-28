@@ -105,6 +105,8 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         "drop_shock_enabled", "drop_shock_min_energy",
         # 2026-10-12, the Pulse flash flare's energy floor:
         "pulse_flash_min_energy",
+        # 2026-10-28, Energy's look-ahead for drops and scene changes (energy.py):
+        "energy_lookahead_s",
         # 2026-10-17, THE HOST FRAME — the shoaling family's six
         # (the shoal-burst plan, fx/VENDOR.md #82):
         "transition_burst_px", "transition_burst_ms", "transition_land_at",

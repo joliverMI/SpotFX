@@ -98,8 +98,11 @@ def song(monkeypatch):
 
 
 def _measured():
-    from spectra.services import midsong_generator
-    return midsong_generator.section_intensities(SECTIONS)
+    """Each section on the song's own 0..1 scale (spectra/services/energy.py)."""
+    from spectra.services import energy
+    return energy.normalize([s["energy_rms"] for s in SECTIONS],
+                            [s["start_ms"] for s in SECTIONS],
+                            [s["end_ms"] for s in SECTIONS])
 
 
 def _feed(factor=1.0, calls=None):
@@ -112,7 +115,7 @@ def _feed(factor=1.0, calls=None):
 
 # ── the feed's values ───────────────────────────────────────────────────────
 
-def test_a_song_lands_in_song_time_with_its_cue_intensity(song):
+def test_a_song_lands_in_song_time_on_its_own_scale(song):
     s = pulse_feed.load_song(URI)
     assert [(a, b) for a, b, _m in s.sections] == [
         (sec["start_ms"] + OFFSET_MS, sec["end_ms"] + OFFSET_MS)
@@ -123,18 +126,20 @@ def test_a_song_lands_in_song_time_with_its_cue_intensity(song):
     assert s.beat_ms == pytest.approx(500.0)
 
 
-def test_energy_is_the_render_intensity_a_cue_at_that_section_fires_at(song):
-    from spectra.services import intensity_scale
+def test_energy_is_the_sections_energy(song):
+    """The section's Energy: its place on the song's own scale x 0.8 x the
+    song's scale, an unmarked song capped at 0.75."""
+    from spectra.services import energy
     f = _feed(factor=1.2)
     _run(f.prepare(URI))
     measured = _measured()
     for pos, idx in ((40_000, 1), (80_000, 2), (110_000, 3)):
         v = f.values(URI, pos)
         assert v["energy"] == pytest.approx(
-            intensity_scale.combine_measured_and_scale(measured[idx], 1.2), abs=1e-3)
+            energy.mark_math(measured[idx], 1.2, False), abs=1e-3)
         assert v["beat_ms"] == pytest.approx(500.0)
-    # the automatic ceiling holds: never above HEADROOM_RESERVE x factor
-    assert f.values(URI, 80_000)["energy"] == pytest.approx(0.6 * 1.2, abs=1e-3)
+    # the automatic ceiling holds for an unmarked song
+    assert max(f.values(URI, p)["energy"] for p in (40_000, 80_000, 110_000)) <= 0.75
 
 
 def test_an_implausible_tempo_is_fed_as_unknown(song, monkeypatch):

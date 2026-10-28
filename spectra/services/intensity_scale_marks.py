@@ -89,7 +89,15 @@ def set_mark(spotify_uri: str, factor: float) -> float:
     marks = _load()
     marks[spotify_uri] = {"factor": clamped, "set_at": time.time()}
     _save(marks)
+    _energy_changed()
     return clamped
+
+
+def _energy_changed() -> None:
+    """A Mark is part of Energy (spectra/services/energy.py): drop its
+    reused reads so the change reaches the room and the top bar at once."""
+    from spectra.services import energy
+    energy.forget()
 
 
 def clear_mark(spotify_uri: str) -> bool:
@@ -100,4 +108,5 @@ def clear_mark(spotify_uri: str) -> bool:
         return False
     del marks[spotify_uri]
     _save(marks)
+    _energy_changed()
     return True

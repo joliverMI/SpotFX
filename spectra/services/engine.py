@@ -119,9 +119,11 @@ responses = ResponseEngine(
     song_position=lambda: (bridge.track_uri(),
                            bridge.effective_position_ms()),
     flare_blocked=_show_flare_blocked,
-    # THE DROP SHOCKWAVE'S ENERGY FLOOR reads the top bar's own Energy
-    # (RoomControlState.drop_shock_min_energy, phase_grammar.shock_allowed).
+    # THE PULSE-FLASH AND SHOCKWAVE FLOORS read Energy (spectra/services/
+    # energy.py): the flash the present, the Shockwave — decided at a drop —
+    # with the look-ahead, like every drop.
     room_energy=lambda: bridge.intensity(),
+    drop_energy=lambda: bridge.intensity(look_ahead=True),
 )
 
 # THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py) supplies the
@@ -717,6 +719,18 @@ def current_show_clock_ms() -> Optional[int]:
         return None
     return av_sync_lead.show_clock_ms(
         effective, av_sync_lead.current_lead_ms(), known_buffer.compensation_ms())
+
+
+def current_energy(look_ahead: bool = False) -> Optional[float]:
+    """ENERGY now (spectra/services/energy.py): the playing song's Energy at
+    the show clock — the clock the trigger poll fires on — with the room's
+    look-ahead for a drop or a scene change. None with no track, no clock
+    or no analysis (callers hold 0.5 neutral). bridge.intensity() is this."""
+    uri = bridge.track_uri()
+    if uri is None:
+        return None
+    from spectra.services import energy
+    return energy.energy_at(uri, current_show_clock_ms(), look_ahead=look_ahead)
 
 
 def _bridge_status_with_clock() -> dict:

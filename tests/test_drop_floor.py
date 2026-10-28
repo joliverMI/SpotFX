@@ -1,17 +1,14 @@
 """THE DROP FLOOR (the Admiral, 2026-10-06: "drop sequences only get
 generated if the final energy value for the post drop or during drop
 section is at least the drop floor. so quiet songs or sections don't
-accidentally get drops"). His final word, after a mark-factored composite
-was tried and measured to keep none of his real drops at either 0.95 or
-0.7: "match to the energy in the top bar shown" — the DISPLAYED number.
-LiveEnergyReadout.tsx renders `bridge.intensity()` (== `analysis_reader.
-section_energy_at`) verbatim, with no rescaling and no mark factored in —
-the adjacent "Mark" readout is a separate, un-multiplied number. So
-`drop_detector.final_energy_at` is plain `section_energy_at`, and
-drop_floor's default is 0.7 (his own fallback — 0.95 kept 0 of his 11
-detector-found real drops on the four reference songs, 0.7 keeps 9 of
-11, scripts/check_drop_floor.py). Synthetic songs only; the store is
-isolated per test by conftest's `_isolated_drop_sequences`."""
+accidentally get drops"), on the number the top bar shows. Since
+2026-10-28 that number is ENERGY (spectra/services/energy.py): the song's
+normalized section energy with the Mark math (x 0.8 x the song's scale, an
+unmarked song capped at 0.75), read with the look-ahead every drop takes.
+`drop_detector.final_energy_at` IS `energy.energy_at(..., look_ahead=True)`.
+The floor value itself is re-set for the new scale by
+scripts/energy_parity.py (the plan's D5). Synthetic songs only; the store
+is isolated per test by conftest's `_isolated_drop_sequences`."""
 from __future__ import annotations
 
 import pytest
@@ -36,11 +33,11 @@ def _isolated(tmp_path, monkeypatch):
 # ── the detector itself ─────────────────────────────────────────────────
 
 def test_a_quiet_post_drop_section_is_excluded_at_the_default_floor():
-    """A real break/return with the post-drop section's own energy below
-    0.7 (the shipped default) is removed — named, not silently dropped."""
+    """A real break/return landing in the song's quietest section (Energy 0
+    on the song's own scale) is removed — named, not silently dropped."""
     from spectra.services import drop_detector as dd
     drop_synth.one_drop_song(_shapes_dir(), URI, energy_sections=[
-        (0, 100, 0.60),       # the whole song reads as one quiet section
+        (0, 43, 0.98), (43, 100, 0.60),   # the drop lands in the quieter second
     ])
     det = dd.detect_uri(URI)
     assert det.sequences == []
@@ -48,14 +45,19 @@ def test_a_quiet_post_drop_section_is_excluded_at_the_default_floor():
     exc = det.excluded[0]
     assert exc.drop_ms == pytest.approx(drop_synth.DROP_S * 1000, abs=2 * dd.FRAME_MS)
     assert "below the drop floor" in exc.reason
-    assert "0.60" in exc.reason and "0.70" in exc.reason
+    assert "0.00" in exc.reason and "0.70" in exc.reason
 
 
-def test_a_loud_post_drop_section_clears_the_default_floor():
+def test_a_loud_post_drop_section_clears_a_floor_its_energy_reaches():
+    """The loud section is 1.0 on the song's own scale; with the Mark math
+    an unmarked song reaches 0.8 x its scale, and a song marked 1.25 reaches
+    the full 1.0 — over the default 0.7."""
     from spectra.services import drop_detector as dd
+    from spectra.services import intensity_scale_marks
     drop_synth.one_drop_song(_shapes_dir(), URI, energy_sections=[
         (0, 43, 0.60), (43, 100, 0.98),   # the drop lands well inside the second
     ])
+    intensity_scale_marks.set_mark(URI, 1.25)
     det = dd.detect_uri(URI)
     assert len(det.sequences) == 1
     assert det.sequences[0].drop_ms == pytest.approx(drop_synth.DROP_S * 1000,
@@ -81,20 +83,25 @@ def test_a_zero_floor_gates_nothing():
     assert len(det.sequences) == 1
 
 
-def test_final_energy_at_reads_the_containing_section_verbatim():
-    """No mark factored in — this is the plain top-bar number."""
-    from spectra.services import analysis_reader, drop_detector as dd
+def test_final_energy_at_is_energy_with_the_look_ahead():
+    """The top bar's number: the section's place on the song's own scale,
+    with the Mark math, looking ahead to the next section edge."""
+    from spectra.services import drop_detector as dd, energy
     drop_synth.one_drop_song(_shapes_dir(), URI, energy_sections=[
         (0, 43, 0.3), (43, 100, 0.8),
     ])
     drop_ms = int(drop_synth.DROP_S * 1000)
-    assert dd.final_energy_at(URI, drop_ms) == pytest.approx(0.8)
-    assert dd.final_energy_at(URI, drop_ms) == analysis_reader.section_energy_at(URI, drop_ms)
+    assert dd.final_energy_at(URI, drop_ms) == energy.energy_at(URI, drop_ms, look_ahead=True)
+    factor, marked = energy.song_factor(URI)
+    assert dd.final_energy_at(URI, drop_ms) == pytest.approx(energy.mark_math(1.0, factor, marked))
+    # 1.5 s before the louder section's edge, the drop reads the louder section
+    assert dd.final_energy_at(URI, 43_000 - 1_500) == pytest.approx(energy.mark_math(1.0, factor, marked))
+    assert energy.energy_at(URI, 43_000 - 1_500) == pytest.approx(0.0)
 
 
-def test_a_manual_intensity_mark_never_moves_the_floor_reading():
-    """The mark is a SEPARATE top-bar readout, never multiplied in — a
-    manual mark must not change final_energy_at at all."""
+def test_a_manual_mark_moves_the_floor_reading():
+    """The Mark is part of Energy now: marking the song up raises the
+    reading the floor compares against (capped at 1.0 for a marked song)."""
     from spectra.services import drop_detector as dd
     from spectra.services import intensity_scale_marks
     drop_synth.one_drop_song(_shapes_dir(), URI, energy_sections=[
@@ -104,7 +111,7 @@ def test_a_manual_intensity_mark_never_moves_the_floor_reading():
     unmarked = dd.final_energy_at(URI, drop_ms)
     intensity_scale_marks.set_mark(URI, 2.0)
     marked = dd.final_energy_at(URI, drop_ms)
-    assert marked == pytest.approx(unmarked) == pytest.approx(0.8)
+    assert unmarked < 0.75 and marked == pytest.approx(1.0)
 
 
 # ── his own edits survive the floor ────────────────────────────────────

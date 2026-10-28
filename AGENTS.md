@@ -1209,6 +1209,58 @@ subscribes. Six things:
   corrected only as fast as the lock's own chase (2 s × 3 confirms, max 2
   recoveries/play) — see `docs/SPECTRA_TIMING_CONVENTIONS.md`'s own note.
 
+## ENERGY — the one number the engine acts on and every screen shows (2026-10-28)
+
+The Admiral's Energy plan (https://claude.ai/artifact/2Dy1SnUgNQ2fJQomhk4dkh,
+"I approve the energy changes"). **`spectra/services/energy.py`'s module
+docstring is the binding statement** — read it before touching anything that
+reads an "intensity" or "energy". Before it there were six numbers: raw
+section loudness (the top bar), a stretched copy (generated cues), his
+triggers' stored ⚡, the drop detector's jump size, and the fire value
+(any of those × 0.6 × the scale). Now:
+
+- **Energy(t) = clamp(normalized section × 0.8 × the song's scale, 0, cap)**,
+  sections in SONG time (+ the capture offset), normalized per song (quietest
+  middle section 0, loudest 1; the first/last 15 s don't set the range), cap
+  0.75 for a song with no manual Mark (his 15 Aug ruling) and 1.0 for a marked
+  one. **The Mark is applied once, inside Energy**: `TriggerEngine.
+  _default_render_intensity` and the sequencer's are the identity now — a new
+  caller that multiplies by the scale again applies it twice. `intensity_scale.
+  combine_measured_and_scale` delegates to `energy.mark_math`.
+- **Read at the show clock** (`engine.current_energy`, which `bridge.
+  intensity()` now is) — never the raw Spotify position. Drops and scene
+  changes **look ahead** `RoomControlState.energy_lookahead_s` (2 s) to the
+  next section edge; a generated moment reads its own source section
+  (`generator_key` `section:<WAV ms>`); flares and the top bar read the present.
+- **The trigger clock resolves Energy per trigger** (`_energized` before the
+  lead peek and the fire; `_sequence_energy` for drop sequences; the colour
+  journey's `NextCue`) through the `energy_for` injectable — a spec that drives
+  a fire at a known value passes `energy_for=lambda uri, t: t.action.intensity`.
+- **Nothing reads a trigger's stored `intensity` any more** (his D4). TO REMOVE
+  LATER, on his list: that field (profile and fired copies), `scripts/
+  backfill_trigger_intensity.py`, and the dialogs' Intensity field and the list
+  value (already hidden). The Timeline's "trigger values" background is gone
+  from the chip; a saved choice of it draws Energy.
+- **Screens**: `GET /api/energy/timeline` (`spectra/api/energy.py`) is what the
+  top bar (`LiveEnergyReadout`, every frame at `getShowClockMs`, `lib/
+  energyAt.ts`), the audio-shape 'section' background and the song strip's
+  terrain draw — full height (0 empty, 1.0 to the top, markers over it), song
+  time, Mark included. A Mark edit calls `energy.forget()`, so it lands at once.
+- **THE GATES AND CURVES WERE SET ON THE OLD SCALE**: Shockwave 0.7, Pulse flash
+  0.8, rainbow 0.9, the drop floor and the Fireworks meld's big-hit strength
+  (0.6, which now compares a flare's Energy) rarely pass on Energy (an unmarked
+  song tops out at 0.8 × its scale, 0.75 at most). `scripts/energy_parity.py`
+  (dry run by default; `--apply --spectra-url` backs up first, `--restore
+  <dir>` puts it back) re-sets the five gates and the scene/colour-set
+  likelihood curves so the same share of moments passes as before. A NEW gate
+  compared with Energy that was tuned on an old number belongs in its `GATES`. The drop-detection stamp deliberately does not carry the
+  Energy definition: stored detections stay until the floor itself changes.
+  Planner holds read Energy too (`GENERATOR_VERSION` "4", re-plans on play).
+
+Specs: `tests/test_energy.py`, `tests/test_energy_parity.py`,
+`tests/test_energy_screens.py` (→ `scripts/check_energy_screens.mjs`); help
+`live-energy`, `energy-lookahead`, `intensity-mark`.
+
 ## SPECTRA per-song intensity scale (genre-anchored port + headroom reserve)
 
 `spectra/services/intensity_scale.py` ports SpotFX's dropped-in-the-rebuild

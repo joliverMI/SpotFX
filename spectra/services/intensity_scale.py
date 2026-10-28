@@ -254,8 +254,13 @@ def song_scaling_factor(spotify_uri: Optional[str], genres: Optional[list[str]] 
 
 # ── the headroom-reserve seam (2026-08-15 correction) ────────────────────
 
-HEADROOM_RESERVE = 0.6
-"""Deliberate ceiling reserve, NOT a fudge factor and NOT a volume trim —
+HEADROOM_RESERVE = 0.8
+"""2026-10-28, ONE ENERGY: 0.8 (his comment on the Energy plan, "Make it 0.8
+instead of 0.6"), and the Mark math now lives in spectra/services/energy.py
+(`mark_math`, which also caps a song with no manual Mark at the 0.75
+automatic ceiling). combine_measured_and_scale below delegates to it.
+
+Deliberate ceiling reserve, NOT a fudge factor and NOT a volume trim —
 the Admiral's own words: "this allows me to gate certain high-intensities
 by requiring a high scaling factor on a track so we do not get loud hype
 scenes unless its a hype track." Worked example he gave: at a maximum
@@ -267,7 +272,8 @@ for."""
 
 
 def combine_measured_and_scale(measured_intensity: float,
-                                song_scaling_factor: float) -> float:
+                                song_scaling_factor: float,
+                                marked: bool = False) -> float:
     """THE SEAM: combines a moment's measured (raw, unscaled) intensity
     with the current song's scaling factor into the final render
     intensity every fire/bind/band-select consumes.
@@ -298,8 +304,8 @@ def combine_measured_and_scale(measured_intensity: float,
     track; automatic never does." Without that release valve the 0.6
     reserve would be a CAP with no way to open it, not a GATE.
     """
-    final = measured_intensity * HEADROOM_RESERVE * song_scaling_factor
-    return max(0.0, min(1.0, final))
+    from spectra.services import energy
+    return energy.mark_math(measured_intensity, song_scaling_factor, marked)
 
 
 def render_intensity(spotify_uri: Optional[str], genres: Optional[list[str]],

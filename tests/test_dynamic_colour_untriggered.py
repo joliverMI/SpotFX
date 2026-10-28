@@ -262,6 +262,7 @@ def _engine(triggers, fired, colours, *, scene_ids):
         colours.append((sel, scene_id))
 
     return TriggerEngine(
+        energy_for=lambda uri, t: t.action.intensity,  # the moment's Energy, as the test declares it
         list_triggers=lambda uri: triggers,
         fire_scene=fire_scene, select_scene=lambda i: next(picks),
         scene_change_mode=lambda: "analysed",
@@ -298,6 +299,7 @@ def test_an_authored_song_gets_no_analysed_colour_moments():
     triggers.append(_cue(200_000, 0.5, source="authored"))
     fired, colours = [], []
     engine = TriggerEngine(
+        energy_for=lambda uri, t: t.action.intensity,  # the moment's Energy, as the test declares it
         list_triggers=lambda uri: triggers,
         fire_scene=lambda *a: asyncio.sleep(0),
         select_scene=lambda i: "fish", scene_change_mode=lambda: "full",

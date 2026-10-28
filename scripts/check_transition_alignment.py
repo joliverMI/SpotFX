@@ -215,7 +215,7 @@ def _run_generation(
     # The scene-change planner (2026-10-04) stores only the moments its
     # holds let become scene changes; this script measures WHERE moments
     # are placed, so every placed moment is stored here (holds at 0).
-    midsong_generator.planning_hold_s = lambda raw, factor, curves: 0.0
+    midsong_generator.planning_hold_s = lambda raw, factor, curves, marked=False: 0.0
     try:
         if edges_enabled:
             midsong_generator.generate_for_song(uri)

@@ -483,7 +483,10 @@ def _meld_sweep(monkeypatch, out, settings=None, extra_flares=()):
         auto_refresh=room.noop, switch_showing=room.showing,
         switch_settings=lambda: settings or ds.SwitchSettings(),
         switch_blocker=lambda: None, switch_pick=room.pick,
-        fire_drop_switch=room.fire_drop_switch, rearm_phase=room.rearm)
+        fire_drop_switch=room.fire_drop_switch, rearm_phase=room.rearm,
+        # the moment's Energy, as the test declares it: a big hit is one whose
+        # Energy clears the threshold (spectra/services/energy.py)
+        energy_for=lambda u, t: t.action.intensity)
     duration = int(fix["drop_sequences_store"]["detected"]["duration_ms"])
 
     async def run():

@@ -351,11 +351,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from random import Random
 from typing import Any, Awaitable, Callable, Optional
 
 from spectra.models.trigger import FireResponseAction, FireSceneAction, SpectraTrigger
+from spectra.services import energy as energy_mod
 from spectra.services import (analysed_flares, drop_firing, drop_sequences,
                                drop_switch, drop_timing, phase_partner,
                                pre_drop_play, transition_phases,
@@ -580,8 +581,15 @@ class TriggerEngine:
         rearm_phase: Callable[[str, float, int], Awaitable[Any]] | None = None,
         clock: Callable[[], float] | None = None,
         rng: Random | None = None,
+        energy_for: Callable[[str, SpectraTrigger], Optional[float]] | None = None,
     ) -> None:
         self._list_triggers = list_triggers or trigger_store.list_for_song
+        # ENERGY AT A TRIGGER'S OWN MOMENT (spectra/services/energy.py, the
+        # Energy plan's D2/D4): what every pick, lead peek and fire of that
+        # trigger reads — never the trigger's stored ⚡ value. None
+        # (unknowable) holds energy.NEUTRAL.
+        self._energy_for = energy_for or self._default_energy_for
+        self._energy_injected = energy_for is not None
         self._fire_scene = fire_scene or self._default_fire_scene
         # PLANNED SCENE CHANGES (2026-10-04): a generated cue the scene-change
         # planner placed fires with dwell.PLANNED_CUE_TOLERANCE_S of the hold
@@ -1098,9 +1106,14 @@ class TriggerEngine:
             and getattr(t.action, "event_class", None) == "flare"
             and t.id not in self._seq_meta
             and (t.id in self._flare_ids or self._trigger_allowed(t, mode))]
+        # one timeline read per tick for every analysed flare; a spec that
+        # injects energy_for declares each moment's Energy through it instead
+        hit_tl = (energy_mod.timeline(self._uri)
+                  if self._flare_ids and not self._energy_injected else None)
         self._tick_hits = [
             (t.id, t.timestamp_ms + t.trigger_offset_ms,
-             float(getattr(t.action, "intensity", 0.0) or 0.0))
+             self._trigger_energy(t) if self._energy_injected
+             else self._moment_energy(hit_tl, t))
             for t in candidates if t.enabled and t.id in self._flare_ids]
         # THE FIREWORKS MELDS: an armed late switch whose moment this tick
         # crosses cuts before anything else fires on it
@@ -1242,7 +1255,9 @@ class TriggerEngine:
             # ALSO the moment _lead_ms's own _pin_for commits its one-shot
             # early pick (see that module-level constant's docstring).
             fire_at = target_ms
+            stored = trig
             if 0 <= target_ms - last <= LOOKAHEAD_HORIZON_MS:
+                trig = self._energized(trig)
                 lead = self._lead_ms(trig)
                 if lead > 0:
                     fire_at = target_ms - lead
@@ -1287,8 +1302,8 @@ class TriggerEngine:
                 if held is not None:
                     self._record_window_hold(trig, target_ms, held)
                     continue
-                await self._fire(trig)
-                fired.append(trig)
+                await self._fire(self._energized(trig))
+                fired.append(stored)
         return fired
 
     # ── drop sequences (drop_firing.py) ──────────────────────────────────
@@ -1606,10 +1621,12 @@ class TriggerEngine:
         windows = (self._drop_windows if self._drop_memo is not None
                    and self._drop_memo[0][0] == uri else [])
 
-        def consider(cue: NextCue) -> None:
-            nonlocal best
+        best_trig: Optional[SpectraTrigger] = None
+
+        def consider(cue: NextCue, trig: Optional[SpectraTrigger] = None) -> None:
+            nonlocal best, best_trig
             if cue.at_ms > pos and (best is None or cue.at_ms < best.at_ms):
-                best = cue
+                best, best_trig = cue, trig
 
         for t in triggers:
             a = t.action
@@ -1625,7 +1642,7 @@ class TriggerEngine:
                 position_ms=pos, kind=a.kind, source=t.source,
                 intensity=getattr(a, "intensity", None),
                 set_id=(a.set_id if a.kind == "select_color_set"
-                        else a.color_set_id)))
+                        else a.color_set_id)), t)
         if analysed_flares.analysed_flares_allowed(mode, has_authored):
             planned = (self._scene_cue_plan
                        if self._flare_plan_uri == uri else [])
@@ -1635,7 +1652,14 @@ class TriggerEngine:
                 for m in moments:
                     consider(NextCue(uri=uri, key=m.key, at_ms=m.timestamp_ms,
                                      position_ms=pos, kind="fire_scene",
-                                     source="planned", intensity=m.intensity))
+                                     source="planned", intensity=m.intensity),
+                             SpectraTrigger(id=m.key, timestamp_ms=m.timestamp_ms,
+                                            source="generated",
+                                            generator_key=m.generator_key,
+                                            action=FireSceneAction(intensity=m.intensity)))
+        if best is not None and best.kind == "fire_scene" and best_trig is not None:
+            # the cue's Energy (spectra/services/energy.py), never a stored value
+            best = replace(best, intensity=self._trigger_energy(best_trig))
         return best
 
     def _notify_intensity_event(self) -> None:
@@ -1877,7 +1901,7 @@ class TriggerEngine:
             plan = drop_switch.decide(
                 key=seq.key, uri=self._uri, members=members, showing=showing,
                 record=record, settings=self._switch_settings(),
-                pick_target=self._switch_pick(seq.intensity), ride=ride,
+                pick_target=self._switch_pick(self._sequence_energy(seq)), ride=ride,
                 can_go_early=can_go_early, blocker=self._switch_blocker(),
                 decided_at_ms=self._last_position_ms,
                 flares=self._tick_hits, beat_ms=seq.beat_ms)
@@ -1941,7 +1965,7 @@ class TriggerEngine:
         seq, fire_mode = self._switch_seqs[key]
         outcome = await self._execute_switch(
             plan, drop_switch.MOMENT_CHARGE_FLARE,
-            self._render_intensity(seq.intensity))
+            self._render_intensity(self._sequence_energy(seq)))
         if outcome.get("result") != "switched":
             return
         # carry the build on on the new scene from where it is
@@ -2058,7 +2082,7 @@ class TriggerEngine:
         if plan.hit_trigger_id:
             self._hit_ids.pop(plan.hit_trigger_id, None)
         seq = (self._switch_seqs.get(key) or (None, None))[0]
-        intensity = self._render_intensity(seq.intensity if seq is not None else 0.5)
+        intensity = self._render_intensity(self._sequence_energy(seq))
         outcome = await self._execute_switch(plan, at, intensity)
         if loud and outcome.get("result") == "switched":
             # the incoming scene comes in loud: its own flare band, now
@@ -2210,7 +2234,7 @@ class TriggerEngine:
                 at_ms=int(pre_target - pos), gap_ms=int(drop_target - pre_target),
                 kind=kind, key=seq.key),
             pre_target_ms=int(pre_target), drop_target_ms=int(drop_target),
-            intensity=float(seq.intensity), seq=seq, fire_mode=fire_mode)
+            intensity=self._sequence_energy(seq), seq=seq, fire_mode=fire_mode)
 
     def _his_pre_drop(self, lull: SpectraTrigger) -> Optional[_PreDropPlan]:
         """The pre-drop one of his own authored LULLS carries: its grouped
@@ -2275,7 +2299,7 @@ class TriggerEngine:
         terms tick() sums into the drop member's target."""
         try:
             band = int(self._response_offset_ms(
-                FireResponseAction(event_class="drop", intensity=seq.intensity)))
+                FireResponseAction(event_class="drop", intensity=self._sequence_energy(seq))))
         except Exception:
             logger.exception("drop colour: the drop band's offset is unreadable "
                              "— the fade is timed to the unshifted drop")
@@ -2518,25 +2542,71 @@ class TriggerEngine:
         return bool(load_room_controls().drop_testing)
 
     def _default_transition_intensity(self) -> float:
-        # Same bridge feed + 0.5 neutral fallback as scene_sequencer's own
-        # _default_intensity — no per-song analysis is required for the
-        # automatic transition fire to work.
+        # ENERGY at the show clock, with the look-ahead a scene change takes
+        # (spectra/services/energy.py) + the 0.5 neutral fallback — no
+        # per-song analysis is required for the transition fire to work.
         from spectra.services.engine import bridge
-        value = bridge.intensity()
-        return value if value is not None else 0.5
+        value = bridge.intensity(look_ahead=True)
+        return value if value is not None else energy_mod.NEUTRAL
+
+    def _default_energy_for(self, uri: str, trig: SpectraTrigger) -> Optional[float]:
+        a = trig.action
+        return energy_mod.energy_for_moment(
+            uri, trig.timestamp_ms + trig.trigger_offset_ms, a.kind,
+            getattr(a, "event_class", None), trig.generator_key)
+
+    def _trigger_energy(self, trig: SpectraTrigger) -> float:
+        """Energy at this trigger's own moment (its source section when it
+        was generated from one; the look-ahead for a drop or a scene change;
+        the present otherwise). 0.5 neutral when unknowable."""
+        try:
+            value = self._energy_for(self._uri, trig) if self._uri else None
+        except Exception:                                # noqa: BLE001
+            logger.exception("trigger %s: energy unreadable — neutral", trig.id)
+            value = None
+        return energy_mod.NEUTRAL if value is None else float(value)
+
+    def _energized(self, trig: SpectraTrigger) -> SpectraTrigger:
+        """A copy of `trig` whose action carries Energy at its moment in place
+        of the stored value — so every read downstream (the pick, the lead and
+        offset peeks, the fire) is Energy. An action with no intensity
+        (select_color_set) is returned as it is. Idempotent: an energized
+        copy energizes to the same value."""
+        a = trig.action
+        if not hasattr(a, "intensity"):
+            return trig
+        return trig.model_copy(update={"action": a.model_copy(
+            update={"intensity": round(self._trigger_energy(trig), 4)})})
+
+    @staticmethod
+    def _moment_energy(tl, trig: SpectraTrigger) -> float:
+        """An analysed flare's Energy from an already-read timeline (the
+        drop switch's "next big hit" reads every one each tick): its own
+        source section, else the present."""
+        if tl is None:
+            return energy_mod.NEUTRAL
+        src = energy_mod.source_ms(trig.generator_key)
+        value = tl.at_source(src) if src is not None else None
+        if value is None:
+            value = tl.at(trig.timestamp_ms + trig.trigger_offset_ms)
+        return energy_mod.NEUTRAL if value is None else float(value)
+
+    def _sequence_energy(self, seq) -> float:
+        """A drop sequence's Energy (the Energy plan's D3): at its drop, with
+        the look-ahead every drop takes — not the detector's jump size."""
+        if seq is None or not self._uri:
+            return energy_mod.NEUTRAL
+        return self._trigger_energy(SpectraTrigger(
+            id=seq.trigger_id("drop"), timestamp_ms=int(seq.drop_ms),
+            action=FireResponseAction(event_class="drop", intensity=seq.intensity)))
 
     def _default_render_intensity(self, raw: float) -> float:
-        """The RENDER/FIRE role (as opposed to _select_scene's SELECTION
-        role, above): every value actually landed at a choke point
-        (fire_scene/fire_response/fire_scene_update) passes through the
-        current song's genre+bass scale via intensity_scale.
-        combine_measured_and_scale — the ported-and-corrected SpotFX v2
-        mechanism (spectra/services/intensity_scale.py's module docstring
-        has the full headroom-reserve formula and its rationale)."""
-        from spectra.services import intensity_scale
-        from spectra.services.engine import bridge
-        return intensity_scale.combine_measured_and_scale(
-            raw, bridge.song_scaling_factor())
+        """The RENDER/FIRE role. Every value it is handed is already ENERGY
+        (spectra/services/energy.py) — the song's normalized section energy
+        WITH the Mark math applied once, inside Energy — so the fire lands it
+        as it is. Applying the Mark here again would apply it twice. Kept as
+        an injectable seam for the tests that drive a fire at a known value."""
+        return raw
 
     def _default_sequencer_enabled(self) -> bool:
         # scene_sequencer's OWN dark switch (config.enabled, storage/

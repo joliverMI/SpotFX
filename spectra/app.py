@@ -33,6 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from spectra import config
 from spectra.api import analysed_plan as analysed_plan_api
 from spectra.api import upcoming as upcoming_api
+from spectra.api import energy as energy_api
 from spectra.api import drop_sequences as drop_sequences_api
 from spectra.api import calibrations as calibrations_api
 from spectra.api import capture_queue as capture_queue_api
@@ -124,6 +125,7 @@ def create_app() -> FastAPI:
     app.include_router(feedback.router)
     app.include_router(show_review.router)
     app.include_router(intensity_scale.router)
+    app.include_router(energy_api.router)
     app.include_router(sonic_usage.router)
     app.include_router(spec.router)
     app.include_router(gradient2d.router)

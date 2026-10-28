@@ -824,19 +824,17 @@ class SceneSequencer:
         return card.name if card else set_id
 
     def _default_intensity(self) -> float:
-        # Bridge feed: section energy at position; 0.5 neutral when absent
-        # (stated degradation).
+        # ENERGY at the show clock (spectra/services/energy.py), with the
+        # look-ahead a scene change takes; 0.5 neutral when absent (stated
+        # degradation).
         from spectra.services.engine import bridge
-        value = bridge.intensity()
+        value = bridge.intensity(look_ahead=True)
         return value if value is not None else 0.5
 
     def _default_render_intensity(self, raw: float) -> float:
-        # See trigger_engine._default_render_intensity's docstring — same
-        # seam, same rationale (spectra/services/intensity_scale.py).
-        from spectra.services import intensity_scale
-        from spectra.services.engine import bridge
-        return intensity_scale.combine_measured_and_scale(
-            raw, bridge.song_scaling_factor())
+        # Energy already carries the Mark (see trigger_engine.
+        # _default_render_intensity's docstring): the fire lands it as it is.
+        return raw
 
     def _default_genre_bucket(self) -> Optional[str]:
         from spectra.services.engine import bridge

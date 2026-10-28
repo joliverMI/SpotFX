@@ -973,7 +973,7 @@ from spectra.services import midsong_generator
 # are neutralised here and proven on their own in
 # tests/test_scene_change_planner.py.
 _real_planning_hold_s = midsong_generator.planning_hold_s
-midsong_generator.planning_hold_s = lambda raw, factor, curves: 0.0
+midsong_generator.planning_hold_s = lambda raw, factor, curves, marked=False: 0.0
 
 GEN_URI = "spotify:track:midsong-gen"
 shapes_dir = scfg.AUDIO_SHAPES_DIR

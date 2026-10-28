@@ -75,6 +75,7 @@ def _engine(mode, stored, flares):
         return None
 
     te = TriggerEngine(
+        energy_for=lambda uri, t: t.action.intensity,  # the moment's Energy, as the test declares it
         list_triggers=lambda uri: list(stored),
         fire_scene=noop, fire_response=fire_response,
         fire_scene_update=noop, select_color_set=noop,
