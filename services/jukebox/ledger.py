@@ -23,7 +23,16 @@ THE RULES IT ENFORCES before anything is written (each refusal is a
     giver per NIGHT, counted from this file, not from a counter that could
     drift from it;
   - a refund returns a spend once, to the phone that paid it, never more
-    than it cost.
+    than it cost;
+  - the host's ZERO takes a phone's balance to exactly 0 (§4's "zero a
+    phone", §12: a cookie reset's fresh grant), never below;
+  - a MERGE (§4's "merge two phones": one guest with two codes) is one
+    group — the retired phone's `merge_out` of its whole balance and the
+    kept phone's `merge_in` of the same — after which the retired phone
+    holds nothing and is never written to again: every later write naming
+    it lands on the phone it joined (`owner`), and what the ledger counts
+    per guest (votes paid, tips per song, the double-first allowance)
+    counts the two as one.
 `verify()` re-checks all of that from the entries alone — the invariants a
 test (and the post-party report) holds the file to.
 
@@ -55,7 +64,9 @@ EARNINGS = frozenset({"vote", "adder_up"})
 SPENDS = frozenset({"add", "bump_up", "bump_down", "play_next", "skip", "skip_pledge",
                     "jail_breakout"})
 TIP_KINDS = frozenset({"tip_out", "tip_in", "tip_bonus"})
-KINDS = GRANTS | EARNINGS | SPENDS | TIP_KINDS | {"refund"}
+HOST_TAKES = frozenset({"host_zero"})
+MERGE_KINDS = frozenset({"merge_out", "merge_in"})
+KINDS = GRANTS | EARNINGS | SPENDS | TIP_KINDS | HOST_TAKES | MERGE_KINDS | {"refund"}
 
 SENTENCES = {
     "not_enough": "Not enough credits for that ({need} needed, {have} held).",
@@ -71,6 +82,9 @@ SENTENCES = {
     "no_spend": "There's no such spend to refund.",
     "refunded": "That spend has already been refunded.",
     "over_refund": "A refund can't be more than the spend it returns.",
+    "nothing_to_zero": "That phone holds no credits.",
+    "merge_self": "A phone can't be merged with itself.",
+    "merged": "That phone has already been merged into another.",
 }
 
 
@@ -125,6 +139,7 @@ class Ledger:
         self._adder_paid: set[str] = set()
         self._tipped: dict[tuple[str, str], int] = {}
         self._refunded: dict[int, int] = {}
+        self._merged: dict[str, str] = {}    # a retired phone -> the phone it joined
         self._lock = threading.RLock()
         if self.path is not None and self.path.exists():
             for line in self.path.read_text(encoding="utf-8").splitlines():
@@ -154,6 +169,21 @@ class Ledger:
     def voted_paid(self, voter: str, song_ref: str) -> bool:
         return (voter, song_ref) in self._voted
 
+    def owner(self, phone: str) -> str:
+        """The phone that holds this one's credits now: itself, or — after a
+        merge — the phone it joined (chains followed)."""
+        seen = {phone}
+        while phone in self._merged:
+            phone = self._merged[phone]
+            if phone in seen:
+                break
+            seen.add(phone)
+        return phone
+
+    def merged_out(self) -> dict[str, str]:
+        """Every retired phone and the phone it joined."""
+        return dict(self._merged)
+
     # ── writing ─────────────────────────────────────────────────────────────
 
     def _apply(self, e: Entry) -> None:
@@ -170,7 +200,26 @@ class Ledger:
             self._tipped[key] = self._tipped.get(key, 0) + (-e.delta) // max(1, self.cfg.tip_unit)
         elif e.kind == "refund" and e.link is not None:
             self._refunded[e.link] = self._refunded.get(e.link, 0) + e.delta
+        elif e.kind == "merge_in" and e.ref:
+            self._fold(e.ref, e.phone)
         self.entries.append(e)
+
+    def _fold(self, gone: str, kept: str) -> None:
+        """A merge: what the ledger counts per guest moves from the retired
+        phone to the kept one — the votes it was paid for, its tips per
+        song, the credits it has given (the double-first allowance)."""
+        old = self._phones.setdefault(gone, _Phone())
+        st = self._phones.setdefault(kept, _Phone())
+        st.given += old.given
+        old.given = 0
+        self._voted |= {(kept, ref) for (who, ref) in self._voted if who == gone}
+        for (who, ref), n in list(self._tipped.items()):
+            if who == gone:
+                self._tipped[(kept, ref)] = self._tipped.get((kept, ref), 0) + n
+        for phone, into in list(self._merged.items()):
+            if into == gone:
+                self._merged[phone] = kept
+        self._merged[gone] = kept
 
     def _write(self, parts: list[tuple[str, int, str, str, Optional[int], str]]) -> list[Entry]:
         """Append one GROUP: [(phone, delta, kind, ref, link, note)]. A link
@@ -205,6 +254,7 @@ class Ledger:
         with self._lock:
             if kind not in GRANTS:
                 raise LedgerError("bad_kind")
+            phone = self.owner(phone)
             return self._write([(phone, self._amount(amount), kind, ref, None, note)])[0]
 
     def vote(self, voter: str, song_ref: str, own_song: bool) -> Optional[Entry]:
@@ -213,6 +263,7 @@ class Ledger:
         with self._lock:
             if own_song:
                 raise LedgerError("own_song")
+            voter = self.owner(voter)
             if (voter, song_ref) in self._voted:
                 return None
             if self.cfg.vote_reward <= 0:
@@ -224,6 +275,7 @@ class Ledger:
         with self._lock:
             if adder_is_host:
                 raise LedgerError("host_song")
+            adder = self.owner(adder)
             if song_ref in self._adder_paid:
                 raise LedgerError("adder_paid")
             amount = int(ups) * self.cfg.adder_up_reward
@@ -237,6 +289,7 @@ class Ledger:
         with self._lock:
             if kind not in SPENDS:
                 raise LedgerError("bad_kind")
+            phone = self.owner(phone)
             amount = self._amount(amount)
             have = self.balance(phone)
             if have < amount:
@@ -263,7 +316,7 @@ class Ledger:
             amount = cost if amount is None else self._amount(amount)
             if amount > cost:
                 raise LedgerError("over_refund")
-            return self._write([(sp.phone, amount, "refund", sp.ref, sp.seq, note)])[0]
+            return self._write([(self.owner(sp.phone), amount, "refund", sp.ref, sp.seq, note)])[0]
 
     def tip(self, giver: str, adder: str, song_ref: str, units: int,
             adder_is_host: bool) -> list[Entry]:
@@ -276,6 +329,7 @@ class Ledger:
                 raise LedgerError("tips_off")
             if adder_is_host:
                 raise LedgerError("host_song")
+            giver, adder = self.owner(giver), self.owner(adder)
             if giver == adder:
                 raise LedgerError("own_tip")
             units = self._amount(units)
@@ -294,6 +348,29 @@ class Ledger:
                               f"first {cfg.gift_double_first} given count double"))
             return self._write(parts)
 
+    def zero(self, phone: str, note: str = "") -> Entry:
+        """The host's zero (§4, §12): the phone's whole balance, taken back."""
+        with self._lock:
+            phone = self.owner(phone)
+            have = self.balance(phone)
+            if have <= 0:
+                raise LedgerError("nothing_to_zero")
+            return self._write([(phone, -have, "host_zero", "", None, note)])[0]
+
+    def merge(self, gone: str, kept: str) -> list[Entry]:
+        """The host's merge (§4, §12): `gone` becomes part of `kept` — its
+        whole balance moves across in one group (written even at 0, so the
+        merge itself is on the record), and from here on it is `kept`."""
+        with self._lock:
+            if gone in self._merged:
+                raise LedgerError("merged")
+            kept = self.owner(kept)
+            if gone == kept:
+                raise LedgerError("merge_self")
+            have = self.balance(gone)
+            return self._write([(gone, -have, "merge_out", kept, None, ""),
+                                (kept, have, "merge_in", gone, -1, "")])
+
     # ── the invariants, from the entries alone ──────────────────────────────
 
     def verify(self) -> list[str]:
@@ -305,18 +382,51 @@ class Ledger:
         voted: set[tuple[str, str]] = set()
         adder_paid: set[str] = set()
         refunded: set[int] = set()
+        merged: dict[str, str] = {}
+
+        def owner(phone: str) -> str:
+            seen = {phone}
+            while phone in merged and merged[phone] not in seen:
+                phone = merged[phone]
+                seen.add(phone)
+            return phone
+
         by_seq = {e.seq: e for e in self.entries}
         for i, e in enumerate(self.entries, 1):
             if e.seq != i:
                 bad.append(f"entry {i} carries seq {e.seq}")
             if e.kind not in KINDS:
                 bad.append(f"entry {e.seq}: unknown kind {e.kind!r}")
-            positive = e.kind in GRANTS | EARNINGS | {"tip_in", "tip_bonus", "refund"}
-            if (positive and e.delta <= 0) or (not positive and e.delta >= 0):
-                bad.append(f"entry {e.seq}: {e.kind} with delta {e.delta}")
+            if e.kind in MERGE_KINDS:     # a merge of an empty phone moves 0
+                if (e.kind == "merge_in" and e.delta < 0) or (e.kind == "merge_out" and e.delta > 0):
+                    bad.append(f"entry {e.seq}: {e.kind} with delta {e.delta}")
+            else:
+                positive = e.kind in GRANTS | EARNINGS | {"tip_in", "tip_bonus", "refund"}
+                if (positive and e.delta <= 0) or (not positive and e.delta >= 0):
+                    bad.append(f"entry {e.seq}: {e.kind} with delta {e.delta}")
+            if e.phone in merged:
+                bad.append(f"entry {e.seq}: written to {e.phone} after it was merged")
             bal[e.phone] = bal.get(e.phone, 0) + e.delta
             if bal[e.phone] < 0:
                 bad.append(f"entry {e.seq}: {e.phone} went to {bal[e.phone]}")
+            if e.kind == "host_zero" and bal[e.phone] != 0:
+                bad.append(f"entry {e.seq}: a zero that left {e.phone} at {bal[e.phone]}")
+            if e.kind == "merge_out" and bal[e.phone] != 0:
+                bad.append(f"entry {e.seq}: a merge that left {e.phone} at {bal[e.phone]}")
+            if e.kind == "merge_in":
+                out = by_seq.get(e.link or 0)
+                if (out is None or out.kind != "merge_out" or out.group != e.group
+                        or out.phone != e.ref or out.ref != e.phone or e.delta != -out.delta
+                        or out.phone == e.phone):
+                    bad.append(f"entry {e.seq}: merge_in with no matching merge_out in its group")
+                else:
+                    gone, kept = out.phone, e.phone
+                    voted |= {(kept, ref) for (who, ref) in voted if who == gone}
+                    bonus[kept] = bonus.get(kept, 0) + bonus.pop(gone, 0)
+                    for phone, into in list(merged.items()):
+                        if into == gone:
+                            merged[phone] = kept
+                    merged[gone] = kept
             if e.kind == "vote":
                 if (e.phone, e.ref) in voted:
                     bad.append(f"entry {e.seq}: a second vote payment on {e.ref}")
@@ -337,9 +447,10 @@ class Ledger:
                 elif e.kind == "tip_in" and e.delta != -out.delta:
                     bad.append(f"entry {e.seq}: tip_in {e.delta} for a tip_out of {-out.delta}")
                 elif e.kind == "tip_bonus":
-                    bonus[out.phone] = bonus.get(out.phone, 0) + e.delta
-                    if bonus[out.phone] > self.cfg.gift_double_first:
-                        bad.append(f"entry {e.seq}: {out.phone}'s gifts made {bonus[out.phone]} "
+                    giver = owner(out.phone)
+                    bonus[giver] = bonus.get(giver, 0) + e.delta
+                    if bonus[giver] > self.cfg.gift_double_first:
+                        bad.append(f"entry {e.seq}: {giver}'s gifts made {bonus[giver]} "
                                    f"bonus credits (cap {self.cfg.gift_double_first})")
             if e.kind == "refund":
                 sp = by_seq.get(e.link or 0)
@@ -347,7 +458,7 @@ class Ledger:
                     bad.append(f"entry {e.seq}: a refund of no spend")
                 elif sp.seq in refunded:
                     bad.append(f"entry {e.seq}: spend {sp.seq} refunded twice")
-                elif sp.phone != e.phone or e.delta > -sp.delta:
+                elif owner(sp.phone) != e.phone or e.delta > -sp.delta:
                     bad.append(f"entry {e.seq}: refund doesn't match spend {sp.seq}")
                 if sp is not None:
                     refunded.add(sp.seq)

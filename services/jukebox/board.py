@@ -117,7 +117,7 @@ def top_songs(book: GuestBook, gs: dict, limit: int = LIMIT,
 
 
 def _people(counts: dict[str, int], book: GuestBook, limit: int) -> list[dict]:
-    names = {pid: p.name for pid, p in book.phones.items() if not p.blocked}
+    names = {pid: p.name for pid, p in book.phones.items() if not p.blocked and not p.merged_into}
     rows = [(n, names[pid]) for pid, n in counts.items() if n > 0 and pid in names]
     rows.sort(key=lambda r: (-r[0], r[1].casefold()))
     return [{"name": name, "value": n} for n, name in rows[:limit]]
@@ -140,11 +140,14 @@ def top_voters(book: GuestBook, limit: int = LIMIT) -> list[dict]:
 
 
 def tips_given(entries: list[Any]) -> dict[str, int]:
-    """Credits each phone gave as tips, from the night's ledger entries."""
+    """Credits each guest gave as tips, from the night's ledger entries — a
+    phone the host merged into another counts as that one."""
     out: dict[str, int] = {}
     for e in entries:
         if e.kind == "tip_out":
             out[e.phone] = out.get(e.phone, 0) - e.delta
+        elif e.kind == "merge_out":       # the ledger writes nothing to it after this
+            out[e.ref] = out.get(e.ref, 0) + out.pop(e.phone, 0)
     return out
 
 

@@ -80,7 +80,8 @@ def night_section(n: JukeboxNight, now_ms: int) -> dict:
 
 
 def credits_section(entries: list[Entry], hours: Optional[float]) -> dict:
-    phones = sorted({e.phone for e in entries if e.phone != HOST})
+    gone = {e.phone for e in entries if e.kind == "merge_out"}    # merged into another guest
+    phones = sorted({e.phone for e in entries if e.phone != HOST and e.phone not in gone})
     by_kind: dict[str, int] = {}
     counts: dict[str, int] = {}
     for e in entries:

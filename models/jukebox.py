@@ -497,6 +497,10 @@ class GuestPhone(_Model):
     jailed_ms: Optional[int] = None
     # when this phone bumped a song, for "N bumps an hour" (the last hour's only)
     bumps_ms: list[int] = Field(default_factory=list)
+    # The host merged this phone into another (§4 "merge two phones": one
+    # guest, two codes): it is that guest now — a request carrying this code
+    # acts as them, and its page is handed their code on its next visit.
+    merged_into: str = ""
 
 
 class BonusCode(_Model):
@@ -532,3 +536,5 @@ class GuestBook(_Model):
     credit_tick: dict[str, int] = Field(default_factory=dict)
     settled: list[str] = Field(default_factory=list)
     pots: dict[str, str] = Field(default_factory=dict)
+    # the host's merges (§4): a retired phone's code -> the phone it joined
+    merged: dict[str, str] = Field(default_factory=dict)

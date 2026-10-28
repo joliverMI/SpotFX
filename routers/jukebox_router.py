@@ -82,6 +82,10 @@ process on its own port (phase 2) and never reaches these routes.
                                       lock, songs, votes
   POST   /api/jukebox/guests/{phone}  {approved?, blocked?, name_locked?,
                                       name?} — the host's controls over a phone
+  POST   /api/jukebox/guests/{phone}/zero   the host's zero: its credits to 0
+                                      (credits mode)
+  POST   /api/jukebox/guests/{phone}/merge  {retire: phone id} — that phone
+                                      joins this one: one guest (§4, §12)
   GET    /api/jukebox/board           the board (services/jukebox/board.py):
                                       tonight's top songs, every people board
                                       marked shown or not, the song playing
@@ -273,6 +277,25 @@ async def post_guest(phone: str, body: PhoneBody) -> JSONResponse:
     code, out = await guests.book.host_set(phone, approved=body.approved, blocked=body.blocked,
                                            name_locked=body.name_locked, name=body.name,
                                            pardon=body.pardon)
+    return JSONResponse(out, status_code=code)
+
+
+@router.post("/guests/{phone}/zero")
+async def post_guest_zero(phone: str) -> JSONResponse:
+    """The host's zero (report §4, §12): this phone's credits to 0."""
+    code, out = await guests.book.zero(phone)
+    return JSONResponse(out, status_code=code)
+
+
+class MergeBody(BaseModel):
+    retire: str = Field(max_length=60)          # the phone that joins this one
+
+
+@router.post("/guests/{phone}/merge")
+async def post_guest_merge(phone: str, body: MergeBody) -> JSONResponse:
+    """The host's merge (report §4, §12): `retire` and this phone are one
+    guest — everything of `retire` joins this phone."""
+    code, out = await guests.book.merge(body.retire, phone)
     return JSONResponse(out, status_code=code)
 
 

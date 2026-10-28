@@ -247,6 +247,31 @@ export function useHostPhone() {
   });
 }
 
+/** The host's zero (§4): a phone's credits to 0, credits mode. */
+export function useZeroPhone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => spotfxPost<GuestsRead & { zeroed?: { name: string; credits: number } }>(
+      `/jukebox/guests/${encodeURIComponent(id)}/zero`),
+    onSuccess: (r) => { qc.setQueryData(['jukebox-guests'], r); },
+  });
+}
+
+/** The host's merge (§4): `retire` joins `keep` — one guest. */
+export function useMergePhones() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ keep, retire }: { keep: string; retire: string }) =>
+      spotfxPost<GuestsRead & { merged?: { name: string; songs: number; credits: number } }>(
+        `/jukebox/guests/${encodeURIComponent(keep)}/merge`, { retire }),
+    onSuccess: (r) => {
+      qc.setQueryData(['jukebox-guests'], r);
+      qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status });
+      qc.invalidateQueries({ queryKey: ['jukebox-board'] });
+    },
+  });
+}
+
 /** Hold a waiting song (it keeps its place; slots pass it) or let it go. */
 export function useHoldEntry() {
   const qc = useQueryClient();

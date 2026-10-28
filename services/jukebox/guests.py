@@ -34,6 +34,18 @@ digits, spaces and ' . - _ — no emoji or symbols; it can't be anyone else's
 tonight or the host's, and with the word filter on it can't hold a word on
 the short block list. The host can rename any phone and lock its name.
 
+ZERO AND MERGE (§4's host buttons, §12's cookie-reset guard). The Guests tab
+shows when each phone first opened the page, so a "new phone" late in the
+night stands out. ZERO (credits mode) takes a phone's credits to 0 — one
+`host_zero` ledger entry — and forgoes any welcome credits it hasn't had
+yet. MERGE makes two phones one guest: the retired phone's songs (waiting
+and played), votes, time-out and credits join the kept one (a ledger
+group, services/jukebox/ledger.py), the guest keeps the name of whichever
+phone came first tonight, and is let in if either phone was. The retired
+code still works: every request carrying it acts as the kept phone
+(`alias`), and its page is handed the kept code on its next hello, so a
+merge made either way round never strands anyone.
+
 VOTES (free play, the plan's §6). One vote per phone on the song playing —
 ▲ or ▼, changeable, withdrawable — keyed by the play (the song and the moment
 it started), so a song that plays twice is voted on twice. Only while it
@@ -286,6 +298,10 @@ SENTENCES: dict[str, str] = {
     "jailed_credits": "You're in jail: your songs wait until you break out ({fee} credits). You can still vote.",
     "chip_off": "Chipping in is off tonight.",
     "next_own": "Play next is for your own songs.",
+    "nothing_to_zero": "That phone holds no credits.",
+    "merge_self": "Pick a different phone to merge with.",
+    "merge_blocked": "Unblock it first — a blocked phone can't be merged.",
+    "merged_phone": "That phone has already been merged into another.",
 }
 
 
@@ -850,6 +866,29 @@ class GuestDeps:
     sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep
 
 
+def merged_target(book: GuestBook, phone: Any) -> Any:
+    """The phone a merged code now belongs to (chains followed); any other
+    code as given."""
+    seen = {phone}
+    while isinstance(phone, str) and phone in book.merged:
+        phone = book.merged[phone]
+        if phone in seen:
+            break
+        seen.add(phone)
+    return phone
+
+
+def _as_guest(fn: Callable) -> Callable:
+    """A guest call naming a phone: a merged code acts as the guest it
+    joined (§4's merge), before anything else looks at it."""
+    import functools
+
+    @functools.wraps(fn)
+    async def run(self: "Guests", phone: Any, *args: Any, **kw: Any) -> Any:
+        return await fn(self, self.alias(phone), *args, **kw)
+    return run
+
+
 class Guests:
     """Tonight's book of phones and votes. Held in memory, written through
     (off the event loop) on every change; every method answers
@@ -902,7 +941,19 @@ class Guests:
         return gs if gs.get("running") else None
 
     def _taken(self, book: GuestBook, but: str = "") -> set[str]:
-        return {p.name.lower() for pid, p in book.phones.items() if pid != but}
+        return {p.name.lower() for pid, p in book.phones.items()
+                if pid != but and not p.merged_into}
+
+    def alias(self, phone: Any) -> Any:
+        """The phone a guest call acts as: a merged code's kept phone (a
+        read of tonight's book; any other code as given). A book with no
+        merges — nearly every night — answers without asking the engine."""
+        if self._book is not None and not self._book.merged:
+            return phone
+        gs = self._running()
+        if gs is None or not isinstance(phone, str):
+            return phone
+        return merged_target(self._book_for(gs["night_id"]), phone)
 
     def _gate(self, phone: Any) -> tuple[Optional[tuple[int, dict]], Optional[dict],
                                          Optional[GuestBook]]:
@@ -1070,6 +1121,7 @@ class Guests:
             if gs is None:
                 return 200, idle_view(self.deps.now_ms(), self.deps.show())
             book = self._book_for(gs["night_id"])
+            phone = merged_target(book, phone)     # a merged code is handed its guest's
             if valid_phone_id(phone) and phone in book.phones:
                 if book.phones[phone].blocked:
                     return refusal("blocked", 403)
@@ -1078,7 +1130,7 @@ class Guests:
             if not self.deps.token_ok(token):
                 return refusal("needs_link", 403)
             show = self.deps.show()
-            if len(book.phones) >= show.max_phones:
+            if sum(1 for p in book.phones.values() if not p.merged_into) >= show.max_phones:
                 return refusal("party_full", 403)
             pid = phone if valid_phone_id(phone) else new_phone_id()
             book.phones[pid] = GuestPhone(id=pid, name=fun_name(self.deps.rng, self._taken(book)),
@@ -1088,6 +1140,7 @@ class Guests:
             await self._save()
             return self._ok(book, pid, gs, phone=pid)
 
+    @_as_guest
     async def join(self, phone: Any, name: Any = None) -> tuple[int, dict]:
         """"Let's go": the phone joins, with the name on its welcome screen
         (or a name it typed there)."""
@@ -1109,6 +1162,7 @@ class Guests:
         await self._credits_tick(book, phone, gs, self.deps.show())     # the welcome credits
         return self._ok(book, phone, gs)
 
+    @_as_guest
     async def rename(self, phone: Any, name: Any = None, shuffle: bool = False) -> tuple[int, dict]:
         """A new name: typed, or a fresh fun one (shuffle). Free on the
         welcome screen; the show's number of changes after joining."""
@@ -1137,6 +1191,7 @@ class Guests:
                 await self._save()
             return self._ok(book, phone, gs)
 
+    @_as_guest
     async def vote(self, phone: Any, vote: Any) -> tuple[int, dict]:
         """▲ (up), ▼ (down) or none (take it back) on the song playing now."""
         values = {"up": 1, "down": -1, "none": 0}
@@ -1261,6 +1316,7 @@ class Guests:
             except Exception:                                      # noqa: BLE001
                 logger.exception("Jukebox: the room's skip couldn't be checked after the grace")
 
+    @_as_guest
     async def bump(self, phone: Any, entry_id: Any, direction: Any,
                    price: Any = None) -> tuple[int, dict]:
         """A bump: your own waiting song up one place, or someone else's down
@@ -1384,6 +1440,7 @@ class Guests:
 
     # ── the printed bonus cards and the host's gifts (§1 rule 1, §4) ────────
 
+    @_as_guest
     async def redeem_bonus(self, phone: Any, code: Any) -> tuple[int, dict]:
         """A printed bonus card (services/jukebox/bonus_codes.py): its code is
         good for `qr_bonus` credits once, ever, and a phone uses one a night.
@@ -1458,6 +1515,7 @@ class Guests:
                 "amount": n, "phones": len(targets),
                 "names": [book.phones[pid].name for pid in targets]}}
 
+    @_as_guest
     async def tip(self, phone: Any, units: Any = 1) -> tuple[int, dict]:
         """Tip the guest whose song is playing (§1 rule 4): a tap at a time,
         at most `tip_max_per_song` per song; never the host, never yourself.
@@ -1488,6 +1546,7 @@ class Guests:
                                                      "amount": -parts[0].delta,
                                                      "bonus": sum(p.delta for p in parts[2:])})
 
+    @_as_guest
     async def skip(self, phone: Any, how: Any = "pay", amount: Any = None,
                    price: Any = None) -> tuple[int, dict]:
         """Skip the song playing (§1 rule 8): pay the rest of its price now,
@@ -1579,6 +1638,7 @@ class Guests:
             return True
         return False
 
+    @_as_guest
     async def play_next(self, phone: Any, entry_id: Any, price: Any = None) -> tuple[int, dict]:
         """Play next (§1 rule 7): your own waiting song to the front of the
         jukebox line, priced by how far it jumps; only for a song at least
@@ -1627,6 +1687,7 @@ class Guests:
                                                   "starts_in_ms": out.get("starts_in_ms")},
                          "view": self._view(book, phone, gs)}
 
+    @_as_guest
     async def break_out(self, phone: Any) -> tuple[int, dict]:
         """Break out of jail (§1 rule 9): `jail_fee` credits, and your count
         starts again at 0. Only a credits-imposed jail (the STORED kind,
@@ -1668,6 +1729,7 @@ class Guests:
         from services.jukebox import board
         return board.tips_given(self._wallet_for(gs["night_id"], show).led.entries)
 
+    @_as_guest
     async def board_view(self, phone: Any) -> tuple[int, dict]:
         """The guests' Board tab: tonight's top songs, and the people boards
         his switches turn on (they ship off)."""
@@ -1708,6 +1770,7 @@ class Guests:
                        "by": board._by(adder, names), **tally(book, play_key(now))}
         return {"running": True, "settings": settings, "board": out, "now": now_out}
 
+    @_as_guest
     async def wallet_view(self, phone: Any) -> tuple[int, dict]:
         """The Shop: the balance and how it was made, what each thing costs
         right now, how to earn, and this phone's history in words."""
@@ -1765,6 +1828,7 @@ class Guests:
                                "tries_left": max(0, BONUS_TRIES - self._bonus_tries.get(phone, 0))},
                      "view": self._view(book, phone, gs)}
 
+    @_as_guest
     async def view(self, phone: Any) -> tuple[int, dict]:
         gate, gs, book = self._gate(phone)
         if gate:
@@ -1819,6 +1883,7 @@ class Guests:
                 self._searches.pop(k, None)
         return metas, library_uris, more
 
+    @_as_guest
     async def search(self, phone: Any, query: Any, offset: Any = 0) -> tuple[int, dict]:
         """A guest's search: his library's songs first ("Ready"), then
         Spotify, SEARCH_PAGE a page; each with its badges and whether it can
@@ -1865,6 +1930,7 @@ class Guests:
                      "next_offset": off + SEARCH_PAGE,
                      "view": self._view(book, phone, gs)}
 
+    @_as_guest
     async def add(self, phone: Any, uri: Any, price: Any = None) -> tuple[int, dict]:
         """A guest adds a song: every rule in the module docstring, then
         fair order, then "would it start before the night ends?". In credits
@@ -1970,8 +2036,12 @@ class Guests:
         w = self._wallet_for(gs["night_id"], show) if credits else None
         out = []
         for p in sorted(book.phones.values(), key=lambda p: p.created_ms):
+            if p.merged_into:
+                continue
             mine = [e for e in line if e.added_by == p.id]
             row = p.model_dump(mode="json", exclude={"bumps_ms"})
+            row["merged_from"] = sorted(q.name for q in book.phones.values()
+                                        if q.merged_into and merged_target(book, q.id) == p.id)
             out.append({**row,
                         "waiting": sum(1 for e in mine if e.state in ("queued", "committed")),
                         "played": sum(1 for e in mine if e.state == "played"),
@@ -2020,6 +2090,108 @@ class Guests:
             await self._save()
         return 200, {"status": "ok", **self.phones()}
 
+    async def zero(self, phone: str) -> tuple[int, dict]:
+        """The host's zero (§4, §12): this phone's credits go to 0, and any
+        welcome credits it hasn't had yet never come. Credits mode only."""
+        async with self._get_lock():
+            gs = self._running()
+            if gs is None:
+                return refusal("not_running", 409)
+            show = self.deps.show()
+            if show.play_mode != "credits":
+                return refusal("credits_off", 409)
+            book = self._book_for(gs["night_id"])
+            p = book.phones.get(phone)
+            if p is None:
+                return refusal("no_phone", 404)
+            if p.merged_into:
+                return refusal("merged_phone", 409)
+            w = self._wallet_for(gs["night_id"], show)
+            from services.jukebox import ledger as ledger_mod
+            try:
+                entry = await self._ledger(w.led.zero, phone, "the host")
+            except ledger_mod.LedgerError as err:
+                return refusal(err.code, 409)
+            w.noted([entry])
+        return 200, {"status": "ok", "zeroed": {"name": p.name, "credits": -entry.delta},
+                     **self.phones()}
+
+    async def merge(self, retire: str, into: str) -> tuple[int, dict]:
+        """The host's merge (§4, §12): `retire` and `into` are one guest.
+        Everything of the retired phone joins the kept one — its songs
+        (waiting and played), its votes (where both voted on a song, the
+        kept phone's vote stands), its time-out (the longer one), its bumps
+        this hour, its jail count, and (whenever the night has a ledger) its
+        credits and what the ledger counts per guest. The guest keeps the
+        name of the phone that came first tonight and is let in if either
+        was. The retired code keeps working as the kept phone (`alias`)."""
+        async with self._get_lock():
+            gs = self._running()
+            if gs is None:
+                return refusal("not_running", 409)
+            book = self._book_for(gs["night_id"])
+            gone, kept = book.phones.get(retire), book.phones.get(into)
+            if gone is None or kept is None:
+                return refusal("no_phone", 404)
+            if retire == into:
+                return refusal("merge_self", 422)
+            if gone.merged_into or kept.merged_into:
+                return refusal("merged_phone", 409)
+            if gone.blocked or kept.blocked:
+                return refusal("merge_blocked", 409)
+            for pid in (retire, into):     # a time-out that ended: its count restarts first
+                self._count_release(book, gs, pid)
+            show = self.deps.show()
+            w = self._wallet_for(gs["night_id"], show)
+            # the engine first: a night that ended meanwhile refuses here,
+            # before anything is written
+            out = await self.deps.runner().merge_phone(retire, into)
+            if out.get("status") != "merged":
+                return refusal("not_running", 409)
+            moved = 0
+            if show.play_mode == "credits" or retire in w.led.phones():
+                from services.jukebox import ledger as ledger_mod
+                try:
+                    entries = await self._ledger(w.led.merge, retire, into)
+                    w.noted(entries)
+                    moved = entries[-1].delta
+                except ledger_mod.LedgerError as err:
+                    if err.code != "merged":    # "merged": a merge cut short before the
+                        raise                   # book saved — the ledger already holds it
+            first = min((gone, kept), key=lambda q: q.created_ms)
+            kept.name, kept.name_locked = first.name, first.name_locked
+            kept.renames = max(gone.renames, kept.renames)
+            kept.approved = kept.approved or gone.approved
+            if gone.joined and (not kept.joined or (gone.joined_ms or 0) < (kept.joined_ms or 0)):
+                kept.joined, kept.joined_ms = True, gone.joined_ms
+            kept.jail_base += gone.jail_base
+            kept.jails += gone.jails
+            if gone.jail_open:
+                kept.jail_open = True
+                times = [t for t in (kept.jailed_ms, gone.jailed_ms) if t is not None]
+                kept.jailed_ms = min(times) if times else None
+            kept.bumps_ms = sorted(kept.bumps_ms + gone.bumps_ms)
+            for votes in book.votes.values():
+                if retire in votes:
+                    v = votes.pop(retire)
+                    votes.setdefault(into, v)
+            for key, by in list(book.play_by.items()):
+                if by == retire:
+                    book.play_by[key] = into
+            if into not in book.credit_tick and retire in book.credit_tick:
+                book.credit_tick[into] = book.credit_tick[retire]
+            book.credit_tick.pop(retire, None)
+            for code, target in list(book.merged.items()):
+                if target == retire:
+                    book.merged[code] = into
+            book.merged[retire] = into
+            gone.merged_into = into
+            self._seen.pop(retire, None)
+            self._polled.pop(retire, None)
+            await self._save()
+        return 200, {"status": "ok", "merged": {"name": kept.name, "songs": out.get("songs", 0),
+                                                "credits": moved}, **self.phones()}
+
     # ── the master's read ───────────────────────────────────────────────────
 
     def summary(self, night_id: Optional[str]) -> dict:
@@ -2029,9 +2201,10 @@ class Guests:
         if self._book is None:
             self._book = store.load_guests()
         book = self._book if self._book.night_id == night_id else GuestBook()
-        return {"phones": len(book.phones),
-                "joined": sum(1 for p in book.phones.values() if p.joined),
-                "pending": sum(1 for p in book.phones.values() if not p.approved and not p.blocked)}
+        here = [p for p in book.phones.values() if not p.merged_into]
+        return {"phones": len(here),
+                "joined": sum(1 for p in here if p.joined),
+                "pending": sum(1 for p in here if not p.approved and not p.blocked)}
 
 
 book = Guests()

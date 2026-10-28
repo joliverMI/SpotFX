@@ -60,12 +60,16 @@ WORDS: dict[str, str] = {
     "skip_pledge": "Chipped in to skip",
     "jail_breakout": "Broke out of jail",
     "refund": "Refund",
+    "host_zero": "Set to zero by the host",
+    "merge_out": "Moved to your other phone",
+    "merge_in": "From your other phone",
 }
 EARN_GROUPS: dict[str, tuple[str, ...]] = {
     "free": ("start", "start_rest", "topup", "qr_bonus", "host_gift"),
     "votes": ("vote",),
     "your songs": ("adder_up",),
     "tips": ("tip_in", "tip_bonus"),
+    "other phone": ("merge_in",),
 }
 DISCLAIMER = ("Credits are free and only for tonight. They can't be bought, sold, traded "
               "or cashed out.")
@@ -136,7 +140,7 @@ def history_rows(entries: list[Any], names: dict[str, str], titles: dict[str, st
 def earned(entries: list[Any]) -> dict:
     """How the balance was made: credits in by source, and spent."""
     got = {k: 0 for k in EARN_GROUPS}
-    spent = refunded = 0
+    spent = refunded = zeroed = 0
     for e in entries:
         for group, kinds in EARN_GROUPS.items():
             if e.kind in kinds:
@@ -145,7 +149,9 @@ def earned(entries: list[Any]) -> dict:
             spent += -e.delta
         if e.kind == "refund":
             refunded += e.delta
-    return {**got, "spent": spent, "refunded": refunded}
+        if e.kind in ("host_zero", "merge_out"):
+            zeroed += -e.delta
+    return {**got, "spent": spent, "refunded": refunded, "zeroed": zeroed}
 
 
 # ── the night's wallet ───────────────────────────────────────────────────────
@@ -164,9 +170,23 @@ class Wallet:
             self._note(e)
 
     def _note(self, e: Any) -> None:
-        self.got.setdefault(e.phone, set()).add(e.kind)
+        got = self.got.setdefault(e.phone, set())
+        got.add(e.kind)
         if e.kind == "skip_pledge":
             self.pledges.setdefault(e.ref, []).append((e.phone, -e.delta, e.seq))
+        elif e.kind == "host_zero":
+            # the host's zero (§12's cookie reset): any welcome credits not
+            # yet arrived are forgone too — a reset buys nothing more
+            got |= {"start", "start_rest"}
+        elif e.kind == "merge_in" and e.ref:
+            # one guest now: the welcome and the bonus card they already had
+            # on the other phone count here (no second welcome, no 2nd card);
+            # the first half of the welcome on BOTH phones is the whole of it
+            # (a cookie reset's 4 stand in for the 4 that come later)
+            other = self.got.get(e.ref, set())
+            if "start" in got and "start" in other:
+                got.add("start_rest")
+            got |= other & {"start", "start_rest", "qr_bonus"}
 
     def noted(self, entries: list[Any]) -> list[Any]:
         for e in entries:
@@ -181,7 +201,8 @@ class Wallet:
         mine: dict[str, int] = {}
         for phone, amount, seq in self.pledges.get(key, []):
             if not self.led.is_refunded(seq):
-                mine[phone] = mine.get(phone, 0) + amount
+                who = self.led.owner(phone)
+                mine[who] = mine.get(who, 0) + amount
         return sum(mine.values()), mine
 
     def due_grants(self, phone: str, joined_ms: Optional[int], last_tick: Optional[int],

@@ -2455,7 +2455,18 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Free play: the room\'s skip, bumps, play next and the jail (see Free play).',
           'The line: every jukebox song still to play, who added it, whether it was their 1st or 2nd song and, in credits mode, what they paid. Play next moves a waiting song to the front of the waiting songs (when Free play\'s Play next is "host only", and always in credits mode); Keep from skips protects a song (see Keeping a song from skips; the song playing has its own row above the line); Hold keeps a song in its place while slots pass it (Let go puts it back in play); Remove takes it out (a song already sent to Spotify is skipped the moment it starts). A song whose guest is in a time-out says so.',
           'Phones: everyone at tonight\'s party, how they stand (on the welcome screen, in, in a time-out with the songs left or in jail until they break out, waiting for your approval, blocked) with their songs, votes, their ▼ count against the jail\'s bar and, in credits mode, the credits they hold. Approve lets a waiting phone in (with "New phones need my approval" on, on the Credits tab); in credits mode Give… gives that guest credits and Everyone +2 gives every phone at the party 2 (see Giving credits); Pardon ends a time-out now; Block takes a phone out for the night; Rename gives it a name of your choosing (your word, no filter); Lock name stops it changing its own.',
-          'Sonic can change the guest rules and the free-play rules and give credits (asking first, and only to a guest named exactly) but not approve, pardon, block or rename a phone: those act on a person by name, so they stay these buttons.',
+          'Each phone also says when it first opened the page tonight ("since 21:42"), so a new phone late in the night stands out. Zero and Merge… are for a guest who cleared their cookies or came back on a second phone (see Zero and merge a phone).',
+          'Sonic can change the guest rules and the free-play rules and give credits (asking first, and only to a guest named exactly) but not approve, pardon, block, rename, zero or merge a phone: those act on a person by name, so they stay these buttons.',
+        ],
+      },
+      {
+        id: 'jukebox-merge-phones',
+        title: 'Zero and merge a phone',
+        keywords: 'zero merge phone guest cookie reset cleared private tab second phone new phone credits take back one guest two phones',
+        body: [
+          'A guest who clears their cookies or opens a private tab comes back as a new phone, with a fresh welcome of 4 credits (the other 4 only after 20 minutes). The Guests tab shows when each phone first opened the page, so a new phone late in the night stands out.',
+          'Zero (credits mode) takes all of a phone\'s credits back, and any welcome credits it hasn\'t had yet never come. It asks once: Take N back, or Keep. It is one entry on the night\'s credits record, like everything else.',
+          'Merge… makes two phones one guest. On the phone to keep, pick the phone that joins it: that phone\'s songs (waiting and played), votes (where both voted on a song, the kept phone\'s vote stands), time-out (the longer one) and credits come across, the guest is called whatever the phone that came first tonight was called, and is let in if either phone was. Both codes keep working as the one guest, so it doesn\'t matter which way round you merge: the other phone is handed the kept code the next time it opens the page. A guest who already had their welcome or used a bonus card on one phone doesn\'t get them again on the other. A blocked phone can\'t be merged until you unblock it.',
         ],
       },
       {
