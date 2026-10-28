@@ -513,9 +513,10 @@ def build_report(guests: Optional[int], nights: int, now_ms: int) -> dict:
     show_cfg = store.load_show()
     program_cfg = store.load_config()
     entries, verify = night_report.load_entries(n.id if n else "", show_cfg.economy)
+    book = night_report.load_book(n.id if n else "")
     out = night_report.build(n, entries, show_cfg.economy, now_ms=now_ms, guests=guests,
                              mode=program_cfg.mode, every=program_cfg.every,
-                             run=program_cfg.run, nights=nights, verify=verify)
+                             run=program_cfg.run, nights=nights, verify=verify, book=book)
     return {"program_from": "your saved program and credits settings", **out}
 
 

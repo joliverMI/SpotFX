@@ -501,6 +501,35 @@ class GuestPhone(_Model):
     # guest, two codes): it is that guest now — a request carrying this code
     # acts as them, and its page is handed their code on its next visit.
     merged_into: str = ""
+    # THE REPORT'S "WANTS" (§3's "can afford it right away"): a guest's first
+    # search after their last add is their first look at an add price; this
+    # stays True until they add (services/jukebox/guests.py's `search`).
+    want_open: bool = False
+
+
+class NightSample(_Model):
+    """One moment of the night as the post-party report measures it — the
+    simulator's own series (services/jukebox/simulator.py), one per song
+    start: credits held by the phones here, how long a song added at the
+    back would wait, its add price there (a known 3.6-minute song), and how
+    many are in a time-out and here. `held`/`price_back` are None in free
+    play (nothing costs anything)."""
+    t_ms: int
+    held: Optional[int] = None
+    back_wait_ms: Optional[int] = None
+    price_back: Optional[int] = None
+    jailed: int = 0
+    present: int = 0
+
+
+class WantCounts(_Model):
+    """§3's "can afford it right away": each first look at an add price, and
+    whether the balance then covered it — and the same for a guest who
+    already had a song waiting (a 2nd song)."""
+    wants: int = 0
+    afford_now: int = 0
+    wish_more: int = 0
+    afford_more: int = 0
 
 
 class BonusCode(_Model):
@@ -538,3 +567,11 @@ class GuestBook(_Model):
     pots: dict[str, str] = Field(default_factory=dict)
     # the host's merges (§4): a retired phone's code -> the phone it joined
     merged: dict[str, str] = Field(default_factory=dict)
+    # THE POST-PARTY REPORT'S RECORDS (§9 3.3, §12 risk 3): one sample per
+    # song start (`sampled_plays` is the engine's `plays` count last sampled),
+    # the guests' first looks at an add price, and adds turned away by code
+    # ("too_late": it would start after the night ends).
+    series: list[NightSample] = Field(default_factory=list)
+    sampled_plays: int = -1
+    wants: WantCounts = Field(default_factory=WantCounts)
+    refused: dict[str, int] = Field(default_factory=dict)

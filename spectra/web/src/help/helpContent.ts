@@ -2484,11 +2484,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'jukebox-report',
         title: 'The night\'s report',
-        keywords: 'report post-party after the party night measured ledger credits compare model bands real numbers next party',
+        keywords: 'report post-party after the party night measured ledger credits compare model bands real numbers next party quiet guest afford mid-party back of the line too late jail',
         body: [
           'The Live tab ends with the latest night\'s report (or the night so far, while one runs): how long it ran, the set and jukebox songs played, what was skipped, the jukebox\'s share, songs an hour, the songs added to the line and what became of them, and the median wait from adding a song to hearing it.',
-          'Once guests use credits (credits mode), it adds the night\'s credits from its ledger — guests, credits made, what was still held at the end, songs bought — and checks the ledger against its own rules, naming any entry that breaks one. Pick a party size (or, after a guest night, the number of guests who used credits) to set each measure beside the party simulator\'s nights at that size, under your saved settings and program, so the next party starts from real numbers rather than the model.',
-          'A measure this night couldn\'t take shows "–" with the reason on hover — "no guest credits were used", or "this night\'s records don\'t hold it yet" (jail is not in the ledger, for one) — never a zero. The report reads only; nothing is changed by opening it.',
+          'Every row of the party simulator\'s table is measured from the night\'s own records, the model\'s way: the guests\' songs and how long they waited (from opening the page to their first song, and from adding a song to hearing it), the back of the line (sampled at every song start), the jail, songs per quiet guest (one who voted on under 15% of the songs that played after they joined), and adds turned away as too late. In credits mode it adds the night\'s credits from its ledger, what guests held and the price at the back of the line mid-party (the model\'s 60-200 minutes of 4 hours, as a share of this night), and how often a guest could afford a song the first time they looked at a price (their first search since their last add). It also checks the ledger against its own rules, naming any entry that breaks one.',
+          'Pick a party size (or keep the number of guests the night had) to set each measure beside the simulator\'s nights at that size, under your saved settings and program, so the next party starts from real numbers rather than the model. A free-play night is measured too; its credit rows say nothing cost anything.',
+          'A measure this night couldn\'t take shows "–" with the reason on hover — "no guest song has played yet", "no song started while a guest\'s page was open", and so on — never a zero. The report reads only; nothing is changed by opening it.',
         ],
       },
       {

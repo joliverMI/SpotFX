@@ -240,7 +240,10 @@ const REP = JSON.parse(readFileSync(join(web, 'harness/jukeboxReportSnapshot.jso
   const credits = Object.fromEntries(RW.creditFacts(REP.credits).map((f) => [f.label, f.value]));
   ok(credits['Held at the end'] === '8 (30%)' && credits['Guests who used credits'] === '3', 'the credits in words');
   const jail = REP.comparison.rows.find((r) => r.key === 'jails');
-  const c = RW.compareCells(jail);
+  ok(RW.compareCells(jail).night === '1' && !RW.compareCells(jail).why,
+    `the night's jail, from its guest book (${RW.compareCells(jail).night})`);
+  ok(REP.comparison.rows.every((r) => r.this_night !== null), 'the snapshot night measures every model row');
+  const c = RW.compareCells({ ...jail, this_night: null, why: 'no guest song has played yet' });
   ok(c.night === '–' && c.why && c.model !== '–', 'a measure the night could not take is "–" with its reason, beside the model');
   ok(RW.endLine({ ...REP.night, state: 'running' }).startsWith('Still running'), 'a running night is a report so far');
 }
