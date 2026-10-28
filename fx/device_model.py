@@ -408,6 +408,15 @@ DROP_INTENSITY_EFFECTS = (
     frozenset({"fish", "radial"}) | STRIP_PHASE_EFFECTS | DROP_SHOCK_EFFECTS
 )  # Star: the told intensity sizes its bands' snap-back (radial.py)
 
+# THE DROP COLOUR RE-SAMPLE (fx/effects/drop_colour_resample.py is the
+# binding statement; widened 2026-10-28, the Admiral: "yes, the star
+# should change color" on a drop with no pre-drop too): told on every drop
+# arm whether a colour change actually landed on it (ResponseEngine.
+# on_event's own drop-colour claim), so a member's thrown-back pieces
+# re-sample their palette positions exactly when the set moved. Star only
+# — no other effect re-samples a palette position this way.
+DROP_COLOUR_RESAMPLE_EFFECTS = frozenset({"radial"})
+
 # THE DROP-LED SCENE SWITCH's families (2026-10-08, drop-scene-variety plan
 # phase 2 — spectra/services/drop_switch.py is the binding statement). A
 # scene can carry a drop-led switch when its Matrix effect is in one of

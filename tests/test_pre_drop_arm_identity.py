@@ -20,6 +20,12 @@ Hole, Orbits and Fireworks strips), so:
 - with a pre-drop that plays, every non-member write is still today's, and
   a member's lull arm carries the told kind, moment, gap and its own
   resolved look, its breath ending exactly on the pre-drop.
+
+Widened 2026-10-28 (fx/effects/drop_colour_resample.py — Star re-samples a
+drop's colour even with no pre-drop): every drop arm now also carries
+`drop_colour_landed` at its own NOT_TOLD default (False) for
+`device_model.DROP_COLOUR_RESAMPLE_EFFECTS` (radial only), the same
+told-every-arm-even-at-default shape the other told keys already use.
 """
 from __future__ import annotations
 
@@ -29,7 +35,7 @@ import json
 import pytest
 
 from fx import device_model
-from fx.effects import phase_grammar, pre_drop
+from fx.effects import drop_colour_resample, phase_grammar, pre_drop
 from tests import pre_drop_arm_harness as harness
 
 GOLDEN = json.loads(harness.GOLDEN_FILE.read_text())["writes"]
@@ -70,13 +76,18 @@ def _member(w) -> bool:
 def _untold(golden_writes):
     """The golden writes as the engine now writes them when no pre-drop
     plays: a member's lull arm also carries the told keys at NOT_TOLD (and
-    a zero breath when it is no breath-hold effect); nothing else moves."""
+    a zero breath when it is no breath-hold effect); a DROP_COLOUR_RESAMPLE_
+    EFFECTS member's drop arm also carries `drop_colour_landed` at its own
+    NOT_TOLD default, False; nothing else moves."""
     out = copy.deepcopy(golden_writes)
     for w in out:
         if _member(w) and w["params"].get("phase") == "lull":
             w["params"].update(pre_drop.NOT_TOLD)
             if w["effect_type"] not in device_model.BREATH_HOLD_EFFECTS:
                 w["params"].update(ZERO_BREATH)
+        if (w["effect_type"] in device_model.DROP_COLOUR_RESAMPLE_EFFECTS
+                and w["params"].get("phase") == "drop"):
+            w["params"].update(drop_colour_resample.key_for(False))
     return out
 
 

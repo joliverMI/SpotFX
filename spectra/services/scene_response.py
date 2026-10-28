@@ -410,7 +410,8 @@ from random import Random
 from typing import Any, Awaitable, Callable, Mapping, NamedTuple, Optional
 
 from fx import device_model
-from fx.effects import lull_dark, lull_handoff, phase_grammar, strip_phase
+from fx.effects import drop_colour_resample, lull_dark, lull_handoff, \
+    phase_grammar, strip_phase
 from fx.effects import pre_drop as fx_pre_drop
 from spectra.models.binding import ValueBinding
 from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
@@ -1349,7 +1350,8 @@ class ResponseEngine:
         if event_class in PHASE_RAMP_MS:
             record["phase"] = await self._drive_phase(event_class, gap_ms,
                                                       intensity,
-                                                      pre_drop=pre_drop)
+                                                      pre_drop=pre_drop,
+                                                      colour_landed=colour_done)
             phase_driven = bool(record["phase"]["targets"])
         spec = scene.responses.get(event_class)
         band = select_band(spec.bands, intensity) if spec else None
@@ -2890,7 +2892,8 @@ class ResponseEngine:
                            gap_ms: Optional[int] = None,
                            intensity: Optional[float] = None,
                            pre_drop: Optional[pre_drop_play.PreDropCandidate]
-                           = None) -> dict:
+                           = None,
+                           colour_landed: bool = False) -> dict:
         """Arm + ramp the vendored phase machinery on every phase-capable
         virtual — the exact drive the original program used: the instant
         arm write must land before the ramp (jump, then glide — in-process
@@ -2934,6 +2937,14 @@ class ResponseEngine:
         the lull's dark hold; 0 when the gap is unknowable). Since
         2026-10-12 that is the Shockwave members WITHOUT the Fish, plus
         Pulse; Orbits breathes only down to a dim blob (its BREATH_FLOOR).
+
+        THE DROP COLOUR RE-SAMPLE (fx/effects/drop_colour_resample.py is
+        the binding statement): `colour_landed` — on_event's own
+        drop-colour claim, already computed before this call — a drop arm
+        also tells every DROP_COLOUR_RESAMPLE_EFFECTS virtual (Star only)
+        whether a colour change landed on THIS drop, so its thrown-back
+        pieces re-sample their palette positions exactly when the set
+        moved, not just when the change faded across a told pre-drop.
 
         THE SHOCKWAVE'S SWITCHES (_drop_shock_keys): a drop arm also tells
         every DROP_SHOCK_TOLD_EFFECTS virtual — the crystal's Shockwave
@@ -2982,6 +2993,11 @@ class ResponseEngine:
         drop_keys: dict = {}
         if event_class == "drop" and intensity is not None:
             drop_keys = lull_handoff.drop_keys_for(intensity)
+        colour_resample_keys: dict = {}
+        if event_class == "drop" and any(
+                st.effect_type in device_model.DROP_COLOUR_RESAMPLE_EFFECTS
+                for st in self.conductor.virtuals.values()):
+            colour_resample_keys = drop_colour_resample.key_for(colour_landed)
         shock_keys: dict = {}
         shock_verdict: Optional[dict] = None
         if event_class == "drop" and any(
@@ -3037,6 +3053,9 @@ class ResponseEngine:
             if (drop_keys and state.effect_type
                     in device_model.DROP_INTENSITY_EFFECTS):
                 arm.update(drop_keys)
+            if (colour_resample_keys and state.effect_type
+                    in device_model.DROP_COLOUR_RESAMPLE_EFFECTS):
+                arm.update(colour_resample_keys)
             if (shock_keys and state.effect_type
                     in device_model.DROP_SHOCK_TOLD_EFFECTS):
                 arm.update(shock_keys)
@@ -3075,6 +3094,9 @@ class ResponseEngine:
                 st.effect_type in device_model.DROP_INTENSITY_EFFECTS
                 for st in self.conductor.virtuals.values()):
             record["drop_intensity"] = drop_keys[lull_handoff.DROP_KEY]
+        if colour_resample_keys:
+            record["drop_colour_resample"] = colour_resample_keys[
+                drop_colour_resample.KEY]
         if shock_verdict is not None:
             record["drop_shock"] = shock_verdict
         if withheld:

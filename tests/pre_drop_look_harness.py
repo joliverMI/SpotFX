@@ -28,7 +28,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tests"))
 
-from fx.effects import phase_grammar, pre_drop  # noqa: E402
+from fx.effects import drop_colour_resample, phase_grammar, pre_drop  # noqa: E402
 
 DT = 1.0 / 60.0
 ROWS, COLS = 37, 72
@@ -42,7 +42,7 @@ STEP8_REF = "ed8b20087520d2b78ddd8f4c0248d946b9ecb09c"
 # ... and just before step 9's: the strips and their shared layer without
 # theirs
 STEP9_REF = "619172e88fe16fb38aa5a1b809d846d191b1584b"
-NEW_KEYS = set(pre_drop.KEYS)
+NEW_KEYS = set(pre_drop.KEYS) | {drop_colour_resample.KEY}
 
 
 def crystal_real_mask() -> Optional[np.ndarray]:
