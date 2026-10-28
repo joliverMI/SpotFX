@@ -142,6 +142,10 @@ export interface DropSequenceView {
   stood_down?: Partial<Record<Handle, string>>;
   /** the intensity it fires at (before the room's render scaling) */
   intensity?: number;
+  /** when its drop FIRES, song ms (drop_firing.annotate's THE FIRE MOMENT:
+   * mark + the drop band's offset + the drop timing offset). Absent from an
+   * older server — the drop's mark then. */
+  fire_ms?: number;
   /** THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py): this
    * play's decision for the sequence — whether it changes the scene, to
    * what, when (a hard cut on the drop, or early in the charge) and why.
@@ -292,6 +296,8 @@ export interface YoursRow {
   detection: string | null;
   /** the pre-drop before his drop (as AuthoredGroup.pre_drop) */
   pre_drop?: HisPreDrop | null;
+  /** when his drop FIRES, song ms (drop_firing.annotate's THE FIRE MOMENT) */
+  fire_ms?: number;
 }
 
 export interface DropSequencesResponse {

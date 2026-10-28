@@ -11,7 +11,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { apiPost } from '../../api/client';
 import type { DropSequencesResponse, Handle, PreDropKind } from '../dropSequences';
 import {
-  EMPTY_STACKS, afterRedo, afterUndo, editChanged, editErrorText, guardInFlight, pushEdit,
+  EMPTY_STACKS, afterRedo, afterUndo, editChanged, editErrorText, guardInFlight, mergeEdit, pushEdit,
   redoRequest, undoRequest, type DropEdits, type ProfileChange, type UndoEntry, type UndoStacks,
 } from '../dropEdit';
 
@@ -63,7 +63,10 @@ export interface DropEditor {
   /** THE HOME DROPS PANEL's writes: a part's toggle, the double tick,
    * Remove, and one of his drops switched back on. Each is one undo step
    * across both stores; `said` is what it did, in words. */
-  parts: (key: string, parts: Partial<Record<PartName, PartState>>, what?: string) => Promise<string | null>;
+  /** `merge`: fold this write into the step on top (a double-tap's second
+   * tap — the pair is one undo step) */
+  parts: (key: string, parts: Partial<Record<PartName, PartState>>, what?: string,
+    opts?: { merge?: boolean }) => Promise<string | null>;
   approve: (key: string, what?: string) => Promise<string | null>;
   remove: (key: string, what?: string) => Promise<string | null>;
   switchOn: (key: string, what?: string) => Promise<string | null>;
@@ -135,7 +138,7 @@ export function useDropEditor(uri: string | null): DropEditor {
   }, [putView, qc]);
 
   const edit = useCallback((path: string, body: Record<string, unknown>, label: string,
-    keyOf: (a: EditAnswer) => string | null) =>
+    keyOf: (a: EditAnswer) => string | null, merge = false) =>
     run(path, body, (a, u) => {
       const key = keyOf(a);
       if (uriRef.current === u) {
@@ -151,7 +154,7 @@ export function useDropEditor(uri: string | null): DropEditor {
         // may not have run that updater yet when the line after it runs (a
         // pending busy/error update on this hook defers it), which silently
         // dropped every note.
-        setStacks((st) => pushEdit(st, entry));
+        setStacks((st) => (merge ? mergeEdit(st, entry) : pushEdit(st, entry)));
         if (editChanged(entry)) setNote(entry.label);
       }
       return key;
@@ -183,10 +186,11 @@ export function useDropEditor(uri: string | null): DropEditor {
       asKey(key)), [edit]);
   const add = useCallback((dropMs: number) =>
     edit('add', { drop_ms: Math.round(dropMs) }, 'added a drop', asKey('')), [edit]);
-  const parts = useCallback((key: string, p: Partial<Record<PartName, PartState>>, what = '') =>
+  const parts = useCallback((key: string, p: Partial<Record<PartName, PartState>>, what = '',
+    opts?: { merge?: boolean }) =>
     edit('parts', { key, parts: p }, what || Object.entries(p)
       .map(([k, v]) => `${k.replace('_', '-')} ${v === 'on' ? 'approved' : 'off'}`).join(', '),
-    () => key), [edit]);
+    () => key, !!opts?.merge), [edit]);
   const approve = useCallback((key: string, what = '') =>
     edit('approve', { key }, `approved${what ? ` ${what}` : ''}`, () => key), [edit]);
   const remove = useCallback((key: string, what = '') =>

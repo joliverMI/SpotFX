@@ -2281,8 +2281,43 @@ class TriggerEngine:
                              "— the fade is timed to the unshifted drop")
             band = 0
         offset = self._tick_drop_offset_ms()
-        return band + drop_timing.applied_offset_ms(
-            seq.drop_ms, offset, seq.build_start_ms(fire_mode))
+        return drop_timing.fire_moment_ms(
+            seq.drop_ms, offset, seq.build_start_ms(fire_mode), band) - seq.drop_ms
+
+    def drop_fire_ms(self, drop_ms: int, intensity: float,
+                     build_start_ms: Optional[int] = None,
+                     offset_ms: Optional[int] = None,
+                     band_offset_ms: Optional[int] = None) -> int:
+        """WHEN A DROP MARKED AT `drop_ms` FIRES, read live — the Drops
+        panel's countdown and the top bar's next-event box (2026-10-28, the
+        Admiral's Q4). `intensity` is the drop's own (a sequence's
+        `sequence_intensity`, or his trigger's), so the band peek selects
+        the band the fire will; `build_start_ms` the lull/charge its build
+        starts from; `offset_ms` the drop timing offset and `band_offset_ms`
+        the drop band's offset when the caller has read them already
+        (live_drop_offset_ms / drop_band_offset_ms — one read a song).
+        drop_timing.fire_moment_ms over the same two live reads tick() makes
+        (the drop band's offset, the drop timing offset); a read that fails
+        counts as 0, the drop on its mark."""
+        band = (self.drop_band_offset_ms(intensity) if band_offset_ms is None
+                else int(band_offset_ms))
+        offset = self._live_drop_offset_ms() if offset_ms is None else int(offset_ms)
+        return drop_timing.fire_moment_ms(int(drop_ms), offset, build_start_ms, band)
+
+    def drop_band_offset_ms(self, intensity: float) -> int:
+        """The drop band's flare-kind offset at this drop intensity — the
+        live peek tick() makes for a drop (0 when unreadable)."""
+        try:
+            return int(self._response_offset_ms(
+                FireResponseAction(event_class="drop", intensity=float(intensity))))
+        except Exception:
+            logger.exception("drop fire moment: the drop band's offset is unreadable")
+            return 0
+
+    def live_drop_offset_ms(self) -> int:
+        """The drop timing offset in force now (room, or the showing scene's
+        own) — 0 when unreadable. Public for drop_fire_ms's callers."""
+        return self._live_drop_offset_ms()
 
     def switch_plans(self, uri: Optional[str]) -> list[drop_switch.SwitchPlan]:
         """This play's drop-switch decisions for `uri` (the Timeline, Sonic)."""

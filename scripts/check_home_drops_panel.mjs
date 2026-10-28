@@ -20,9 +20,9 @@
 //   FOUR  Remove on one of his drops, then undo: the restore carries his
 //         drop-store edits back AND the song-profile rows the other way
 //         round (both stores, one step)
-//   FIVE  the Testing toggle: one PUT of drop_testing, then the drop that
-//         just played moves to the top, highlighted; a refused PUT is said,
-//         never a silent nothing
+//   FIVE  the Testing toggle: one PUT of drop_testing; the drop that just
+//         played lights up IN PLACE (rows never move, any mode); a refused
+//         PUT is said, never a silent nothing
 //   SIX   the tie-in: a tap on the song timeline's drop pill selects it
 //   SEVEN Remove's tooltip says what each trigger's own provenance says,
 //         and the general rule for any it does not name — never a guess
@@ -37,6 +37,17 @@
 //         ◀ ▶ step along that rail; one tap on its glyph sends ONE
 //         `pre-drop-kind`; ＋ Pre-drop sends ONE `fill {handle: pre_drop}`;
 //         his own drop's moves under his key; undo goes through `restore`
+//   TEN   NEXT AND JUMP (2026-10-28, his Q1-Q5): the next drop that will
+//         play wears the purple outline and a countdown to its server
+//         `fire_ms` (not its mark); a row that does not play is skipped;
+//         the time is a Jump button that zooms the shared window to the
+//         whole drop and turns Follow off
+//   ELEVEN DOUBLE-TAP (his Q9): a second tap within DOUBLE_TAP_MS switches
+//         the part off — two calls, the second queued behind the first —
+//         and ONE undo step puts both back
+//   TWELVE HIGH CONFIDENCE (his Q10-Q12): a waiting part on a confident
+//         tier is drawn approved with a detector dot (class `confident`),
+//         left out of "to review"; a tap on it switches it off
 //
 // Run: node scripts/check_home_drops_panel.mjs
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -105,10 +116,11 @@ const VIEW = {
   song: { tempo_bpm: 120, beat_ms: 500, captured_from_ms: 0, captured_to_ms: 200000, duration_ms: 200000 },
   sequences: [
     seq({ key: 'drop:44000', state: 'suggested', charge_ms: 35000, lull_ms: 40000, drop_ms: 44000,
-      parts: parts('waiting', 'waiting', 'waiting'), fires: false, fires_reason: 'waits_for_confirm' }),
+      parts: parts('waiting', 'waiting', 'waiting'), fires: false, fires_reason: 'waits_for_confirm',
+      fire_ms: 43900 }),
     seq({ key: 'drop:90000', state: 'confident', tier: 'confident', charge_ms: 80000, lull_ms: 86000,
       drop_ms: 90000, parts: parts('waiting', 'waiting', 'waiting', 'waiting'), fires: true,
-      fires_reason: 'analysed_show', playing: ['charge', 'lull', 'drop'],
+      fires_reason: 'analysed_show', playing: ['charge', 'lull', 'drop'], fire_ms: 89900,
       pre_drop_ms: 89200, pre_drop_kind: 'spike', pre_drop_auto: 89200, pre_drop_tier: 'confident',
       pre_drop_score: 1.15, pre_drop_off: false, pre_drop_was: null }),
     seq({ key: 'drop:130000', state: 'suggested', charge_ms: null, lull_ms: 126000, drop_ms: 130000,
@@ -117,7 +129,8 @@ const VIEW = {
       pre_drop_score: 1.05, pre_drop_off: true, pre_drop_was: 127000 }),
     seq({ key: 'drop:169980', state: 'matches_yours', tier: 'confident', charge_ms: 160000,
       lull_ms: 166000, drop_ms: 169980, parts: parts('waiting', 'waiting', 'waiting'), fires: true,
-      fires_reason: 'analysed_show', matches: [{ id: 'h-drop', kind: 'drop', timestamp_ms: 170000 }] }),
+      fires_reason: 'analysed_show', matches: [{ id: 'h-drop', kind: 'drop', timestamp_ms: 170000 }],
+      fire_ms: 169880 }),
   ],
   excluded: [], counts: {}, authored: [], authored_lone: [],
   yours: [{
@@ -125,7 +138,7 @@ const VIEW = {
     charge: { id: 'h-charge', kind: 'charge', timestamp_ms: 160100, enabled: true },
     lull: { id: 'h-lull', kind: 'lull', timestamp_ms: 166100, enabled: true },
     drop: { id: 'h-drop', kind: 'drop', timestamp_ms: 170000, enabled: true },
-    enabled: true, detections: ['drop:169980'], detection: 'drop:169980',
+    enabled: true, detections: ['drop:169980'], detection: 'drop:169980', fire_ms: 169900,
     pre_drop: { ms: 169400, kind: 'spike', auto: 169400, off: false, was: null, moved: false,
       lead_ms: 600, score: 1.2, tier: 'confident', part: 'on' },
   }],
@@ -159,6 +172,10 @@ const RAILS = {
   entries: [[87000, 0.6], [88800, 0.7]],
 };
 let revN = 0;
+// parts answers chain their revisions, as the real store's do, so a
+// double-tap's second write starts where the first one ended
+let partsRev = 'r0';
+let partsN = 0;
 let failNextPut = false;
 const STATUS = {
   increment: 'S3', dark: false,
@@ -194,7 +211,14 @@ globalThis.fetch = async (url, opts = {}) => {
   }
   if (p === '/spectra/api/drop-sequences' && method === 'GET') return json(200, VIEW);
   if (p === '/spectra/api/drop-sequences/provenance') return json(200, PROV);
-  if (p === '/spectra/api/drop-sequences/parts') return json(200, answer(body.key, { rev_after: 'r1', after: { overrides: { [body.key]: { parts: body.parts } }, added: [] } }));
+  if (p === '/spectra/api/drop-sequences/parts') {
+    partsN += 1;
+    const before = partsRev;
+    partsRev = `pr${partsN}`;
+    return json(200, answer(body.key, { rev_before: before, rev_after: partsRev,
+      before: { overrides: { tick: partsN - 1 }, added: [] },
+      after: { overrides: { tick: partsN }, added: [] } }));
+  }
   if (p === '/spectra/api/drop-sequences/approve') return json(200, answer(body.key, { rev_after: 'r2', after: { overrides: { [body.key]: { state: 'confirmed' } }, added: [] } }));
   if (p === '/spectra/api/drop-sequences/remove') {
     return json(200, answer(body.key, { before: EDITS_BEFORE, after: EDITS_AFTER, rev_before: 'r0',
@@ -235,7 +259,8 @@ import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import HomeDrops from ${src('home/HomeDrops.tsx')};
-export { removeTitle, buildPanelRows, snapPreDrop, stepPreDrop, clampPreDrop } from ${src('home/dropsPanel.ts')};
+export { removeTitle, buildPanelRows, snapPreDrop, stepPreDrop, clampPreDrop, nextDropKey, nextPartState, DOUBLE_TAP_MS } from ${src('home/dropsPanel.ts')};
+export { seedShowClockFromStatus } from ${src('lib/showClock.ts')};
 export { ICONS } from ${src('components/iconRegistry.ts')};
 export { PRE_DROP_COLOR } from ${src('timeline/dropSequences.ts')};
 import { SongTimelineViewProvider, useSongTimelineView } from ${src('components/songTimelineView.tsx')};
@@ -246,11 +271,14 @@ document.body.appendChild(container);
 let root = null;
 let askDrop = null;
 
+let viewState = null;
 function Asker() {
-  const { selectDrop } = useSongTimelineView();
-  askDrop = selectDrop;
+  const v = useSongTimelineView();
+  askDrop = v.selectDrop;
+  viewState = v;
   return null;
 }
+export function view() { return viewState; }
 
 export async function settle(rounds = 8) {
   for (let i = 0; i < rounds; i += 1) {
@@ -274,6 +302,15 @@ export async function mount() {
 export async function click(el) {
   await act(async () => { el.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
   await settle();
+}
+
+/** Two clicks with no settle between them — a double-tap. */
+export async function dblTap(el) {
+  await act(async () => {
+    el.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    el.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  });
+  await settle(12);
 }
 
 export async function push(msg) {
@@ -312,6 +349,12 @@ const build = await esbuild.build({
   plugins: [{
     name: 'stub-spectra-ws',
     setup(b) {
+      // components/songStrip.ts sits beside SongStrip.tsx: esbuild matches an
+      // extension-less transitive import of it case-insensitively and fails
+      // (AGENTS.md's own note) — resolve it straight to the .ts file
+      b.onResolve({ filter: /(^|\/)songStrip$/ }, () => (
+        { path: join(repo, 'spectra/web/src/components/songStrip.ts') }
+      ));
       const wsFile = join(repo, 'spectra/web/src/api/spectraWs.ts');
       b.onResolve({ filter: /\/spectraWs(\.ts)?$/ }, (args) => {
         const resolved = join(dirname(args.importer), args.path);
@@ -329,17 +372,19 @@ const H = require(outFile);
 
 const container = await H.mount();
 const rowsEls = () => [...container.querySelectorAll('.home-drops-row')];
-const rowByTime = (t) => rowsEls().find((r) => r.querySelector('.home-drops-time')?.textContent === t);
+const timeOf = (r) => r.querySelector('.home-drops-time-text')?.textContent;
+const rowByTime = (t) => rowsEls().find((r) => timeOf(r) === t);
 const partBtn = (row, part) => row.querySelector(`.home-drops-btn.part.${part}`);
 const posts = (path) => calls.filter((c) => c.method !== 'GET' && c.path === `/spectra/api/drop-sequences/${path}`);
 
 console.log('ONE  the rows, their parts and the review count');
 {
-  const times = rowsEls().map((r) => r.querySelector('.home-drops-time')?.textContent);
+  const times = rowsEls().map(timeOf);
   ok(JSON.stringify(times) === JSON.stringify(['0:44.0', '1:30.0', '2:10.0', '2:50.0']),
     `one row per drop, in time order, the stand-in not listed twice (${times.join(', ')})`);
   const title = container.querySelector('.home-quick-title')?.textContent ?? '';
-  ok(/Drops · 2 to review/.test(title), `the title counts the drops waiting for him ("${title.trim()}")`);
+  ok(/Drops · 1 to review/.test(title),
+    `the title counts the drops a suggestion waits on — high confidence left out ("${title.trim()}")`);
   const a = rowByTime('0:44.0');
   ok(partBtn(a, 'charge').classList.contains('waiting') && partBtn(a, 'lull').classList.contains('waiting')
     && partBtn(a, 'drop').classList.contains('waiting'), 'a suggestion: every part waiting (dashed)');
@@ -348,7 +393,8 @@ console.log('ONE  the rows, their parts and the review count');
   const c = rowByTime('2:10.0');
   ok(partBtn(c, 'drop').classList.contains('off') && c.classList.contains('dim'),
     'a switched-off drop: its drop part striped off, the row dimmed');
-  ok(/switched off/.test(c.querySelector('.home-drops-state')?.textContent ?? ''), 'and it says so');
+  ok(/drop off · plays nothing/.test(c.querySelector('.home-drops-state')?.textContent ?? ''),
+    'and it says so: reviewed, plays nothing (his Q6)');
   ok(partBtn(c, 'charge').classList.contains('absent'), 'a drop with no charge: faint');
   const d = rowByTime('2:50.0');
   ok(['charge', 'lull', 'drop'].every((p) => partBtn(d, p).classList.contains('on')),
@@ -415,7 +461,7 @@ console.log('FOUR  Remove on his own drop, then undo: both stores, one step');
     'a card-born row keeps its store (the fired copy), and a profile row names none');
 }
 
-console.log('FIVE  Testing: one PUT, and the drop that just played goes to the top');
+console.log('FIVE  Testing: one PUT; the drop that just played lights up in place');
 {
   const before = calls.filter((c) => c.method === 'PUT' && c.path === '/spectra/api/room-controls').length;
   const toggle = container.querySelector('.home-drops-testing');
@@ -427,14 +473,17 @@ console.log('FIVE  Testing: one PUT, and the drop that just played goes to the t
     `one partial PUT of drop_testing: ${JSON.stringify(puts[0]?.body)}`);
   ok(container.querySelector('.home-drops-testing').classList.contains('on')
     && container.querySelector('.home-drops-card').classList.contains('testing'), 'it glows');
-  await H.push({ type: 'drop_played', uri: URI, key: 'drop:44000', at_ms: Date.now(), position_ms: 44000 });
-  const first = rowsEls()[0];
-  ok(first.querySelector('.home-drops-time')?.textContent === '0:44.0'
-    && first.classList.contains('justplayed') && /just played/.test(first.textContent),
-    'the drop that just played is first, highlighted');
+  const order = () => JSON.stringify(rowsEls().map(timeOf));
+  const was = order();
+  await H.push({ type: 'drop_played', uri: URI, key: 'drop:90000', at_ms: Date.now(), position_ms: 90000 });
+  const lit = rowByTime('1:30.0');
+  ok(lit.classList.contains('justplayed') && /just played/.test(lit.textContent) && order() === was,
+    'the drop that just played lights up in its own place — the rows never move');
+  ok(rowsEls().filter((r) => r.classList.contains('justplayed')).length === 1, 'one row lit at a time');
   await H.push({ type: 'drop_played', uri: URI, key: 'drop:169980', at_ms: Date.now() + 1, position_ms: 170000 });
-  ok(rowsEls()[0].querySelector('.home-drops-time')?.textContent === '2:50.0',
-    'a stand-in playing for his drop lifts his row');
+  ok(rowByTime('2:50.0').classList.contains('justplayed')
+    && !rowByTime('1:30.0').classList.contains('justplayed') && order() === was,
+    'a stand-in playing for his drop lights his row, in place, until the next one plays');
   failNextPut = true;
   await H.click(container.querySelector('.home-drops-testing'));
   const said = container.querySelector('.home-drops-note');
@@ -474,10 +523,10 @@ console.log('EIGHT the pre-drop button: its look, its glyph, one call a tap');
   const pathOf = (btn) => btn?.querySelector('svg path')?.getAttribute('d');
   const b = rowByTime('1:30.0');
   const pb = partBtn(b, 'pre_drop');
-  ok(pb.classList.contains('waiting') && !pb.disabled && pb.getAttribute('data-kind') === 'spike',
-    'a waiting spike pre-drop: dashed, and it can be tapped');
+  ok(pb.classList.contains('confident') && !pb.disabled && pb.getAttribute('data-kind') === 'spike',
+    'a waiting spike pre-drop on its own confident tier: drawn approved (confident), and it can be tapped');
   ok(pathOf(pb) === H.ICONS.preDrop, 'a spike wears the spike glyph (preDrop)');
-  ok(/a spike/.test(pb.title) && /waiting for you/.test(pb.title)
+  ok(/a spike/.test(pb.title) && /high confidence/.test(pb.title)
     && /colour fades across it/.test(pb.title),
     `its tooltip names the kind, the state, and that it does not play yet ("${pb.title}")`);
   ok(/spike pre-drop/.test(b.querySelector('.home-drops-state')?.textContent ?? ''),
@@ -506,8 +555,8 @@ console.log('EIGHT the pre-drop button: its look, its glyph, one call a tap');
   const sent = posts('parts').slice(before);
   ok(sent.length === 3, `three taps, three calls (${sent.length})`);
   ok(sent[0]?.body.key === 'drop:90000'
-    && JSON.stringify(sent[0]?.body.parts) === JSON.stringify({ pre_drop: 'on' }),
-    `waiting → on: ${JSON.stringify(sent[0]?.body)}`);
+    && JSON.stringify(sent[0]?.body.parts) === JSON.stringify({ pre_drop: 'off' }),
+    `high confidence (it looks approved) → off: ${JSON.stringify(sent[0]?.body)}`);
   ok(sent[1]?.body.key === 'drop:130000'
     && JSON.stringify(sent[1]?.body.parts) === JSON.stringify({ pre_drop: 'on' }),
     `off → on: ${JSON.stringify(sent[1]?.body)}`);
@@ -519,7 +568,7 @@ console.log('EIGHT the pre-drop button: its look, its glyph, one call a tap');
 
   // a waiting pre-drop on his own drop waits for him: review count + double tick
   const yoursWaiting = { ...VIEW, yours: [{ ...VIEW.yours[0],
-    pre_drop: { ...VIEW.yours[0].pre_drop, part: 'waiting' } }] };
+    pre_drop: { ...VIEW.yours[0].pre_drop, part: 'waiting', tier: 'suggested' } }] };
   const hisRow = H.buildPanelRows(yoursWaiting, { testing: false }).find((r) => r.kind === 'yours');
   ok(hisRow?.canApprove && hisRow.waiting && hisRow.parts.pre_drop === 'waiting',
     'his own drop with a waiting pre-drop counts for review and lights the double tick');
@@ -674,6 +723,111 @@ console.log('NINE the editor\'s pre-drop handle');
   ok(sent.length === 1 && sent[0].body.key === 'his:h-drop'
     && JSON.stringify(sent[0].body.handles) === JSON.stringify({ pre_drop: 169300 }),
     `his own drop's pre-drop moves under his key, snapped to a hit: ${JSON.stringify(sent[0]?.body)}`);
+}
+
+console.log('TEN  next and Jump: the countdown runs to the fire moment');
+{
+  await H.click(container.querySelector('.home-drop-editor .home-drop-editor-close')
+    ?? rowByTime('2:50.0').querySelector('.home-drops-btn.edit'));
+  // the show clock at 0:30, paused: 0:44 does not play (a suggestion the
+  // server says waits), so the next drop is 1:30 — the one that will play
+  await H.push({ type: 'clock', show_clock_ms: 30000, position_ms: 30000, is_playing: false });
+  const nextRows = rowsEls().filter((r) => r.classList.contains('next'));
+  ok(nextRows.length === 1 && timeOf(nextRows[0]) === '1:30.0',
+    `one row is next, and it is the next that will PLAY (${nextRows.map(timeOf).join(',')})`);
+  const chip = rowByTime('1:30.0').querySelector('.home-drops-count');
+  ok(chip && chip.textContent === '59.9s',
+    `its countdown runs to fire_ms 1:29.9 (mark 1:30.0 + drop timing), not the mark ("${chip?.textContent}")`);
+  ok(!rowByTime('0:44.0').querySelector('.home-drops-count'), 'a row that does not play has no countdown');
+  await H.push({ type: 'clock', show_clock_ms: 89000, position_ms: 89000, is_playing: false });
+  ok(rowByTime('1:30.0').querySelector('.home-drops-count')?.classList.contains('soon'),
+    'inside the last three seconds it fills and glows (soon)');
+  await H.push({ type: 'clock', show_clock_ms: 89950, position_ms: 89950, is_playing: false });
+  const after = rowsEls().find((r) => r.classList.contains('next'));
+  ok(after && timeOf(after) === '2:50.0'
+    && after.querySelector('.home-drops-count')?.classList.contains('flash'),
+    'once it fires the next one takes over, and its countdown flashes');
+  ok(after.querySelector('.home-drops-count')?.textContent === '79.9s',
+    'his own drop counts to the stand-in that plays for it (fire_ms 2:49.88)');
+  {
+    const css = readFileSync(join(repo, 'spectra/web/src/styles/tokens.css'), 'utf8');
+    ok(/\.home-drops-list\s*\{[^}]*overflow-y:\s*auto/.test(css),
+      'the list scrolls inside the card');
+    ok(!['1:30.0', '2:50.0'].some((t) => rowByTime(t).getAttribute('data-scrolled')),
+      'keeping just-played and next in view never scrolls the page (no scrollIntoView)');
+  }
+  ok(H.nextDropKey([{ key: 'a', plays: true, fireMs: 1000 }, { key: 'b', plays: false, fireMs: 500 }], 0) === 'a'
+    && H.nextDropKey([{ key: 'a', plays: true, fireMs: 1000 }], 1000) === null
+    && H.nextDropKey([{ key: 'a', plays: true, fireMs: 1000 }], null) === null,
+    'nextDropKey: only rows that play, only drops not fired yet, nothing without a clock');
+
+  const jump = rowByTime('1:30.0').querySelector('.home-drops-time');
+  ok(jump.querySelector('svg path')?.getAttribute('d') === H.ICONS.jump
+    && /Jump/.test(jump.getAttribute('aria-label') ?? ''),
+    'the row\'s time is a Jump button (the time and an arrow)');
+  await H.click(jump);
+  const v = H.view();
+  ok(v.win.follow === false && v.win.manualWin && v.win.manualWin.startMs <= 80000
+    && v.win.manualWin.endMs >= 90000,
+    `Jump shows the whole drop on the audio shape and turns Follow off (${JSON.stringify(v.win.manualWin)})`);
+}
+
+console.log('ELEVEN double-tap: off, behind the first tap, one undo step');
+{
+  const btn = partBtn(rowByTime('0:44.0'), 'charge');
+  ok(btn.classList.contains('waiting'), 'a lower-confidence suggestion (dashed)');
+  const before = posts('parts').length;
+  const firstN = partsN + 1;
+  await H.dblTap(btn);
+  const sent = posts('parts').slice(before);
+  ok(sent.length === 2 && JSON.stringify(sent[0].body.parts) === JSON.stringify({ charge: 'on' })
+    && JSON.stringify(sent[1].body.parts) === JSON.stringify({ charge: 'off' }),
+    `the first tap acts at once (on), the second switches it off: ${JSON.stringify(sent.map((x) => x.body.parts))}`);
+  const undoBtn = container.querySelector('.home-drops-undo');
+  ok(/double-tap/.test(undoBtn.title), `the undo step names the double-tap ("${undoBtn.title}")`);
+  const r0 = posts('restore').length;
+  await H.click(undoBtn);
+  const rs = posts('restore').slice(r0);
+  ok(rs.length === 1 && rs[0].body.expect === `pr${firstN + 1}`
+    && JSON.stringify(rs[0].body.edits) === JSON.stringify({ overrides: { tick: firstN - 1 }, added: [] }),
+    `ONE undo puts both taps back — to before the first (${JSON.stringify(rs[0]?.body)})`);
+  ok(!/charge approved at 0:44.0/.test(container.querySelector('.home-drops-undo').title),
+    'and the first tap is not left on the stack as a step of its own');
+
+  const conf = partBtn(rowByTime('1:30.0'), 'lull');
+  const b2 = posts('parts').length;
+  await H.dblTap(conf);
+  const sent2 = posts('parts').slice(b2);
+  ok(sent2.length === 1 && JSON.stringify(sent2[0].body.parts) === JSON.stringify({ lull: 'off' }),
+    `a double-tap on a part the first tap already switched off sends nothing more (${sent2.length})`);
+}
+
+console.log('TWELVE high confidence: drawn approved, with the detector dot');
+{
+  const b = rowByTime('1:30.0');
+  ok(['charge', 'lull', 'drop'].every((p) => partBtn(b, p).classList.contains('confident')
+    && partBtn(b, p).getAttribute('aria-pressed') === 'true'),
+    'a confident detection: every waiting part drawn approved (confident), pressed');
+  ok(b.querySelector('.home-drops-btn.approve').classList.contains('half')
+    && !b.querySelector('.home-drops-btn.approve').disabled,
+    'its double tick is half-lit (only the detector approved it) and still makes it yours');
+  ok(/high confidence · plays on its own/.test(b.querySelector('.home-drops-state')?.textContent ?? ''),
+    'its line says high confidence, plays on its own');
+  const a = rowByTime('0:44.0');
+  ok(!a.querySelector('.home-drops-btn.approve').classList.contains('half'),
+    'a suggestion\'s double tick is not half-lit');
+  ok(H.nextPartState('confident') === 'off' && H.nextPartState('waiting') === 'on'
+    && H.nextPartState('on') === 'off' && H.nextPartState('off') === 'on'
+    && H.nextPartState('absent') === null, 'a tap: confident or on → off, waiting or off → on');
+  const css = readFileSync(join(repo, 'spectra/web/src/styles/tokens.css'), 'utf8');
+  ok(/\.home-drops-btn\.part\.confident::after\s*\{[^}]*border-radius:\s*50%/.test(css),
+    'the detector dot is drawn (a small circle on the part)');
+  // the server's answer under triggers-only: a confident drop waits and says why
+  const waitsView = { ...VIEW, sequences: VIEW.sequences.map((q) => (q.key === 'drop:90000'
+    ? { ...q, fires: false, fires_reason: 'analysed_show_off' } : q)) };
+  const row = H.buildPanelRows(waitsView, { testing: false }).find((r) => r.key === 'drop:90000');
+  ok(/high confidence · waits: only your own triggers play on this song/.test(row.stateLine)
+    && !row.waiting, `where only his own triggers play it waits, says so, and is still not "to review" ("${row.stateLine}")`);
 }
 
 if (failures) {

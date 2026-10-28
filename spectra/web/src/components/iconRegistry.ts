@@ -146,6 +146,9 @@ export const ICONS = {
   undo: 'M9 14L4 9l5-5 M4 9h11a5 5 0 0 1 0 10h-3',
   /** Arrow curving forward — Home's timeline-card Redo. */
   redo: 'M15 14l5-5-5-5 M20 9H9a5 5 0 0 0 0 10h3',
+  /** Arrow up and to the right — the Drops panel's Jump (move the audio
+   * shape to that drop). */
+  jump: 'M7 17L17 7 M8 7h9v9',
   /** Crosshair — "follow the playhead" (Home's timeline card). */
   follow: 'M12 2v4 M12 18v4 M2 12h4 M18 12h4 M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z',
   /** Line with arrows at both ends — "whole song" (Home's timeline card). */

@@ -434,6 +434,37 @@ export function pushEditChanged(st: UndoStacks, e: UndoEntry): [UndoStacks, bool
   return [next, next !== st];
 }
 
+/** Two steps as ONE (the Drops panel's double-tap, his Q9: "the pair is one
+ * undo step"): from `a`'s before to `b`'s after, and each of his trigger rows
+ * from the first change's before to the last change's after (a row both
+ * steps changed back to what it was drops out). */
+export function mergeEntries(a: UndoEntry, b: UndoEntry): UndoEntry {
+  const byId = new Map<string, ProfileChange>();
+  const order: string[] = [];
+  for (const c of [...(a.profile ?? []), ...(b.profile ?? [])]) {
+    const seen = byId.get(c.id);
+    if (seen) byId.set(c.id, { ...seen, after: c.after, did: c.did ?? seen.did });
+    else { byId.set(c.id, { ...c }); order.push(c.id); }
+  }
+  const profile = order.map((id) => byId.get(id)!)
+    .filter((c) => JSON.stringify(c.before) !== JSON.stringify(c.after));
+  return {
+    label: b.label, before: a.before, after: b.after, revBefore: a.revBefore,
+    revAfter: b.revAfter, key: b.key ?? a.key, ...(profile.length ? { profile } : {}),
+  };
+}
+
+/** `pushEdit`, but folded into the step on top when `e` continues it (same
+ * drop, starting where that step ended) — a double-tap's second write. A
+ * pair that ends where it began leaves no step at all. */
+export function mergeEdit(st: UndoStacks, e: UndoEntry, depth = UNDO_DEPTH): UndoStacks {
+  const top = st.undo[st.undo.length - 1];
+  if (!top || top.revAfter !== e.revBefore || top.key !== e.key) return pushEdit(st, e, depth);
+  const merged = mergeEntries(top, e);
+  const rest = st.undo.slice(0, -1);
+  return { undo: editChanged(merged) ? [...rest, merged] : rest, redo: [] };
+}
+
 /** After an undo landed: the step moves to the redo stack. */
 export function afterUndo(st: UndoStacks): UndoStacks {
   const e = st.undo[st.undo.length - 1];

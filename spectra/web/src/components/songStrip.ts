@@ -23,6 +23,15 @@ export interface UpcomingEvent {
   rank_of: number | null;
   source: string;
   num?: number;
+  /** a drop only: the moment it actually FIRES (mark + drop timing,
+   * spectra/api/upcoming.py) — what the next-event box counts to; `ms` stays
+   * the mark, where its marker is drawn */
+  fire_ms?: number;
+}
+
+/** When an event fires: a drop's `fire_ms`, everything else its `ms`. */
+export function eventFireMs(e: Pick<UpcomingEvent, 'ms' | 'fire_ms'>): number {
+  return e.fire_ms ?? e.ms;
 }
 
 export interface UpcomingResponse {
@@ -84,13 +93,15 @@ export const KIND_COLOR: Record<UpcomingKind, string> = {
   high: '#f5f5f4', low: '#818cf8',
 };
 
-/** The first event strictly ahead of `nowMs` — events are assumed sorted
- * ascending (the API's own contract), but this defends against an
+/** The first event that FIRES strictly after `nowMs` (`eventFireMs`: a drop
+ * counts to the moment it fires, not its mark — his Q4) — events are assumed
+ * sorted ascending (the API's own contract), but this defends against an
  * unsorted/empty list anyway. null when nothing is left this song. */
 export function pickNext(events: UpcomingEvent[], nowMs: number): UpcomingEvent | null {
   let best: UpcomingEvent | null = null;
   for (const e of events) {
-    if (e.ms > nowMs && (best === null || e.ms < best.ms)) best = e;
+    const at = eventFireMs(e);
+    if (at > nowMs && (best === null || at < eventFireMs(best))) best = e;
   }
   return best;
 }
