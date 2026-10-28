@@ -139,6 +139,27 @@ export interface JukeboxStatus {
   guests?: { phones: number; joined: number; pending?: number };
 }
 
+/** The Live tab's economy panel (SpotFX GET /api/jukebox/economy,
+ *  services/jukebox/economy_live.py): the credits right now, the prices a
+ *  guest sees now, and the night's recent events. */
+export interface EconomyEvent {
+  at_ms: number; kind: string; who: string; what: string; credits: number; phones?: number;
+}
+export interface EconomyCredits {
+  minted: number; held: number; held_per_guest: number | null; unspent_share: number | null;
+  by_kind: Record<string, number>; adds: number; skips_hr: number | null; nexts_hr: number | null;
+  tips_hr: number | null; add_price_median: number | null; votes: number; free: number;
+}
+export interface EconomyPrices {
+  add_first: number; add_back: number; back_wait_min: number | null; skip_now: number | null;
+  next_from: number; jail_fee: number;
+}
+export interface JukeboxEconomy {
+  running: boolean; play_mode: 'free' | 'credits';
+  crowd?: number; joined?: number; jailed?: number; votes?: number; time_outs?: number;
+  credits?: EconomyCredits | null; prices?: EconomyPrices | null; events?: EconomyEvent[];
+}
+
 export interface SetMoveResult {
   status: 'moved' | 'refused';
   reason?: string;

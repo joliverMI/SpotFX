@@ -13,8 +13,10 @@
 //      within two of the playing one can't move; and the words.
 //   2. The page, mounted: clicking a set song / a slot / × in Manual PUTs
 //      exactly the slots the rule says; Auto → Manual copies the server's
-//      own `manual_equivalent`; the sign-in warning shows; the Live tab is
-//      read-only (no control in it writes) and shows the night.
+//      own `manual_equivalent`; the sign-in warning shows; the Live tab
+//      shows the night and is read-only except its own jukebox line, which
+//      drags the same way the Guests tab's does (report.md §7.2: both host
+//      views carry it) — one shared component, JukeboxLine.tsx, for both.
 //   3. Help: every topic is a real HELP_SECTIONS entry, the menu row's "?"
 //      maps /jukebox to `jukebox`, /jukebox is in the Engine menu — and,
 //      behaviourally, hovering the page's own controls opens each topic,
@@ -305,6 +307,22 @@ const PHONES = [
     `a merge says what moves and that the guest keeps the first phone's name (${mw})`);
   ok(GW.phoneLine({ ...PHONES[0], merged_from: ['Lucky Otter'] }).endsWith('merged with Lucky Otter'),
     'a kept phone names the phones merged into it');
+  const EW = await bundle(`export * from ${JSON.stringify(join(web, 'src/jukebox/jukeboxEconomy.ts'))};`, 'econ');
+  ok(EW.signed(3) === '+3' && EW.signed(-6) === '−6' && EW.signed(0) === '', 'credits read signed, nothing for none');
+  ok(EW.freePlayLine({ votes: 1, time_outs: 2 }) === 'Free play: nothing costs anything — 1 vote and 2 time-outs so far tonight.',
+    'free play says what the room did instead of an economy');
+  ok(EW.roomLine({ crowd: 1, joined: 1, jailed: 0 }) === '1 phone here in the last 15 min · 1 joined', 'who is here');
+  ok(EW.activityLine({ adds: 1, skips_hr: null, nexts_hr: 0.5, tips_hr: null, votes: 1, free: 8 })
+    === '1 song added · play next 0.5/h · 1 vote paid · 8 free credits handed out', 'an hourly rate the night can\'t measure yet is left out');
+  ok(EW.priceRows({ add_first: 4, add_back: 4, back_wait_min: null, skip_now: null, next_from: 11, jail_fee: 10 })
+    .map((r) => `${r.label}=${r.value}`).join('|')
+    === 'A 1st song, now=4|At the back of the line=4|Skip the song playing=nothing playing|Play next=from 11|Break out of jail=10',
+  'the prices, with nothing playing to skip');
+  const waiting = { ...line[1], state: 'queued', held: true, paid: 5, round: 2 };
+  ok(EW.liveLineWords(waiting, PHONES) === `waiting · added by ${GW.adderName(waiting, PHONES)} · 2nd song · on hold · paid 🎟 5`,
+    `a held song in the Live line (${EW.liveLineWords(waiting, PHONES)})`);
+  ok(EW.liveLineWords({ ...waiting, added_by: 'nobody-here', held: false, paid: 0 }, PHONES).includes('added by a guest'),
+    'a guest the page no longer knows is "a guest", never their code');
   const kl = GW.lineRows(line, PHONES, false, ['u2']);
   ok(kl[1].skipLocked && !kl[0].skipLocked && !kl[2].skipLocked, 'a song the host kept from skips is marked, by its song');
   ok(GW.lineRows([{ ...line[1], paid: 6 }], PHONES)[0].paid === 6, 'what a guest paid for a song rides on its row');
@@ -395,6 +413,12 @@ function lapFor(cfg) {
   return out;
 }
 const sign = { state: 'soon', warning: 'SpotFX\'s Spotify sign-in runs out by 2026-11-05 (9 days left) — sign in again before then.', days_left: 9 };
+const ECON = { running: true, play_mode: 'credits', crowd: 4, joined: 3, jailed: 1, votes: 12, time_outs: 1,
+  credits: { minted: 60, held: 25, held_per_guest: 8.3, unspent_share: 0.417, by_kind: {}, adds: 3, skips_hr: 1.2,
+             nexts_hr: null, tips_hr: 2, add_price_median: 5, votes: 12, free: 24 },
+  prices: { add_first: 4, add_back: 9, back_wait_min: 31.6, skip_now: 21, next_from: 11, jail_fee: 10 },
+  events: [{ at_ms: Date.UTC(2026, 9, 28, 1, 42), kind: 'add', who: 'Disco Ana', what: 'added “Take On Me”', credits: -6 },
+           { at_ms: Date.UTC(2026, 9, 28, 1, 40), kind: 'host_gift', who: 'the host', what: 'gave 3 guests 2 each', credits: 2, phones: 3 }] };
 function statusOf() {
   if (!world.running) return { night: null, running: false, now: null, next: [], line: [], warnings: [sign.warning], spotify_auth: sign, log: [], history: [] };
   return {
@@ -404,7 +428,7 @@ function statusOf() {
     remaining_ms: 40_000,
     next: [{ kind: 'jukebox', uri: 'spotify:track:j', title: 'Bad Romance', artist: 'Lady Gaga', duration_ms: 1, set_index: null, entry_id: 'e1', committed: true, starts_in_ms: 40_000 }],
     line: [{ id: 'e1', uri: 'spotify:track:j', title: 'Bad Romance', artist: 'Lady Gaga', duration_ms: 1, added_by: 'host', state: 'committed', doomed: false, commit_check: 'next' },
-           { id: 'e2', uri: 'spotify:track:k', title: 'Take On Me', artist: 'a-ha', duration_ms: 1, added_by: 'pa', state: 'queued', doomed: false, commit_check: '', round: 1 },
+           { id: 'e2', uri: 'spotify:track:k', title: 'Take On Me', artist: 'a-ha', duration_ms: 1, added_by: 'pa', state: 'queued', doomed: false, commit_check: '', round: 1, paid: 6 },
            { id: 'e3', uri: 'spotify:track:m', title: 'Vogue', artist: 'Madonna', duration_ms: 1, added_by: 'pd', state: 'queued', doomed: false, commit_check: '', round: 1 }],
     warnings: [sign.warning, 'Shuffle is on in Spotify, so the set won\'t play in order.'], spotify_auth: sign,
     log: ['started'], history: [], no_skip: [...world.noSkip],
@@ -490,6 +514,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.startsWith('/api/jukebox/simulate')) return json(SIM);
   if (u.startsWith('/api/jukebox/report')) return json(REP);
   if (u.startsWith('/api/jukebox/status')) return json(statusOf());
+  if (u.startsWith('/api/jukebox/economy')) return json(world.running ? ECON : { running: false, play_mode: 'credits' });
   if (u.startsWith('/api/jukebox/preview')) {
     return json({ status: 'ok', playlist_name: 'Saturday set', set_songs: SET.length, set: SET,
       lap_items: lapFor(world.config), next: [], playhead: world.running ? 1 : null,
@@ -593,6 +618,45 @@ console.log('\n§2 the editor, mounted — every click PUTs the slots the rule s
   ok(text($(c, '[data-testid="jukebox-now"]')).includes('Dancing Queen') && text($(c, '[data-testid="jukebox-now"]')).includes('Set 2'),
     'and what is playing');
   ok(text($(c, '[data-testid="jukebox-next"]')).includes('sent to Spotify'), 'the committed song says it was sent');
+  await P.settle();
+  const liveRows = [...c.querySelectorAll('[data-testid="jukebox-line"] .jukebox-item')].map(text);
+  ok(liveRows[1]?.includes('added by Disco Ana') && liveRows[1].includes('1st song') && liveRows[1].includes('paid 🎟 6')
+    && !liveRows.some((r) => / pa\b| pd\b/.test(r)),
+    `the Live line names who added each song (never a phone's code) and what they paid (${liveRows[1]})`);
+  ok(liveRows[2]?.includes('added by Lucky Otter') && liveRows[2].includes('sits out a time-out')
+    && liveRows[0]?.includes('added by the host'), 'and which songs sit out a time-out');
+  // the Live tab's own draggable line (§7.2: both host views carry it) — the
+  // same reorder rules as the Guests tab's: only the waiting songs carry a
+  // handle, and the move goes through the engine's own /move
+  const lineEls = [...c.querySelectorAll('[data-testid="jukebox-line"] .jukebox-item')];
+  ok(!lineEls[0]?.querySelector('.light-show-step-handle') && !!lineEls[1]?.querySelector('.light-show-step-handle')
+    && !!lineEls[2]?.querySelector('.light-show-step-handle'),
+    'only the waiting songs carry a ⠿ handle on the Live tab\'s own line too');
+  const liveRectAt = (i) => ({ x: 0, y: i * 60, left: 0, top: i * 60, right: 400, bottom: i * 60 + 50, width: 400, height: 50, toJSON() {} });
+  lineEls.slice(1).forEach((li, i) => { li.getBoundingClientRect = () => liveRectAt(i); });
+  const livePev = (type, y) => {
+    const ev = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, clientX: 200, clientY: y, button: 0 });
+    Object.defineProperty(ev, 'pointerId', { value: 4 });
+    Object.defineProperty(ev, 'isPrimary', { value: true });
+    Object.defineProperty(ev, 'pointerType', { value: 'touch' });
+    return ev;
+  };
+  P.actSync(() => lineEls[2].querySelector('.light-show-step-handle').dispatchEvent(livePev('pointerdown', 85)));
+  for (const y of [80, 70, 45, 20, 10]) P.actSync(() => document.dispatchEvent(livePev('pointermove', y)));
+  P.actSync(() => document.dispatchEvent(livePev('pointerup', 10)));
+  await P.settle();
+  const liveDragMove = world.requests.filter((r) => r.url === '/api/jukebox/line/e3/move').at(-1);
+  ok(liveDragMove?.method === 'POST' && JSON.stringify(liveDragMove.body) === '{"to":0}',
+    `dragging the Live tab's own line POSTs the move too (${JSON.stringify(liveDragMove?.body)})`);
+  world.requests = [];
+  const econ = $(c, '[data-testid="jukebox-economy"]');
+  ok(!!econ && text($(c, '[data-testid="jukebox-economy-credits"]')) === '25 credits held · 8.3 a guest · 60 made tonight · 42% still unspent',
+    `the economy card says the credits right now (${text($(c, '[data-testid="jukebox-economy-credits"]'))})`);
+  ok(text($(c, '[data-testid="jukebox-economy-prices"]')).includes('At the back of the line (~32 min)9')
+    && text($(c, '[data-testid="jukebox-economy-prices"]')).includes('Skip the song playing21'), 'and the prices a guest sees now');
+  const evs = [...c.querySelectorAll('[data-testid="jukebox-economy-events"] li')].map(text);
+  ok(evs.length === 2 && evs[0].includes('Disco Ana added “Take On Me”') && evs[0].includes('−6')
+    && evs[1].includes('the host gave 3 guests 2 each') && evs[1].includes('+2'), `and what happened lately (${evs.join(' | ')})`);
   ok(text($(c, '[data-testid="jukebox-live-card"]')).includes('Shuffle is on')
     && !text($(c, '[data-testid="jukebox-live-card"]')).includes('runs out by'),
   'the night\'s own warning shows on Live; the sign-in line is not shown twice');
@@ -606,7 +670,7 @@ console.log('\n§2 the editor, mounted — every click PUTs the slots the rule s
     'picking a party size asks for the report at that size');
   const live = c.querySelector('[data-testid="jukebox-live-card"]')?.parentElement;
   for (const b of live ? [...live.querySelectorAll('button')] : []) await click(b);
-  ok(writes().length === before, 'nothing on the Live tab writes — it is read-only');
+  ok(writes().length === before, 'nothing else on the Live tab writes — only its own line\'s drag does, proven above');
   P.unmount();
 }
 
@@ -713,6 +777,27 @@ console.log('\n§2d the Guests tab, mounted — the rules, the line, the phones'
   ok(rows.length === 3 && rows[1].textContent.includes('added by Disco Ana') && rows[1].textContent.includes('1st song'),
     'the line shows each song with who added it and their round');
   ok(rows[2].textContent.includes('sits out a time-out'), 'a song whose guest is in a time-out says so');
+  // the host's draggable line (§7): a waiting song drags to a new place; the
+  // song already sent to Spotify has no handle — nothing passes it
+  ok(!rows[0].querySelector('.light-show-step-handle') && !!rows[1].querySelector('.light-show-step-handle')
+    && !!rows[2].querySelector('.light-show-step-handle'), 'only the waiting songs carry a ⠿ handle');
+  const rectAt = (i) => ({ x: 0, y: i * 60, left: 0, top: i * 60, right: 400, bottom: i * 60 + 50, width: 400, height: 50, toJSON() {} });
+  rows.slice(1).forEach((li, i) => { li.getBoundingClientRect = () => rectAt(i); });
+  const pev = (type, y) => {
+    const ev = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, clientX: 200, clientY: y, button: 0 });
+    Object.defineProperty(ev, 'pointerId', { value: 3 });
+    Object.defineProperty(ev, 'isPrimary', { value: true });
+    Object.defineProperty(ev, 'pointerType', { value: 'touch' });
+    return ev;
+  };
+  P.actSync(() => rows[2].querySelector('.light-show-step-handle').dispatchEvent(pev('pointerdown', 85)));
+  for (const y of [80, 70, 45, 20, 10]) P.actSync(() => document.dispatchEvent(pev('pointermove', y)));
+  P.actSync(() => document.dispatchEvent(pev('pointerup', 10)));
+  await P.settle();
+  const dragMove = world.requests.filter((r) => r.url === '/api/jukebox/line/e3/move').at(-1);
+  ok(dragMove?.method === 'POST' && JSON.stringify(dragMove.body) === '{"to":0}',
+    `dragging the 2nd waiting song to the top moves it to place 0 among the waiting (${JSON.stringify(dragMove?.body)})`);
+  world.requests = [];
   ok(!buttonByText(rows[1], /^Play next$/) && !!buttonByText(rows[2], /^Play next$/), 'Play next on a waiting song behind the first');
   await click(buttonByText(rows[2], /^Play next$/));
   const mv = world.requests.filter((r) => r.url === '/api/jukebox/line/e3/move').at(-1);
@@ -885,7 +970,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     'jukebox-credits', 'jukebox-presets', 'jukebox-price-check', 'jukebox-simulator', 'sonic-jukebox',
     'jukebox-report', 'jukebox-guest-page', 'jukebox-guests', 'jukebox-free-play', 'jukebox-credits-mode',
     'jukebox-skip-lock', 'jukebox-board', 'jukebox-gifts', 'jukebox-bonus-cards', 'jukebox-cards',
-    'jukebox-merge-phones'];
+    'jukebox-merge-phones', 'jukebox-economy'];
   const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
   const knownIds = new Set();
   for (const section of HELP_SECTIONS) {
@@ -937,7 +1022,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     if (id && id !== 'sonic-scene-backups') reached.add(id);
   }
   ok(topics.every((id) => reached.has(id)) && reached.size === topics.length,
-    `the page's own controls and its 💬 Sonic open exactly the twenty-one jukebox topics (${[...reached].sort().join(', ')})`);
+    `the page's own controls and its 💬 Sonic open exactly the twenty-two jukebox topics (${[...reached].sort().join(', ')})`);
   P.unmount();
 }
 

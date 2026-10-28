@@ -2,8 +2,9 @@
  * plan's §4 Show/Guests/Free play cards and §12 guards): the guests' own
  * rules (when the night ends and requests close, explicit songs, how many
  * phones, name changes, the word filter), free play's rules (the room's
- * skip, bumps, play next, the jail), the line with Hold, Play next and
- * Remove on each song, and every phone at tonight's party with Approve,
+ * skip, bumps, play next, the jail), the line — draggable (JukeboxLine.tsx,
+ * shared with the Live tab, §7.2) with Hold, Play next and Remove on each
+ * song too — and every phone at tonight's party with Approve,
  * Pardon, Block, Rename and Lock name. Every decision is SpotFX's
  * (services/jukebox/guests.py, one show validator); the words are
  * jukeboxGuests.ts. */
@@ -11,13 +12,14 @@ import { useState } from 'react';
 import InfoTip from '../components/InfoTip';
 import { useToast } from '../components/Toast';
 import BoardLists from './BoardLists';
+import JukeboxLine from './JukeboxLine';
 import {
   lineRows, mergeCandidates, mergeWords, phoneActions, phoneLine, phoneTakes, sinceWords,
   type PhoneAction,
 } from './jukeboxGuests';
 import {
   useGift, useGuests, useHoldEntry, useHostPhone, useJukeboxBoard, useJukeboxShow, useMergePhones,
-  usePlayNext, useRemoveEntry, useSaveShow, useSkipLock, useZeroPhone,
+  useMoveEntry, usePlayNext, useRemoveEntry, useSaveShow, useSkipLock, useZeroPhone,
 } from './queries';
 import type { GuestField, GuestPhone, JukeboxStatus, ShowConfig } from './types';
 
@@ -43,6 +45,7 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
   const hold = useHoldEntry();
   const remove = useRemoveEntry();
   const playNext = usePlayNext();
+  const move = useMoveEntry();
   const skipLock = useSkipLock();
   const gift = useGift();
   const zero = useZeroPhone();
@@ -71,6 +74,37 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
       onSave={(v) => save.mutate({ [f.key]: v }, { onError })}
       onBad={(reason) => toast(reason, 'error')} />
   ));
+
+  const lineRowBody = (r: (typeof rows)[number]) => (
+    <>
+      <span className="jukebox-item-words">
+        <span className="jukebox-song-title">{r.entry.title || r.entry.uri}</span>
+        <span className="jukebox-song-artist">
+          {[r.entry.artist, `added by ${r.by}`, r.round, r.paid ? `paid 🎟 ${r.paid}` : '',
+            r.sent ? 'sent to Spotify' : '',
+            r.held ? 'on hold' : '', r.jailed ? 'sits out a time-out' : '',
+            r.skipLocked ? 'kept from skips' : '',
+            r.doomed ? 'removed: skipped as it starts' : ''].filter(Boolean).join(' · ')}
+        </span>
+      </span>
+      <span className="jukebox-guest-actions">
+        {r.canPlayNext && (
+          <button onClick={() => playNext.mutate(r.entry.id, { onError })}>Play next</button>
+        )}
+        <button onClick={() => skipLock.mutate({ uri: r.entry.uri, locked: !r.skipLocked }, { onError })}>
+          {r.skipLocked ? 'Allow skips' : 'Keep from skips'}
+        </button>
+        {r.canHold && (
+          <button onClick={() => hold.mutate({ id: r.entry.id, held: !r.held }, { onError })}>
+            {r.held ? 'Let go' : 'Hold'}
+          </button>
+        )}
+        {!r.doomed && (
+          <button onClick={() => remove.mutate(r.entry.id, { onError })}>Remove</button>
+        )}
+      </span>
+    </>
+  );
 
   return (
     <div className="jukebox-grid">
@@ -139,40 +173,14 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
             </span>
           </div>
         )}
-        {rows.length > 0 && (
-          <ol className="jukebox-next">
-            {rows.map((r) => (
-              <li key={r.entry.id} className={`jukebox-item ${r.sent ? 'jukebox' : 'set'}`}>
-                <span className="jukebox-item-words">
-                  <span className="jukebox-song-title">{r.entry.title || r.entry.uri}</span>
-                  <span className="jukebox-song-artist">
-                    {[r.entry.artist, `added by ${r.by}`, r.round, r.paid ? `paid 🎟 ${r.paid}` : '',
-                      r.sent ? 'sent to Spotify' : '',
-                      r.held ? 'on hold' : '', r.jailed ? 'sits out a time-out' : '',
-                      r.skipLocked ? 'kept from skips' : '',
-                      r.doomed ? 'removed: skipped as it starts' : ''].filter(Boolean).join(' · ')}
-                  </span>
-                </span>
-                <span className="jukebox-guest-actions">
-                  {r.canPlayNext && (
-                    <button onClick={() => playNext.mutate(r.entry.id, { onError })}>Play next</button>
-                  )}
-                  <button onClick={() => skipLock.mutate({ uri: r.entry.uri, locked: !r.skipLocked }, { onError })}>
-                    {r.skipLocked ? 'Allow skips' : 'Keep from skips'}
-                  </button>
-                  {r.canHold && (
-                    <button onClick={() => hold.mutate({ id: r.entry.id, held: !r.held }, { onError })}>
-                      {r.held ? 'Let go' : 'Hold'}
-                    </button>
-                  )}
-                  {!r.doomed && (
-                    <button onClick={() => remove.mutate(r.entry.id, { onError })}>Remove</button>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ol>
-        )}
+        <JukeboxLine
+          items={rows}
+          getId={(r) => r.entry.id}
+          getLabel={(r) => r.entry.title || r.entry.uri}
+          getSent={(r) => r.sent}
+          onReorder={(id, to) => move.mutate({ id, to }, { onError })}
+          renderRow={lineRowBody}
+        />
       </section>
 
       <section className="card jukebox-card jukebox-list-card" data-testid="jukebox-phones">

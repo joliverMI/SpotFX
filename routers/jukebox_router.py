@@ -86,6 +86,9 @@ process on its own port (phase 2) and never reaches these routes.
                                       (credits mode)
   POST   /api/jukebox/guests/{phone}/merge  {retire: phone id} — that phone
                                       joins this one: one guest (§4, §12)
+  GET    /api/jukebox/economy         the Live tab's economy panel (services/
+                                      jukebox/economy_live.py): credits now,
+                                      prices now, recent events — reads only
   GET    /api/jukebox/board           the board (services/jukebox/board.py):
                                       tonight's top songs, every people board
                                       marked shown or not, the song playing
@@ -262,6 +265,13 @@ async def post_skip_lock(body: SkipLockBody) -> dict:
 @router.get("/guests")
 async def get_guests() -> dict:
     return guests.book.phones()
+
+
+@router.get("/economy")
+async def get_economy() -> dict:
+    """The Live tab's economy panel (report §9 3.3, §7): the credits right
+    now, the prices a guest sees now, and the night's recent events."""
+    return guests.book.economy()
 
 
 @router.get("/board")

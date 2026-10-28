@@ -8,7 +8,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { spotfxDel, spotfxGet, spotfxPost, spotfxPut } from '../api/client';
 import type {
-  BonusCodesRead, CardRead, GuestsRead, JukeboxBoardRead, JukeboxPreview, JukeboxStatus, NightReport, PriceCheck,
+  BonusCodesRead, CardRead, GuestsRead, JukeboxBoardRead, JukeboxEconomy, JukeboxPreview, JukeboxStatus,
+  NightReport, PriceCheck,
   ProgramConfig, SetMoveResult, ShowRead, SimResult,
 } from './types';
 
@@ -167,6 +168,16 @@ export function useGuests(running: boolean) {
   });
 }
 
+/** The Live tab's economy panel: credits now, prices now, recent events. */
+export function useJukeboxEconomy(running: boolean) {
+  return useQuery({
+    queryKey: ['jukebox-economy'],
+    queryFn: () => spotfxGet<JukeboxEconomy>('/jukebox/economy'),
+    enabled: running,
+    refetchInterval: running ? 5000 : false,
+  });
+}
+
 /** The board (tonight's top songs, the people boards, the song playing):
  *  the Guests tab's Board card and the TV page. */
 export function useJukeboxBoard(fast: boolean) {
@@ -294,6 +305,24 @@ export function usePlayNext() {
       return r;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status }),
+  });
+}
+
+/** Drag a waiting song to place `to` among the waiting songs (the host's
+ *  own move: nothing passes the song already sent to Spotify). */
+export function useMoveEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, to }: { id: string; to: number }) => {
+      const r = await spotfxPost<{ status: string; detail?: string; line?: JukeboxStatus['line'] }>(
+        `/jukebox/line/${encodeURIComponent(id)}/move`, { to });
+      if (r.status === 'refused') throw new Error(r.detail || 'It could not move.');
+      return r;
+    },
+    onSuccess: (r) => {
+      if (r.line) qc.setQueryData<JukeboxStatus>(JUKEBOX_KEYS.status, (old) => (old ? { ...old, line: r.line! } : old));
+      qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status });
+    },
   });
 }
 
