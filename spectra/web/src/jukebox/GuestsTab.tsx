@@ -2,8 +2,9 @@
  * plan's §4 Show/Guests/Free play cards and §12 guards): the guests' own
  * rules (when the night ends and requests close, explicit songs, how many
  * phones, name changes, the word filter), free play's rules (the room's
- * skip, bumps, play next, the jail), the line with Hold, Play next and
- * Remove on each song, and every phone at tonight's party with Approve,
+ * skip, bumps, play next, the jail), the line — draggable (JukeboxLine.tsx,
+ * shared with the Live tab, §7.2) with Hold, Play next and Remove on each
+ * song too — and every phone at tonight's party with Approve,
  * Pardon, Block, Rename and Lock name. Every decision is SpotFX's
  * (services/jukebox/guests.py, one show validator); the words are
  * jukeboxGuests.ts. */
