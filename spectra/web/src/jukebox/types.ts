@@ -252,6 +252,9 @@ export interface GuestPhone {
   credits?: number;
   /** the names of phones the host merged into this one (§4 "merge two phones") */
   merged_from?: string[];
+  /** §12's vote-farming flag: the phones this one always votes with, the
+   *  same way within a second, and on how many songs (guests.py `lockstep`) */
+  lockstep?: { id: string; name: string; songs: number }[];
 }
 
 /** The board (SpotFX services/jukebox/board.py): tonight's top songs and

@@ -2483,6 +2483,16 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'jukebox-lockstep',
+        title: 'Phones that vote together',
+        keywords: 'vote farming lockstep two phones same vote within a second flag abuse second phone friends merge',
+        body: [
+          'A phone row on the Guests tab gets a ⚑ when it has voted on every song together with another phone — the same way, within a second of each other — on at least 5 songs. That is what one guest tapping two or three phones to farm votes looks like.',
+          'Only the stretch both phones were voting counts: a song one of them voted on before the other arrived, or after the other went quiet, doesn\'t clear the flag, and a song one of them added is left out (nobody votes on their own song). One song voted differently, more than a second apart, or by only one of them while both were voting, and the flag goes.',
+          'It is only a flag: it never refuses a vote, takes credits or moves anyone, because two friends who tap together look exactly the same. You decide. Merge… on the flagged phone starts with the other phone already picked; merging makes them one guest, and the flag goes. Zero takes a phone\'s credits back.',
+        ],
+      },
+      {
         id: 'jukebox-report',
         title: 'The night\'s report',
         keywords: 'report post-party after the party night measured ledger credits compare model bands real numbers next party quiet guest afford mid-party back of the line too late jail',

@@ -49,7 +49,10 @@ excluded" from "forgotten":
     merge two phones into one guest, §4's host buttons) — they act on a person
     standing in his room, by name, and a misheard name would block, rename
     or free the wrong guest; they are the Guests tab's buttons, where each
-    phone is shown;
+    phone is shown. §12's vote-farming flag (phones that always vote alike
+    within a second) is read there too, beside Merge: a flag about a person
+    is for the host to weigh with the phones in front of him, not to hear
+    read out at the party;
   * the jukebox LINE — adding, removing and moving songs (bumps, play
     next), and keeping a song from skips (PR 3.2), are the guests' turn and
     the host's page, where each song is shown;

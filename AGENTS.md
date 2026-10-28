@@ -11046,6 +11046,21 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   jumps (`guests.jump_front_ms`). Spec: `tests/test_jukebox_shows.py`,
   `tests/test_jukebox_play_next_jump.py`; help `jukebox-shows`,
   `jukebox-slots`.
+- **THE VOTE-FARMING FLAG** (§12's abuse table: "the master flags phones
+  that always vote identically within a second"). Every vote now keeps its
+  moment (`GuestBook.vote_ms`, play -> phone -> ms; taken back with the
+  vote, folded on a merge, evicted with the play), and the pure
+  `guests.lockstep(book)` flags a PAIR that, over the span both were voting
+  (the later one's first vote to the earlier one's last), voted on every
+  song the same way within `LOCKSTEP_WINDOW_MS` (1000) — at least
+  `LOCKSTEP_MIN_PLAYS` (5) songs; a song one of them added is left out, and
+  a vote with no time (cast before times were kept) is never compared.
+  Candidate pairs come from each play's votes sorted by time, so the cost
+  is the night's votes, not every pair of phones. It is ONLY a flag
+  (`phones()`' `lockstep` per row, the Guests tab's ⚑ beside Merge…, which
+  starts with the partner picked): it refuses nothing, because two friends
+  tapping together look the same. Merged and blocked phones are never
+  flagged. Spec: `tests/test_jukebox_lockstep.py`; help `jukebox-lockstep`.
 - **THE PARTY SIMULATOR AND SONIC (PR 3.4)**: the simulator moved from
   tests into `services/jukebox/simulator.py` — ONE copy is both the
   economy's executable spec and the master view's Simulate tab

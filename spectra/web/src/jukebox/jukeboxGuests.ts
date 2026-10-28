@@ -91,6 +91,18 @@ export function mergeWords(keep: GuestPhone, retire: GuestPhone): string {
     + `work as one guest, and they're called ${first.name}.`;
 }
 
+/** §12's vote-farming flag, in words: who this phone always votes with. It
+ *  is a flag, not a verdict — two friends tapping together look the same. */
+export function lockstepWords(p: GuestPhone): string {
+  const rows = p.lockstep ?? [];
+  if (!rows.length) return '';
+  const names = rows.map((r) => r.name);
+  const who = names.length === 1 ? names[0]
+    : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  const most = Math.max(...rows.map((r) => r.songs));
+  return `Votes with ${who} — the same way, within a second, on every song (${most} so far)`;
+}
+
 export type PhoneAction = 'approve' | 'pardon' | 'block' | 'unblock' | 'lock' | 'unlock' | 'rename';
 
 /** The buttons a phone gets: Approve only while it waits; Pardon only in a
