@@ -46,7 +46,16 @@
  * NO PER-FRAME STATE LIVES HERE. The window is read through its own
  * `getWin()` getter (useFollowWindow's own contract) by the rAF loops
  * that draw the strip and the canvas — this context re-renders only when
- * a filter, the follow mode or a committed manual window changes. */
+ * a filter, the follow mode or a committed manual window changes.
+ *
+ * SHAPE BANDS ARE SHARED TOO (his 2026-10-29 ask: the drop-sequence edit
+ * dialog's own zoomed audio shape should show bass/mid/high/total exactly
+ * as the main shape does). `shapeBands` is the ONE on/off state for those
+ * four — HomeTimeline's T/B/M/H toggles write it, and HomeDropEditor's
+ * dialog only reads it, so a change to one always changes the other; see
+ * ../timeline/canvas/rmsBandSeries.ts for the colours/maths both share
+ * too. Deliberately not persisted, matching `filters` above — a band left
+ * off and forgotten would be unreachable on a reload. */
 import {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from 'react';
@@ -56,12 +65,19 @@ import type { Win } from '../timeline/hooks/useFollowWindow';
 import { getShowClockMs } from '../lib/showClock';
 import { useEngineStatus } from '../queries';
 import type { UpcomingKind } from './songStrip';
+import type { RmsBandKey, RmsBandVisibility } from '../timeline/canvas/rmsBandSeries';
 
 export interface KindFilter {
   analysed: boolean;
   drop: boolean;
   lightShow: boolean;
 }
+
+/** Every band shown — the shipped default on both the main shape and the
+ * drop-sequence editor dialog. */
+export const DEFAULT_SHAPE_BANDS: RmsBandVisibility = {
+  total: true, bass: true, mid: true, high: true,
+};
 
 /** Which filter governs each event kind the timeline can draw. `colour`
  * rides with the analysed group: it is an authored `select_color_set`
@@ -100,6 +116,11 @@ export interface SongTimelineView {
   durationMs: number;
   filters: KindFilter;
   toggleFilter: (k: keyof KindFilter) => void;
+  /** Which of the main audio shape's four RMS bands draw — shared with
+   * Home's drop-sequence editor dialog (its own zoomed shape reads this
+   * SAME state, never a copy; see this file's own module docstring). */
+  shapeBands: RmsBandVisibility;
+  toggleShapeBand: (k: RmsBandKey) => void;
   /** True exactly while something is listening to the window (Home's
    * audio shape) — the strip draws its draggable window overlay only
    * then. */
@@ -138,6 +159,8 @@ function useFallback(): SongTimelineView {
     durationMs: 0,
     filters: { analysed: true, drop: true, lightShow: true },
     toggleFilter: () => {},
+    shapeBands: DEFAULT_SHAPE_BANDS,
+    toggleShapeBand: () => {},
     editable: false,
     pushHistory: () => {},
     undo: () => {},
@@ -201,6 +224,11 @@ export function SongTimelineViewProvider({ children }: { children: ReactNode }) 
     setFilters((f) => ({ ...f, [k]: !f[k] }));
   }, []);
 
+  const [shapeBands, setShapeBands] = useState<RmsBandVisibility>(DEFAULT_SHAPE_BANDS);
+  const toggleShapeBand = useCallback((k: RmsBandKey) => {
+    setShapeBands((b) => ({ ...b, [k]: !b[k] }));
+  }, []);
+
   const [owners, setOwners] = useState(0);
   const addShapeOwner = useCallback(() => {
     setOwners((n) => n + 1);
@@ -254,6 +282,8 @@ export function SongTimelineViewProvider({ children }: { children: ReactNode }) 
     durationMs,
     filters,
     toggleFilter,
+    shapeBands,
+    toggleShapeBand,
     editable: owners > 0,
     pushHistory,
     undo,
@@ -263,8 +293,9 @@ export function SongTimelineViewProvider({ children }: { children: ReactNode }) 
     addShapeOwner,
     selectedDrop,
     selectDrop,
-  }), [win, track, showingLast, durationMs, filters, toggleFilter, owners, pushHistory,
-       undo, redo, past.length, future.length, addShapeOwner, selectedDrop, selectDrop]);
+  }), [win, track, showingLast, durationMs, filters, toggleFilter, shapeBands, toggleShapeBand,
+       owners, pushHistory, undo, redo, past.length, future.length, addShapeOwner, selectedDrop,
+       selectDrop]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

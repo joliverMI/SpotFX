@@ -3543,7 +3543,9 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 }
 .home-drop-editor-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .home-drop-editor-shape {
-  fill: rgba(168, 85, 247, 0.28); stroke: rgba(168, 85, 247, 0.6);
+  /* fill/stroke are set inline per band (RMS_BAND_FILL/_STROKE,
+   * timeline/canvas/rmsBandSeries.ts) so this dialog's colours can
+   * never drift from the main audio shape's own. */
   stroke-width: 1; vector-effect: non-scaling-stroke;
 }
 .home-drop-editor-beat { stroke: rgba(255, 255, 255, 0.14); stroke-width: 1; vector-effect: non-scaling-stroke; }

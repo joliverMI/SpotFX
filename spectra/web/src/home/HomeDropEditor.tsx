@@ -22,10 +22,25 @@
  * glyph beside its ◀ ▶ switches its kind; ＋ Pre-drop places one where the
  * rules pick when the drop has none. On his own drop it moves the same way
  * (the server keeps it in the drop store, never his song profile). One that
- * plays fades the drop's colour change across it (PRE_DROP_IN_THE_ROOM). */
+ * plays fades the drop's colour change across it (PRE_DROP_IN_THE_ROOM).
+ *
+ * THE SHAPE DRAWS EVERY BAND THE MAIN AUDIO SHAPE DOES (the Admiral,
+ * 2026-10-29, verbatim: "make it so the audio shape matches the settings
+ * that show in the main audio shape, so it includes the colored mids,
+ * highs, and bass (and total if it's on). Right now it just shows one").
+ * It used to draw ONE trace — `rms_total` alone, unconditionally. It now
+ * draws total/bass/mid/high from `shapeBands` — the SAME shared on/off
+ * state HomeTimeline's T/B/M/H toggles write (components/
+ * songTimelineView.tsx) — in the SAME colours, via the SAME peak/fraction
+ * arithmetic (../timeline/canvas/rmsBandSeries.ts, which the main shape's
+ * own `rmsBands` canvas layer reads from too). A change to those toggles
+ * on Home changes this dialog's shape on its very next render — there is
+ * no second copy of "which bands" to drift out of step. */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Icon from '../components/Icon';
+import { useSettings } from '../api/queries';
+import { useSongTimelineView } from '../components/songTimelineView';
 import type { DropEditor } from '../timeline/hooks/useDropEditor';
 import { useAudioShapeData, useDropRails } from '../timeline/queries';
 import type { Handle, PreDropKind } from '../timeline/dropSequences';
@@ -33,6 +48,12 @@ import { HANDLES } from '../timeline/dropSequences';
 import {
   changedHandles, clampHandle, snapHandle, snapRadiusMs, stepHandle, type HandleTimes,
 } from '../timeline/dropEdit';
+import {
+  RMS_BAND_FILL, RMS_BAND_KEYS, RMS_BAND_STROKE, rmsBandFraction, rmsBandPeak,
+  rmsBandWindowIndices,
+} from '../timeline/canvas/rmsBandSeries';
+import { DEFAULT_SHAPE_SCALES, shapeScalesSeed } from '../lib/shapeScales';
+import { useSticky } from '../lib/useSticky';
 import {
   clampPreDrop, fmtDropTime, PART_COLOR, PART_LABEL, PRE_DROP_KIND_WORD, PRE_DROP_LEAD_MS,
   PRE_DROP_IN_THE_ROOM, preDropRail, snapPreDrop, stepPreDrop, type PanelRow,
@@ -52,6 +73,13 @@ export default function HomeDropEditor({ row, uri, beatMs, editor, onClose }: {
 }) {
   const { data: rails } = useDropRails(uri);
   const { data: shape } = useAudioShapeData(uri, true);
+  // THE SAME BAND VISIBILITY AND SCALE MULTIPLIERS THE MAIN SHAPE READS —
+  // `shapeBands` shared via context (songTimelineView.tsx), `scales` via
+  // the same `spotfx.builder.v1.scales` sticky key home/HomeTimeline.tsx
+  // and the Timeline page both already read.
+  const { shapeBands } = useSongTimelineView();
+  const { data: settings } = useSettings();
+  const [scales] = useSticky('scales', DEFAULT_SHAPE_SCALES, shapeScalesSeed(settings));
   const saved: HandleTimes = useMemo(
     () => ({ charge: row.chargeMs, lull: row.lullMs, drop: row.dropMs }),
     [row.chargeMs, row.lullMs, row.dropMs]);
@@ -79,23 +107,31 @@ export default function HomeDropEditor({ row, uri, beatMs, editor, onClose }: {
   useEffect(() => { setPreGhost(null); }, [savedPre, preKind]);
 
   const stripRef = useRef<HTMLDivElement>(null);
-  const shapePath = useMemo(() => {
-    if (!shape?.timestamps_ms?.length) return null;
+  // ONE PATH PER VISIBLE BAND — total first, then bass/mid/high over it
+  // (RMS_BAND_KEYS' own order), the same draw order the main shape's
+  // `rmsBands` canvas layer uses, so a colour never hides behind one it
+  // would show above here.
+  const bandPaths = useMemo(() => {
+    if (!shape?.timestamps_ms?.length) return [];
     const ts = shape.timestamps_ms;
-    const vals = shape.rms_total;
-    let peak = 1e-9;
-    const pts: [number, number][] = [];
-    for (let i = 0; i < ts.length; i++) {
-      if (ts[i] < startMs || ts[i] > endMs) continue;
-      pts.push([ts[i], vals[i]]);
-      if (vals[i] > peak) peak = vals[i];
-    }
-    if (pts.length < 2) return null;
+    const idx = rmsBandWindowIndices(ts, startMs, endMs);
+    if (idx.length < 2) return [];
+    const peak = rmsBandPeak(shape, idx, scales, 1);
     const x = (ms: number) => (((ms - startMs) / span) * 1000).toFixed(1);
-    const y = (v: number) => (STRIP_H - (v / peak) * (STRIP_H - 10)).toFixed(1);
-    return `M${x(pts[0][0])} ${STRIP_H} ` + pts.map(([t, v]) => `L${x(t)} ${y(v)}`).join(' ')
-      + ` L${x(pts[pts.length - 1][0])} ${STRIP_H} Z`;
-  }, [shape, startMs, endMs, span]);
+    const y = (frac: number) => (STRIP_H - frac * STRIP_H).toFixed(1);
+    const first = x(ts[idx[0]]);
+    const last = x(ts[idx[idx.length - 1]]);
+    const out: { key: (typeof RMS_BAND_KEYS)[number]; d: string }[] = [];
+    for (const key of RMS_BAND_KEYS) {
+      if (!shapeBands[key]) continue;
+      const frac = rmsBandFraction(shape, key, idx, scales, 1, peak);
+      const d = `M${first} ${STRIP_H} `
+        + idx.map((i, n) => `L${x(ts[i])} ${y(frac[n])}`).join(' ')
+        + ` L${last} ${STRIP_H} Z`;
+      out.push({ key, d });
+    }
+    return out;
+  }, [shape, startMs, endMs, span, scales, shapeBands]);
 
   const msAt = (clientX: number): number => {
     const r = stripRef.current?.getBoundingClientRect();
@@ -233,7 +269,10 @@ export default function HomeDropEditor({ row, uri, beatMs, editor, onClose }: {
         style={{ height: STRIP_H }}>
         <svg viewBox={`0 0 1000 ${STRIP_H}`} preserveAspectRatio="none" aria-hidden
           className="home-drop-editor-svg">
-          {shapePath && <path d={shapePath} className="home-drop-editor-shape" />}
+          {bandPaths.map(({ key, d }) => (
+            <path key={key} d={d} className={`home-drop-editor-shape ${key}`}
+              style={{ fill: RMS_BAND_FILL[key], stroke: RMS_BAND_STROKE[key] }} />
+          ))}
           {(rails?.beats ?? []).filter(([ms]) => ms >= startMs && ms <= endMs).map(([ms, down]) => (
             <line key={`b${ms}`} x1={pct(ms) * 10} x2={pct(ms) * 10} y1={down ? 0 : STRIP_H * 0.55}
               y2={STRIP_H} className={down ? 'home-drop-editor-downbeat' : 'home-drop-editor-beat'} />

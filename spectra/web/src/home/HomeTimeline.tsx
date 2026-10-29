@@ -40,7 +40,16 @@
  * pointing the shape at it keeps PR 424's measured fix by construction.
  * The alignment writer is a ResizeObserver, not a render, and skips a
  * write that would not move anything — so it costs nothing per frame
- * either. */
+ * either.
+ *
+ * THE BAND TOGGLES (T/B/M/H) ARE SHARED, NOT LOCAL (his 2026-10-29 ask:
+ * the drop-sequence editor dialog's own shape should match whichever of
+ * total/bass/mid/high draw here). `shapeBands`/`toggleShapeBand` live on
+ * `useSongTimelineView()` for exactly that reason — see that module's own
+ * docstring and ../timeline/canvas/rmsBandSeries.ts, which both this
+ * canvas's `rmsBands` layer and home/HomeDropEditor.tsx's own small strip
+ * draw their colours from. `marks`/`lanes`/`intensityBg` stay local — the
+ * dialog draws none of those. */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../components/Icon';
 import IconToggle from '../components/IconToggle';
@@ -138,15 +147,21 @@ export default function HomeTimeline({
   // THE SHARED VIEW STATE the chrome's timeline row owns (the window, the
   // marker filters, the view history) — this card's control row is where
   // he sets it, and registering as its listener is what turns the row's
-  // own window overlay on.
-  const { win, filters, toggleFilter, pushHistory, undo, redo, canUndo, canRedo, selectDrop } =
-    useSongTimelineView();
+  // own window overlay on. `shapeBands` (total/bass/mid/high) is shared
+  // the SAME way with Home's drop-sequence editor dialog, which reads it
+  // read-only so its own zoomed shape never drifts from this one (his
+  // 2026-10-29 ask) — see components/songTimelineView.tsx's own docstring.
+  const {
+    win, filters, toggleFilter, shapeBands, toggleShapeBand,
+    pushHistory, undo, redo, canUndo, canRedo, selectDrop,
+  } = useSongTimelineView();
   useSongTimelineShape(showAudioShape);
 
-  // The mockup's own thin control row under the shape: which bands draw,
-  // the marks, and the librosa lanes — real filters, wired straight into
-  // the canvas's own ViewState (the same fields BuilderPage sets).
-  const [bands, setBands] = useState({ total: true, bass: true, mid: true, high: true, marks: true });
+  // The mockup's own thin control row under the shape: the marks and the
+  // librosa lanes stay local (nothing else reads them) — real filters,
+  // wired straight into the canvas's own ViewState (the same fields
+  // BuilderPage sets).
+  const [marks, setMarks] = useState(true);
   const [lanes, setLanes] = useState({ sections: true, beats: true, more: false });
   const [intensityBg, setIntensityBg] = useState(false);
 
@@ -164,14 +179,14 @@ export default function HomeTimeline({
     [filters.drop, dropResp, analysedPlan]);
 
   const view: ViewState = useMemo(() => ({
-    filters: bands,
+    filters: { ...shapeBands, marks },
     avgFilters: { total: false, bass: false, mid: false, high: false },
     // Every MusicMark kind, gated as one by the "Marks" toggle below —
     // Home is a glance view, not the Timeline page's per-kind legend.
     markFilters: {
-      bass_drop: bands.marks, bass_start: bands.marks, bass_end: bands.marks,
-      power_up: bands.marks, power_down: bands.marks, quiet: bands.marks,
-      charging: bands.marks, tempo_change: bands.marks,
+      bass_drop: marks, bass_start: marks, bass_end: marks,
+      power_up: marks, power_down: marks, quiet: marks,
+      charging: marks, tempo_change: marks,
     },
     librosaFilters: {
       sections: lanes.sections, beats: lanes.beats,
@@ -206,7 +221,7 @@ export default function HomeTimeline({
     // (components/songStrip.ts::terrainPath).
     intensityMode: intensityBg ? 'section' : 'off',
     advanced: false,
-  }), [bands, lanes, intensityBg, offsetMs, maxRms, scales]);
+  }), [shapeBands, marks, lanes, intensityBg, offsetMs, maxRms, scales]);
 
   const data: LayerDataBag = useMemo(() => ({
     shape: shape ?? null,
@@ -309,17 +324,17 @@ export default function HomeTimeline({
         {/* ONE THIN ROW of controls, the mockup's own (audit H5). */}
         <div className="home-timeline-controls">
           <div className="home-timeline-controls-group">
-            <IconToggle label="T" size={28} on={bands.total} title="Total RMS"
-              onChange={() => setBands((b) => ({ ...b, total: !b.total }))} />
-            <IconToggle label="B" size={28} on={bands.bass} title="Bass RMS"
-              onChange={() => setBands((b) => ({ ...b, bass: !b.bass }))} />
-            <IconToggle label="M" size={28} on={bands.mid} title="Mid RMS"
-              onChange={() => setBands((b) => ({ ...b, mid: !b.mid }))} />
-            <IconToggle label="H" size={28} on={bands.high} title="High RMS"
-              onChange={() => setBands((b) => ({ ...b, high: !b.high }))} />
+            <IconToggle label="T" size={28} on={shapeBands.total} title="Total RMS"
+              onChange={() => toggleShapeBand('total')} />
+            <IconToggle label="B" size={28} on={shapeBands.bass} title="Bass RMS"
+              onChange={() => toggleShapeBand('bass')} />
+            <IconToggle label="M" size={28} on={shapeBands.mid} title="Mid RMS"
+              onChange={() => toggleShapeBand('mid')} />
+            <IconToggle label="H" size={28} on={shapeBands.high} title="High RMS"
+              onChange={() => toggleShapeBand('high')} />
             <span className="home-timeline-vsep" aria-hidden />
-            <IconToggle label="Marks" size={28} on={bands.marks} title="The song's own marks"
-              onChange={() => setBands((b) => ({ ...b, marks: !b.marks }))} />
+            <IconToggle label="Marks" size={28} on={marks} title="The song's own marks"
+              onChange={() => setMarks((m) => !m)} />
             <span className="home-timeline-vsep" aria-hidden />
             <IconToggle label="sections" size={28} on={lanes.sections} title="Librosa section boundaries"
               onChange={() => setLanes((l) => ({ ...l, sections: !l.sections }))} />
