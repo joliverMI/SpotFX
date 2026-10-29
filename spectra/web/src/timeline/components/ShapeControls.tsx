@@ -107,7 +107,7 @@ export default function ShapeControls({
       <span style={{ position: 'relative' }}>
         <button
           className={`chip filter long-press-target ${view.intensityMode !== 'off' ? 'active' : ''}`}
-          title="Intensity background — click: on/off · hold: pick source · scroll: cycle sources"
+          title="Energy background — click: on/off · hold: pick source · scroll: cycle sources"
           onClick={() => setIntensityMode(view.intensityMode === 'off'
             ? (hasIntensityCurve ? 'total' : 'triggers') : 'off')}
           onWheel={(e) => {

@@ -16,7 +16,7 @@ import HelpLink from '../help/HelpLink';
 export type ValueKind = 'number' | 'toggle' | 'option';
 
 const PAGE_SIGNALS: { value: SignalName; label: string }[] = [
-  { value: 'trigger_intensity', label: 'Intensity' },
+  { value: 'trigger_intensity', label: 'Energy' },
   { value: 'random', label: 'Random 🎲' },
 ];
 const WIDE_SIGNALS: Record<string, string> = {
@@ -238,7 +238,7 @@ export function BindButtons({ value, kind, unbindValue, makeBinding, onChange }:
     <>
       <BindButton icon="⚡" active={bound && !random}
         title={bound && !random ? 'Unbind — back to a fixed value'
-          : random ? 'Switch to the intensity signal' : `Map intensity to this value${stepsHint}`}
+          : random ? 'Switch to the Energy signal' : `Map Energy to this value${stepsHint}`}
         onClick={() => setV(!bound ? makeBinding('trigger_intensity')
           : random ? { ...value, signal: 'trigger_intensity', dice: null }
           : unbindValue())} />

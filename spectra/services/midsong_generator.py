@@ -246,7 +246,7 @@ logger = logging.getLogger(__name__)
 INTENSITY_FLOOR = 0.05
 EDGE_TRIM_MS = 15_000
 
-GENERATOR_VERSION = "3"
+GENERATOR_VERSION = "4"
 """Bumped whenever this module's own planning changes what it would store
 for an unchanged song and unchanged settings — part of every generated
 cue's generator_stamp, so a bump marks every stored analysed cue stale and
@@ -410,13 +410,14 @@ def _resolve_hold_curves() -> list[list]:
     return curves or [dwell.DEFAULT_DWELL_CURVE]
 
 
-def planning_hold_s(raw_intensity: float, factor: float, curves: list[list]) -> float:
-    """Seconds a scene change at this cue's intensity holds the room before
+def planning_hold_s(normalized: float, factor: float, curves: list[list],
+                    marked: bool = False) -> float:
+    """Seconds a scene change at this cue's section holds the room before
     the next may fire, as the show will latch it: the dwell curve read at
-    the RENDER intensity (raw x headroom x the song's factor), plus the
-    planning margin."""
-    from spectra.services import intensity_scale, selection_kernel
-    render = intensity_scale.combine_measured_and_scale(raw_intensity, factor)
+    the section's ENERGY (spectra/services/energy.py: the song-normalized
+    value with the Mark math), plus the planning margin."""
+    from spectra.services import energy, selection_kernel
+    render = energy.mark_math(normalized, factor, marked)
     return max(selection_kernel.curve_eval(points, render) for points in curves) + PLAN_HOLD_MARGIN_S
 
 
@@ -424,6 +425,7 @@ def _strongest_first_fill(
     by_strength: list[CandidateMoment], ordered: list[dict], factor: float,
     ceiling: Optional[int], hold_curves: list[list],
     protected: tuple = (),
+    marked: bool = False,
 ) -> list[CandidateMoment]:
     """THE STRONGEST-FIRST FILL (the module docstring's SCENE-CHANGE PLANNER):
     walk the actions strongest first; each becomes a scene change when it
@@ -434,11 +436,17 @@ def _strongest_first_fill(
     sequence's protected window (`protected`, drop_firing.Window) is never
     a scene change — it stays a flare. Returns the chosen, in strength
     order. Pure: no I/O."""
+    from spectra.services import energy
+    norm_by_start: dict[int, float] = {}
     try:
-        start_raw = max(0.0, min(1.0, float(ordered[0].get("energy_rms", 0.5))))
-    except (IndexError, TypeError, ValueError):
-        start_raw = 0.5
-    start_hold = planning_hold_s(start_raw, factor, hold_curves)
+        norm = energy.normalize([float(sec.get("energy_rms") or 0.0) for sec in ordered],
+                                [int(sec.get("start_ms", 0)) for sec in ordered],
+                                [int(sec.get("end_ms", 0)) for sec in ordered])
+        norm_by_start = {int(sec.get("start_ms", 0)): n for sec, n in zip(ordered, norm)}
+        start_norm = norm[0] if norm else energy.NEUTRAL
+    except (TypeError, ValueError):
+        start_norm = energy.NEUTRAL
+    start_hold = planning_hold_s(start_norm, factor, hold_curves, marked)
     chosen: list[tuple[int, float, CandidateMoment]] = []
     for c in by_strength:
         if ceiling is not None and len(chosen) >= ceiling:
@@ -448,7 +456,9 @@ def _strongest_first_fill(
             continue
         if any(w.holds_scene_change(t) for w in protected):
             continue
-        hold = planning_hold_s(c.intensity, factor, hold_curves)
+        src = energy.source_ms(c.generator_key)
+        hold = planning_hold_s(norm_by_start.get(src, c.intensity) if src is not None
+                               else c.intensity, factor, hold_curves, marked)
         fits = all(
             t != ta
             and not (ta < t and (t - ta) / 1000.0 < hold_a)
@@ -457,14 +467,6 @@ def _strongest_first_fill(
         if fits:
             chosen.append((t, hold, c))
     return [c for _, _, c in chosen]
-
-
-def section_intensities(sections: list[dict]) -> list[float]:
-    """Each section's intensity as a generated cue at it carries (the
-    per-song stretch below), for a reader outside this module — the Pulse
-    feed (spectra/services/pulse_feed.py) feeds the Singles exactly this
-    number, so a section reads the same to the effect as to the cue."""
-    return _normalized_intensities(sections)
 
 
 def _normalized_intensities(sections: list[dict]) -> list[float]:
@@ -710,8 +712,10 @@ def plan_moments(
     # 4. STRONGEST-FIRST FILL — see the module docstring.
     if hold_curves is None:
         hold_curves = planning_hold_curves()
+    from spectra.services import intensity_scale_marks
     chosen = _strongest_first_fill(pool, ordered, factor, ceiling, hold_curves,
-                                   tuple(protected))
+                                   tuple(protected),
+                                   marked=intensity_scale_marks.get_mark(uri) is not None)
     chosen_keys = {c.generator_key for c in chosen}
     kept = sorted(chosen, key=lambda c: c.timestamp_ms)
     flares = sorted((c for c in pool if c.generator_key not in chosen_keys),

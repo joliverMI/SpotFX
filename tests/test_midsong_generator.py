@@ -127,7 +127,7 @@ def no_holds(monkeypatch):
     change, so an early fixture boundary is still stored."""
     from spectra.services import midsong_generator
     monkeypatch.setattr(midsong_generator, "planning_hold_s",
-                        lambda raw, factor, curves: 0.0)
+                        lambda raw, factor, curves, marked=False: 0.0)
 
 
 def _seed_song(scfg, *, tempo_bpm=120.0):

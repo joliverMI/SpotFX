@@ -312,14 +312,20 @@ class SpotEffectsBridge:
         offset = self.shape_offset_ms()
         return position if offset is None else position + offset
 
-    def intensity(self) -> Optional[float]:
-        """Section energy at the playback position (RAW ms — the standing
-        rule); None when unknowable (callers hold 0.5 neutral, stated)."""
-        uri = self.track_uri()
-        position = self.track_position_ms()
-        if uri is None or position is None:
+    def intensity(self, look_ahead: bool = False) -> Optional[float]:
+        """ENERGY now (spectra/services/energy.py is the binding
+        statement): the song's normalized section energy with the Mark math,
+        read at the SHOW CLOCK — the clock the trigger poll fires on — never
+        the raw Spotify position (reading there put a drop's energy in a
+        different section from its mark on up to half of his own drops).
+        `look_ahead` is for a drop or a scene change (the room's look-ahead
+        to the next section edge). None when unknowable (callers hold 0.5
+        neutral, stated). Read by engine.current_energy, beside the show
+        clock it reads (the lead is applied in engine.py alone)."""
+        if self.track_uri() is None:
             return None
-        return analysis_reader.section_energy_at(uri, position)
+        from spectra.services import engine
+        return engine.current_energy(look_ahead=look_ahead)
 
     def is_playing(self) -> Optional[bool]:
         """Whether spot-effects currently reports a track actively
@@ -371,19 +377,6 @@ class SpotEffectsBridge:
         if not genres:
             return None
         return analysis_reader.genre_bucket(genres)
-
-    def song_scaling_factor(self) -> float:
-        """The current song's per-song genre+bass render-intensity scale
-        (spectra.services.intensity_scale, the SpotFX v2 port) — the
-        `song_scaling_factor` term in intensity_scale.combine_measured_and_
-        scale's headroom formula. Neutral 1.0 with no track (never blocks a
-        fire); every other degradation (no bass data, no genre match) is
-        handled inside intensity_scale.song_scaling_factor itself."""
-        uri = self.track_uri()
-        if uri is None:
-            return 1.0
-        from spectra.services import intensity_scale
-        return intensity_scale.song_scaling_factor(uri, self.track_genres())
 
     def absorb_holds_lights(self) -> bool:
         """True while an Absorb Music window holds the show still (SpotFX

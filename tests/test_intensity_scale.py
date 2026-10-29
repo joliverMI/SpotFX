@@ -182,36 +182,37 @@ def test_invalidate_cache_forces_a_resweep():
 
 # ── the headroom-reserve seam ─────────────────────────────────────────────
 
-def test_headroom_reserve_constant_is_point_six():
-    assert isc.HEADROOM_RESERVE == 0.6
+def test_headroom_reserve_constant_is_point_eight():
+    """0.8 since 2026-10-28 (his comment on the Energy plan: "Make it 0.8
+    instead of 0.6"); spectra/services/energy.py owns the Mark math."""
+    from spectra.services import energy
+    assert isc.HEADROOM_RESERVE == energy.HEADROOM == 0.8
 
 
 def test_combine_measured_and_scale_matches_the_admirals_worked_example():
     # "with a maximum scaling factor of 200%, the ceiling becomes 120% ...
-    # rather than 200%" -- at raw intensity 1.0 (his ceiling example).
-    assert isc.combine_measured_and_scale(1.0, 2.0) == pytest.approx(1.0), \
-        "0.6 * 2.0 = 1.2 pre-clamp, clamped to the [0,1] intensity contract"
+    # rather than 200%" -- at 0.8 headroom: 0.8 * 2.0 = 1.6 pre-cap, capped
+    # at 1.0 for a song he marked.
+    assert isc.combine_measured_and_scale(1.0, 2.0, marked=True) == pytest.approx(1.0)
 
 
-def test_combine_measured_and_scale_straight_math_below_the_clamp():
-    assert isc.combine_measured_and_scale(0.5, 1.0) == pytest.approx(0.3)
-    assert isc.combine_measured_and_scale(1.0, 1.0) == pytest.approx(0.6)
+def test_combine_measured_and_scale_straight_math_below_the_cap():
+    assert isc.combine_measured_and_scale(0.5, 1.0) == pytest.approx(0.4)
+    assert isc.combine_measured_and_scale(0.5, 1.0, marked=True) == pytest.approx(0.4)
 
 
 def test_combine_measured_and_scale_auto_only_ceiling_is_075():
-    """Structural fact from the seam's own docstring: with no manual
-    per-song override, song_scaling_factor never exceeds SCALE_MAX (1.25),
-    so `final` can never exceed HEADROOM_RESERVE * SCALE_MAX = 0.75 for
-    ANY auto-scaled song, even at its single most intense moment."""
+    """His 15 Aug ruling, kept at the new headroom: a song with no manual
+    Mark never passes 0.75, even at SCALE_MAX (0.8 x 1.25 = 1.0 pre-cap)."""
     assert isc.combine_measured_and_scale(1.0, SCALE_MAX) == pytest.approx(0.75)
+    assert isc.combine_measured_and_scale(0.9, 1.0) == pytest.approx(0.72)
 
 
-def test_combine_measured_and_scale_clamps_only_the_final_product():
-    # A pathologically large scale (well beyond anything song_scaling_factor
-    # itself would ever return) still just clamps the FINAL product to 1.0 —
-    # proving there's no earlier clamp silently capping the scale term.
-    assert isc.combine_measured_and_scale(1.0, 10.0) == pytest.approx(1.0)
-    assert isc.combine_measured_and_scale(0.0, 10.0) == pytest.approx(0.0)
+def test_combine_measured_and_scale_caps_only_the_final_product():
+    # A pathologically large scale still just caps the FINAL product —
+    # no earlier clamp silently capping the scale term.
+    assert isc.combine_measured_and_scale(1.0, 10.0, marked=True) == pytest.approx(1.0)
+    assert isc.combine_measured_and_scale(0.0, 10.0, marked=True) == pytest.approx(0.0)
 
 
 def test_combine_measured_and_scale_never_negative():

@@ -22,10 +22,15 @@ hard it builds; drift (S2) softens that without touching the clock.
 
 Fires resolve bindings at the moment's intensity and go through
 scene_compiler.fire_scene(dry_run=False) — scene + colour set in ONE compile.
-That fire-time intensity is the RAW kernel-selection value scaled by the
-current song's genre+bass factor (spectra/services/intensity_scale.py,
-_default_render_intensity) — SELECTION (kernel.select/select_color_set,
-above) stays on the raw value so genre isn't double-counted there.
+That moment's intensity is ENERGY (spectra/services/energy.py, the
+Admiral's Energy plan — the song's normalized section energy with the
+Mark math applied once, inside energy.py's own mark_math), read at the
+show clock with the scene-change look-ahead; SELECTION (kernel.select/
+select_color_set, above) reads the identical Energy value the fire does
+— the kernel's own genre_mult is a per-candidate weight on the pick, not
+a second scaling of the x position, so this is not a double count.
+_default_render_intensity is the identity: Energy already carries the
+Mark, so the fire lands it as it is.
 
 Executable spec: scripts/check_spectra.py (fake clock, injected fire — no
 live LedFX, no audio).
@@ -593,11 +598,13 @@ class SceneSequencer:
         color = self._roll_color_set(config, curves, pick.picked_id,
                                      intensity, genre_bucket)
         try:
-            # SELECTION (kernel.select/select_color_set above) stayed on the
-            # RAW intensity — genre_mult already factors genre into the
-            # pick. The FIRE itself gets the current song's genre+bass
-            # render scale on top (intensity_scale.py), same split trigger_
-            # engine.py's own _fire/_fire_transition make.
+            # SELECTION (kernel.select/select_color_set above) and the
+            # FIRE both read the same Energy value (intensity, already the
+            # Mark-scaled figure from spectra/services/energy.py) — the
+            # kernel's own genre_mult is a per-candidate weight on the
+            # pick, not a second scaling, so this is not a double count.
+            # _render_intensity is the identity; trigger_engine.py's own
+            # _fire/_fire_transition read Energy the same way.
             fire_result = await self._fire(pick.picked_id,
                                            color["fire_set_id"] if color else None,
                                            self._render_intensity(intensity))
@@ -824,19 +831,17 @@ class SceneSequencer:
         return card.name if card else set_id
 
     def _default_intensity(self) -> float:
-        # Bridge feed: section energy at position; 0.5 neutral when absent
-        # (stated degradation).
+        # ENERGY at the show clock (spectra/services/energy.py), with the
+        # look-ahead a scene change takes; 0.5 neutral when absent (stated
+        # degradation).
         from spectra.services.engine import bridge
-        value = bridge.intensity()
+        value = bridge.intensity(look_ahead=True)
         return value if value is not None else 0.5
 
     def _default_render_intensity(self, raw: float) -> float:
-        # See trigger_engine._default_render_intensity's docstring — same
-        # seam, same rationale (spectra/services/intensity_scale.py).
-        from spectra.services import intensity_scale
-        from spectra.services.engine import bridge
-        return intensity_scale.combine_measured_and_scale(
-            raw, bridge.song_scaling_factor())
+        # Energy already carries the Mark (see trigger_engine.
+        # _default_render_intensity's docstring): the fire lands it as it is.
+        return raw
 
     def _default_genre_bucket(self) -> Optional[str]:
         from spectra.services.engine import bridge

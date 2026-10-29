@@ -223,6 +223,8 @@ def test_an_analysed_flare_fires_at_the_cues_own_render_intensity():
 
     async def run():
         eng = TriggerEngine(list_triggers=lambda u: [], fire_analysed_flare=fire_flare,
+                            # the moment's Energy, as declared (no analysis here)
+                            energy_for=lambda uri, t: t.action.intensity,
                             render_intensity=lambda raw: raw * 0.5,
                             scene_change_mode=lambda: "analysed")
         plan = type("P", (), {"flares": [type("F", (), {

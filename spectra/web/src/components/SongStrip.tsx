@@ -44,8 +44,7 @@ import {
 } from './songStrip';
 import SongNextBox, { useNextBoxInBar } from './SongNextBox';
 import { paintTrack, type MarkNode } from './trackPainter';
-import { useEngineStatus, useUpcoming } from '../queries';
-import { useLibrosa } from '../timeline/queries';
+import { useEnergyTimeline, useEngineStatus, useUpcoming } from '../queries';
 import { getPositionMs, getShowClockMs } from '../lib/showClock';
 import InfoTip from './InfoTip';
 import { kindShown, useSongTimelineView } from './songTimelineView';
@@ -66,11 +65,11 @@ export default function SongStrip() {
   const navigate = useNavigate();
   const location = useLocation();
   const { data: upcoming } = useUpcoming(uri);
-  // The terrain's own source: librosa's per-section energy (approved idea
-  // 4). Shares react-query's cache with the Timeline/debug pages, so a
-  // song already looked at costs nothing here; `retry: false` means a song
-  // with no analysis simply draws no terrain.
-  const { data: librosa } = useLibrosa(uri);
+  // The terrain's own source: the song's ENERGY timeline (spectra/services/
+  // energy.py — the number the engine acts on, Mark included, in song
+  // time). Shares react-query's cache with the top bar, Home and the
+  // Timeline page; a song with no analysis draws no terrain.
+  const { data: energyTl } = useEnergyTimeline(uri);
   // WHERE THE NEXT-EVENT BOX LIVES at this width (his Q1 answer) — the
   // one predicate, shared with TopBarStrip, so it is never in both
   // places and never in neither.
@@ -80,7 +79,7 @@ export default function SongStrip() {
     () => (allEvents ?? []).filter((e) => kindShown(e.kind, filters)),
     [allEvents, filters]);
   const durationMs = track?.duration_ms ?? 0;
-  const sections = librosa?.sections ?? null;
+  const sections = energyTl?.status === 'ok' ? energyTl.sections : null;
   // Read through a ref so the rAF loop below never re-runs when an
   // unrelated render hands `useFollowWindow` a fresh object identity
   // (only its own `getWin` is memoized — that module's own contract).

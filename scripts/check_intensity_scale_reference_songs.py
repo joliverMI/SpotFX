@@ -29,7 +29,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from spectra.services import intensity_scale as isc  # noqa: E402
+from spectra.services import energy, intensity_scale as isc  # noqa: E402
 
 REFERENCE_SONGS = [
     ("Dopamine", "spotify:track:7vFKcXQ39f74XNrZmXADIT",
@@ -61,10 +61,13 @@ def main() -> int:
                   f"{target:>7.2f} {scale - target:>+7.3f}   {final_at_peak:>10.3f}")
 
     print()
-    print(f"headroom reserve: {isc.HEADROOM_RESERVE} — structural ceiling for ANY "
-          f"auto-scaled song (no manual per-song override exists in SPECTRA today) "
-          f"is {isc.HEADROOM_RESERVE} * {isc.SCALE_MAX} = "
-          f"{isc.HEADROOM_RESERVE * isc.SCALE_MAX:.3f}, at measured_intensity=1.0")
+    print(f"headroom reserve: {isc.HEADROOM_RESERVE} — since the 2026-10-28 Energy "
+          f"build (spectra/services/energy.py) the ceiling for an auto-scaled song "
+          f"(no manual mark, intensity_scale_marks.py) is the EXPLICIT "
+          f"energy.AUTO_CEILING = {energy.AUTO_CEILING:.3f}, not the raw "
+          f"HEADROOM_RESERVE * SCALE_MAX product ({isc.HEADROOM_RESERVE} * "
+          f"{isc.SCALE_MAX} = {isc.HEADROOM_RESERVE * isc.SCALE_MAX:.3f}), at "
+          f"measured_intensity=1.0; a manually-marked song's cap is 1.0 instead")
     if any_missing:
         print("\nNOTE: one or more reference songs had no bass-rank data — this is "
               "expected in a worktree/CI without the real storage/audio_shapes "

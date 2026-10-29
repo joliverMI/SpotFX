@@ -48,10 +48,12 @@ factor"). His replacement:
 
     final = measured_intensity * HEADROOM_RESERVE * song_scaling_factor
 
-combine_measured_and_scale() below is THE SEAM: the one function this
-formula lives in. See its docstring for why 0.6 is a deliberate gate, not
-a fudge factor, and for the clamp order (load-bearing: clamping the wrong
-term at the wrong time silently destroys the gate).
+combine_measured_and_scale() below is THE SEAM — since the 2026-10-28
+Energy build it delegates to spectra/services/energy.py's own mark_math,
+the one function the formula (now at HEADROOM_RESERVE = 0.8) and its
+ceiling logic actually live in. See HEADROOM_RESERVE's own docstring for
+why it's a deliberate gate, not a fudge factor, and energy.mark_math for
+the clamp order.
 """
 from __future__ import annotations
 
@@ -254,58 +256,62 @@ def song_scaling_factor(spotify_uri: Optional[str], genres: Optional[list[str]] 
 
 # ── the headroom-reserve seam (2026-08-15 correction) ────────────────────
 
-HEADROOM_RESERVE = 0.6
-"""Deliberate ceiling reserve, NOT a fudge factor and NOT a volume trim —
+HEADROOM_RESERVE = 0.8
+"""2026-10-28, ONE ENERGY: 0.8 (his comment on the Energy plan, "Make it 0.8
+instead of 0.6"), and the Mark math now lives in spectra/services/energy.py
+(`mark_math`, which also caps a song with no manual Mark at the 0.75
+automatic ceiling). combine_measured_and_scale below delegates to it.
+
+Deliberate ceiling reserve, NOT a fudge factor and NOT a volume trim —
 the Admiral's own words: "this allows me to gate certain high-intensities
 by requiring a high scaling factor on a track so we do not get loud hype
-scenes unless its a hype track." Worked example he gave: at a maximum
-scaling factor of 200% the reachable ceiling is 0.6 * 2.0 = 120%, not
-200% — the top of the intensity range is UNREACHABLE unless a track has
-earned a high enough song_scaling_factor to buy back the reserve. Do not
-"simplify" this constant away; that silently deletes the gate he asked
-for."""
+scenes unless its a hype track." Worked example he gave (at the original
+0.6): at a maximum scaling factor of 200% the reachable ceiling was
+0.6 * 2.0 = 120%, not 200% — the top of the intensity range was
+UNREACHABLE unless a track had earned a high enough song_scaling_factor
+to buy back the reserve. At 0.8 the same max-factor product is
+0.8 * 2.0 = 160%, which energy.mark_math's own explicit cap (1.0 when
+marked) now clamps to the full ceiling rather than leaving it emergent.
+Do not "simplify" this constant away; that silently deletes the gate he
+asked for."""
 
 
 def combine_measured_and_scale(measured_intensity: float,
-                                song_scaling_factor: float) -> float:
+                                song_scaling_factor: float,
+                                marked: bool = False) -> float:
     """THE SEAM: combines a moment's measured (raw, unscaled) intensity
     with the current song's scaling factor into the final render
     intensity every fire/bind/band-select consumes.
 
-        final = measured_intensity * HEADROOM_RESERVE * song_scaling_factor
-
-    CLAMP ORDER IS LOAD-BEARING. The only clamp in this function is the
-    final one, applied to the full three-term product, LAST. There is
-    deliberately no intermediate clamp on HEADROOM_RESERVE * song_scaling_
-    factor (or on song_scaling_factor alone) before it multiplies
-    measured_intensity — clamping that product to <=1.0 early would cap
-    every song's effective scale at the same ceiling regardless of how
-    "hype" it is, which defeats the gate this function exists to
-    implement. (song_scaling_factor's OWN clamp to [SCALE_MIN, SCALE_MAX]
-    already happened earlier, inside song_scaling_factor()/compute_auto_
-    scale() — that's a different, independent clamp on a different term,
-    not this one.)
-
-    THE 0.75 CEILING, AND THE ONE WAY PAST IT (2026-08-15 ruling): an
-    AUTO-resolved song_scaling_factor (auto_scaling_factor(), no manual
-    mark) is always <= SCALE_MAX = 1.25, so `final` at that song's single
-    most intense moment (measured_intensity = 1.0) can never exceed
-    HEADROOM_RESERVE * SCALE_MAX = 0.75 — deliberate, his ruling: "0.75
-    STANDS as the automatic ceiling. Nothing automatic ever exceeds it."
-    His own "120% ceiling" worked example (0.6 * 2.0) is reachable only
-    through a manual per-track mark (spectra/services/intensity_scale_
-    marks.py, song_scaling_factor()'s own docstring) — "he marks the
-    track; automatic never does." Without that release valve the 0.6
-    reserve would be a CAP with no way to open it, not a GATE.
+    Since the 2026-10-28 Energy build this is a thin delegate to
+    spectra/services/energy.py's own mark_math — the formula
+    (measured * HEADROOM_RESERVE * song_scaling_factor), the clamp order,
+    and the 0.75-unmarked/1.0-marked ceiling split all live there now
+    (mark_math's own docstring + HEADROOM/AUTO_CEILING). `marked` selects
+    which ceiling applies — False (no manual mark) stays at AUTO_CEILING
+    (0.75), matching his 2026-08-15 ruling: "0.75 STANDS as the automatic
+    ceiling. Nothing automatic ever exceeds it." True (a manual per-track
+    mark, spectra/services/intensity_scale_marks.py) may reach 1.0 —
+    "he marks the track; automatic never does."
     """
-    final = measured_intensity * HEADROOM_RESERVE * song_scaling_factor
-    return max(0.0, min(1.0, final))
+    from spectra.services import energy
+    return energy.mark_math(measured_intensity, song_scaling_factor, marked)
 
 
 def render_intensity(spotify_uri: Optional[str], genres: Optional[list[str]],
                      measured_intensity: float) -> float:
     """Convenience wrapper: song_scaling_factor() + combine_measured_and_
-    scale() in one call, for callers that just want "this moment's final
-    render intensity for this song" (trigger_engine, scene_sequencer)."""
+    scale() in one call, for a caller that just wants "this moment's final
+    render intensity for this song" without resolving the factor itself —
+    not currently called anywhere in this repo (trigger_engine and
+    scene_sequencer now read Energy directly, spectra/services/energy.py;
+    their own _default_render_intensity is the identity). Resolves whether
+    the song carries a manual Mark the same way song_scaling_factor() itself
+    does, so a marked song reaches its own Mark-math ceiling (up to 1.0)
+    here too, not the unmarked 0.75 one."""
     factor = song_scaling_factor(spotify_uri, genres)
-    return combine_measured_and_scale(measured_intensity, factor)
+    marked = False
+    if spotify_uri:
+        from spectra.services import intensity_scale_marks
+        marked = intensity_scale_marks.get_mark(spotify_uri) is not None
+    return combine_measured_and_scale(measured_intensity, factor, marked)

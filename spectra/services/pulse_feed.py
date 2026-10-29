@@ -12,16 +12,16 @@ the shared phase keys like every phase effect (fx.device_model.
 PHASE_EFFECTS, scene_response._drive_phase), on the same ramp the crystal
 and strips get.
 
-WHAT `energy` IS — the render intensity a section would fire at:
-    energy = intensity_scale.combine_measured_and_scale(measured, factor)
-  measured — the section's own intensity, per-song min-max stretched with
-      the generator's floor and edge trim (midsong_generator.
-      section_intensities), so every song spans its own calm-to-intense
-      range: the SAME number a generated scene cue at that section carries.
+WHAT `energy` IS — the section's ENERGY (spectra/services/energy.py is the
+binding statement, and this feed uses its two pure steps):
+    energy = energy.mark_math(energy.normalize(...)[section], factor, marked)
+  normalized — the section's loudness on the song's own 0..1 scale (the
+      quietest middle section 0, the loudest 1, the first and last 15 s not
+      setting the range): the same number every engine decision reads.
   factor — the song's scaling factor (intensity_scale.song_scaling_factor:
-      automatic up to 125%, or his per-track mark up to 200%).
-  So it obeys his 0.75 automatic ceiling (HEADROOM_RESERVE): a section only
-  reaches 1.0 — Pulse's "intense" end — on a track he has marked.
+      automatic up to 125%, or his per-track Mark up to 200%), x 0.8.
+  So it obeys his 0.75 automatic ceiling: a section only reaches 1.0 —
+  Pulse's "intense" end — on a track he has marked.
   A song with no analysis is fed NEUTRAL_ENERGY (0.5, the effect's own
   default and the bridge's down-degrade value) and beat_ms 0.
 
@@ -106,13 +106,15 @@ class SongFeed:
 def load_song(uri: str) -> SongFeed:
     """Parse one song's analysis into a SongFeed. BLOCKING (file reads):
     called in a worker thread by PulseFeed.prepare."""
-    from spectra.services import analysis_reader, midsong_generator, testbed_audio
+    from spectra.services import analysis_reader, energy, testbed_audio
     with analysis_reader.memoized_reads():
         raw = analysis_reader.sections_for_uri(uri) or []
         bpm = analysis_reader.tempo_bpm_for_uri(uri)
     ordered = sorted((s for s in raw if isinstance(s, dict)),
                      key=lambda s: int(s.get("start_ms", 0) or 0))
-    measured = midsong_generator.section_intensities(ordered)
+    measured = energy.normalize([float(s.get("energy_rms") or 0.0) for s in ordered],
+                                [int(s.get("start_ms", 0) or 0) for s in ordered],
+                                [int(s.get("end_ms", 0) or 0) for s in ordered])
     offset = testbed_audio.capture_offset_ms_or_zero(uri) if ordered else 0
     sections = tuple(
         (int(s.get("start_ms", 0) or 0) + offset,
@@ -133,9 +135,14 @@ def _default_factor(uri: str, genres: list[str]) -> float:
     return intensity_scale.song_scaling_factor(uri, genres)
 
 
-def _render(measured: float, factor: float) -> float:
-    from spectra.services import intensity_scale
-    return intensity_scale.combine_measured_and_scale(measured, factor)
+def _default_marked(uri: str) -> bool:
+    from spectra.services import intensity_scale_marks
+    return intensity_scale_marks.get_mark(uri) is not None
+
+
+def _render(measured: float, factor: float, marked: bool = False) -> float:
+    from spectra.services import energy
+    return energy.mark_math(measured, factor, marked)
 
 
 @dataclass
@@ -151,6 +158,7 @@ class _Computed:
 class PulseFeed:
     loader: Callable[[str], SongFeed] = load_song
     factor: Callable[[str, list[str]], float] = _default_factor
+    marked: Callable[[str], bool] = _default_marked
     clock: Callable[[], float] = time.monotonic
     _song: Optional[SongFeed] = None
     _computed: Optional[_Computed] = None
@@ -220,7 +228,11 @@ class PulseFeed:
             except Exception:                            # noqa: BLE001
                 logger.exception("pulse feed: scaling factor unreadable — 1.0")
                 factor = 1.0
-            energy = _render(measured, factor)
+            try:
+                marked = bool(self.marked(song.uri))
+            except Exception:                            # noqa: BLE001
+                marked = False
+            energy = _render(measured, factor, marked)
         values = {"energy": round(float(energy), 3),
                   "beat_ms": float(song.beat_ms)}
         self._computed = _Computed(key=key, values=values, section=index,

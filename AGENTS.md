@@ -1209,6 +1209,58 @@ subscribes. Six things:
   corrected only as fast as the lock's own chase (2 s × 3 confirms, max 2
   recoveries/play) — see `docs/SPECTRA_TIMING_CONVENTIONS.md`'s own note.
 
+## ENERGY — the one number the engine acts on and every screen shows (2026-10-28)
+
+The Admiral's Energy plan (https://claude.ai/artifact/2Dy1SnUgNQ2fJQomhk4dkh,
+"I approve the energy changes"). **`spectra/services/energy.py`'s module
+docstring is the binding statement** — read it before touching anything that
+reads an "intensity" or "energy". Before it there were six numbers: raw
+section loudness (the top bar), a stretched copy (generated cues), his
+triggers' stored ⚡, the drop detector's jump size, and the fire value
+(any of those × 0.6 × the scale). Now:
+
+- **Energy(t) = clamp(normalized section × 0.8 × the song's scale, 0, cap)**,
+  sections in SONG time (+ the capture offset), normalized per song (quietest
+  middle section 0, loudest 1; the first/last 15 s don't set the range), cap
+  0.75 for a song with no manual Mark (his 15 Aug ruling) and 1.0 for a marked
+  one. **The Mark is applied once, inside Energy**: `TriggerEngine.
+  _default_render_intensity` and the sequencer's are the identity now — a new
+  caller that multiplies by the scale again applies it twice. `intensity_scale.
+  combine_measured_and_scale` delegates to `energy.mark_math`.
+- **Read at the show clock** (`engine.current_energy`, which `bridge.
+  intensity()` now is) — never the raw Spotify position. Drops and scene
+  changes **look ahead** `RoomControlState.energy_lookahead_s` (2 s) to the
+  next section edge; a generated moment reads its own source section
+  (`generator_key` `section:<WAV ms>`); flares and the top bar read the present.
+- **The trigger clock resolves Energy per trigger** (`_energized` before the
+  lead peek and the fire; `_sequence_energy` for drop sequences; the colour
+  journey's `NextCue`) through the `energy_for` injectable — a spec that drives
+  a fire at a known value passes `energy_for=lambda uri, t: t.action.intensity`.
+- **Nothing reads a trigger's stored `intensity` any more** (his D4). TO REMOVE
+  LATER, on his list: that field (profile and fired copies), `scripts/
+  backfill_trigger_intensity.py`, and the dialogs' Intensity field and the list
+  value (already hidden). The Timeline's "trigger values" background is gone
+  from the chip; a saved choice of it draws Energy.
+- **Screens**: `GET /api/energy/timeline` (`spectra/api/energy.py`) is what the
+  top bar (`LiveEnergyReadout`, every frame at `getShowClockMs`, `lib/
+  energyAt.ts`), the audio-shape 'section' background and the song strip's
+  terrain draw — full height (0 empty, 1.0 to the top, markers over it), song
+  time, Mark included. A Mark edit calls `energy.forget()`, so it lands at once.
+- **THE GATES AND CURVES WERE SET ON THE OLD SCALE**: Shockwave 0.7, Pulse flash
+  0.8, rainbow 0.9, the drop floor and the Fireworks meld's big-hit strength
+  (0.6, which now compares a flare's Energy) rarely pass on Energy (an unmarked
+  song tops out at 0.8 × its scale, 0.75 at most). `scripts/energy_parity.py`
+  (dry run by default; `--apply --spectra-url` backs up first, `--restore
+  <dir>` puts it back) re-sets the five gates and the scene/colour-set
+  likelihood curves so the same share of moments passes as before. A NEW gate
+  compared with Energy that was tuned on an old number belongs in its `GATES`. The drop-detection stamp deliberately does not carry the
+  Energy definition: stored detections stay until the floor itself changes.
+  Planner holds read Energy too (`GENERATOR_VERSION` "4", re-plans on play).
+
+Specs: `tests/test_energy.py`, `tests/test_energy_parity.py`,
+`tests/test_energy_screens.py` (→ `scripts/check_energy_screens.mjs`); help
+`live-energy`, `energy-lookahead`, `intensity-mark`.
+
 ## SPECTRA per-song intensity scale (genre-anchored port + headroom reserve)
 
 `spectra/services/intensity_scale.py` ports SpotFX's dropped-in-the-rebuild
@@ -1221,25 +1273,33 @@ Let It Be≈0.50, Soy Peor≈1.00 (100% = no adjustment, not "maximum" — a
 from it; don't repeat that reasoning). Own SPECTRA-side feature cache
 (`storage/spectra/intensity_scale_features.json`, never SpotFX's cache
 file — see `_isolated_intensity_scale` in `tests/conftest.py` for why every
-test repoints this). `song_scaling_factor()` is wired at RENDER choke
-points only — `trigger_engine._fire`/`_fire_transition` and
-`scene_sequencer._roll`'s fire call — never at `selection_kernel.select`'s
-scene/flare/colour-set SELECTION, whose own `genre_mult` already factors
-genre into the pick; scaling intensity there too would double-count genre.
+test repoints this). **Since the 2026-10-28 Energy build (see "ENERGY"
+above), `song_scaling_factor()` is no longer called directly from
+`trigger_engine`/`scene_sequencer`** — it feeds `spectra/services/
+energy.py`'s own `song_factor()`/`mark_math`, the ONE place the Mark
+math is applied, read once at the show clock for both SELECTION
+(`selection_kernel.select`'s scene/flare/colour-set pick) and the FIRE —
+the kernel's own `genre_mult` is a per-candidate weight on the pick, not
+a second scaling of Energy, so this is not a double count.
 
 2026-08-15 correction, his words, closed (not a curve-shape question): the
 old plan (`final = measured * song_scaling_factor`) was "just a straight
 multiplication of a factor" — replaced by `combine_measured_and_scale`,
-the one seam: `final = measured_intensity * HEADROOM_RESERVE(0.6) *
-song_scaling_factor`, clamped to `[0,1]` ONLY at the very end (clamping
-the scale term early silently defeats the gate — see the constant's own
-docstring for why 0.6 is deliberate, not a fudge factor, and must survive
-any future edit).
+the one seam: `final = measured_intensity * HEADROOM_RESERVE *
+song_scaling_factor`. Since the 2026-10-28 Energy build the constant is
+0.8 (his own comment on the Energy plan, "Make it 0.8 instead of 0.6" —
+see HEADROOM_RESERVE's own docstring for why it's deliberate, not a fudge
+factor, and must survive any future edit) and the whole seam delegates to
+`energy.mark_math`, which clamps to an EXPLICIT ceiling — `AUTO_CEILING`
+(0.75) with no manual mark, 1.0 with one — rather than the old plain
+`[0,1]` clamp on the raw product.
 
-**The 0.75 auto ceiling + the manual mark (his ruling, same day, BUILT)**:
-0.75 STANDS as the automatic ceiling — `auto_scaling_factor()` (the
-renamed, unchanged AUTO-only resolution) never exceeds `SCALE_MAX=1.25`,
-so nothing automatic ever produces a `final` above `0.6*1.25=0.75`.
+**The 0.75 auto ceiling + the manual mark (his ruling, same day, BUILT;
+0.75 itself unchanged by the 0.8 move)**: 0.75 STANDS as the automatic
+ceiling — `auto_scaling_factor()` (the renamed, unchanged AUTO-only
+resolution) never exceeds `SCALE_MAX=1.25`, and `energy.mark_math` caps
+an unmarked song at `AUTO_CEILING=0.75` outright (no longer the emergent
+`0.6*1.25` arithmetic the original 0.6 constant produced).
 `spectra/services/intensity_scale_marks.py` is the release valve: a
 per-track manual mark (`{uri: factor}`, clamped `[0, 2.0]` — SpotFX's own
 manual-slider ceiling), checked FIRST by `song_scaling_factor()` and
@@ -1446,8 +1506,10 @@ superseded; never point `fx/` at live hardware before the S3 handover.
 `App.tsx` next to `RoomControlsBar`) is the shared always-visible strip
 for widgets that belong on every SPECTRA route, not just one page —
 first occupant is `LiveEnergyReadout.tsx`, showing `bridge.intensity()`
-(spectra/services/bridge.py: raw librosa section energy at the live
-playback position, no smoothing) exactly as read from
+— at the time, raw librosa section energy at the live playback position,
+no smoothing; since the 2026-10-28 Energy build (see "ENERGY" above)
+`bridge.intensity()` delegates to `engine.current_energy()`, so this is
+now Energy, the Mark math included — exactly as read from
 `GET /api/engine/status`'s `bridge.intensity` field, already the
 callable wired into the drift conductor, the sequencer's default scene
 pick, and automatic transition fires — the one number this build found
@@ -9654,10 +9716,9 @@ detail. Eleven things:
   deliberately NOT, like every phase effect's phase keys (nor the flare
   pokes `flash`/`flip`).
 - **THE FEED** (`spectra/services/pulse_feed.py`, binding statement):
-  `energy` = the section's render intensity (the generator's per-song
-  stretch, `midsong_generator.section_intensities`, through
-  `intensity_scale.combine_measured_and_scale` — so it obeys his 0.75
-  automatic ceiling and reaches 1.0 only on a marked track), `beat_ms` from
+  `energy` = the section's Energy (`spectra/services/energy.py` — see
+  "ENERGY" below — `energy.normalize` then `energy.mark_math`, so it obeys
+  his 0.75 automatic ceiling and reaches 1.0 only on a marked track), `beat_ms` from
   the analysed tempo. Pushed only when it changes (a section edge, a song)
   by its own engine loop on `bridge.effective_position_ms` — no A/V lead, so
   not a second application point — and carried in the scene fire that
@@ -9996,10 +10057,12 @@ including how an effect opts in. Four things:
   Admiral): `RoomControlState.drop_shock_enabled` (room, default on), the
   showing scene's `SceneV2.drop_shock_enabled` (default on; the Fish scene
   ships OFF via `scripts/set_fish_drop_shock_off.py`, a deploy step), and
-  `drop_shock_min_energy` (0.7) against the TOP BAR's Energy at the drop
-  (`bridge.intensity()`, wired as `ResponseEngine(room_energy=)`; NOT the
-  render `drop_intensity`, which the automatic path caps at 0.75 — 8% of his
-  real drops clear 0.7 on it; an unknown energy is never gated).
+  `drop_shock_min_energy` reads Energy at the drop WITH THE LOOK-AHEAD
+  (`ResponseEngine(drop_energy=)` → `bridge.intensity(look_ahead=True)`),
+  the same number the drop fires at — its 0.7 was set on the old raw
+  top-bar scale, and the Energy plan's D5 parity re-set (`scripts/
+  energy_parity.py`) moves it to the share-matched Energy value (0.32 on
+  his data at build time); an unknown energy is never gated).
   `scene_response._drop_shock_keys` decides once per drop arm with
   `phase_grammar.shock_allowed` and tells every member `drop_shock_on`
   (record key `drop_shock`); told False the base render builds no painter,
@@ -12087,8 +12150,10 @@ all of them (placement unchanged), dedupes moments placed on one instant,
 keeps the strongest "total actions" (`transitions_per_minute`), and a
 STRONGEST-FIRST FILL makes the ones that fit the hold in both directions the
 scene changes (`planning_hold_s` = the longest enabled scene's dwell curve
-at RENDER intensity + 0.5 s; `scene_changes_per_minute`, 0 = off, is an
-optional ceiling); the rest are ordinary analysed flares. At play time a
+at the cue's own ENERGY — `spectra/services/energy.py`, since the
+2026-10-28 Energy build, see "ENERGY" above — + 0.5 s; `scene_changes_
+per_minute`, 0 = off, is an optional ceiling); the rest are ordinary
+analysed flares. At play time a
 generated cue fires through `TriggerEngine._fire_planned_scene` with
 `dwell.PLANNED_CUE_TOLERANCE_S` (1.5 s) of hold allowed, and every
 trigger-engine kernel draw passes the showing scene as `current_id`.
@@ -12131,9 +12196,9 @@ Plan: `/home/javi/fleet-spotfx/data/drop-detection-plan/report.md` (approved
   detect differently.
 - **THE DROP FLOOR (2026-10-06, the Admiral's own setting, default 0.7):
   a candidate is only kept if the TOP BAR'S OWN "⚡ Energy" NUMBER,
-  EXACTLY AS DISPLAYED, clears it at the drop's moment** —
-  `drop_detector.final_energy_at` is plain `analysis_reader.
-  section_energy_at`, the SAME value `LiveEnergyReadout.tsx` renders
+  EXACTLY AS DISPLAYED, clears it at the drop's moment** — at the time,
+  `drop_detector.final_energy_at` was plain `analysis_reader.
+  section_energy_at`, the SAME value `LiveEnergyReadout.tsx` rendered
   verbatim via `bridge.intensity()`, with NO rescaling. His first ask was
   0.95 against this same raw section energy — told that removed every one
   of his 13 real drops on the four reference songs, his follow-up: "what
@@ -12145,23 +12210,32 @@ Plan: `/home/javi/fleet-spotfx/data/drop-detection-plan/report.md` (approved
   and the song's own `song_scaling_factor` (genres from the capture
   sidecar): it structurally capped every one of these four songs' own
   ceiling at 0.40-0.44 (their auto scale is 0.68-0.74, so
-  `HEADROOM_RESERVE`(0.6) x scale never reaches 0.7 even at energy=1.0),
-  so NEITHER 0.95 NOR 0.7 ever let a real drop through on that measure —
-  it would have switched generated drops off entirely. Checking
-  `LiveEnergyReadout.tsx` directly settled it: the "⚡ Energy" readout
-  shows the raw number with no mark factored in anywhere — the adjacent
-  "Mark" readout (`IntensityMarkControl.tsx`) is a SEPARATE, un-multiplied
-  number. His final word, "match to the energy in the top bar shown", is
-  the DISPLAYED number, so the floor reverted to it. Room setting
-  `drop_floor`, folded into `drop_sequences.stamp_for`'s own stamp so a
-  change re-detects each song the next time it plays. Gated ONLY inside
-  `detect()`, so a sequence he has confirmed, edited or added is never
-  removed by it. A song with no stored section energy is UNKNOWN, never
-  gated. **Measured, not assumed**: `scripts/check_drop_floor.py` scores
-  the same four songs at 0.0/0.7/0.95 on this plain measure — at 0.95, 0
-  of his 11 detector-found drops survive; at 0.7, 9 of 11 do. His own
-  fallback rule decided the default: 0.7, since 0.95 keeps none of them
-  and 0.7 keeps nearly all.
+  `HEADROOM_RESERVE`(0.6, the value live that day) x scale never reaches
+  0.7 even at energy=1.0), so NEITHER 0.95 NOR 0.7 ever let a real drop
+  through on that measure — it would have switched generated drops off
+  entirely. Checking `LiveEnergyReadout.tsx` directly settled it AT THE
+  TIME: the "⚡ Energy" readout showed the raw number with no mark
+  factored in anywhere — the adjacent "Mark" readout
+  (`IntensityMarkControl.tsx`) was a SEPARATE, un-multiplied number. His
+  final word, "match to the energy in the top bar shown", is the
+  DISPLAYED number, so the floor reverted to it — and stayed reverted to
+  it: **since the 2026-10-28 ONE ENERGY build (see "ENERGY" above), what
+  the top bar displays IS the Mark-factored figure**
+  (`drop_detector.final_energy_at` now reads `energy.energy_at(...,
+  look_ahead=True)`, the exact same `spectra/services/energy.py` number
+  `LiveEnergyReadout` draws), which is precisely what he had asked for —
+  the floor still matches the displayed number, that number just stopped
+  excluding the Mark. `scripts/energy_parity.py` re-set `drop_floor` so
+  the same share of his drops still clears it under the new scale (the
+  plan's D5). Room setting `drop_floor`, folded into `drop_sequences.
+  stamp_for`'s own stamp so a change re-detects each song the next time it
+  plays. Gated ONLY inside `detect()`, so a sequence he has confirmed,
+  edited or added is never removed by it. A song with no stored section
+  energy is UNKNOWN, never gated. **Measured, not assumed, at the time**:
+  `scripts/check_drop_floor.py` scored the same four songs at 0.0/0.7/0.95
+  on the then-plain measure — at 0.95, 0 of his 11 detector-found drops
+  survived; at 0.7, 9 of 11 did. His own fallback rule decided the
+  default: 0.7, since 0.95 kept none of them and 0.7 kept nearly all.
 - **IT READS ONLY THE STORED AUDIO SHAPE AND THE BEATS, AND EVERY TIME IS
   SONG TIME** (the `.npz` is captured in song time; beats shift by its first
   timestamp). The test bed's `_estimate_for` must NOT shift the Drops lane

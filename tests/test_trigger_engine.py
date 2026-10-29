@@ -34,6 +34,14 @@ from fx import device_model, facade, headless
 VID = headless.DEFAULT_VIRTUAL_ID
 
 
+
+def _declared(uri, trig):
+    """The moment's Energy, as the test declares it on the trigger. These
+    specs drive a fire at a known Energy; since 2026-10-28 the engine reads
+    Energy at a trigger's moment (spectra/services/energy.py), never the
+    stored value, and these songs have no analysis to read it from."""
+    return trig.action.intensity
+
 def _run(coro):
     return asyncio.run(coro)
 
@@ -133,7 +141,8 @@ def test_trigger_fires_scene_action_with_its_own_intensity_at_its_moment(tmp_pat
 
                 engine = TriggerEngine(list_triggers=lambda uri: [trig],
                                        fire_scene=fire_scene,
-                                       render_intensity=lambda x: x)
+                                       render_intensity=lambda x: x,
+                                       energy_for=_declared)
                 await engine.on_track_state("song:1")
 
                 await engine.tick(4000)   # before the trigger's moment
@@ -191,7 +200,8 @@ def test_trigger_fires_response_action_on_the_real_pipeline(tmp_path):
 
                 engine = TriggerEngine(list_triggers=lambda uri: [trig],
                                        fire_response=responder.on_event,
-                                       render_intensity=lambda x: x)
+                                       render_intensity=lambda x: x,
+                                       energy_for=_declared)
                 await engine.on_track_state("song:2")
 
                 await engine.tick(1000)
@@ -261,7 +271,8 @@ def test_trigger_fires_scene_update_action_on_the_real_pipeline(tmp_path):
 
                 engine = TriggerEngine(list_triggers=lambda uri: [trig],
                                        fire_scene_update=responder.on_update,
-                                       render_intensity=lambda x: x)
+                                       render_intensity=lambda x: x,
+                                       energy_for=_declared)
                 await engine.on_track_state("song:update")
 
                 await engine.tick(1000)
@@ -374,7 +385,8 @@ def test_transition_fire_lands_on_real_pipeline_on_song_change(tmp_path):
                     list_triggers=lambda uri: [], fire_scene=fire_scene,
                     select_scene=lambda intensity: scene.id,
                     transition_intensity=lambda: 0.5,
-                    render_intensity=lambda x: x)
+                    render_intensity=lambda x: x,
+                                       energy_for=_declared)
 
                 await engine.on_track_state("song:first")   # arms only
                 headless.render_frames(virtual, 1, clock=clock, dt=1 / 60)
@@ -607,7 +619,8 @@ def test_generated_trigger_resolves_scene_via_kernel_and_fires_at_its_moment(
                 # the real kernel, not an injected picker.
                 engine = TriggerEngine(list_triggers=lambda uri: [trig],
                                        fire_scene=fire_scene,
-                                       render_intensity=lambda x: x)
+                                       render_intensity=lambda x: x,
+                                       energy_for=_declared)
                 await engine.on_track_state("song:kernel")
 
                 await engine.tick(2000)
@@ -708,7 +721,8 @@ def test_scene_pool_narrows_and_biases_the_kernel_draw(tmp_path, monkeypatch):
                 for i in range(20):
                     engine = TriggerEngine(list_triggers=lambda uri: [trig],
                                            fire_scene=fire_scene,
-                                           render_intensity=lambda x: x)
+                                           render_intensity=lambda x: x,
+                                       energy_for=_declared)
                     await engine.on_track_state(f"song:pool{i}")
                     fired = await engine.tick(1000)
                     assert len(fired) == 1 and fired[0].id == trig.id
@@ -774,7 +788,8 @@ def test_trigger_lead_fires_scene_transition_early_so_it_lands_mid_flight_on_the
                 engine = TriggerEngine(list_triggers=lambda uri: [trig],
                                        fire_scene=fire_scene,
                                        lead_ms=lambda t: LEAD_MS,
-                                       render_intensity=lambda x: x)
+                                       render_intensity=lambda x: x,
+                                       energy_for=_declared)
                 await engine.on_track_state("song:midpoint")
 
                 lead_position = 5000 - LEAD_MS
@@ -854,7 +869,8 @@ def test_trigger_lead_fires_momentary_flare_early_so_its_switch_finishes_on_the_
                 engine = TriggerEngine(list_triggers=lambda uri: [trig],
                                        fire_response=responder.on_event,
                                        lead_ms=lambda t: DICE_REROLL_GLIDE_MS,
-                                       render_intensity=lambda x: x)
+                                       render_intensity=lambda x: x,
+                                       energy_for=_declared)
                 await engine.on_track_state("song:momentary-lead")
 
                 lead_position = 2000 - DICE_REROLL_GLIDE_MS
@@ -985,7 +1001,8 @@ def test_trigger_lookahead_reuses_pinned_pick_never_rendering_a_wrong_or_stale_s
                 engine = TriggerEngine(list_triggers=lambda uri: [trig],
                                        fire_scene=fire_scene,
                                        select_scene=select_scene,
-                                       render_intensity=lambda x: x)
+                                       render_intensity=lambda x: x,
+                                       energy_for=_declared)
                 await engine.on_track_state("song:lookahead")
 
                 horizon_entry = 6000 - LOOKAHEAD_HORIZON_MS
@@ -1021,7 +1038,8 @@ def test_trigger_lookahead_reuses_pinned_pick_never_rendering_a_wrong_or_stale_s
                 engine2 = TriggerEngine(list_triggers=lambda uri: [trig2],
                                         fire_scene=fire_scene_2,
                                         select_scene=select_scene_2,
-                                        render_intensity=lambda x: x)
+                                        render_intensity=lambda x: x,
+                                       energy_for=_declared)
                 await engine2.on_track_state("song:lookahead-invalidated")
                 for pos in range(0, horizon_entry + 401, 200):
                     await engine2.tick(pos)
@@ -1102,7 +1120,8 @@ def test_trigger_fires_drop_with_zero_lead_so_its_switch_starts_on_the_beat_not_
                 engine = TriggerEngine(list_triggers=lambda uri: [trig],
                                        fire_response=responder.on_event,
                                        lead_ms=lambda t: 0,
-                                       render_intensity=lambda x: x)
+                                       render_intensity=lambda x: x,
+                                       energy_for=_declared)
                 await engine.on_track_state("song:drop-anchor")
 
                 await engine.tick(1999)

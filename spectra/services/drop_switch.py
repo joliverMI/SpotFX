@@ -137,7 +137,8 @@ SAME one-call hard cut every drop-led switch makes; only the moment moves.
     ARMED at the drop and released by THE NEXT BIG BASS HIT, defined once
     (`next_big_hit`): the first ANALYSED flare after the drop (past the
     drop's own MATCH_BEATS reach, where a flare is silenced anyway) whose
-    intensity is at least `drop_switch_hit_threshold`. The cut lands just
+    ENERGY (spectra/services/energy.py, at its source section) is at least
+    `drop_switch_hit_threshold`. The cut lands just
     before that flare fires, so the flare itself lands on the incoming
     scene's own band — the "comes in loud". No hit by the DEADLINE (the
     sequence's protected tail plus one bar, `hit_deadline_ms`) and the cut
@@ -553,10 +554,10 @@ def next_big_hit(flares, drop_ms: int, beat_ms: Optional[float],
                  threshold: float, until_ms: Optional[int] = None
                  ) -> Optional[tuple[str, int]]:
     """THE NEXT BIG BASS HIT, defined once: the first ANALYSED flare
-    (`flares` = (trigger id, song ms, intensity)) strictly after the drop's
+    (`flares` = (trigger id, song ms, Energy)) strictly after the drop's
     own reach — MATCH_BEATS beats, where an analysed flare is silenced
     anyway (drop_firing.Window.at_drop), and never sooner than
-    HIT_MIN_AFTER_MS — up to `until_ms`, whose intensity is at least
+    HIT_MIN_AFTER_MS — up to `until_ms`, whose Energy is at least
     `threshold`. None when there is no such flare."""
     from spectra.services import drop_firing
     beat = float(beat_ms) if beat_ms and beat_ms > 0 else FALLBACK_BEAT_MS

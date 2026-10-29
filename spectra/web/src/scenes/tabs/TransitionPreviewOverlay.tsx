@@ -139,7 +139,7 @@ export default function TransitionPreviewOverlay({
         </label>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, margin: '8px 0' }}>
-          <span style={{ color: 'var(--text-muted)' }}>Intensity</span>
+          <span style={{ color: 'var(--text-muted)' }}>Energy</span>
           <input type="range" min={0} max={1} step={0.01} value={intensity}
             onChange={(e) => setIntensity(Number(e.target.value))} style={{ flex: 1 }} />
           <span style={{ fontVariantNumeric: 'tabular-nums', width: 36 }}>{intensity.toFixed(2)}</span>
@@ -196,7 +196,7 @@ export default function TransitionPreviewOverlay({
                     <strong>{Math.round(timeline.anchor_frac * 100)}%</strong> of it — the start of the
                     accented stage</>
                 : <>This transition crossfades over <strong>{fmtMs(timeline.crossfade_ms)}</strong>
-                    {' '}at this intensity, and its payoff is anchored at{' '}
+                    {' '}at this Energy, and its payoff is anchored at{' '}
                     <strong>{Math.round(timeline.anchor_frac * 100)}%</strong> of the blend —{' '}
                     {timeline.anchor_source === 'phased_pair'
                       ? 'this pair of effects choreographs a phased handoff, so that phase is what lands on the mark'

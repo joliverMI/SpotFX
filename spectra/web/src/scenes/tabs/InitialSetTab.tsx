@@ -203,7 +203,7 @@ function EntryPanel({ dev, setDev, registry, onRemove }: {
         {effEffect === 'sauron' && <HelpLink topic="sauron-effect" />}
         {steps.length === 0 && dev.effect_type && (
           <button style={{ fontSize: 11 }} onClick={addStep}
-            title="Stepped effect: switch to a DIFFERENT effect at/above an ⚡ intensity threshold">
+            title="Stepped effect: switch to a DIFFERENT effect at/above an ⚡ Energy threshold">
             ⚡ Stepped effect…
           </button>
         )}
@@ -220,7 +220,7 @@ function EntryPanel({ dev, setDev, registry, onRemove }: {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <button className={variantIdx === -1 ? 'active' : ''} style={{ fontSize: 12 }}
-              title="The base form — what fires below the first threshold (and with no intensity signal)"
+              title="The base form — what fires below the first threshold (and with no Energy signal)"
               onClick={() => setVariantIdx(-1)}>
               {dev.effect_type || '—'} <small>&lt; {steps[0].threshold.toFixed(2)}</small>
             </button>

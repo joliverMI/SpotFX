@@ -58,6 +58,7 @@ import {
   useLibrosa, useShowArms,
 } from '../timeline/queries';
 import { useSettings } from '../api/queries';
+import { useEnergyTimeline } from '../queries';
 import { useSticky } from '../lib/useSticky';
 import { DEFAULT_SHAPE_SCALES, shapeScalesSeed } from '../lib/shapeScales';
 import { getShowClockMs } from '../lib/showClock';
@@ -119,6 +120,7 @@ export default function HomeTimeline({
   const { data: meta } = useAudioShapeMeta(showAudioShape ? uri : null);
   const { data: shape } = useAudioShapeData(showAudioShape ? uri : null, true);
   const { data: librosa } = useLibrosa(uri);
+  const { data: energyTl } = useEnergyTimeline(uri);
   const { data: analysedPlan } = useAnalysedPlan(uri);
   const { data: showArms } = useShowArms(!!uri);
   const { data: dropResp } = useDropSequences(uri);
@@ -211,6 +213,7 @@ export default function HomeTimeline({
     averages,
     meta: meta ?? null,
     librosa: librosa ?? null,
+    energy: energyTl ?? null,
     mfccDistances,
     triggers: [],
     events: [],
@@ -233,7 +236,7 @@ export default function HomeTimeline({
       }
       : null,
     lightShow: lightShowCues,
-  }), [shape, averages, meta, librosa, mfccDistances, analysedMarkers, dropSeqs,
+  }), [shape, averages, meta, librosa, energyTl, mfccDistances, analysedMarkers, dropSeqs,
        dropResp, lightShowCues]);
 
   // ── ALIGNED WITH THE TIMELINE TRACK ────────────────────────────────────

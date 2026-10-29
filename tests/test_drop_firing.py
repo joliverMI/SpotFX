@@ -90,6 +90,7 @@ class _Rec:
 
 def _engine(triggers, mode, rec, plan=None):
     return TriggerEngine(
+        energy_for=lambda uri, t: t.action.intensity,  # the moment's Energy, as the test declares it
         list_triggers=lambda uri: list(triggers),
         scene_change_mode=lambda: mode,
         fire_sequence=rec.fire_sequence, fire_response=rec.fire_response,
@@ -612,7 +613,7 @@ def test_an_edit_marks_the_songs_stored_cues_stale():
     drop_sequences.dismiss(uri, "drop:87070")
     after = mg.song_inputs(uri, claimed=set())["protected"]
     assert before != after and len(after) == len(before) - 1
-    assert mg.GENERATOR_VERSION == "3"
+    assert mg.GENERATOR_VERSION == "4"     # "4": the planner's holds read Energy (2026-10-28)
 
 
 # ═══ 5. fire history and the views ═════════════════════════════════════════

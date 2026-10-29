@@ -83,9 +83,12 @@ def test_no_uri_never_touches_the_marks_store():
 def test_a_marked_track_can_clear_the_075_auto_ceiling():
     marks.set_mark("spotify:track:hype-2", 2.0)
     factor = isc.song_scaling_factor("spotify:track:hype-2", [])
-    final = isc.combine_measured_and_scale(1.0, factor)
+    final = isc.combine_measured_and_scale(1.0, factor, marked=True)
     assert final > 0.75, "a marked track must be able to exceed the automatic ceiling"
-    assert final == 1.0, "matches the Admiral's own worked example: 0.6 * 2.0 = 1.2, clamped to 1.0"
+    assert final == 1.0, "0.8 x 2.0 = 1.6, capped at 1.0 for a marked song"
+    from spectra.services import energy
+    assert energy.song_factor("spotify:track:hype-2") == (2.0, True), \
+        "Energy knows the song is marked, so its cap is 1.0, not 0.75"
 
 
 def test_an_unmarked_track_never_exceeds_075_at_the_auto_ceiling():

@@ -20,7 +20,7 @@ import {
   DROP_BAND_Y, dropBands, KIND_COLOR, MARKER_CY, markerOpacity, markerSizePx, TERRAIN_FILL,
   terrainPath, TRACK_FILL, TRACK_HEIGHT, TRACK_STROKE, trackX, type UpcomingEvent,
 } from './songStrip';
-import type { LibrosaSection } from '../timeline/types';
+import type { EnergySection } from '../types';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -29,7 +29,7 @@ export interface MarkNode { node: SVGElement; ms: number }
 export interface PaintTrackInput {
   events: UpcomingEvent[];
   durationMs: number;
-  sections: LibrosaSection[] | null | undefined;
+  sections: readonly EnergySection[] | null | undefined;
 }
 
 export function paintTrack(

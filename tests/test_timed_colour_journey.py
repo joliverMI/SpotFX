@@ -70,6 +70,7 @@ class Clock:
 
 def _engine(triggers, *, mode="triggers_only", clock=None):
     return TriggerEngine(
+        energy_for=lambda uri, t: t.action.intensity,  # the moment's Energy, as the test declares it
         list_triggers=lambda uri: triggers,
         fire_scene=lambda *a: asyncio.sleep(0),
         fire_response=lambda *a: asyncio.sleep(0),

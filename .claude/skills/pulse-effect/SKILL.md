@@ -22,7 +22,10 @@ Plan: `/home/javi/fleet-spotfx/data/single-led-power-plan/report.md`.
 - **Hits come from live audio inside the effect** (`ingest_signal`, audio
   thread) — measured against the music's OWN recent level, so calm songs
   still pulse. Everything else is engine-pushed config: `energy`/`beat_ms`
-  (`spectra/services/pulse_feed.py`, at section edges), `phase`/
+  (`spectra/services/pulse_feed.py`, at section edges — since 2026-10-28
+  `energy` is the section's ENERGY, `spectra/services/energy.py`: its place
+  on the song's own 0..1 scale x 0.8 x the song's scale, an unmarked song
+  capped at 0.75 — the same number every engine decision reads), `phase`/
   `phase_progress` (it is in `fx.device_model.PHASE_EFFECTS`), and the two
   flare pokes `flash`/`flip`.
 - **Two clocks.** Hits are logged on the audio clock (`_audio_t`); the
@@ -77,7 +80,9 @@ Plan: `/home/javi/fleet-spotfx/data/single-led-power-plan/report.md`.
 - **The flash flare only fires on HIGH ENERGY** (2026-10-12, "The flash
   flare on pulse should only happen on high energy, .8 or higher"):
   `scene_response._pulse_flash` writes nothing unless the top bar's Energy
-  (`bridge.intensity()`, `ResponseEngine(room_energy=)`) is at least
+  (`bridge.intensity()`, `ResponseEngine(room_energy=)` — Energy at the show
+  clock since 2026-10-28; the 0.8 was set on the old raw number, and
+  `scripts/energy_parity.py` gives the value that keeps today's share) is at least
   `RoomControlState.pulse_flash_min_energy` (0.8, Sonic `set_setting`,
   room bar's Scenes panel) — `pulse_flash_allowed` is the one rule; an
   unknown energy (no analysis, the previews' scratch engines) is never

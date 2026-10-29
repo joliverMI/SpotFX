@@ -225,7 +225,7 @@ export default function SequencePreviewOverlay({ scene, onClose, onDropOffsetCha
         </div>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, margin: '8px 0' }}>
-          <span style={{ color: 'var(--text-muted)' }}>Intensity</span>
+          <span style={{ color: 'var(--text-muted)' }}>Energy</span>
           <input type="range" min={0} max={1} step={0.01} value={intensity}
             onChange={(e) => setIntensity(Number(e.target.value))} style={{ flex: 1 }} />
           <span style={{ fontVariantNumeric: 'tabular-nums', width: 36 }}>{intensity.toFixed(2)}</span>

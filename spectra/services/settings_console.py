@@ -140,19 +140,20 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "rainbow_select_limit": "fraction 0.0-1.0",
             "drop_confident_score": "detector score",
             "drop_suggested_score": "detector score",
-            "drop_floor": "top-bar displayed energy, fraction 0.0-1.0",
+            "drop_floor": "Energy (the top bar's number, Mark included), fraction 0.0-1.0",
             "lull_dark_max_s": "seconds",
             "strip_phase_strength": "multiplier 0.0-1.5, 0 = off",
             "background_fade_s": "seconds, 0 = instant",
             "lull_breath_hold_s": "seconds",
             "drop_timing_offset_ms": "ms, negative = earlier, 0 = on the mark",
-            "drop_shock_min_energy": "top-bar displayed energy, fraction 0.0-1.0",
-            "pulse_flash_min_energy": "top-bar displayed energy, fraction 0.0-1.0",
+            "drop_shock_min_energy": "Energy (the top bar's number, Mark included), fraction 0.0-1.0",
+            "pulse_flash_min_energy": "Energy (the top bar's number, Mark included), fraction 0.0-1.0",
+            "energy_lookahead_s": "seconds, 0 = read the present",
             "drop_colour_spread_deg": "degrees either side of 180",
             "drop_switch_stale_margin_s": "seconds beyond the scene's own dwell",
             "drop_switch_drops_in_a_row": "drops, 0 = off",
             "drop_switch_swallow_delay_s": "seconds after the drop",
-            "drop_switch_hit_threshold": "analysed flare intensity, 0.0-1.0",
+            "drop_switch_hit_threshold": "an analysed flare's Energy, 0.0-1.0",
             "transition_program_ms": "ms",
             "transition_velocity_blend_ms": "ms",
             "transition_infall_spin": "extra turns",
@@ -294,9 +295,9 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "drop_floor", "Drop detection — energy floor",
         "A drop sequence is only generated where the music during or "
         "right after the drop reaches at least this value on the same "
-        "0.0-1.0 energy number the top bar's '⚡ Energy' readout shows "
-        "(the Mark readout next to it is a separate number and is not "
-        "factored in) — so quiet songs or sections don't get drops. "
+        "0.0-1.0 Energy number the top bar's '⚡ Energy' readout shows "
+        "(the song's Mark is part of it) — so quiet songs or sections "
+        "don't get drops. "
         "Never removes a drop he has already confirmed, edited or added "
         "himself. Default 0.7."),
     "lull_dark_max_s": _spec(
@@ -426,6 +427,13 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "can't be read (no analysis for the song) the flash is not held "
         "back. Does not touch the colour-flip flare. Takes effect on the "
         "very next flash."),
+    "energy_lookahead_s": _spec(
+        "energy_lookahead_s", "Energy look-ahead",
+        "A drop or a scene change this many seconds or less before the "
+        "next section of the song reads that next section's Energy, "
+        "louder or quieter — so a drop placed just before the loud part "
+        "reads the loud part. Ordinary flares and the top bar read the "
+        "present. Default 2. 0 = always read the present."),
     "drop_switch_enabled": _spec(
         "drop_switch_enabled", "Drop-led scene switch",
         "On (default): a drop sequence may change the scene — a hard cut "
@@ -457,8 +465,8 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "drop_switch_hit_threshold", "Fireworks meld: big-hit strength",
         "When a stale Fireworks scene hands over to Fish, Orbits, Squiggles "
         "or STAR, Fireworks plays its own drop and the next scene cuts in "
-        "on the next analysed flare at least this strong (0-1, default "
-        "0.6) — or one bar after the drop's tail if none comes."),
+        "on the next analysed flare whose Energy is at least this (0-1, "
+        "default 0.6) — or one bar after the drop's tail if none comes."),
     "transition_programs_enabled": _spec(
         "transition_programs_enabled", "Thematic transitions",
         "On (default): a scene change between the Black Hole and the "

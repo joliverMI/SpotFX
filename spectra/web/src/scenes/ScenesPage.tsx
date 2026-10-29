@@ -318,8 +318,8 @@ export default function ScenesPage() {
             </button>
             <button style={{ fontSize: 12 }} onClick={duplicate}>⧉ Duplicate</button>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 8 }}
-              title="The intensity a fire resolves ⚡ bindings against — preview the scene anywhere on the axis">
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>intensity</span>
+              title="The Energy a fire resolves ⚡ bindings against — preview the scene anywhere on the axis">
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Energy</span>
               <input type="range" min={0} max={1} step={0.01} value={intensity} style={{ width: 110 }}
                 onChange={(e) => setIntensity(Number(e.target.value))} />
               <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', width: 34 }}>{intensity.toFixed(2)}</span>

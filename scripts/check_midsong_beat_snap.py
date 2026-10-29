@@ -113,7 +113,7 @@ def _run_generation(tmp_root: Path, uri: str, *, snap: bool) -> list[int]:
     # This measures WHERE cues are placed: every placed moment is stored
     # (the scene-change planner's holds, 2026-10-04, zeroed here).
     original_hold = midsong_generator.planning_hold_s
-    midsong_generator.planning_hold_s = lambda raw, factor, curves: 0.0
+    midsong_generator.planning_hold_s = lambda raw, factor, curves, marked=False: 0.0
     try:
         midsong_generator.generate_for_song(uri)
     finally:

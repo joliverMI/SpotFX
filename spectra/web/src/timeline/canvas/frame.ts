@@ -4,6 +4,7 @@ import type {
   AudioShapeData, AudioShapeMeta, EventOption, LibrosaAnalysis, MarkType, MusicTrigger,
 } from '../types';
 import type { DisplaySeq, DropRails, SeqHandle } from '../dropSequences';
+import type { EnergyTimeline } from '../../types';
 import type { Ghost, SnapGuide } from '../dropEdit';
 
 export interface Win {
@@ -30,10 +31,14 @@ export interface ViewState {
 }
 
 export type IntensityBgMode = 'off' | 'total' | 'bass' | 'section' | 'triggers';
-export const INTENSITY_MODES: IntensityBgMode[] = ['off', 'total', 'bass', 'section', 'triggers'];
+/** 'triggers' (the triggers' stored ⚡ values) is no longer offered: since
+ * 2026-10-28 the engine reads Energy at a trigger's moment and never the
+ * stored value (spectra/services/energy.py), so a graph of them would show
+ * numbers nothing uses. A saved choice of it draws Energy instead. */
+export const INTENSITY_MODES: IntensityBgMode[] = ['off', 'total', 'bass', 'section'];
 export const INTENSITY_MODE_LABELS: Record<IntensityBgMode, string> = {
-  off: 'Intensity', total: 'Total RMS', bass: 'Bass RMS',
-  section: 'Section energy', triggers: 'Trigger intensity',
+  off: 'Energy', total: 'Total RMS', bass: 'Bass RMS',
+  section: 'Energy', triggers: 'Energy',
 };
 
 export interface LayerDataBag {
@@ -41,6 +46,9 @@ export interface LayerDataBag {
   averages: { rms_total: number[]; rms_low: number[]; rms_mid: number[]; rms_high: number[] } | null;
   meta: AudioShapeMeta | null;
   librosa: LibrosaAnalysis | null;
+  /** The song's ENERGY timeline (GET /api/energy/timeline, spectra/services/
+   * energy.py) — what the 'section' background draws. Absent = nothing. */
+  energy?: EnergyTimeline | null;
   mfccDistances: number[] | null;
   triggers: MusicTrigger[];
   events: EventOption[];

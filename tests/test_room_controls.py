@@ -483,7 +483,7 @@ def test_reconcile_force_scene_if_changed_uses_bridge_intensity_when_available(m
         return {"dry_run": dry_run, "intensity": intensity, "writes": [],
                 "resolved_bindings": {}, "dice_rolls": {}}
     monkeypatch.setattr(scene_compiler, "fire_scene", fake_fire_scene)
-    monkeypatch.setattr(bridge, "intensity", lambda: 0.83)
+    monkeypatch.setattr(bridge, "intensity", lambda look_ahead=False: 0.83)
 
     previous = rc.RoomControlState(force_scene_enabled=False)
     new_state = rc.RoomControlState(force_scene_enabled=True, force_scene_scene_id=held.id)

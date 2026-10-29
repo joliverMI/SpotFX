@@ -170,16 +170,11 @@ export default function TriggerDialog({ events }: { events: EventOption[] }) {
           <HelpLink topic="filter-labels" title="Label filter syntax" />
         </label>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}
-          title="Per-trigger fire intensity (0–1). Drives values bound to the trigger_intensity signal; also draggable as the circle on the timeline.">
-          <span style={{ width: 90, color: 'var(--text-muted)' }}>Intensity ⚡</span>
-          <input type="range" min={0} max={1} step={0.01} value={intensity}
-            onChange={(e) => setIntensity(Number(e.target.value))} style={{ flex: 1 }} />
-          <input type="number" min={0} max={1} step={0.01} value={intensity}
-            onChange={(e) => setIntensity(Math.max(0, Math.min(1, Number(e.target.value))))}
-            style={{ width: 70, background: 'var(--bg)', color: 'var(--text)',
-                     border: '1px solid var(--border)', borderRadius: 6, padding: '5px 8px' }} />
-        </label>
+        {/* No Intensity field (2026-10-28, the Energy plan's D4): a trigger
+            fires at Energy at its own moment (spectra/services/energy.py) and
+            its stored value is read by nothing, so a field for it would edit
+            a number that does nothing. The value is kept as it is, on the
+            "to remove later" list. */}
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}
           title="When this trigger fires a Scene Group, use THIS Color Group instead of the group's designated one. Blank = group's normal colors. Missing/deleted groups fall back to normal.">

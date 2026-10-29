@@ -38,7 +38,7 @@ const CLASS_TITLES: Record<ResponseClass, string> = {
 // surges; everything else is a flare) and the band containing the fire's
 // intensity fires its attached kinds at their scales.
 const CLASS_HINTS: Record<ResponseClass, string> = {
-  flare: 'Any ordinary trigger fire is a flare. The band containing its intensity fires its attached kinds at their ×scales: drift-jumps roll dice / jump the colour set (ramping in gently on soft flares), momentary kinds spike and return, permanent kinds re-baseline — drift carries on from there.',
+  flare: 'Any ordinary trigger fire is a flare. The band containing its Energy fires its attached kinds at their ×scales: drift-jumps roll dice / jump the colour set (ramping in gently on soft flares), momentary kinds spike and return, permanent kinds re-baseline — drift carries on from there.',
   charge: 'A charge (build-up) fires from the music: the phase machinery builds the arc; the band\'s kinds coil the room into the payoff.',
   lull: 'A lull fires: the band\'s kinds colour the suspension — typically a permanent gain < 1 ducks the room and carries.',
   drop: 'A drop fires: the payoff lands; permanent kinds move the baselines and drift resumes from the new point.',
@@ -82,18 +82,18 @@ const kindContent = (k: FlareKind): string => {
   if (k.type === 'pulse_flip') bits.push('Pulse colour turns 180° and swings back');
   if (k.type === 'big_fish') bits.push('a big contrasting fish crosses behind the others');
   if (k.type === 'sauron_surge') bits.push('the eye\'s flames erupt and burn back');
-  if (k.min_intensity != null) bits.push(`only above intensity ${k.min_intensity}`);
+  if (k.min_intensity != null) bits.push(`only above Energy ${k.min_intensity}`);
   return bits.join(' · ');
 };
 
 const TYPE_HINT: Record<string, string> = {
   drift_jump: 'Jumps the drift itself — the change CARRIES; the journey walks on from it. On colour jumps the ramp-in eases gentle flares, big ones land hard.',
-  momentary: 'Spikes and RETURNS exactly to the carried baseline (a creep\'s current wander position included) after its hold — 250 ms unless the kind sets its own hold_ms. Each param target is absolute, an offset from the carried baseline (up/down), or a fresh random draw in a range; intensity still steers strength via the band\'s ×scale.',
+  momentary: 'Spikes and RETURNS exactly to the carried baseline (a creep\'s current wander position included) after its hold — 250 ms unless the kind sets its own hold_ms. Each param target is absolute, an offset from the carried baseline (up/down), or a fresh random draw in a range; Energy still steers strength via the band\'s ×scale.',
   permanent: 'Lands and BECOMES the new baseline drift carries from. Same target expressions as momentary (absolute / offset / random), just never released.',
-  color_rotate: 'Rotates the live foreground colour\'s hue and returns it — degrees, ramp-in, dwell, and fade-back all scale from the fire\'s intensity; no knobs of its own.',
+  color_rotate: 'Rotates the live foreground colour\'s hue and returns it — degrees, ramp-in, dwell, and fade-back all scale from the fire\'s Energy; no knobs of its own.',
   blob_rush: 'Twelve blobs appear at once on every live Black Hole, spread fairly evenly around the circle — arriving from the panel edge as it falls in, or leaving the event horizon while it is reversed. They ignore the effect\'s max-blob cap and disturb nothing already on screen; no knobs of its own.',
-  pulse_flash: 'On the Singles\' Pulse light: an instant jump in brightness that fades back to normal in about 180 ms (Pulse\'s Flash Flare Size and Fade settings), bigger at higher intensity. Spent from the same flash budget as hits, so a run of flares never strobes.',
-  pulse_flip: 'On the Singles\' Pulse light: the colour turns 180° at once and swings back round the colour wheel over three quarters of a beat — never through grey or white. Fires only above intensity 0.4 unless the kind sets its own minimum.',
+  pulse_flash: 'On the Singles\' Pulse light: an instant jump in brightness that fades back to normal in about 180 ms (Pulse\'s Flash Flare Size and Fade settings), bigger at higher Energy. Spent from the same flash budget as hits, so a run of flares never strobes.',
+  pulse_flip: 'On the Singles\' Pulse light: the colour turns 180° at once and swings back round the colour wheel over three quarters of a beat — never through grey or white. Fires only above Energy 0.4 unless the kind sets its own minimum.',
   big_fish: 'On Fish: one really large fish swims straight across the panel, behind the ordinary fish, at 60% brightness (Fish\'s Big Fish Brightness setting). Faster at higher intensity; its colour is the scene\'s centre colour turned 120° (intensity 0.2 or less) up to 180° (0.5 or more), either way round, so it contrasts. No knobs on the kind — its brightness, size and crossing times are Fish\'s own settings.',
   sauron_surge: 'On Sauron: the eye\'s flames erupt toward the crystal\'s edge, the iris and the ember sky flare, and the fire burns back over about half a second — bigger at higher intensity, landing on the mark. No knobs on the kind — the fire\'s own look is Sauron\'s Flames, Flame Audio, Flame Speed and Ember Sky settings.',
   firework_burst: 'Explodes extra payoff rockets the instant the flare fires, on every live fireworks effect — 3 rockets at intensity 0 up to 6 at intensity 1, on top of whatever the scene is already launching; no knobs of its own.',
@@ -240,7 +240,7 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
           Flare kinds <HelpLink topic="flare-kinds" />
           <HelpLink topic="flare-disable" title="Switching a flare off" />
           {kinds.some((k) => k.min_intensity != null) && (
-            <HelpLink topic="flare-min-intensity" title="Minimum intensity" />
+            <HelpLink topic="flare-min-intensity" title="Minimum Energy" />
           )}
           {kinds.some((k) => k.type === 'big_fish') && (
             <HelpLink topic="fish-big-fish" title="Big fish flare" />

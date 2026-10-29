@@ -37,7 +37,7 @@ function RainbowLimitRow() {
   return (
     <div className="settings-row">
       <InfoTip
-        text="Above this live intensity, automatic colour-set selection is restricted to rainbow-marked sets only; at or below it, to single (non-rainbow) sets only.">
+        text="Above this Energy, automatic colour-set selection is restricted to rainbow-marked sets only; at or below it, to single (non-rainbow) sets only.">
         <span className="settings-row-label"><Icon name="palette" size={15} /> Rainbow select limit</span>
       </InfoTip>
       <input
@@ -97,7 +97,7 @@ export default function RoomCard() {
       <BrightnessRow />
       <div className="settings-row">
         <InfoTip topic="drift-gradient"
-          text="A two-dimensional gradient (time across, intensity up) that replaces the wheel-based colour journey while it is active. On songs without your own triggers the journey instead times itself to arrive on each analysed scene change, and analysed moments jump the colour too.">
+          text="A two-dimensional gradient (time across, Energy up) that replaces the wheel-based colour journey while it is active. On songs without your own triggers the journey instead times itself to arrive on each analysed scene change, and analysed moments jump the colour too.">
           <span className="settings-row-label"><Icon name="layers" size={15} /> Drift gradient</span>
         </InfoTip>
         <DriftGradientPanel compact />

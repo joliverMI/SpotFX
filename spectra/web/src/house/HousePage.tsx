@@ -294,7 +294,7 @@ function EnergyLines({ lighting }: { lighting: LightingStatus }) {
   if (!lines.length) return null;
   return (
     <div className="house-seam house-energy">
-      <strong>Energy</strong> <HelpLink topic="house-energy" />
+      <strong>Power saving</strong> <HelpLink topic="house-energy" />
       <ul>{lines.map((l) => <li key={l} className={l.startsWith('⚠') ? 'house-problem' : 'muted'}>{l}</li>)}</ul>
     </div>
   );
@@ -450,7 +450,7 @@ function ModeEditor({ draft, edit, targets, dirty, busy, warnings, onSave, onDel
           </select>
         </label>
         <label className="house-field">
-          <span>Scenes resolved at intensity</span>
+          <span>Scenes resolved at Energy</span>
           <input type="number" min={0} max={1} step={0.05} value={draft.flow.intensity}
             onChange={(e) => edit((d) => { d.flow.intensity = Number(e.target.value); })} />
         </label>

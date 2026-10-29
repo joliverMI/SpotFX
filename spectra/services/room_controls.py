@@ -645,6 +645,13 @@ class RoomControlState(BaseModel):
     # "we can't tell" is not "below the floor". Folded into
     # drop_sequences.stamp_for's own stamp, so a change re-detects each
     # song the next time it plays.
+    # 2026-10-28, ONE ENERGY (spectra/services/energy.py): the top bar's
+    # number IS Energy now — song-normalized, with the Mark math (x 0.8 x the
+    # song's scale, unmarked songs capped at 0.75) — and this floor reads it
+    # with the look-ahead. The history above is why 0.7 on the new scale
+    # would keep almost no drops on an unmarked song: the D5 re-set
+    # (scripts/energy_parity.py) gives the value that keeps today's share,
+    # applied on his word; the detection stamp re-detects every song then.
     drop_floor: float = Field(default=0.7, ge=0.0, le=1.0)
 
     # THE LULL'S DARK CAP (the Admiral, 2026-10-07, verbatim: "Instead of
@@ -725,8 +732,8 @@ class RoomControlState(BaseModel):
     # every DROP_SHOCK_EFFECTS member) paints on a drop only while
     # drop_shock_enabled is on, the showing scene's own
     # SceneV2.drop_shock_enabled is on, AND the top bar's Energy at the
-    # drop (bridge.intensity() — raw section energy, the number the drop
-    # floor reads; firstmate's ruling 2026-10-12) is at least
+    # drop (bridge.intensity(look_ahead=True) — ENERGY since 2026-10-28,
+    # spectra/services/energy.py; re-set by scripts/energy_parity.py) is at least
     # drop_shock_min_energy. An energy that cannot be read is never gated.
     # Off or skipped, the effect's own drop runs unchanged. Decided once per
     # drop arm (scene_response._drive_phase, phase_grammar.shock_allowed).
@@ -772,10 +779,20 @@ class RoomControlState(BaseModel):
     # THE PULSE FLASH'S ENERGY FLOOR (2026-10-12, the Admiral: "The flash
     # flare on pulse should only happen on high energy, .8 or higher"): a
     # pulse_flash flare writes nothing unless the top bar's Energy
-    # (bridge.intensity(), the Shockwave floor's number) is at least this.
+    # (bridge.intensity() — ENERGY since 2026-10-28, re-set by scripts/
+    # energy_parity.py) is at least this.
     # In lulls and out of them; an unreadable energy is never gated.
     # scene_response.pulse_flash_allowed is the one rule. 0 = never gated.
     pulse_flash_min_energy: float = Field(default=0.8, ge=0.0, le=1.0)
+
+    # ENERGY'S LOOK-AHEAD (2026-10-28, the Energy plan's D2 — spectra/
+    # services/energy.py is the binding statement): a drop or a scene
+    # change within this many seconds of the next section edge reads the
+    # NEXT section's Energy, higher or lower. Measured on his library
+    # before it was chosen: a detected drop up to 2 s before an edge
+    # usually lands in a clearly louder section, and the effect fades by
+    # 4 s. 0 = always read the present.
+    energy_lookahead_s: float = Field(default=2.0, ge=0.0, le=4.0)
 
     # THE DROP-LED SCENE SWITCH (2026-10-08, drop-scene-variety plan phase
     # 2 — spectra/services/drop_switch.py is the binding statement). A drop
@@ -804,8 +821,9 @@ class RoomControlState(BaseModel):
     #   - drop_switch_swallow_delay_s: into the Black Hole, this many
     #     seconds after the drop mark (the Black Hole swallows the burst);
     #   - drop_switch_hit_threshold: into Fish / Orbits / Squiggles / STAR,
-    #     on the next ANALYSED flare at least this strong (the "next big
-    #     bass hit"), or at a deadline one bar past the sequence's tail.
+    #     on the next ANALYSED flare whose Energy is at least this (the
+    #     "next big bass hit"), or at a deadline one bar past the sequence's
+    #     tail. Re-set with the other Energy gates (scripts/energy_parity.py).
     drop_switch_swallow_delay_s: float = Field(default=1.0, ge=0.0, le=10.0)
     drop_switch_hit_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
 
@@ -1577,7 +1595,7 @@ async def reconcile_force_scene_if_changed(previous: RoomControlState,
         return {"status": "skipped", "reason": "pinned scene not found"}
     from spectra.services.engine import bridge
     from spectra.services.scene_sequencer import fire_scene_by_id
-    intensity = bridge.intensity()
+    intensity = bridge.intensity(look_ahead=True)
     if intensity is None:
         intensity = 0.5
     try:

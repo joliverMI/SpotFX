@@ -144,12 +144,12 @@ export default function EngineStatusStrip() {
       <InfoTip
         className="engine-status-bridge"
         topic="engine-bridge"
-        text="A one-directional, read-only feed from spot-effects. If it's down, nothing breaks — intensity just holds at 0.5 neutral."
+        text="A one-directional, read-only feed from spot-effects. If it's down, nothing breaks — Energy just holds at 0.5 neutral."
       >
         <span style={{ color: st.bridge.connected ? 'var(--text-muted)' : 'var(--warning)' }}
           title={st.bridge.connected
             ? `Read-only spot-effects feed live (${st.bridge.ws_url}) — track state, trigger fires with intensity, deferral flags`
-            : 'The read-only spot-effects feed is down — no moments, no surges; intensity holds at the 0.5 neutral (stated degradation)'}>
+            : 'The read-only spot-effects feed is down — no moments, no surges; Energy holds at the 0.5 neutral (stated degradation)'}>
           bridge {st.bridge.connected ? '● live' : '○ down'}
           {st.bridge.connected && st.bridge.intensity != null
             && ` · i=${st.bridge.intensity.toFixed(2)}`}
