@@ -3,10 +3,12 @@ HomeDrops.tsx): `scripts/check_home_drops_panel.mjs` mounts the REAL card,
 the real shared song-timeline view state and the real drop editor in jsdom
 against a recording fake of the SPECTRA routes, and proves a part tap sends
 one `parts` call, the double tick one `approve`, an undo after removing one
-of his own drops puts back both stores, Testing is one PUT and lifts the
-drop that just played to the top, and a tap on the song timeline's drop
-pill selects it. This test runs it so the proof fires on every full test
-run.
+of his own drops puts back both stores, Testing is one PUT, the drop that
+just played lights up in place, the next one counts down to its fire moment,
+a row's time jumps the audio shape, a double-tap switches a part off as one
+undo step, high-confidence parts draw approved, and a tap on the song
+timeline's drop pill selects it. This test runs it so the proof fires on
+every full test run.
 
 Skipped (not failed) when the frontend toolchain isn't installed; the
 script itself skips cleanly when the dev-only jsdom is missing.

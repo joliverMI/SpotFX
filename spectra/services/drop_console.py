@@ -7,7 +7,11 @@ Every write goes through spectra/services/drop_sequences.py's own
 `apply_edit` — the same edits the Timeline's buttons make, never a second
 write path — so the "How edits are kept" rules hold here exactly as there.
 What fires is spectra/services/drop_firing.py's rule (phase 5): a
-sequence confirmed, edited or added here counts as his.
+sequence confirmed, edited or added here counts as his. ANY EDIT APPROVES
+(drop_sequences.py's ANY EDIT APPROVES, 2026-10-28): every write here
+except dismiss/remove and revert approves the whole sequence — every part
+not switched off — so Sonic's operations follow the panel's rule with no
+code of their own; the instructions below say so to the model.
 
 NUMBERING. A sequence is named by its number in song order among the
 song's sequences that are not dismissed (#1 is the earliest), the same
@@ -843,7 +847,9 @@ OPERATIONS: dict[str, SonicOperation] = {
             "'Move the second drop one beat earlier' = sequence=2, handle='drop', "
             "by_beats=-1. Give exactly one of by_beats or to_seconds. His time always wins "
             "over the analysis afterwards; order is kept (charge before lull before drop, "
-            "200 ms apart) and a move that breaks it is refused with the reason."),
+            "200 ms apart) and a move that breaks it is refused with the reason. Like every "
+            "edit, a move approves the whole sequence (every part not switched off), so it "
+            "plays."),
         input_schema={"type": "object", "properties": {
             "sequence": _SEQ,
             "handle": {"type": "string", "enum": list(HANDLE_CHOICES)},
@@ -881,7 +887,8 @@ OPERATIONS: dict[str, SonicOperation] = {
             "and isn't already off; on=true either turns a switched-off "
             "one back on or, if there was never one at all, adds it "
             "(the same placement move_drop_handle and add_drop_sequence "
-            "use — refused if there's no room before the drop/lull)."),
+            "use — refused if there's no room before the drop/lull). "
+            "Either way it approves the whole sequence (any edit does)."),
         input_schema={"type": "object", "properties": {
             "sequence": _SEQ,
             "handle": {"type": "string", "enum": ["lull", "charge"]},
@@ -895,7 +902,9 @@ OPERATIONS: dict[str, SonicOperation] = {
                 "sequence's detection (a confirm, a move, a switched-off "
                 "member).",
         instructions="Does not remove a sequence HE added — that's "
-                    "dismiss_drop_sequence. Only clears edits to a DETECTED one.",
+                    "dismiss_drop_sequence. Only clears edits to a DETECTED one, "
+                    "and returns it to waiting: unlike every other edit it does "
+                    "NOT approve the sequence.",
         input_schema={"type": "object", "properties": {"sequence": _SEQ, "uri": _URI},
                       "required": ["sequence"], "additionalProperties": False},
         handler=_op_revert),
@@ -961,8 +970,9 @@ OPERATIONS: dict[str, SonicOperation] = {
                 "its charge, lull, pre-drop and drop all approved (every part not off).",
         instructions=(
             "'Approve drop 2' = sequence=2. A part he switched off stays off (tap it with "
-            "set_drop_part to bring it back). A drop of his own needs no approval. "
-            "undo_drop_edit puts it back."),
+            "set_drop_part to bring it back). A drop of his own needs no approval. Any "
+            "other edit to a drop approves it the same way, so this is only needed when he "
+            "wants nothing else changed. undo_drop_edit puts it back."),
         input_schema={"type": "object", "properties": {"sequence": _SEQ, "uri": _URI},
                       "required": ["sequence"], "additionalProperties": False},
         handler=_op_approve),
@@ -972,8 +982,11 @@ OPERATIONS: dict[str, SonicOperation] = {
                 "pre-drop or the drop itself (the Drops panel's toggles).",
         instructions=(
             "on=true approves the part (it plays, with its drop); on=false switches it off "
-            "(never plays, not even with drop testing on). Switching the DROP off keeps "
-            "the sequence listed but silent — that is not removing it. Name a detection by "
+            "(never plays, not even with drop testing on). EITHER WAY IT APPROVES THE WHOLE "
+            "SEQUENCE: every other part not switched off becomes approved, so the drop plays "
+            "(any edit to a drop approves it). Switching the DROP off approves the rest but "
+            "keeps the sequence listed and silent — reviewed, playing nothing; that is not "
+            "removing it. Name a detection by "
             "its number (list_drop_sequences), or one of HIS OWN drops by your_drop_s (its "
             "time, from the listing's `yours`) or by the number of the detection standing "
             "in for it. On his own drop, on=false DELETES a trigger he placed by hand and "
@@ -981,7 +994,9 @@ OPERATIONS: dict[str, SonicOperation] = {
             "answers, and only after he says yes call it again with the same arguments "
             "plus confirm_id (a pre-drop never asks: it is not one of his triggers). To "
             "add a lull or charge that was never there, use set_drop_member; a pre-drop, "
-            "set_pre_drop with place='rules'. Nothing plays from a pre-drop yet."),
+            "set_pre_drop with place='rules'. A pre-drop that plays (its kind on and its gap "
+            "inside the scene's window) fades the drop's colour change across it and plays "
+            "each effect's pre-drop look."),
         input_schema={"type": "object", "properties": {
             "part": {"type": "string", "enum": list(PART_CHOICES)},
             "on": {"type": "boolean"},
@@ -1003,8 +1018,12 @@ OPERATIONS: dict[str, SonicOperation] = {
             "spike sits 250-3000 ms before its drop, a vocal intro 350-4500 ms; at least "
             "200 ms before it either way. Name the drop as set_drop_part does (sequence, "
             "or your_drop_s for one of his own drops — his pre-drop edits never touch his "
-            "triggers). list_drop_sequences shows each drop's pre_drop. Nothing plays "
-            "from a pre-drop yet. undo_drop_edit puts it back."),
+            "triggers). list_drop_sequences shows each drop's pre_drop. Any change here "
+            "approves a detected drop's whole sequence; on one of his own drops a move, "
+            "'rules', 'on' or a kind switch approves that pre-drop ('detected' and 'off' "
+            "do not). A pre-drop that plays (its kind on and its gap "
+            "inside the scene's window) fades the drop's colour change across it and plays "
+            "each effect's pre-drop look. undo_drop_edit puts it back."),
         input_schema={"type": "object", "properties": {
             "sequence": _SEQ,
             "your_drop_s": {"type": "number", "minimum": 0,

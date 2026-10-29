@@ -108,10 +108,29 @@ a `parts` dict is the legacy shape: confirmed or edited means the whole
 sequence is his (every part on), exactly as before parts existed. The
 first part edit on a sequence creates the dict, seeded from that legacy
 reading (`_ensure_parts`), and from then on every part's approval is
-explicit: approving the drop alone confirms it and leaves the charge and
-lull waiting. The drop part "on" and the override's confirmed state move
+explicit. The drop part "on" and the override's confirmed state move
 together. The Timeline's Confirm in parts mode approves every part that is
 not off, the same as the panel's double tick.
+
+ANY EDIT APPROVES (2026-10-28, the Admiral: "Any edit to the drop
+sequence, including approval or dissapproval of any portion, counts as
+confirmation and approval of the sequence"; his answers Q6/Q7 on the Drops
+panel proposal). Every edit of a detection — a part switched on or off, a
+handle dragged (or sent back to automatic), a lull/charge/pre-drop switched
+off or on or added, a pre-drop's kind, a review answer — ends in
+`_approve_edited`: PARTS MODE, every part that is not off approved, and the
+drop too unless he switched it off. So approving the lull alone, or
+switching it off, approves the rest and the drop plays. Switching the DROP
+off is "reviewed, plays nothing": the other parts are approved, the drop
+stays off, the sequence stays listed so he can switch it back on. TWO
+edits do NOT approve: Remove (it takes the drop away) and Back to detected
+(`revert`, it returns it to waiting) — and neither does an undo/redo
+(`restore` puts his edits back exactly), nor the bookkeeping his own rows
+write on a detection standing in for them (the `multi` steps, which keep
+the detection's tier). One of HIS OWN drops needs no approval; an edit to
+its pre-drop (a move, its kind, ＋ Pre-drop) approves that pre-drop.
+Approving a sequence never changes the firing rule (drop_firing.py): it
+plays where his sequences play.
 
 HIS OWN ROWS. `yours` in the view groups ALL his charge/lull/drop triggers
 (enabled or switched off, unlike `authored`, which feeds the firing and
@@ -882,6 +901,37 @@ def _approve_parts(ov: dict, det: Optional[dict]) -> None:
         parts[PRE_DROP] = PART_ON
 
 
+def _approve_edited(entry: dict, okey: Optional[str]) -> None:
+    """ANY EDIT APPROVES THE SEQUENCE (module docstring's ANY EDIT APPROVES):
+    the override `okey` an edit just landed in goes to PARTS MODE, every
+    part that is not off becomes approved, and the drop with them unless he
+    switched it off — a drop switched off stays listed but silent, reviewed.
+    A sequence he added (everything his already), a dismissed one and an
+    override the edit removed are left as they are."""
+    if not okey or _is_added(okey) or _is_mine(okey):
+        return
+    ovs = entry.get("overrides") or {}
+    if okey not in ovs:
+        return
+    okey, det, ov = _ensure_parts(entry, okey)
+    if ov.get("state") == STATE_DISMISSED:
+        return
+    _approve_parts(ov, det)
+    if ov["parts"].get("drop") != PART_OFF:
+        ov["parts"]["drop"] = PART_ON
+        ov["state"] = STATE_CONFIRMED
+
+
+def _approving(op) -> Any:
+    """`op(entry)` — one of the approving edits — then `_approve_edited` on
+    the override key it returned."""
+    def fn(entry):
+        okey = op(entry)
+        _approve_edited(entry, okey if isinstance(okey, str) else None)
+        return okey
+    return fn
+
+
 def _refuse_dismissed(ov: dict) -> None:
     if ov.get("state") == STATE_DISMISSED:
         raise InvalidEdit("this drop was removed — undo it, or bring it back on the Timeline")
@@ -1286,6 +1336,15 @@ def _op_mine_pre_drop(entry: dict, key: str, ctx: dict, step: dict) -> str:
         _pre_fill(slot, step["fill"], step.get("why"))
     else:
         raise InvalidEdit("name what to do to the pre-drop")
+    if (step.get("move") is not None or "kind" in step or "fill" in step
+            or step.get("off") is False):
+        # ANY EDIT APPROVES: moving, relabelling, placing or switching his
+        # pre-drop back on approves it (one switched off stays off). A move
+        # back to the rules' place is that pre-drop's own "back to detected":
+        # it does not
+        cur = _pre_drop_of(slot.base_pre, slot.rec)
+        if cur["ms"] is not None and not cur["off"]:
+            slot.rec.setdefault("parts", {})[PRE_DROP] = PART_ON
     if any(k != "at" for k in slot.rec):
         slot.rec["at"] = _now_ms()
     else:                                   # nothing of his left: no record at all
@@ -1433,18 +1492,21 @@ def reset_to_detected(uri: str, key: str) -> bool:
 
 
 def set_handle(uri: str, key: str, handle: str, ms: Optional[int]) -> str:
-    """Move one handle (see `set_handles`)."""
-    return _mutate(uri, lambda e: _op_set_handles(e, key, {handle: ms}))
+    """Move one handle (see `set_handles`). Approves the sequence (ANY EDIT
+    APPROVES)."""
+    return _mutate(uri, _approving(lambda e: _op_set_handles(e, key, {handle: ms})))
 
 
 def set_handles(uri: str, key: str, handles: dict) -> str:
-    """Move one or more handles in one edit (a whole-sequence move)."""
-    return _mutate(uri, lambda e: _op_set_handles(e, key, handles))
+    """Move one or more handles in one edit (a whole-sequence move).
+    Approves the sequence (ANY EDIT APPROVES)."""
+    return _mutate(uri, _approving(lambda e: _op_set_handles(e, key, handles)))
 
 
 def set_member_off(uri: str, key: str, handle: str, off: bool) -> str:
-    """Lull off / charge off (and back on) on a detected or added sequence."""
-    return _mutate(uri, lambda e: _op_member_off(e, key, handle, off))
+    """Lull off / charge off (and back on) on a detected or added sequence.
+    Approves the sequence (ANY EDIT APPROVES)."""
+    return _mutate(uri, _approving(lambda e: _op_member_off(e, key, handle, off)))
 
 
 def add(uri: str, drop_ms: int, *, lull_ms: Optional[int] = None,
@@ -1520,17 +1582,21 @@ def _apply_edit(uri: str, op: str, **kw) -> EditResult:
     if op == "revert":
         return _mutate_tracked(uri, lambda e: _op_reset(e, key))
     if op == "handles":
-        return _mutate_tracked(uri, lambda e: _op_set_handles(e, key, kw["handles"]))
+        return _mutate_tracked(uri, _approving(
+            lambda e: _op_set_handles(e, key, kw["handles"])))
     if op == "member":
-        return _mutate_tracked(uri, lambda e: _op_member_off(e, key, kw["handle"], kw["off"]))
+        return _mutate_tracked(uri, _approving(
+            lambda e: _op_member_off(e, key, kw["handle"], kw["off"])))
     if op == "review":
-        return _mutate_tracked(uri, lambda e: _op_resolve_review(e, key, kw["choice"]))
+        return _mutate_tracked(uri, _approving(
+            lambda e: _op_resolve_review(e, key, kw["choice"])))
     if op == "fill" and kw.get("handle") == PRE_DROP:
         times = _current_times(stored(uri), key)
         placed, why = place_pre_drop(uri, int(times["drop"]))
-        return _mutate_tracked(uri, lambda e: _op_pre_drop_fill(e, key, placed, why))
+        return _mutate_tracked(uri, _approving(
+            lambda e: _op_pre_drop_fill(e, key, placed, why)))
     if op == "pre_drop_kind":
-        return _mutate_tracked(uri, lambda e: _op_pre_drop_kind(e, key, kw["kind"]))
+        return _mutate_tracked(uri, _approving(lambda e: _op_pre_drop_kind(e, key, kw["kind"])))
     if op == "mine_pre_drop":
         ctx = {"drop_ms": int(kw["drop_ms"]), "pre": kw.get("pre")}
         step = dict(kw["step"])
@@ -1542,7 +1608,7 @@ def _apply_edit(uri: str, op: str, **kw) -> EditResult:
         times = _current_times(stored(uri), key)
         placed = _place(uri, stored(uri), handle, int(times["drop"]),
                         times.get("lull") if handle == "charge" else None)
-        return _mutate_tracked(uri, lambda e: _op_fill(e, key, handle, placed))
+        return _mutate_tracked(uri, _approving(lambda e: _op_fill(e, key, handle, placed)))
     if op == "add":
         rec = _added_record(uri, kw["drop_ms"], kw.get("lull_ms"), kw.get("charge_ms"),
                             kw.get("fill", True))
@@ -1571,7 +1637,7 @@ def _apply_edit(uri: str, op: str, **kw) -> EditResult:
             for part, value in parts.items():
                 done = _op_part(entry, key, part, value)
             return done
-        return _mutate_tracked(uri, fn)
+        return _mutate_tracked(uri, _approving(fn))
     if op == "approve":
         return _mutate_tracked(uri, lambda e: _op_approve(e, key))
     if op == "remove":

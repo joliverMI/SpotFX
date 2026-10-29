@@ -2281,8 +2281,66 @@ class TriggerEngine:
                              "— the fade is timed to the unshifted drop")
             band = 0
         offset = self._tick_drop_offset_ms()
-        return band + drop_timing.applied_offset_ms(
-            seq.drop_ms, offset, seq.build_start_ms(fire_mode))
+        return drop_timing.fire_moment_ms(
+            seq.drop_ms, offset, seq.build_start_ms(fire_mode), band) - seq.drop_ms
+
+    def drop_fire_ms(self, drop_ms: int, intensity: float,
+                     build_start_ms: Optional[int] = None,
+                     offset_ms: Optional[int] = None,
+                     band_offset_ms: Optional[int] = None) -> int:
+        """WHEN A DROP MARKED AT `drop_ms` FIRES, read live — the Drops
+        panel's countdown and the top bar's next-event box (2026-10-28, the
+        Admiral's Q4). `intensity` is the drop's own (a sequence's
+        `sequence_intensity`, or his trigger's), so the band peek selects
+        the band the fire will; `build_start_ms` the lull/charge its build
+        starts from; `offset_ms` the drop timing offset and `band_offset_ms`
+        the drop band's offset when the caller has read them already
+        (live_drop_offset_ms / drop_band_offset_ms — one read a song).
+        drop_timing.fire_moment_ms over the same two live reads tick() makes
+        (the drop band's offset, the drop timing offset); a read that fails
+        counts as 0, the drop on its mark."""
+        band = (self.drop_band_offset_ms(intensity) if band_offset_ms is None
+                else int(band_offset_ms))
+        offset = self._live_drop_offset_ms() if offset_ms is None else int(offset_ms)
+        return drop_timing.fire_moment_ms(int(drop_ms), offset, build_start_ms, band)
+
+    def his_drop_fire_ms(self, timestamp_ms: int, trigger_offset_ms: int,
+                        intensity: float, build_timestamp_ms: Optional[int] = None,
+                        build_trigger_offset_ms: int = 0,
+                        offset_ms: Optional[int] = None,
+                        band_offset_ms: Optional[int] = None) -> int:
+        """WHEN ONE OF HIS OWN AUTHORED DROP TRIGGERS FIRES, read live —
+        `drop_fire_ms`'s own twin for the Drops panel's "yours" rows
+        (2026-10-28): `timestamp_ms`/`build_timestamp_ms` are the STORED,
+        offset-inclusive moments drop_sequences.HisMark carries;
+        `trigger_offset_ms`/`build_trigger_offset_ms` are each trigger's
+        own SpectraTrigger.trigger_offset_ms, so the clamp this composes
+        runs against the RAW stored timestamps — exactly as
+        `_drop_shift_ms` picks its build start from the real triggers'
+        own `timestamp_ms` — never the offset-inclusive ones, which would
+        silently double-count a nonzero trigger_offset_ms inside the
+        clamp floor. See drop_timing.his_fire_moment_ms."""
+        band = (self.drop_band_offset_ms(intensity) if band_offset_ms is None
+                else int(band_offset_ms))
+        offset = self._live_drop_offset_ms() if offset_ms is None else int(offset_ms)
+        return drop_timing.his_fire_moment_ms(
+            int(timestamp_ms), int(trigger_offset_ms), offset,
+            build_timestamp_ms, build_trigger_offset_ms, band)
+
+    def drop_band_offset_ms(self, intensity: float) -> int:
+        """The drop band's flare-kind offset at this drop intensity — the
+        live peek tick() makes for a drop (0 when unreadable)."""
+        try:
+            return int(self._response_offset_ms(
+                FireResponseAction(event_class="drop", intensity=float(intensity))))
+        except Exception:
+            logger.exception("drop fire moment: the drop band's offset is unreadable")
+            return 0
+
+    def live_drop_offset_ms(self) -> int:
+        """The drop timing offset in force now (room, or the showing scene's
+        own) — 0 when unreadable. Public for drop_fire_ms's callers."""
+        return self._live_drop_offset_ms()
 
     def switch_plans(self, uri: Optional[str]) -> list[drop_switch.SwitchPlan]:
         """This play's drop-switch decisions for `uri` (the Timeline, Sonic)."""

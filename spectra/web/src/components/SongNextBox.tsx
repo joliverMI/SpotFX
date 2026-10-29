@@ -22,7 +22,7 @@
 import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  countdownParts, eventLabel, FINAL_STRETCH_MS, kindGlyphSvg, NEXT_EVENT_BOX_WIDTH,
+  countdownParts, eventFireMs, eventLabel, FINAL_STRETCH_MS, kindGlyphSvg, NEXT_EVENT_BOX_WIDTH,
   pickNext, type UpcomingEvent,
 } from './songStrip';
 import { getShowClockMs } from '../lib/showClock';
@@ -72,7 +72,8 @@ export default function SongNextBox({
       const now = getShowClockMs();
       const next = now != null ? pickNext(events, now) : null;
       if (next) {
-        const remaining = next.ms - (now as number);
+        // a drop counts to the moment it FIRES (mark + drop timing, his Q4)
+        const remaining = eventFireMs(next) - (now as number);
         const key = `${next.ms}:${next.kind}`;
         const glyphKey = `${next.kind}:${next.num ?? ''}`;
         if (iconRef.current && lastGlyphRef.current !== glyphKey) {

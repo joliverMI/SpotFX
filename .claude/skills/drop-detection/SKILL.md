@@ -53,18 +53,44 @@ through `apply_edit`.
 ## Home's Drops panel — parts, Testing, his own drops (2026-10-26)
 
 Predrop plan step 1 (`/home/javi/fleet-spotfx/data/predrop-plan/
-report.md` 3.6). Four things not visible cold:
+report.md` 3.6). Six things not visible cold:
 
 - **PARTS HAVE TWO MODES.** Every view sequence carries `parts` (on /
   waiting / off / absent for charge, lull, pre_drop, drop). An override
   WITHOUT a `parts` dict is the legacy shape — confirmed or edited means
   the whole sequence is his — so nothing he did before changed meaning.
   The first part edit seeds the dict from that reading (`_ensure_parts`);
-  from then on approval is explicit per part, and only an approved DROP
-  makes it his (`_view_state`). The Timeline's legacy `member` op still
-  makes a sequence "edited" (his) in legacy mode — the panel's part toggle
-  never does. The pre-drop's part is real since step 4 (see "Editing a
-  pre-drop" below).
+  from then on approval is per part, and only an approved DROP makes it
+  his (`_view_state`). The pre-drop's part is real since step 4 (see
+  "Editing a pre-drop" below).
+- **ANY EDIT APPROVES (2026-10-28, the Drops panel proposal's Q6/Q7).**
+  Every edit of a detection through `apply_edit` — parts, handles (a move
+  back to automatic included), member, fill, pre_drop_kind, review — ends
+  in `_approve_edited`: every part not off approved, the drop too unless
+  the drop is what he switched off (reviewed, plays nothing). It is wired
+  per op in `_apply_edit` via `_approving(...)` and in the public
+  `set_handle(s)`/`set_member_off`, deliberately NOT inside `_op_part` /
+  `_op_member_off`: his own rows' `multi` steps reuse those to mirror his
+  trigger's part onto the detection standing in for it, and approving
+  there would make a suggested stand-in fire under "analysed". Remove,
+  revert and restore never approve. On his own drop an edit to its
+  pre-drop (move, kind, fill, switch back on — not a move back to the
+  rules' place) approves that pre-drop. Old half-approved overrides:
+  `scripts/approve_half_edited_drops.py` (groups; dry run by default).
+- **THE FIRE MOMENT IS TWO CALLABLES, NOT ONE** (`drop_timing.
+  fire_moment_ms`/`trigger_engine.drop_fire_ms` for a listed sequence;
+  `drop_timing.his_fire_moment_ms`/`trigger_engine.his_drop_fire_ms`,
+  added 2026-10-28, for his own `yours` rows). `drop_firing.
+  annotate(..., fire_ms=, his_fire_ms=)` stamps `fire_ms` on both via
+  whichever callable applies; `/api/upcoming` copies it onto drop events
+  (`ms` stays the mark). The split exists because his drop's/lull's/
+  charge's stored "fires at" (`HisMark`) is already offset-inclusive
+  (its own `trigger_offset_ms` folded in) — feeding that into the plain
+  `fire_moment_ms` clamp would double-count a nonzero
+  `trigger_offset_ms`; `his_fire_moment_ms` unwinds it back to the raw
+  stored timestamp before clamping, exactly as `_drop_shift_ms` already
+  does. The Drops panel's countdown and the top bar's next box count to
+  `fire_ms`. Proof from the show side: `tests/test_drop_fire_moment.py`.
 - **WHAT FIRES reads parts and Testing** (`drop_firing._member_ms`,
   `_candidates(view, testing)`): a drop part off → never fires (listed,
   silent); a waiting part fires with its tier (confident) or in Testing; a

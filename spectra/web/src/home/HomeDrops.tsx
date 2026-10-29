@@ -12,10 +12,27 @@
  * button that switches it back on).
  *
  * TESTING is the icon-only toggle in the card's head (`drop_testing`):
- * while it glows every detected drop plays, approved or not, and the drop
- * that just played (the `drop_played` push, or the engine status poll's
- * `triggers.last_drop` as its backstop) moves to the top, highlighted.
- * Removed and switched-off never play, even then — the server's rule.
+ * while it glows every detected drop plays, approved or not. Removed and
+ * switched-off never play, even then — the server's rule.
+ *
+ * JUST PLAYED, NEXT, JUMP (2026-10-28, his Q1-Q5, every mode): the rows
+ * stay in time order. The drop that just played (the `drop_played` push, or
+ * the engine status poll's `triggers.last_drop` as its backstop) is
+ * highlighted in amber IN PLACE until the next one plays; the drop that
+ * plays next (dropsPanel.nextDropKey, the server's own "plays") wears a
+ * purple outline and a countdown in the top bar's style — tenths of a
+ * second, a fill and glow over the last 3 s, a flash as it fires — to the
+ * moment it FIRES (`fireMs`, mark + drop timing). Its own rAF loop writes
+ * the countdown straight to the DOM (no React render a frame, SongNextBox's
+ * rule). The list scrolls inside the card, never the page, to keep both in
+ * view. A row's time is its JUMP button: it moves the audio shape to show
+ * the whole drop and turns Follow off.
+ *
+ * DOUBLE-TAP (his Q9): a second tap on the same part within
+ * dropsPanel.DOUBLE_TAP_MS switches it off, whatever it was. The first tap
+ * has already acted (taps feel instant); the second waits behind it in the
+ * editor's queue and folds into its undo step (`parts(..., {merge: true})`)
+ * — the pair is one undo.
  *
  * THE PRE-DROP's button wears its kind's glyph (`preDrop` for a spike,
  * `preDropVoice` for a vocal intro); on one of his own drops its tap goes
@@ -28,6 +45,8 @@
  * here and scrolls it into view; selecting one zooms the shared window,
  * and so Home's audio shape, to it. */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { countdownParts, FINAL_STRETCH_MS } from '../components/songStrip';
+import { getShowClockMs } from '../lib/showClock';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPut } from '../api/client';
 import { onSpectraMessage } from '../api/spectraWs';
@@ -43,8 +62,8 @@ import { editErrorText } from '../timeline/dropEdit';
 import type { LastDrop, RoomControlState } from '../types';
 import HomeDropEditor from './HomeDropEditor';
 import {
-  buildPanelRows, fmtDropTime, nextPartState, PART_COLOR, PART_LABEL, partTitle, removeTitle,
-  rowNear, toReview, type PanelRow, type ProvenanceResponse,
+  buildPanelRows, DOUBLE_TAP_MS, fmtDropTime, nextDropKey, nextPartState, PART_COLOR, PART_LABEL,
+  partTitle, removeTitle, rowNear, toReview, type PanelRow, type ProvenanceResponse,
 } from './dropsPanel';
 
 const PART_ICON: Record<PartKey, IconName> = {
@@ -66,7 +85,7 @@ function newer(a: LastDrop | null | undefined, b: LastDrop | null | undefined): 
 
 export default function HomeDrops() {
   const qc = useQueryClient();
-  const { track, win, pushHistory, durationMs, selectedDrop } = useSongTimelineView();
+  const { track, win, pushHistory, durationMs, selectedDrop, showingLast } = useSongTimelineView();
   const uri = track?.uri ?? null;
   const { data: resp } = useDropSequences(uri);
   const { data: controls } = useRoomControls();
@@ -104,7 +123,86 @@ export default function HomeDrops() {
   const [busyTesting, setBusyTesting] = useState(false);
   const [testingError, setTestingError] = useState<string | null>(null);
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
+  const listRef = useRef<HTMLUListElement>(null);
   useEffect(() => { setSelected(null); setEditing(null); }, [uri]);
+
+  // THE NEXT DROP AND ITS COUNTDOWN (module docstring): which row is next is
+  // React state (it changes a few times a song); the countdown itself is
+  // written to the DOM by this loop, a frame at a time.
+  const [nextKey, setNextKey] = useState<string | null>(null);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  // the show clock is the PLAYING song's: no countdown on the last-played one
+  const liveRef = useRef(!showingLast);
+  liveRef.current = !showingLast;
+  const nextKeyRef = useRef<string | null>(null);
+  const countRef = useRef<HTMLSpanElement>(null);
+  const countValRef = useRef<HTMLSpanElement>(null);
+  const countUnitRef = useRef<HTMLElement>(null);
+  const countFillRef = useRef<HTMLSpanElement>(null);
+  const flashNext = useRef(false);
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const now = liveRef.current ? getShowClockMs() : null;
+      const list = rowsRef.current;
+      const key = nextDropKey(list, now);
+      if (key !== nextKeyRef.current) {
+        const was = list.find((r) => r.key === nextKeyRef.current);
+        // the one that was next has just fired: the new countdown flashes
+        flashNext.current = !!was && now != null && was.fireMs <= now;
+        nextKeyRef.current = key;
+        setNextKey(key);
+      }
+      const row = key ? list.find((r) => r.key === key) : null;
+      // the chip on screen may still be the last next row's for a frame,
+      // until React re-renders: write only to the chip of THIS row
+      if (row && now != null && countRef.current && countRef.current.dataset.key === row.key) {
+        const remaining = row.fireMs - now;
+        const parts = countdownParts(remaining);
+        if (countValRef.current) countValRef.current.textContent = parts.value;
+        if (countUnitRef.current) countUnitRef.current.textContent = parts.unit ?? '';
+        const soon = remaining <= FINAL_STRETCH_MS;
+        countRef.current.classList.toggle('soon', soon);
+        if (countFillRef.current) {
+          countFillRef.current.style.transform =
+            `scaleX(${soon ? Math.min(1, 1 - remaining / FINAL_STRETCH_MS) : 0})`;
+        }
+        if (flashNext.current) {
+          flashNext.current = false;
+          const el = countRef.current;
+          el.classList.remove('flash');
+          void el.offsetWidth;
+          el.classList.add('flash');
+          setTimeout(() => el.classList.remove('flash'), 600);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  // keep the drop that just played and the next one in view — scrolling the
+  // card's own list, never the page
+  const justKey = rows.find((r) => r.justPlayed)?.key ?? null;
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list || list.scrollHeight <= list.clientHeight) return;
+    const els = [justKey, nextKey].map((k) => (k ? rowRefs.current.get(k) : null))
+      .filter((el): el is HTMLLIElement => !!el);
+    if (!els.length) return;
+    // each row's place in the list's own content, wherever the list scrolls
+    const base = list.getBoundingClientRect().top - list.scrollTop;
+    const topOf = (el: HTMLElement) => el.getBoundingClientRect().top - base;
+    const top = Math.min(...els.map(topOf));
+    const bottom = Math.max(...els.map((el) => topOf(el) + el.getBoundingClientRect().height));
+    if (top >= list.scrollTop && bottom <= list.scrollTop + list.clientHeight) return;
+    // both if they fit, else the next one (the one still to come)
+    const nextEl = nextKey ? rowRefs.current.get(nextKey) : null;
+    const want = bottom - top <= list.clientHeight || !nextEl ? top : topOf(nextEl);
+    list.scrollTop = Math.max(0, want - 4);
+  }, [justKey, nextKey]);
 
   /** Select a row: highlight it, and zoom the shared window (and so Home's
    * audio shape) to it — one view-history step. */
@@ -158,11 +256,24 @@ export default function HomeDrops() {
   // that lands while one is in flight is ignored (the editor's own queue
   // would run it, but against the row as it was before the first landed)
   const idle = () => !editor.busy;
+  const lastTap = useRef<{ key: string; part: PartKey; at: number; next: 'on' | 'off' } | null>(null);
   const tapPart = (r: PanelRow, part: PartKey) => {
-    const next = nextPartState(r.parts[part]);
-    if (!next || !idle()) return;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const prev = lastTap.current;
+    const word = `${PART_LABEL[part].toLowerCase()}`;
+    if (prev && prev.key === r.key && prev.part === part && now - prev.at < DOUBLE_TAP_MS) {
+      // DOUBLE-TAP: off, whatever it was — behind the first tap, one undo step
+      lastTap.current = null;
+      if (prev.next === 'off') return;           // the first tap already switched it off
+      void editor.parts(r.key, { [part]: 'off' },
+        `${word} off at ${fmtDropTime(r.dropMs)} (double-tap)`, { merge: true });
+      return;
+    }
+    const next = nextPartState(r.looks[part]);
+    if (!next || !idle()) { lastTap.current = null; return; }
+    lastTap.current = { key: r.key, part, at: now, next };
     void editor.parts(r.key, { [part]: next },
-      `${PART_LABEL[part].toLowerCase()} ${next === 'on' ? 'approved' : 'off'} at ${fmtDropTime(r.dropMs)}`);
+      `${word} ${next === 'on' ? 'approved' : 'off'} at ${fmtDropTime(r.dropMs)}`);
   };
 
   const note = testingError ?? editor.error ?? editor.note;
@@ -172,7 +283,7 @@ export default function HomeDrops() {
       aria-label="Drops">
       <div className="home-drops-head">
         <InfoTip topic="drops-panel" className="home-drops-title-tip"
-          text="The drops of the song Home is showing. Each row's bar: the double tick approves the whole drop; one button per part (charge, lull, pre-drop, drop) approves it, switches it off, or back on; the cross removes the drop; the pencil edits it here. A green dot means it plays on this song now.">
+          text="The drops of the song Home is showing. The amber row just played; the purple one plays next, with a countdown to the moment it fires. A row's time jumps the audio shape to it. Each row's bar: the double tick approves the whole drop; one button per part (charge, lull, pre-drop, drop) switches it on or off — any edit approves the drop, and a double-tap switches a part off. A filled part with a dot is high confidence (the detector approved it); a dashed one is a suggestion waiting for you. The cross removes the drop; the pencil edits it here. A green dot means it plays on this song now.">
           <div className="home-quick-title">
             <Icon name="phaseDrop" size={14} />
             <span>Drops{review > 0 ? ` · ${review} to review` : ''}</span>
@@ -188,8 +299,8 @@ export default function HomeDrops() {
           </button>
           <InfoTip topic="drop-testing"
             text={testing
-              ? 'Drop testing is ON: every detected drop plays, approved or not, and the one that just played moves to the top for a quick approval. Removed and switched-off drops never play. Tap to switch it off.'
-              : 'Drop testing: tap to make every detected drop play, approved or not, so you can watch them in the room and approve the good ones. Removed and switched-off drops never play.'}>
+              ? 'Drop testing is ON: every detected drop plays, suggestions included, so you can watch them in the room; the one that just played lights up in place for a quick approval. Removed and switched-off drops never play. Tap to switch it off.'
+              : 'Drop testing: tap to make every detected drop play, suggestions included, so you can watch them in the room and approve the good ones. Removed and switched-off drops never play.'}>
             <button type="button" className={`home-quick-icon-btn home-drops-testing${testing ? ' on' : ''}`}
               role="switch" aria-checked={testing} disabled={busyTesting}
               aria-label={testing ? 'Drop testing is on — every detected drop plays' : 'Drop testing is off'}
@@ -207,27 +318,39 @@ export default function HomeDrops() {
             : resp.reason ?? 'This song has not been analysed for drops yet.'}
         </p>
       )}
-      <ul className="home-quick-list home-drops-list">
+      <ul className="home-quick-list home-drops-list" ref={listRef}>
         {rows.map((r) => {
           const his = r.kind === 'yours';
           const off = r.switchedOff;
           return (
             <li key={r.key} ref={(el) => { if (el) rowRefs.current.set(r.key, el); else rowRefs.current.delete(r.key); }}
-              className={`home-drops-row${selected === r.key ? ' sel' : ''}${off ? ' dim' : ''}${r.justPlayed ? ' justplayed' : ''}`}
+              className={`home-drops-row${selected === r.key ? ' sel' : ''}${off ? ' dim' : ''}${r.justPlayed ? ' justplayed' : ''}${nextKey === r.key ? ' next' : ''}`}
               data-key={r.key}>
               <div className="home-drops-r1">
                 <button type="button" className="home-drops-time" onClick={() => select(r)}
-                  title="Show this drop on the timeline and the audio shape">
-                  {fmtDropTime(r.dropMs)}
+                  title="Jump: show this whole drop on the audio shape (Follow goes off; tap Follow to come back to now)"
+                  aria-label={`Jump the audio shape to the drop at ${fmtDropTime(r.dropMs)}`}>
+                  <span className="home-drops-time-text">{fmtDropTime(r.dropMs)}</span>
+                  <Icon name="jump" size={12} />
                 </button>
                 <span className={`home-drops-state${off ? ' off' : ''}`}>{r.stateLine}</span>
                 {r.justPlayed && <span className="home-drops-jp">just played</span>}
+                {nextKey === r.key && (
+                  <span ref={countRef} className="home-drops-count tabular-nums" data-key={r.key}
+                    title="Plays next: the countdown runs to the moment it fires (its mark plus your drop timing)"
+                    aria-label="plays next">
+                    <span ref={countFillRef} className="home-drops-count-fill" />
+                    <span className="home-drops-count-txt">
+                      <span ref={countValRef}>—</span><small ref={countUnitRef} />
+                    </span>
+                  </span>
+                )}
                 <span className={`home-drops-dot ${r.plays ? 'yes' : 'no'}`}
                   title={r.plays ? 'Plays on this song now' : 'Does not play on this song now'}
                   aria-label={r.plays ? 'plays' : 'does not play'} role="img" />
               </div>
               <div className="home-drops-bar" role="group" aria-label={`Drop at ${fmtDropTime(r.dropMs)}`}>
-                <button type="button" className="home-drops-btn approve"
+                <button type="button" className={`home-drops-btn approve ${r.approveLook}`}
                   disabled={!r.canApprove}
                   title={r.canApprove
                     ? (his ? 'Approve its pre-drop (your own triggers need no approval)'
@@ -238,16 +361,16 @@ export default function HomeDrops() {
                   <Icon name="checkAll" size={17} />
                 </button>
                 {PARTS.map((part) => {
-                  const state = r.parts[part];
+                  const look = r.looks[part];
                   const member = his && part !== 'pre_drop' ? r.yours?.[part] : null;
-                  const title = partTitle(r, part, state, member ? provById.get(member.id) : null);
+                  const title = partTitle(r, part, look, member ? provById.get(member.id) : null);
                   return (
                     <button key={part} type="button"
-                      className={`home-drops-btn part ${part} ${state}`}
+                      className={`home-drops-btn part ${part} ${look}`}
                       data-kind={part === 'pre_drop' ? (r.preDropKind ?? undefined) : undefined}
                       style={{ ['--part' as string]: PART_COLOR[part] }}
-                      disabled={state === 'absent'}
-                      aria-pressed={state === 'on'}
+                      disabled={look === 'absent'}
+                      aria-pressed={look === 'on' || look === 'confident'}
                       title={title} aria-label={title}
                       onClick={() => tapPart(r, part)}>
                       <Icon name={partIcon(r, part)} size={16} />

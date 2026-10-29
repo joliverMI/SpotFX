@@ -430,7 +430,10 @@ def _live_detections(view: dict, keys: list[str]) -> list[dict]:
 # ── the writes ────────────────────────────────────────────────────────────
 
 async def set_parts(uri: str, key: str, parts: dict) -> PanelResult:
-    """A part's toggle. `parts`: {part: "on" | "off"}."""
+    """A part's toggle. `parts`: {part: "on" | "off"}. On a detection it
+    approves the whole sequence too (drop_sequences.py's ANY EDIT APPROVES:
+    every part not off, the drop unless it is what went off); one of his own
+    drops needs no approval — its triggers are his already."""
     if not is_his(key):
         res = await asyncio.to_thread(ds.apply_edit, uri, "parts", key=key, parts=parts)
         words = ", ".join(f"{p.replace('_', '-')} {'approved' if v == ds.PART_ON else 'off'}"

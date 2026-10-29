@@ -206,7 +206,7 @@ def test_its_part_toggle_approves_switches_off_and_back_on():
     _edit("parts", parts={"pre_drop": "on"})
     s = _seq()
     assert s["parts"]["pre_drop"] == "on"
-    assert s["parts"]["drop"] == "waiting"          # approving one part approves only it
+    assert s["parts"]["drop"] == "on"               # ANY EDIT APPROVES the sequence
     _edit("parts", parts={"pre_drop": "off"})
     assert _seq()["parts"]["pre_drop"] == "off" and _seq()["pre_drop_ms"] is None
     _edit("parts", parts={"pre_drop": "on"})        # back on, and approved
@@ -340,10 +340,11 @@ def test_his_drops_pre_drop_edits_land_in_the_drop_store_never_his_triggers(his)
     assert set(res.after["overrides"]) >= {f"mine:{drop_id}"}
     pre = _his_pre()
     assert (pre["ms"], pre["lead_ms"], pre["moved"], pre["tier"]) == (69_800, 550, True, None)
-    # back to the rules' place: nothing of his left in the store
+    assert pre["part"] == "on"                       # ANY EDIT APPROVES: the move approved it
+    # back to the rules' place: only the approval of his is left in the store
     asyncio.run(drop_panel.move_handles(ECD, key, {"pre_drop": None}))
-    assert f"mine:{drop_id}" not in (ds.stored(ECD).get("overrides") or {})
-    assert not _his_pre()["moved"]
+    assert ds.stored(ECD)["overrides"][f"mine:{drop_id}"]["parts"] == {"pre_drop": "on"}
+    assert not _his_pre()["moved"] and _his_pre()["part"] == "on"
 
 
 def test_his_drops_pre_drop_switches_off_on_and_its_kind(his):

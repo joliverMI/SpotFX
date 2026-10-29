@@ -3433,24 +3433,56 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 }
 .home-drops-row.sel { border-color: var(--accent); }
 .home-drops-row.dim { opacity: 0.6; }
+/* JUST PLAYED is amber, in place; NEXT is a purple outline with its own
+ * countdown (his Q1-Q4) — two looks that never read as each other */
 .home-drops-row.justplayed {
-  border-color: var(--accent2); background: rgba(232, 121, 249, 0.13);
-  box-shadow: 0 0 0 1px rgba(232, 121, 249, 0.35);
+  border-color: #f59e0b; background: rgba(245, 158, 11, 0.13);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.35);
 }
+.home-drops-row.next { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+/* the list scrolls inside the card, never the page (HomeDrops keeps the
+ * drop that just played and the next one in view) */
+.home-drops-list { max-height: min(440px, 62vh); overflow-y: auto; overscroll-behavior: contain; }
 .home-drops-r1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* the row's time is its JUMP button: time + an up-right arrow */
 .home-drops-time {
   font-weight: 800; font-variant-numeric: tabular-nums; font-size: 13.5px;
-  background: none; border: 0; color: var(--text); padding: 0; cursor: pointer; flex: none;
+  background: rgba(168, 85, 247, 0.16); border: 0; border-radius: 6px; color: var(--text);
+  padding: 2px 7px; cursor: pointer; flex: none;
+  display: inline-flex; align-items: center; gap: 4px;
 }
+.home-drops-time svg { color: var(--accent); }
 .home-drops-state {
   font-size: 12px; color: var(--text-muted); flex: 1; min-width: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .home-drops-state.off { font-style: italic; }
 .home-drops-jp {
-  font-size: 10.5px; font-weight: 800; color: #14061f; background: var(--accent2);
+  font-size: 10.5px; font-weight: 800; color: #1c1200; background: #f59e0b;
   border-radius: 999px; padding: 0 7px; white-space: nowrap; flex: none;
 }
+/* the next drop's countdown — the top bar's next-event box in small: a
+ * fixed width (no jump as the digits change), a fill and glow over the last
+ * 3 s, a flash as it fires */
+.home-drops-count {
+  position: relative; overflow: hidden; flex: none;
+  width: 5.2em; text-align: center; border-radius: 999px;
+  font-size: 11px; font-weight: 800; color: var(--accent);
+  background: rgba(168, 85, 247, 0.16); padding: 1px 6px; white-space: nowrap;
+}
+.home-drops-count-fill {
+  position: absolute; inset: 0; background: var(--accent); opacity: 0.4;
+  transform-origin: left; transform: scaleX(0);
+}
+.home-drops-count-txt { position: relative; }
+.home-drops-count small { font-size: 0.85em; font-weight: 600; opacity: 0.75; margin-left: 1px; }
+.home-drops-count.soon { color: #fff; box-shadow: 0 0 8px rgba(168, 85, 247, 0.6); }
+.home-drops-count.flash { animation: home-drops-count-flash 0.6s ease-out; }
+@keyframes home-drops-count-flash {
+  0% { background: var(--accent); color: #fff; }
+  100% { background: rgba(168, 85, 247, 0.16); }
+}
+@media (prefers-reduced-motion: reduce) { .home-drops-count.flash { animation: none; } }
 .home-drops-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .home-drops-dot.yes { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
 .home-drops-dot.no { background: #4b3f5e; }
@@ -3467,12 +3499,24 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 }
 .home-drops-btn:disabled { opacity: 0.3; cursor: default; }
 .home-drops-btn.approve { color: var(--ok); border-color: rgba(74, 222, 128, 0.6); }
+/* the double tick: half = only high-confidence parts wait (the detector
+ * approved them) — a firmer outline; disabled when nothing waits */
+.home-drops-btn.approve.half { border-width: 2px; box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.35); }
 .home-drops-btn.remove { color: var(--danger); border-color: rgba(248, 113, 113, 0.55); }
 .home-drops-btn.power { color: var(--ok); border-color: rgba(74, 222, 128, 0.6); }
 .home-drops-btn.edit.on { background: rgba(168, 85, 247, 0.25); border-color: var(--accent); color: #fff; }
 /* each part in its own phase colour (--part): filled = on, dashed = waiting,
  * striped = off, faint = this drop has no such part */
 .home-drops-btn.part.on { background: var(--part); border-color: var(--part); color: #14061f; }
+/* HIGH CONFIDENCE (his Q10-Q11): drawn approved, with a small dot that says
+ * the detector approved it, not him */
+.home-drops-btn.part.confident {
+  position: relative; background: var(--part); border-color: var(--part); color: #14061f;
+}
+.home-drops-btn.part.confident::after {
+  content: ""; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px;
+  border-radius: 50%; background: #14061f; opacity: 0.6;
+}
 .home-drops-btn.part.waiting { color: var(--part); border: 1.5px dashed var(--part); }
 .home-drops-btn.part.off {
   color: #6b5a85;

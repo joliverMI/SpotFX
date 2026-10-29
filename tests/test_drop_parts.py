@@ -4,8 +4,9 @@ drop_firing.py's PARTS and DROP TESTING).
 
   1. Every view sequence carries one state per part (on / waiting / off /
      absent), read the legacy way until a part edit moves it to PARTS MODE.
-  2. The part edits: approving the drop alone confirms it and leaves the
-     charge and lull waiting; the double tick approves every part not off;
+  2. The part edits: ANY EDIT APPROVES (2026-10-28) — approving or
+     switching off one part approves every part not off, the drop with them
+     unless it is the drop that went off; the double tick approves every part not off;
      switching the drop off keeps it listed but silent; Remove dismisses a
      detection and deletes an added drop; the Timeline's Confirm approves
      every part in parts mode.
@@ -101,29 +102,86 @@ def test_an_added_drop_is_on_part_by_part():
 
 # ── 2. the part edits ────────────────────────────────────────────────────
 
-def test_approving_the_drop_alone_confirms_it_and_leaves_the_build_waiting():
+def test_approving_the_drop_approves_the_whole_sequence():
+    # ANY EDIT APPROVES: approving one part approves every part not off
     _set_detected([(44_000, 40_000, 35_000, "suggested")])
     res = ds.apply_edit(URI, "parts", key="drop:44000", parts={"drop": "on"})
     s = _seq("drop:44000")
     assert s["state"] == ds.STATE_CONFIRMED
-    assert s["parts"] == {"charge": "waiting", "lull": "waiting", "pre_drop": "absent",
-                          "drop": "on"}
+    assert s["parts"] == {"charge": "on", "lull": "on", "pre_drop": "absent", "drop": "on"}
     ov = res.after["overrides"]["drop:44000"]
-    assert ov["state"] == "confirmed" and ov["parts"] == {"drop": "on"}
+    assert ov["state"] == "confirmed"
+    assert ov["parts"] == {"charge": "on", "lull": "on", "drop": "on"}
     assert res.before == {"overrides": {}, "added": []}
 
 
-def test_switching_a_lull_off_in_parts_mode_never_approves_the_rest():
+def test_approving_only_the_lull_approves_the_drop_so_it_plays():
+    _set_detected([(44_000, 40_000, 35_000, "suggested")])
+    ds.apply_edit(URI, "parts", key="drop:44000", parts={"lull": "on"})
+    s = _seq("drop:44000")
+    assert s["state"] == ds.STATE_CONFIRMED
+    assert s["parts"] == {"charge": "on", "lull": "on", "pre_drop": "absent", "drop": "on"}
+    v = ds.view(URI, triggers=[])
+    by = {f.key: f for f in drop_firing.firing_sequences(v)}
+    assert by["drop:44000"].members() == [("charge", 35_000), ("lull", 40_000),
+                                          ("drop", 44_000)]
+
+
+def test_switching_a_lull_off_approves_the_rest():
     _set_detected([(44_000, 40_000, 35_000, "suggested")])
     ds.apply_edit(URI, "parts", key="drop:44000", parts={"lull": "off"})
     s = _seq("drop:44000")
-    # the legacy Timeline lull-off would make it "edited" (his); a part
-    # toggle must not approve anything he did not tap
-    assert s["state"] == "suggested"
-    assert s["parts"] == {"charge": "waiting", "lull": "off", "pre_drop": "absent",
-                          "drop": "waiting"}
+    # a disapproval is an edit too: every part not off is approved, the drop plays
+    assert s["state"] == ds.STATE_EDITED
+    assert s["parts"] == {"charge": "on", "lull": "off", "pre_drop": "absent", "drop": "on"}
     ds.apply_edit(URI, "parts", key="drop:44000", parts={"lull": "on"})
     assert _seq("drop:44000")["parts"]["lull"] == "on"
+
+
+def test_switching_the_drop_off_approves_the_rest_and_plays_nothing():
+    # Q6: the drop off counts as reviewed and plays nothing; it stays listed
+    _set_detected([(44_000, 40_000, 35_000, "suggested")])
+    ds.apply_edit(URI, "parts", key="drop:44000", parts={"drop": "off"})
+    s = _seq("drop:44000")
+    assert s["parts"] == {"charge": "on", "lull": "on", "pre_drop": "absent", "drop": "off"}
+    v = ds.view(URI, triggers=[])
+    assert drop_firing.firing_sequences(v, testing=True) == []
+    a = next(x for x in drop_firing.annotate(v, "analysed", False, testing=True)["sequences"]
+             if x["key"] == "drop:44000")
+    assert a["fires"] is False and a["fires_reason"] == "switched_off"
+    ds.apply_edit(URI, "parts", key="drop:44000", parts={"drop": "on"})
+    assert _seq("drop:44000")["parts"] == {"charge": "on", "lull": "on", "pre_drop": "absent",
+                                           "drop": "on"}
+
+
+@pytest.mark.parametrize("op,kw", [
+    ("handles", {"handles": {"lull": 41_000}}),
+    ("handles", {"handles": {"lull": None}}),
+    ("member", {"handle": "charge", "off": True}),
+])
+def test_every_other_edit_approves_the_sequence(op, kw):
+    _set_detected([(44_000, 40_000, 35_000, "suggested")])
+    ds.apply_edit(URI, op, key="drop:44000", **kw)
+    s = _seq("drop:44000")
+    assert s["state"] in (ds.STATE_CONFIRMED, ds.STATE_EDITED)
+    assert s["parts"]["drop"] == "on"
+    assert all(v in ("on", "off", "absent") for v in s["parts"].values())
+
+
+def test_remove_back_to_detected_and_undo_do_not_approve():
+    # Q7: Remove takes it away, Back to detected returns it to waiting
+    _set_detected([(44_000, 40_000, 35_000, "suggested"), (90_000, 86_000, 80_000, "suggested")])
+    ds.apply_edit(URI, "remove", key="drop:44000")
+    ov = ds.stored(URI)["overrides"]["drop:44000"]
+    assert ov["state"] == ds.STATE_DISMISSED and "parts" not in ov
+    res = ds.apply_edit(URI, "handles", key="drop:90000", handles={"lull": 85_000})
+    assert _seq("drop:90000")["parts"]["drop"] == "on"
+    ds.apply_edit(URI, "revert", key="drop:90000")
+    assert _seq("drop:90000")["state"] == "suggested"
+    assert _seq("drop:90000")["parts"]["drop"] == "waiting"
+    res = ds.apply_edit(URI, "handles", key="drop:90000", handles={"lull": 85_000})
+    ds.apply_edit(URI, "restore", edits=res.before, expect=ds.edits_rev(res.after))
+    assert _seq("drop:90000")["parts"]["drop"] == "waiting"
 
 
 def test_the_double_tick_approves_every_part_that_is_not_off():
@@ -197,10 +255,23 @@ def test_one_part_edit_is_one_undo_step():
 
 # ── 2b. the firing gate, pure ────────────────────────────────────────────
 
+def _half_approved(key):
+    """An override left half-approved from before ANY EDIT APPROVES (the drop
+    approved, the build still waiting) — the shape the one-time
+    scripts/approve_half_edited_drops.py exists for; no edit makes it now."""
+    def fn(entry):
+        entry.setdefault("overrides", {})[key] = {
+            "detected": None, "state": "confirmed", "parts": {"drop": "on"}}
+    ds._mutate(URI, fn)
+
+
 def test_only_the_parts_that_play_are_members():
     _set_detected([(44_000, 40_000, 35_000, "suggested"), (90_000, 86_000, 80_000, "confident")])
-    ds.apply_edit(URI, "parts", key="drop:44000", parts={"drop": "on"})
-    ds.apply_edit(URI, "parts", key="drop:90000", parts={"lull": "off"})
+    _half_approved("drop:44000")
+    def lull_off(entry):          # a lull off, the rest waiting (pre-rule)
+        entry.setdefault("overrides", {})["drop:90000"] = {
+            "detected": None, "lull_off": True, "parts": {}}
+    ds._mutate(URI, lull_off)
     v = ds.view(URI, triggers=[])
     by = {s.key: s for s in drop_firing.firing_sequences(v)}
     # approved drop, waiting build on a SUGGESTED tier: only the drop
@@ -356,11 +427,20 @@ def test_with_testing_on_an_off_part_a_switched_off_drop_and_a_removed_drop_neve
 
 def test_approving_one_drop_plays_it_without_testing():
     _seed_millones()
+    rec = _sweep(testing=False)
+    assert not _near(_drops(rec), 166_594)      # a suggestion waits
     ds.apply_edit(MILLONES, "parts", key="drop:166594", parts={"drop": "on"})
     rec = _sweep(testing=False)
     assert _near(_drops(rec), 166_594)
-    # its build was not approved and its tier is suggested: it waits
-    assert not _members_near(rec, "lull", 161_485)
-    ds.apply_edit(MILLONES, "approve", key="drop:166594")
+    # ANY EDIT APPROVES: its build was approved with it, so it plays too
+    assert _members_near(rec, "lull", 161_485)
+
+
+def test_approving_only_its_lull_plays_the_drop_without_testing():
+    # the Admiral's own case: "approving just the lull plays nothing outside
+    # Testing" — not any more
+    _seed_millones()
+    ds.apply_edit(MILLONES, "parts", key="drop:166594", parts={"lull": "on"})
     rec = _sweep(testing=False)
+    assert _near(_drops(rec), 166_594)
     assert _members_near(rec, "lull", 161_485)
