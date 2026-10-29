@@ -53,7 +53,7 @@ through `apply_edit`.
 ## Home's Drops panel — parts, Testing, his own drops (2026-10-26)
 
 Predrop plan step 1 (`/home/javi/fleet-spotfx/data/predrop-plan/
-report.md` 3.6). Four things not visible cold:
+report.md` 3.6). Six things not visible cold:
 
 - **PARTS HAVE TWO MODES.** Every view sequence carries `parts` (on /
   waiting / off / absent for charge, lull, pre_drop, drop). An override
@@ -77,12 +77,20 @@ report.md` 3.6). Four things not visible cold:
   pre-drop (move, kind, fill, switch back on — not a move back to the
   rules' place) approves that pre-drop. Old half-approved overrides:
   `scripts/approve_half_edited_drops.py` (groups; dry run by default).
-- **THE FIRE MOMENT** (`drop_timing.fire_moment_ms`, read live by
-  `trigger_engine.drop_fire_ms`): `drop_firing.annotate(..., fire_ms=)`
-  stamps `fire_ms` on every listed sequence and his `yours` rows;
-  `/api/upcoming` copies it onto drop events (`ms` stays the mark). The
-  Drops panel's countdown and the top bar's next box count to it. Proof
-  from the show side: `tests/test_drop_fire_moment.py`.
+- **THE FIRE MOMENT IS TWO CALLABLES, NOT ONE** (`drop_timing.
+  fire_moment_ms`/`trigger_engine.drop_fire_ms` for a listed sequence;
+  `drop_timing.his_fire_moment_ms`/`trigger_engine.his_drop_fire_ms`,
+  added 2026-10-28, for his own `yours` rows). `drop_firing.
+  annotate(..., fire_ms=, his_fire_ms=)` stamps `fire_ms` on both via
+  whichever callable applies; `/api/upcoming` copies it onto drop events
+  (`ms` stays the mark). The split exists because his drop's/lull's/
+  charge's stored "fires at" (`HisMark`) is already offset-inclusive
+  (its own `trigger_offset_ms` folded in) — feeding that into the plain
+  `fire_moment_ms` clamp would double-count a nonzero
+  `trigger_offset_ms`; `his_fire_moment_ms` unwinds it back to the raw
+  stored timestamp before clamping, exactly as `_drop_shift_ms` already
+  does. The Drops panel's countdown and the top bar's next box count to
+  `fire_ms`. Proof from the show side: `tests/test_drop_fire_moment.py`.
 - **WHAT FIRES reads parts and Testing** (`drop_firing._member_ms`,
   `_candidates(view, testing)`): a drop part off → never fires (listed,
   silent); a waiting part fires with its tier (confident) or in Testing; a

@@ -116,15 +116,18 @@ def applied_offset_ms(drop_ms: int, offset_ms: int,
 
 def fire_moment_ms(drop_ms: int, offset_ms: int, build_start_ms: Optional[int] = None,
                    band_offset_ms: int = 0) -> int:
-    """THE MOMENT A DROP FIRES — the one definition (2026-10-28, the Drops
-    panel's countdown and the top bar's next-event box count to it, the
-    Admiral's Q4: "the moment it fires: mark + drop timing"). Its mark
-    (`drop_ms`: a sequence's drop, or his own trigger's time plus its own
-    offset) plus the drop band's flare-kind offset (`band_offset_ms`,
+    """THE MOMENT A DROP FIRES — for a DETECTED drop-sequence drop, whose
+    mark is not offset-inclusive (2026-10-28, the Drops panel's countdown
+    and the top bar's next-event box count to it, the Admiral's Q4: "the
+    moment it fires: mark + drop timing"). Its mark (`drop_ms`) plus the
+    drop band's flare-kind offset (`band_offset_ms`,
     scene_response.band_trigger_offset_ms) plus this offset as
     `shift_drop_ms` clamps it — the same three OFFSET-family terms
     trigger_engine.tick() sums into a drop's target. The drop's lead is 0,
-    so this is when it begins."""
+    so this is when it begins. **Not for one of his own authored drop
+    triggers** — their stored mark already has `trigger_offset_ms` folded
+    in, so clamping it here would double-count it; see
+    `his_fire_moment_ms` below, the twin this function does NOT cover."""
     return shift_drop_ms(drop_ms, offset_ms, build_start_ms) + int(band_offset_ms)
 
 

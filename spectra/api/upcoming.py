@@ -36,8 +36,13 @@ trigger's own offset) — the caller places it against the show clock
 A DROP ALSO CARRIES `fire_ms` (2026-10-28, the Admiral's Q4 on the Drops
 panel proposal): the moment it actually fires — its mark plus the drop
 band's offset plus the drop timing offset, drop_firing.annotate's
-`fire_ms` (drop_timing.fire_moment_ms, the one definition). Its marker is
-drawn at `ms`, the mark; the next-event box counts to `fire_ms`.
+`fire_ms`. A detected sequence's own `fire_ms` comes from `drop_timing.
+fire_moment_ms`; one of his own authored drop triggers (read here off
+`plan["drop_sequences"]["yours"]`) comes from the separate `drop_timing.
+his_fire_moment_ms` instead, since his stored timestamp is already
+offset-inclusive and the plain formula would double-count a nonzero
+`trigger_offset_ms` — see drop_firing.annotate's own docstring. Its
+marker is drawn at `ms`, the mark; the next-event box counts to `fire_ms`.
 """
 from __future__ import annotations
 

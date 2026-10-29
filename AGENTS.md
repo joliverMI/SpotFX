@@ -12368,7 +12368,7 @@ lull, pre-drop, drop), remove, edit-in-place — plus an icon-only Testing
 toggle. `spectra/services/drop_panel.py` (writes), `drop_sequences.py`'s
 PARTS section (the model) and `services/profile_trigger_edit.py` (his
 own triggers) are the binding statements; the `drop-detection` skill has
-the cold-start detail. Five things:
+the cold-start detail. Six things:
 
 - **PARTS HAVE TWO MODES, AND ANY EDIT APPROVES (2026-10-28, his
   "any edit ... counts as confirmation and approval of the sequence").**
@@ -12387,12 +12387,18 @@ the cold-start detail. Five things:
   drop that just played is highlighted in place (any mode), the next one
   that will play counts down to its FIRE moment — `fire_ms`, stamped by
   `drop_firing.annotate` from `drop_timing.fire_moment_ms` (mark + drop
-  band offset + drop timing offset, the ONE definition, read live through
+  band offset + drop timing offset, read live through
   `trigger_engine.drop_fire_ms`) and carried on `/api/upcoming` drops so
-  the top bar's next box counts to it too. A waiting part on a confident
-  tier draws approved with a detector dot and is not "to review"; a
-  double-tap switches a part off and folds into the first tap's undo step
-  (`dropEdit.mergeEdit`).
+  the top bar's next box counts to it too. **His own `yours` rows go
+  through a SEPARATE callable** (`his_fire_ms=`/`drop_timing.
+  his_fire_moment_ms`/`trigger_engine.his_drop_fire_ms`), because his
+  drop's/lull's/charge's stored timestamp already has its own
+  `trigger_offset_ms` folded in — the clamp has to run against the raw
+  stored timestamp, never that offset-inclusive one, or a nonzero
+  `trigger_offset_ms` double-counts inside the clamp floor. A waiting part
+  on a confident tier draws approved with a detector dot and is not "to
+  review"; a double-tap switches a part off and folds into the first
+  tap's undo step (`dropEdit.mergeEdit`).
 - **TESTING (`RoomControlState.drop_testing`) is a fire-time gate only**:
   `drop_firing.firing_sequences(view, testing)`, read once per tick and in
   the trigger clock's memo key. The PLANNER's `protected_windows` never
