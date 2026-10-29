@@ -1,12 +1,14 @@
 """SPECTRA — per-track manual intensity marks (2026-08-15, the Admiral's
-ruling on the headroom-reserve gate): the AUTO ceiling
-(intensity_scale.HEADROOM_RESERVE * intensity_scale.SCALE_MAX = 0.75)
-STANDS for every song the AUTO path resolves — nothing automatic ever
-exceeds it. A manual mark is the ONE way past it, his own words: "he
-marks the track; automatic never does." Restores the control SpotFX's own
-per-song manual slider gave him (SongProfile.intensity_scale, source=
-"user", never touched by the auto backfill) — without a way to open it,
-the 0.6 headroom reserve is a CAP with no release, not a GATE.
+ruling on the headroom-reserve gate): the AUTO ceiling — `energy.
+AUTO_CEILING` (0.75; since the 2026-10-28 Energy build an explicit cap in
+spectra/services/energy.py's own mark_math, not the emergent
+intensity_scale.HEADROOM_RESERVE * intensity_scale.SCALE_MAX product it
+started as) — STANDS for every song the AUTO path resolves — nothing
+automatic ever exceeds it. A manual mark is the ONE way past it, his own
+words: "he marks the track; automatic never does." Restores the control
+SpotFX's own per-song manual slider gave him (SongProfile.intensity_scale,
+source="user", never touched by the auto backfill) — without a way to
+open it, the headroom reserve is a CAP with no release, not a GATE.
 
 intensity_scale.song_scaling_factor() checks get_mark() FIRST, before
 falling through to the AUTO genre+bass computation — a marked song's

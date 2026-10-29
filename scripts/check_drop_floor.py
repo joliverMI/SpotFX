@@ -15,14 +15,17 @@ measured: it structurally capped every one of these four songs' own
 ceiling at 0.40-0.44 (their auto scale is 0.68-0.74, so HEADROOM_RESERVE
 x scale never reaches 0.7 even at energy_rms=1.0), so NEITHER 0.95 NOR
 0.7 ever let a single real drop through on that measure. Checking the
-actual top-bar component settled it: LiveEnergyReadout.tsx renders
-`bridge.intensity()` (== `analysis_reader.section_energy_at`) VERBATIM,
-with no mark factored in anywhere — the adjacent "Mark" readout is a
-separate, un-multiplied number. His final word, "match to the energy in
-the top bar shown", is the DISPLAYED number. This script measures THAT
-plain measure (drop_detector.final_energy_at, now == section_energy_at)
-at 0.0 (off), 0.7 (the shipped default) and 0.95 (his first number, kept
-for comparison), against his same 13 real drops.
+actual top-bar component settled it AT THE TIME: LiveEnergyReadout.tsx
+rendered `bridge.intensity()` (== `analysis_reader.section_energy_at`)
+VERBATIM, with no mark factored in anywhere — the adjacent "Mark"
+readout was a separate, un-multiplied number. His final word, "match to
+the energy in the top bar shown", is the DISPLAYED number — and stayed
+the rule once the 2026-10-28 ONE ENERGY build made the top bar's own
+number the Mark-factored one (spectra/services/energy.py): this script
+still measures exactly what `drop_detector.final_energy_at` reads, which
+is why its printed numbers now include the Mark, same as the live top
+bar, at 0.0 (off), 0.7 (the shipped default) and 0.95 (his first number,
+kept for comparison), against his same 13 real drops.
 
 READ-ONLY against the live checkout's storage (default /home/javi/SpotFX,
 override with --live-root) — the same isolation shape as
@@ -102,9 +105,9 @@ def main() -> int:
         _isolate(live_root, tmp)
         from spectra.services import drop_detector, drop_scoring, drop_sequences, trigger_store
 
-        print("## The drop floor — the plain top-bar energy number (2026-10-06)\n")
-        print("Each of his 13 real drops' top-bar-as-displayed energy (what "
-              "`drop_detector.final_energy_at` reads — no mark factored in):\n")
+        print("## The drop floor — the top-bar Energy number (since 2026-10-28)\n")
+        print("Each of his 13 real drops' top-bar-as-displayed Energy (what "
+              "`drop_detector.final_energy_at` reads, Mark math included):\n")
         print("| Song | Drop (ms) | Displayed energy |")
         print("|---|---|---|")
         for name, uri in SONGS:
