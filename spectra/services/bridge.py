@@ -378,19 +378,6 @@ class SpotEffectsBridge:
             return None
         return analysis_reader.genre_bucket(genres)
 
-    def song_scaling_factor(self) -> float:
-        """The current song's per-song genre+bass render-intensity scale
-        (spectra.services.intensity_scale, the SpotFX v2 port) — the
-        `song_scaling_factor` term in intensity_scale.combine_measured_and_
-        scale's headroom formula. Neutral 1.0 with no track (never blocks a
-        fire); every other degradation (no bass data, no genre match) is
-        handled inside intensity_scale.song_scaling_factor itself."""
-        uri = self.track_uri()
-        if uri is None:
-            return 1.0
-        from spectra.services import intensity_scale
-        return intensity_scale.song_scaling_factor(uri, self.track_genres())
-
     def absorb_holds_lights(self) -> bool:
         """True while an Absorb Music window holds the show still (SpotFX
         proved the house silent and has not given it back yet). See this

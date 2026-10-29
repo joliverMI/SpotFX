@@ -311,7 +311,17 @@ def combine_measured_and_scale(measured_intensity: float,
 def render_intensity(spotify_uri: Optional[str], genres: Optional[list[str]],
                      measured_intensity: float) -> float:
     """Convenience wrapper: song_scaling_factor() + combine_measured_and_
-    scale() in one call, for callers that just want "this moment's final
-    render intensity for this song" (trigger_engine, scene_sequencer)."""
+    scale() in one call, for a caller that just wants "this moment's final
+    render intensity for this song" without resolving the factor itself —
+    not currently called anywhere in this repo (trigger_engine and
+    scene_sequencer now read Energy directly, spectra/services/energy.py;
+    their own _default_render_intensity is the identity). Resolves whether
+    the song carries a manual Mark the same way song_scaling_factor() itself
+    does, so a marked song reaches its own Mark-math ceiling (up to 1.0)
+    here too, not the unmarked 0.75 one."""
     factor = song_scaling_factor(spotify_uri, genres)
-    return combine_measured_and_scale(measured_intensity, factor)
+    marked = False
+    if spotify_uri:
+        from spectra.services import intensity_scale_marks
+        marked = intensity_scale_marks.get_mark(spotify_uri) is not None
+    return combine_measured_and_scale(measured_intensity, factor, marked)

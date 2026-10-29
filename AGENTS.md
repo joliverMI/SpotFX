@@ -9706,10 +9706,9 @@ detail. Eleven things:
   deliberately NOT, like every phase effect's phase keys (nor the flare
   pokes `flash`/`flip`).
 - **THE FEED** (`spectra/services/pulse_feed.py`, binding statement):
-  `energy` = the section's render intensity (the generator's per-song
-  stretch, `midsong_generator.section_intensities`, through
-  `intensity_scale.combine_measured_and_scale` — so it obeys his 0.75
-  automatic ceiling and reaches 1.0 only on a marked track), `beat_ms` from
+  `energy` = the section's Energy (`spectra/services/energy.py` — see
+  "ENERGY" below — `energy.normalize` then `energy.mark_math`, so it obeys
+  his 0.75 automatic ceiling and reaches 1.0 only on a marked track), `beat_ms` from
   the analysed tempo. Pushed only when it changes (a section edge, a song)
   by its own engine loop on `bridge.effective_position_ms` — no A/V lead, so
   not a second application point — and carried in the scene fire that

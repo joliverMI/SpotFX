@@ -45,6 +45,15 @@ def expect_invalid(fn, label):
         print(f"ok: {label} rejected")
 
 
+def _declared_energy(uri, trig):
+    """The moment's Energy, as a proof declares it on the trigger's own
+    stored action.intensity (the tests/test_trigger_engine.py convention,
+    since 2026-10-28 the engine reads Energy at a trigger's moment,
+    spectra/services/energy.py, never the stored value, and these songs
+    have no analysis for it to read it from)."""
+    return trig.action.intensity
+
+
 td = Path(tempfile.mkdtemp(prefix="spectra-triggers-spec-"))
 
 from fx import device_model
@@ -327,7 +336,8 @@ song["gap_demo"] = [
 ]
 engine_gap = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
                            fire_response=gap_recording_fire_response,
-                           render_intensity=lambda x: x)
+                           render_intensity=lambda x: x,
+                           energy_for=_declared_energy)
 asyncio.run(engine_gap.on_track_state("gap_demo"))
 asyncio.run(engine_gap.tick(0))
 asyncio.run(engine_gap.tick(1000))
@@ -351,7 +361,8 @@ song["gap_gated"] = [
 ]
 engine_gated = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
                              fire_response=gap_recording_fire_response,
-                             render_intensity=lambda x: x)
+                             render_intensity=lambda x: x,
+                             energy_for=_declared_energy)
 asyncio.run(engine_gated.on_track_state("gap_gated"))
 asyncio.run(engine_gated.tick(0))
 asyncio.run(engine_gated.tick(1000))
@@ -530,6 +541,7 @@ def fake_select_scene(intensity):
 engine7 = TriggerEngine(list_triggers=lambda uri: song.get(uri, []),
                         fire_scene=fake_fire_scene, select_scene=fake_select_scene,
                         render_intensity=lambda x: x,
+                        energy_for=_declared_energy,
                         # LOOKAHEAD (section 9 below) would otherwise pin
                         # "kernel-picked-scene" early, find it isn't a real
                         # scene at fire time (correctly — a fake id backed
@@ -938,30 +950,37 @@ check(len(spectra_engine.responses.surges) == before_update_to + 1,
       "authored-trigger action, no via_trigger split needed")
 rc.save_room_controls(rc.RoomControlState(scene_change_mode="full"))  # restore
 
-# render-intensity wiring (2026-08-15 headroom-reserve correction): the
-# production _default_render_intensity multiplies a trigger's raw intensity
-# by the CURRENT SONG's genre+bass scale via intensity_scale.py's seam —
-# SELECTION (the kernel proof above) deliberately stays on the raw value;
-# only the FIRE-time value that reaches a choke point is scaled.
-from spectra.services import intensity_scale
+# render-intensity wiring (2026-10-28 ONE ENERGY build): the production
+# _default_render_intensity is now the IDENTITY — every value it is
+# handed is already ENERGY (spectra/services/energy.py), the song's
+# normalized section energy with the Mark math applied ONCE, inside
+# Energy itself (energy.mark_math). Applying the Mark again at this seam
+# would apply it twice — the easy mistake the Energy plan's own "how to
+# change it cleanly" section warns about. SELECTION (the kernel proof
+# above) was never scaled by this seam either way.
+from spectra.services import energy, intensity_scale
 
-# Sets the bridge's track state directly (not handle_message) so this stays
-# a narrow wiring proof — routing through handle_message would also fire
-# _on_track_uri's auto-generate/sequencer/ambient side effects, unrelated
-# to what this check is proving.
-spectra_engine.bridge._track = {
-    "spotify_uri": "spotify:track:render-scale-wiring", "genres": []}
+check(prod_engine._default_render_intensity(1.0) == 1.0,
+      "the production render_intensity default is the identity — Energy, "
+      "not this seam, already carries the Mark math")
+check(prod_engine._default_render_intensity(0.42) == 0.42,
+      "...and it is a pure passthrough for any value, not special-cased "
+      "to 1.0")
+
+# The Mark math itself (HEADROOM x the song's scale, capped at AUTO_CEILING
+# for a song with no manual Mark, or at 1.0 for a marked one) now lives in
+# energy.mark_math — sanity-check it still enforces that ceiling split so a
+# future change here can't silently let an unmarked song reach past it.
 expected_factor = intensity_scale.song_scaling_factor(
     "spotify:track:render-scale-wiring", [])
-expected_final = max(0.0, min(1.0, 1.0 * intensity_scale.HEADROOM_RESERVE * expected_factor))
-check(prod_engine._default_render_intensity(1.0) == expected_final,
-      "the production render_intensity default reaches the real bridge + "
-      "intensity_scale.combine_measured_and_scale — a raw 1.0 lands at "
-      "measured * HEADROOM_RESERVE * song_scaling_factor, not raw 1.0")
-check(expected_final < 1.0,
-      "sanity: the headroom reserve alone (0.6x) means even a raw-1.0 "
-      "moment on this song can never reach a bare passthrough")
-spectra_engine.bridge._track = None   # restore for whatever runs next
+unmarked_energy = energy.mark_math(1.0, expected_factor, marked=False)
+check(unmarked_energy <= energy.AUTO_CEILING,
+      "sanity: energy.mark_math caps an unmarked song's Energy at "
+      "AUTO_CEILING even at normalized=1.0 and the song's own highest scale")
+marked_energy = energy.mark_math(1.0, expected_factor, marked=True)
+check(marked_energy <= 1.0 and marked_energy >= unmarked_energy,
+      "sanity: a MARKED song's Energy may reach up to 1.0, never less than "
+      "the unmarked ceiling for the same normalized value and scale")
 
 # ═══ 6. mid-song generation (front 3) ════════════════════════════════════
 
