@@ -13,6 +13,10 @@ import { energyFill } from '../../lib/energyAt';
 import { plannedEvents as analysedEvents } from '../../debug/layers';
 import { lightShowMarkers } from './lightShowLayer';
 import { dropSeqBody, dropSeqRail, dropSeqRailBand } from './dropSeqLayer';
+// Home's drop-sequence editor dialog (home/HomeDropEditor.tsx) draws its
+// own small strip with these SAME four colours, from this SAME shared
+// module — see rmsBandSeries.ts's own docstring for why.
+import { RMS_BAND_FILL } from './rmsBandSeries';
 
 const TRI_H = 8;
 const TRI_W = 7;
@@ -165,10 +169,10 @@ export const rmsBands: CanvasLayer = {
       ctx.fillStyle = style;
       ctx.fill();
     };
-    if (view.filters.total) fill(shape.rms_total, view.scales.total, 'rgba(150,150,150,0.4)');
-    if (view.filters.bass) fill(shape.rms_low, view.scales.bass, 'rgba(46,204,113,0.45)');
-    if (view.filters.mid) fill(shape.rms_mid, view.scales.mid, 'rgba(230,126,34,0.4)');
-    if (view.filters.high) fill(shape.rms_high, view.scales.high, 'rgba(52,152,219,0.35)');
+    if (view.filters.total) fill(shape.rms_total, view.scales.total, RMS_BAND_FILL.total);
+    if (view.filters.bass) fill(shape.rms_low, view.scales.bass, RMS_BAND_FILL.bass);
+    if (view.filters.mid) fill(shape.rms_mid, view.scales.mid, RMS_BAND_FILL.mid);
+    if (view.filters.high) fill(shape.rms_high, view.scales.high, RMS_BAND_FILL.high);
   },
 };
 

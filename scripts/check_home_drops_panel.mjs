@@ -171,6 +171,19 @@ const RAILS = {
   hits: [[88600, 0.5], [89200, 0.8], [89700, 0.4], [89800, 0.6], [169300, 0.4], [169400, 0.8]],
   entries: [[87000, 0.6], [88800, 0.7]],
 };
+// The audio shape behind the editor's own strip (THIRTEEN, below) — his
+// 2026-10-29 ask that the dialog's shape draw total/bass/mid/high like
+// the main one. Covers the 0:44.0 drop's own window (its charge/lull/
+// drop are never mutated by any handle drag elsewhere in this fixture,
+// unlike 1:30.0's) with four bands of clearly different magnitude.
+const SHAPE = {
+  timestamps_ms: [30000, 34000, 36000, 38000, 40000, 42000, 44000, 45000, 50000],
+  rms_total: [0.10, 0.20, 0.40, 0.70, 0.90, 1.00, 0.80, 0.30, 0.10],
+  rms_low: [0.05, 0.10, 0.20, 0.35, 0.50, 0.60, 0.45, 0.15, 0.05],
+  rms_mid: [0.03, 0.06, 0.12, 0.20, 0.30, 0.35, 0.25, 0.08, 0.03],
+  rms_high: [0.01, 0.02, 0.05, 0.08, 0.12, 0.15, 0.10, 0.03, 0.01],
+  avg_rms_1s: null,
+};
 let revN = 0;
 // parts answers chain their revisions, as the real store's do, so a
 // double-tap's second write starts where the first one ended
@@ -211,6 +224,8 @@ globalThis.fetch = async (url, opts = {}) => {
   }
   if (p === '/spectra/api/drop-sequences' && method === 'GET') return json(200, VIEW);
   if (p === '/spectra/api/drop-sequences/provenance') return json(200, PROV);
+  if (p === '/api/audio-shape/data') return json(200, SHAPE);
+  if (p === '/api/settings') return json(200, {});
   if (p === '/spectra/api/drop-sequences/parts') {
     partsN += 1;
     const before = partsRev;
@@ -263,6 +278,7 @@ export { removeTitle, buildPanelRows, snapPreDrop, stepPreDrop, clampPreDrop, ne
 export { seedShowClockFromStatus } from ${src('lib/showClock.ts')};
 export { ICONS } from ${src('components/iconRegistry.ts')};
 export { PRE_DROP_COLOR } from ${src('timeline/dropSequences.ts')};
+export { RMS_BAND_FILL, RMS_BAND_KEYS } from ${src('timeline/canvas/rmsBandSeries.ts')};
 import { SongTimelineViewProvider, useSongTimelineView } from ${src('components/songTimelineView.tsx')};
 import { __emit } from ${JSON.stringify(fakeWsPath)};
 
@@ -320,6 +336,15 @@ export async function push(msg) {
 
 export async function ask(uri, ms) {
   await act(async () => { askDrop(uri, ms); });
+  await settle();
+}
+
+/** The main shape's own T/B/M/H toggle, called straight on the shared
+ * context (the real control lives on home/HomeTimeline.tsx, not mounted
+ * by this harness) — proving the dialog, which only READS this state,
+ * follows it with no component of its own standing between the two. */
+export async function toggleBand(key) {
+  await act(async () => { viewState.toggleShapeBand(key); });
   await settle();
 }
 
@@ -820,6 +845,41 @@ console.log('TWELVE high confidence: drawn approved, with the detector dot');
   const row = H.buildPanelRows(waitsView, { testing: false }).find((r) => r.key === 'drop:90000');
   ok(/high confidence · waits: only your own triggers play on this song/.test(row.stateLine)
     && !row.waiting, `where only his own triggers play it waits, says so, and is still not "to review" ("${row.stateLine}")`);
+}
+
+console.log('THIRTEEN the editor\'s shape draws every band the main shape does, in its colour');
+{
+  // 0:44.0's own charge/lull/drop (35000/40000/44000) are never mutated by
+  // any drag/fill elsewhere in this fixture, unlike 1:30.0's — a stable
+  // window to assert the shape against: two beats either side, beat_ms
+  // 500, so [34000, 45000].
+  await H.click(rowByTime('0:44.0').querySelector('.home-drops-btn.edit'));
+  const strip = () => container.querySelector('.home-drop-editor-strip');
+  const bandPaths = () => [...container.querySelectorAll('.home-drop-editor-shape')];
+  const keysOf = (paths) => paths.map((p) => p.className.baseVal.split(' ')[1]);
+
+  ok(!!strip(), 'the pencil opens the editor on 0:44.0');
+  const all = bandPaths();
+  ok(JSON.stringify(keysOf(all)) === JSON.stringify([...H.RMS_BAND_KEYS]),
+    `every band drawn, total first then bass/mid/high over it (${keysOf(all).join(', ')})`);
+  for (const p of all) {
+    const key = p.className.baseVal.split(' ')[1];
+    ok(p.style.fill.replace(/\s+/g, '') === H.RMS_BAND_FILL[key].replace(/\s+/g, ''),
+      `${key}'s fill is the shared colour, not a hand-copied one (${p.style.fill})`);
+  }
+
+  await H.toggleBand('total');
+  ok(JSON.stringify(keysOf(bandPaths())) === JSON.stringify(['bass', 'mid', 'high']),
+    `total off (the main shape's T toggle) removes just that trace (${keysOf(bandPaths()).join(', ')})`);
+
+  await H.toggleBand('bass');
+  ok(JSON.stringify(keysOf(bandPaths())) === JSON.stringify(['mid', 'high']),
+    `bass off too: only mid and high remain (${keysOf(bandPaths()).join(', ')})`);
+
+  await H.toggleBand('total');
+  await H.toggleBand('bass');
+  ok(JSON.stringify(keysOf(bandPaths())) === JSON.stringify([...H.RMS_BAND_KEYS]),
+    'switching both back on restores every band — the dialog owns no copy of its own');
 }
 
 if (failures) {
