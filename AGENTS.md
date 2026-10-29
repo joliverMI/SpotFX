@@ -1273,11 +1273,14 @@ Let It Be≈0.50, Soy Peor≈1.00 (100% = no adjustment, not "maximum" — a
 from it; don't repeat that reasoning). Own SPECTRA-side feature cache
 (`storage/spectra/intensity_scale_features.json`, never SpotFX's cache
 file — see `_isolated_intensity_scale` in `tests/conftest.py` for why every
-test repoints this). `song_scaling_factor()` is wired at RENDER choke
-points only — `trigger_engine._fire`/`_fire_transition` and
-`scene_sequencer._roll`'s fire call — never at `selection_kernel.select`'s
-scene/flare/colour-set SELECTION, whose own `genre_mult` already factors
-genre into the pick; scaling intensity there too would double-count genre.
+test repoints this). **Since the 2026-10-28 Energy build (see "ENERGY"
+above), `song_scaling_factor()` is no longer called directly from
+`trigger_engine`/`scene_sequencer`** — it feeds `spectra/services/
+energy.py`'s own `song_factor()`/`mark_math`, the ONE place the Mark
+math is applied, read once at the show clock for both SELECTION
+(`selection_kernel.select`'s scene/flare/colour-set pick) and the FIRE —
+the kernel's own `genre_mult` is a per-candidate weight on the pick, not
+a second scaling of Energy, so this is not a double count.
 
 2026-08-15 correction, his words, closed (not a curve-shape question): the
 old plan (`final = measured * song_scaling_factor`) was "just a straight

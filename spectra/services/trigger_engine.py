@@ -44,16 +44,18 @@ moment its timestamp is first crossed:
                        gated like fire_response. Reset is the same action
                        as update (his correction — one behaviour).
 
-RENDER-INTENSITY SCALE (2026-08-15, the ported-and-corrected SpotFX v2
-per-song/genre intensity scaling — spectra/services/intensity_scale.py):
-every trigger's own intensity is a RAW measured value; _default_
-render_intensity applies the current song's genre+bass scale to it
-(headroom-reserve formula, intensity_scale.py's module docstring) before
-it reaches a fire choke point. SELECTION (_select_scene, when a
-generated trigger's scene_id is None) deliberately stays on the RAW
-value — selection_kernel.py's own genre_mult already factors genre into
-which scene/flare/colour-set gets picked, so scaling intensity there too
-would double-count genre in the pick, not just in how hard it lands.
+ENERGY (2026-10-28, the Admiral's Energy plan — spectra/services/
+energy.py is the binding statement): every trigger's own intensity is
+ENERGY — the song's normalized section energy with the Mark math
+(the song's genre+bass scale, intensity_scale.py) already applied
+once, inside energy.py's own mark_math. `_energized()` resolves it onto
+a copy of the trigger before both the lead/offset peeks and the fire,
+so SELECTION (_select_scene, when a generated trigger's scene_id is
+None) and the FIRE both read the identical Energy value —
+selection_kernel.py's own genre_mult is a per-candidate weight on the
+pick, not a second scaling of the x position, so this is not the old
+double count. _render_intensity/_default_render_intensity is now the
+identity: applying the Mark again at this seam would apply it twice.
 
 THE SETTINGS MODEL (room_controls.RoomControlState.scene_change_mode,
 replacing front 3's plain midsong_triggers_enabled bool): four tiers the
@@ -1720,9 +1722,11 @@ class TriggerEngine:
                         # affinity draw entirely.
                         scene_id = self._select_scene_from_pool(a.scene_pool)
                     else:
-                        # SELECTION uses the trigger's RAW intensity: the kernel
-                        # already applies its own genre_mult (selection_kernel.py)
-                        # — scaling here too would double-count genre in the pick.
+                        # SELECTION reads Energy (a.intensity, already
+                        # energized by _energized() above _fire): the
+                        # kernel's own genre_mult (selection_kernel.py) is
+                        # a per-candidate weight on the pick, not a second
+                        # scaling of the x position — no double count.
                         scene_id = self._select_scene(a.intensity)
                     if scene_id is None:
                         logger.info("trigger %s: kernel picked no scene "
