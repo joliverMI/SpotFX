@@ -106,10 +106,12 @@ LEGACY_KEEP_MARK = 0.5
 # mean "not told" (rule 3) rather than also meaning "a silent drop".
 DROP_INTENSITY_FLOOR = 0.01
 
-# THE INTENSITY-SCALED DROP. The loudest AUTOMATIC intensity (spectra
-# intensity_scale: HEADROOM_RESERVE 0.6 x SCALE_MAX 1.25) is exactly the
-# legacy drop; a marked track at 1.0 runs DROP_SCALE_MAX of it; a quiet
-# song shrinks toward the effect's own floor (`scale_min`).
+# THE INTENSITY-SCALED DROP. The loudest AUTOMATIC intensity — Energy's
+# own AUTO_CEILING (spectra/services/energy.py), 0.75 outright rather than
+# an emergent HEADROOM_RESERVE x SCALE_MAX product since the 2026-10-28
+# Energy build — is exactly the legacy drop; a marked track at 1.0 runs
+# DROP_SCALE_MAX of it; a quiet song shrinks toward the effect's own floor
+# (`scale_min`).
 DROP_AUTO_CEILING = 0.75
 DROP_SCALE_MAX = 1.2
 DEFAULT_DROP_SCALE_MIN = 0.4

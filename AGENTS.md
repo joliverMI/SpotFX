@@ -10057,13 +10057,12 @@ including how an effect opts in. Four things:
   Admiral): `RoomControlState.drop_shock_enabled` (room, default on), the
   showing scene's `SceneV2.drop_shock_enabled` (default on; the Fish scene
   ships OFF via `scripts/set_fish_drop_shock_off.py`, a deploy step), and
-  `drop_shock_min_energy` (0.7) against the TOP BAR's Energy at the drop,
-  WITH THE LOOK-AHEAD (`bridge.intensity(look_ahead=True)`, wired as
-  `ResponseEngine(drop_energy=)` since the 2026-10-28 Energy build —
-  `room_energy=` stays the present-only reading the Pulse flash floor
-  below still uses); NOT the render `drop_intensity`, which the automatic
-  path caps at 0.75 — 8% of his real drops clear 0.7 on it; an unknown
-  energy is never gated).
+  `drop_shock_min_energy` reads Energy at the drop WITH THE LOOK-AHEAD
+  (`ResponseEngine(drop_energy=)` → `bridge.intensity(look_ahead=True)`),
+  the same number the drop fires at — its 0.7 was set on the old raw
+  top-bar scale, and the Energy plan's D5 parity re-set (`scripts/
+  energy_parity.py`) moves it to the share-matched Energy value (0.32 on
+  his data at build time); an unknown energy is never gated).
   `scene_response._drop_shock_keys` decides once per drop arm with
   `phase_grammar.shock_allowed` and tells every member `drop_shock_on`
   (record key `drop_shock`); told False the base render builds no painter,
