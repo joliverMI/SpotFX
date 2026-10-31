@@ -390,6 +390,24 @@ def test_lowering_recently_captureds_cap_asks_raising_does_not(spotfx):
     assert _run(ac._op_set_absorb_setting("recently_captured_max", 80))["status"] == "applied"
 
 
+def test_the_hidden_player_on_asks_first_off_at_once(spotfx):
+    """Phase 4 (services/absorb_lane.py): turning the backlog on the hidden
+    player ON newly lets Absorb act with nobody pressing anything, so it asks
+    first; turning it off acts at once. The status names what it is doing."""
+    assert absorb_store.load_config().use_capture_lane is False
+    on = _run(ac._op_set_absorb_setting("use_capture_lane", True))
+    assert on["status"] == "needs_confirmation" and "Serenity Capture" in on["question"]
+    assert "never changes your playlists" in on["question"]
+    assert absorb_store.load_config().use_capture_lane is False
+    yes = _run(ac._op_set_absorb_setting("use_capture_lane", True, confirm_id=on["confirm_id"]))
+    assert yes["status"] == "applied" and absorb_store.load_config().use_capture_lane is True
+    st = _run(ac._op_absorb_status())
+    assert st["hidden_player"]["on"] is True and "state" in st["hidden_player"]
+    off = _run(ac._op_set_absorb_setting("use_capture_lane", False))
+    assert off["status"] == "applied" and absorb_store.load_config().use_capture_lane is False
+    assert "true or false" in _run(ac._op_set_absorb_setting("use_capture_lane", 1))["reason"]
+
+
 def test_running_while_asleep_off_at_once_on_asks(spotfx):
     off = _run(ac._op_set_absorb_setting("run_while_sleeping", False))
     assert off["status"] == "applied" and "on → off" in off["summary"]

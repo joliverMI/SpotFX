@@ -87,6 +87,19 @@ const S = await bundle(`export * from ${JSON.stringify(join(web, 'src/absorb/abs
     'an ALBUM link is refused — Absorb plays a playlist');
   ok(S.parsePlaylistLink('  ') === null && S.parsePlaylistLink('hello') === null, 'empty or junk is refused');
 
+  // the hidden player (phase 4, services/absorb_lane.py)
+  ok(S.laneLine(null) === 'Reading the hidden player…', 'the hidden player line waits for its read');
+  ok(S.laneLine({ enabled: false, state: 'off', reason: '', job: null, learned: [], failed: [], passed_over: [], log: [] })
+    .startsWith('Off:'), 'off says so');
+  ok(S.laneLine({ enabled: true, state: 'learning', reason: '', learned: [], failed: [], passed_over: [], log: [],
+    job: { job_id: 'j', uri: 'u', title: 'September', artist: 'Earth, Wind & Fire', duration_ms: 1 } })
+    === 'Learning Earth, Wind & Fire — September on the hidden player.', 'learning names the song');
+  ok(S.laneLine({ enabled: true, state: 'resting', reason: 'The house is asleep, so the hidden player rests.', job: null,
+    learned: [], failed: [], passed_over: [], log: [] }).includes('asleep'), 'resting gives the server\'s own reason');
+  ok(S.laneTally({ enabled: true, state: 'idle', reason: '', job: null, learned: [{ uri: 'a', title: 'x', at_ms: 1 }],
+    failed: [], passed_over: ['b', 'c'], log: [] }) === '1 song learned since SpotFX started · 2 passed over after using up their tries',
+    'the tally counts what it learned and passed over, never invented');
+
   const none = S.headRateView({ attempted: 0, with_head: 0 });
   ok(none.pct === null && /No capture has committed/.test(none.text),
     'a head rate with nothing committed is "none yet", never 0 %');
@@ -252,6 +265,14 @@ globalThis.fetch = async (url, init = {}) => {
       house_tz: 'America/New_York', windows: [], open_now: [], next: null, overrun_grace_min: 5, outcomes: [] });
   }
   if (u.startsWith('/api/absorb/parked')) return json({ parked: world.parked });
+  if (u.startsWith('/api/absorb/lane')) {
+    return json(world.config.use_capture_lane
+      ? { enabled: true, state: 'learning', reason: '', log: [], failed: [], passed_over: [t(77)],
+          learned: [{ uri: t(70), title: 'ABBA — Dancing Queen', at_ms: 1 }],
+          job: { job_id: 'j1', uri: t(71), title: 'September', artist: 'Earth, Wind & Fire', duration_ms: 215000 } }
+      : { enabled: false, state: 'off', reason: 'Off: the hidden player only learns songs during a Jukebox night.',
+          job: null, learned: [], failed: [], passed_over: [], log: [] });
+  }
   if (u.startsWith('/api/absorb/retry')) return json({ uri: body.uri, unparked: true });
   if (u.startsWith('/api/absorb/start')) return json({ status: 'running', run: briefOf(world.run) });
   if (u.startsWith('/api/absorb/stop')) return json({ status: 'ended', run: briefOf(world.run) });
@@ -385,6 +406,18 @@ console.log('\n§2 a window mid-evening — the cards, and every control reaches
     'a window with no days is refused by name and Save is disabled');
   await click(buttonByText(c, /^Cancel$/));
 
+  // the hidden player card (phase 4): off, says so; the switch writes that one setting
+  const hp = $(c, '[data-testid="absorb-hidden-player"]');
+  ok(!!hp && text($(c, '[data-testid="absorb-lane-line"]')).startsWith('Off:'),
+    'the hidden player card renders, off by default, saying what it does instead');
+  const sw = hp?.querySelector('button[aria-label*="hidden player"]');
+  await click(sw);
+  ok(lastWrite()?.url === '/api/absorb/config' && JSON.stringify(lastWrite().body) === '{"use_capture_lane":true}',
+    `its switch writes use_capture_lane alone (${JSON.stringify(lastWrite()?.body)})`);
+  await P.settle(60);
+  ok(text($(c, '[data-testid="absorb-lane-line"]')).includes('Learning Earth, Wind & Fire — September'),
+    `on, it names the song the hidden player is learning (${text($(c, '[data-testid="absorb-lane-line"]'))})`);
+
   await click(buttonByText(c, /^\s*Stop$/));
   ok(lastWrite()?.url === '/api/absorb/stop', 'Stop reaches /stop');
   ok(writes().every((w) => w.url.startsWith('/api/absorb/')), 'every write the page made went to /api/absorb');
@@ -428,11 +461,11 @@ console.log('\n§3 the shipped state — nothing linked, nothing ever run');
 await report();
 
 async function report() {
-  // ── 4. the six help topics: content, route mapping, and the page's own
+  // ── 4. the seven help topics: content, route mapping, and the page's own
   //      controls actually opening them ─────────────────────────────────
-  console.log('\n§4 the six help topics: HELP_SECTIONS, the route\'s "?", and every control');
+  console.log('\n§4 the seven help topics: HELP_SECTIONS, the route\'s "?", and every control');
   const topics = ['absorb-music', 'absorb-silence', 'absorb-failures', 'absorb-schedule',
-    'absorb-already-captured', 'absorb-sleeping'];
+    'absorb-already-captured', 'absorb-sleeping', 'absorb-hidden-player'];
 
   const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
   const knownIds = new Set();
@@ -477,7 +510,7 @@ async function report() {
         .filter(Boolean),
     );
     ok(topics.every((id) => reached.has(id)) && topics.length === reached.size,
-      `hovering the page's own controls opens exactly the six absorb topics (${[...reached].sort().join(', ')})`);
+      `hovering the page's own controls opens exactly the seven absorb topics (${[...reached].sort().join(', ')})`);
     P.unmount();
   } else {
     console.log('  (jsdom unavailable — skipping the hover-behaviour half of §4)');

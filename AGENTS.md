@@ -11122,6 +11122,16 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   `scripts/check_jukebox_absorbing.mjs` (`tests/test_jukebox_absorbing_page.py`),
   the Absorbing tab in `scripts/render_jukebox_page.py` and the learning scene
   in `scripts/render_jukebox_guest.py`.
+- **ABSORB'S BACKLOG ON THE HIDDEN PLAYER (phase 4, PR 4.4)** is
+  `services/absorb_lane.py` (its docstring is the binding statement; the
+  `absorb-music` skill carries the cold-start map), its own supervised task,
+  switched by `AbsorbConfig.use_capture_lane` (ships OFF; Sonic asks first to
+  turn it on). It learns only Absorb's FRESH songs, one at a time, and RESTS —
+  cancelling its song — during a Jukebox night (the learning queue's), an
+  Absorb window, sleeping or unreadable sleep (conservative: Order 27's only
+  exception is his grant for Absorb's proven-silent windows), account B signed
+  out, or a lane that says the hidden player is unusable. It never writes his
+  playlists. Spec: `tests/test_absorb_lane.py`.
 - **THE MASTER PAGE (PR 1.3)** is SPECTRA's `/jukebox` (Engine ▾ Jukebox,
   `spectra/web/src/jukebox/`): a Set list editor and a READ-ONLY Live tab,
   plus the sign-in line — a third tab, Credits, was added by PR 3.3

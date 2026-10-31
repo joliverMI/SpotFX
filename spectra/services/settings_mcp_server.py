@@ -1142,8 +1142,9 @@ async def get_absorb_settings() -> dict:
 @mcp.tool()
 async def set_absorb_setting(key: _AbsorbKeyEnum, value: Union[bool, int],
                              confirm_id: Optional[str] = None) -> dict:
-    """Change one Absorb number, or whether it keeps going while the house
-    sleeps."""
+    """Change one Absorb number, whether it keeps going while the house
+    sleeps, or whether the hidden player learns the backlog when nothing else
+    runs."""
     return await _call("set_absorb_setting", key=key, value=value, confirm_id=confirm_id)
 
 

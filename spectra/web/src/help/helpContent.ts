@@ -2333,6 +2333,16 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Switch "Keep going while the house sleeps" off to stop windows from running while the house is asleep. Either way, pick the schedule\'s end with the morning in mind.',
         ],
       },
+      {
+        id: 'absorb-hidden-player',
+        title: 'Learning new songs on the hidden player',
+        keywords: 'hidden player serenity capture second account capture lane backlog never captured learn idle inaudible jukebox',
+        body: [
+          'Off by default. Switched on, the hidden player "Serenity Capture" — a second Spotify player, signed in as the second account, whose sound goes nowhere — learns the linked playlist\'s songs that have never been captured, one at a time in playlist order, whenever no Absorb window and no Jukebox night is running. Nothing is heard and the house\'s own music is untouched.',
+          'It rests while the house is asleep (or while that can\'t be read), while an Absorb window is open, during a Jukebox night (the night\'s own songs come first), and while the second account is signed out or the hidden player isn\'t running; the card says which. A song it was learning when one of those began is stopped and tried again later.',
+          'It only learns songs with no shape at all. A song whose shape is missing its head, or its analysis, is still Absorb\'s own re-capture in a window — that one moves your hand-placed marks with it. It never changes your playlists: a song it learned is filed into Recently Captured as "already captured" at Absorb\'s next window. A song that fails its tries (Absorb\'s own attempts setting) is passed over until you switch this off and on again.',
+        ],
+      },
     ],
   },
   {

@@ -7,7 +7,7 @@
  * "none yet", never 0 %; a silence the run never proved is "not proven",
  * never a tick. A line that cannot be known says so. */
 import type {
-  AbsorbBrief, AbsorbConfig, AbsorbCounts, AbsorbHeadRate, AbsorbHeadTally, AbsorbParkedSong,
+  AbsorbBrief, AbsorbConfig, AbsorbCounts, AbsorbHeadRate, AbsorbHeadTally, AbsorbLaneStatus, AbsorbParkedSong,
   AbsorbRealign, AbsorbRun, AbsorbRunSummary, AbsorbScheduleOutcome, AbsorbWindow,
 } from './types';
 
@@ -459,4 +459,29 @@ export function outcomeLine(o: AbsorbScheduleOutcome): string {
 export function lastOpenedRun(run: AbsorbRun | null | undefined, earlier: AbsorbRunSummary[] | null | undefined): AbsorbRun | AbsorbRunSummary | null {
   if (run && (run.opened_ms ?? 0) > 0 && run.state !== 'running' && run.state !== 'paused') return run;
   return (earlier ?? []).find((r) => (r.opened_ms ?? 0) > 0 && r.id !== run?.id) ?? null;
+}
+
+// ── the hidden player (phase 4: services/absorb_lane.py) ──────────────────
+
+/** What the hidden player is doing for Absorb, in one line: the song it is
+ * learning, or the server's own reason it rests (which says what instead). */
+export function laneLine(lane: AbsorbLaneStatus | null | undefined): string {
+  if (!lane) return 'Reading the hidden player…';
+  if (!lane.enabled) return 'Off: the hidden player only learns songs during a Jukebox night.';
+  if (lane.state === 'learning' && lane.job) {
+    const who = lane.job.artist ? `${lane.job.artist} — ${lane.job.title}` : lane.job.title || lane.job.uri;
+    return `Learning ${who} on the hidden player.`;
+  }
+  return lane.reason || 'Waiting for its turn.';
+}
+
+/** The small print under it: what it learned lately and what it passed over. */
+export function laneTally(lane: AbsorbLaneStatus | null | undefined): string {
+  if (!lane || !lane.enabled) return '';
+  const parts: string[] = [];
+  const n = lane.learned.length;
+  parts.push(n ? `${n} song${n === 1 ? '' : 's'} learned since SpotFX started` : 'nothing learned yet since SpotFX started');
+  const p = lane.passed_over.length;
+  if (p) parts.push(`${p} passed over after using up their tries`);
+  return parts.join(' · ');
 }
