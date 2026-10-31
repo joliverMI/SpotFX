@@ -11050,6 +11050,16 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   callback, and reads it back as `GET /api/spotify/auth-age` and on the
   jukebox status's `spotify_auth`/`warnings` — a line from 14 days before the
   end. A sign-in older than the record reads `unknown`, never a guess.
+- **THE CAPTURE ACCOUNT HAS ITS OWN SIGN-IN (G2, 2026-10-30)**:
+  `api/spotify_capture.py` is the binding statement. Account B (phase 4's
+  hidden "Serenity Capture" player) signs in at `/api/spotify/capture/login`
+  with its own redirect URI (`settings.spotipy_capture_redirect_uri`), its
+  own token file (`storage/.spotify_token_cache_capture`) and record — NEVER
+  `/api/spotify/login`, whose ONE token everything SpotFX polls follows. The
+  code is exchanged into memory and the account read back first; the main
+  account is refused with nothing written (show_dialog, so Spotify always
+  asks who), and the main token file is only ever read. `/capture/status`
+  reads two files, never Spotify.
 - **THE MASTER PAGE (PR 1.3)** is SPECTRA's `/jukebox` (Engine ▾ Jukebox,
   `spectra/web/src/jukebox/`): a Set list editor and a READ-ONLY Live tab,
   plus the sign-in line — a third tab, Credits, was added by PR 3.3

@@ -22,6 +22,8 @@ storage/backups/
 storage/nn_models/
 storage/resources/
 storage/.spotify_token_cache
+storage/.spotify_token_cache_capture
+storage/spotify_capture_auth.json
 storage/events.json
 storage/events.json.bak-*
 storage/gradients.json
