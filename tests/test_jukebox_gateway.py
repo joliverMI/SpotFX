@@ -40,6 +40,9 @@ class FakeSpotipy:
         self.times: list[tuple[str, float]] = []
         self.pages: list[dict] = []
         self.items_args: list[dict] = []
+        self.track_data: dict = {}
+        self.artist_data: dict = {}
+        self.artist_calls: list[str] = []
 
     def _hit(self, name: str) -> None:
         self.times.append((name, self.clock.t))
@@ -71,6 +74,15 @@ class FakeSpotipy:
         self._hit("playlist_items")
         self.items_args.append(kw)
         return self.pages[kw["offset"] // 100]
+
+    def track(self, tid):
+        self._hit("track")
+        return dict(self.track_data)
+
+    def artist(self, artist_id):
+        self._hit("artist")
+        self.artist_calls.append(artist_id)
+        return dict(self.artist_data.get(artist_id) or {})
 
 
 def test_every_call_is_spaced_reads_included():
@@ -154,6 +166,43 @@ def test_playback_and_queue_are_reduced_to_what_the_engine_reads():
     assert pb["shuffle"] is True and pb["context_uri"] == "spotify:playlist:p"
     assert g.queue() == {"current": "spotify:track:a",
                          "queue": ["spotify:track:b", "spotify:track:c"]}
+
+
+def test_track_genres_looks_up_the_tracks_primary_artist():
+    clock = Clock()
+    sp = FakeSpotipy(clock)
+    sp.track_data = {"artists": [{"id": "jbx-genre-test-artist-1", "name": "Test Artist"}]}
+    sp.artist_data = {"jbx-genre-test-artist-1": {"genres": ["synthwave", "chillwave"]}}
+    g = JukeboxGateway(sp, clock=clock, sleep=clock.sleep)
+    assert g.track_genres("spotify:track:xyz") == ["synthwave", "chillwave"]
+    assert sp.artist_calls == ["jbx-genre-test-artist-1"]
+
+
+def test_track_genres_is_empty_when_the_track_has_no_artist():
+    clock = Clock()
+    sp = FakeSpotipy(clock)
+    sp.track_data = {"artists": []}
+    g = JukeboxGateway(sp, clock=clock, sleep=clock.sleep)
+    assert g.track_genres("spotify:track:xyz") == []
+    assert sp.artist_calls == []
+
+
+def test_track_genres_artist_read_is_spaced_and_locked_like_every_other_call():
+    """The genre lookup makes TWO Spotify calls (track, then artist) — both
+    must obey the gateway's own spacing/lock contract, not just the first."""
+    clock = Clock()
+    sp = FakeSpotipy(clock)
+    sp.track_data = {"artists": [{"id": "jbx-genre-spacing-test", "name": "Spacing Artist"}]}
+    sp.artist_data = {"jbx-genre-spacing-test": {"genres": ["lofi"]}}
+    g = JukeboxGateway(sp, clock=clock, sleep=clock.sleep)
+    g.queue()                                  # an earlier call, to prime spacing
+    assert g.track_genres("spotify:track:xyz") == ["lofi"]
+    assert [name for name, _ in sp.times] == ["queue", "track", "artist"]
+    starts = [t for _, t in sp.times]
+    ends = [t + sp.cost for t in starts]
+    for prev_end, start in zip(ends, starts[1:]):
+        assert start - prev_end >= MIN_CALL_SPACING_S - 1e-9
+    assert len(clock.slept) == 2                # before `track`, and before `artist`
 
 
 @pytest.mark.parametrize("link, expected", [

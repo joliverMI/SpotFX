@@ -262,6 +262,30 @@ async def post_hold(entry_id: str, body: HoldBody) -> dict:
     return await night.runner.hold(entry_id, body.held)
 
 
+@router.get("/learning")
+async def get_learning() -> dict:
+    """Absorb-then-queue (services/jukebox/learning.py): whether the hidden
+    player can learn, what it is learning now, the songs waiting to be
+    learned with when each will be ready, and the ones it couldn't learn."""
+    from services.jukebox import learning
+    return learning.learner.status()
+
+
+@router.post("/line/{entry_id}/unanalysed")
+async def post_unanalysed(entry_id: str) -> dict:
+    """Let a song that is waiting to be learned play now, un-analysed (it is
+    learned as it plays)."""
+    from services.jukebox import learning
+    return await learning.learner.play_unanalysed(entry_id)
+
+
+@router.post("/line/{entry_id}/relearn")
+async def post_relearn(entry_id: str) -> dict:
+    """Give a song the hidden player couldn't learn fresh tries."""
+    from services.jukebox import learning
+    return await learning.learner.relearn(entry_id)
+
+
 @router.post("/skip-lock")
 async def post_skip_lock(body: SkipLockBody) -> dict:
     """Keep a song from every skip tonight — the room's vote and a paid

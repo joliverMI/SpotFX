@@ -33,6 +33,7 @@ from routers import spotify, profiles, events, control, settings_router, audio_s
 from services import absorb
 from services.jukebox import guest_link as jukebox_guest_link
 from services.jukebox import night as jukebox
+from services.jukebox import learning as jukebox_learning
 from services import spotify_auth_age
 from routers.settings_router import apply_settings_override
 from services import effect_params
@@ -203,6 +204,10 @@ async def lifespan(app: FastAPI):
     tasks = [
         asyncio.create_task(absorb.run_supervised(), name="absorb-supervisor"),
         asyncio.create_task(jukebox.runner.run_supervised(), name="jukebox-program"),
+        # absorb-then-queue: while a night runs, songs the lights don't know
+        # are learned on the hidden player (capture_lane/, its own process)
+        # before they play. Talks to the lane on loopback; plays nothing here.
+        asyncio.create_task(jukebox_learning.learner.run_supervised(), name="jukebox-learning"),
         # closes a guest link (Tailscale Funnel) this process opened if no
         # night is running — a crash between a night's start and its end.
         # Off by default; with the link off it never runs `tailscale`.

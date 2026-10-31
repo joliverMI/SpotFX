@@ -54,8 +54,11 @@ excluded" from "forgotten":
     is for the host to weigh with the phones in front of him, not to hear
     read out at the party;
   * the jukebox LINE — adding, removing and moving songs (bumps, play
-    next), and keeping a song from skips (PR 3.2), are the guests' turn and
-    the host's page, where each song is shown;
+    next), keeping a song from skips (PR 3.2), and the two learning buttons
+    (phase 4: letting a song that waits to be learned play un-analysed now,
+    and giving one the hidden player couldn't learn fresh tries) are the
+    guests' turn and the host's page, where each song is shown
+    (`jukebox_status` reads what is being learned and what is waiting);
   * reordering the SET PLAYLIST — it rewrites his playlist's order in
     Spotify; a drag on the page, where the set is shown song by song;
   * the GUEST LINK (N1, SpotFX's services/jukebox/guest_link.py) —
@@ -104,6 +107,9 @@ SHOW_KEYS: tuple[str, ...] = ("approve_new_phones", "play_mode")
 #: word filter — the same one validator a page edit runs
 GUEST_RULE_KEYS: tuple[str, ...] = ("night_ends", "last_call_min", "explicit", "explicit_after",
                                     "max_phones", "renames_per_night", "word_filter",
+                                    # absorb-then-queue (phase 4): learn a new
+                                    # song on the hidden player before it plays
+                                    "learn_first",
                                     # free play (PR 2.3): the room's skip, bumps,
                                     # play next, the jail's time-out
                                     "free_skip_downs", "free_skip_share", "free_bumps_per_hour",
@@ -333,10 +339,30 @@ async def _op_jukebox_status() -> dict:
         return err
     nxt = [{k: i.get(k) for k in ("kind", "title", "starts_in_ms", "entry_id") if k in i}
            for i in (st.get("next") or [])[:10]]
-    return {"status": "ok", "summary": _status_summary(st), "running": bool(st.get("running")),
-            "night": st.get("night"), "now": st.get("now"), "next": nxt,
-            "line": st.get("line") or [], "warnings": st.get("warnings") or [],
-            "spotify_sign_in": st.get("spotify_auth"), "guests": st.get("guests")}
+    out = {"status": "ok", "summary": _status_summary(st), "running": bool(st.get("running")),
+           "night": st.get("night"), "now": st.get("now"), "next": nxt,
+           "line": st.get("line") or [], "warnings": st.get("warnings") or [],
+           "spotify_sign_in": st.get("spotify_auth"), "guests": st.get("guests")}
+    lr, lerr = await _get("/api/jukebox/learning")
+    if not lerr:
+        out["learning"] = learning_summary(lr)
+    return out
+
+
+def learning_summary(lr: dict) -> dict:
+    """What the hidden player is doing for the night (phase 4), in a few
+    fields: whether it can learn and why not, the song it is learning, how
+    many wait and when the first is ready, and how many it couldn't learn."""
+    queue = lr.get("queue") or []
+    now = next((q for q in queue if q.get("state") == "learning"), None)
+    waiting = [q for q in queue if q.get("state") == "waiting"]
+    return {"can_learn": bool(lr.get("available")) and bool(lr.get("learn_first")),
+            "why_not": lr.get("reason") or "",
+            "learning_now": now.get("title") if now else None,
+            "learning_now_ready_in_s": now.get("eta_s") if now else None,
+            "waiting": len(waiting),
+            "first_waiting_ready_in_s": waiting[0].get("eta_s") if waiting else None,
+            "couldnt_learn": [q.get("title") for q in lr.get("parked") or []]}
 
 
 async def _op_get_jukebox_settings() -> dict:
@@ -757,7 +783,9 @@ OPERATIONS: dict[str, SonicOperation] = {
             "page's mode: credits turns on prices, the Shop and the credits chip), the guest "
             "rules — night_ends and "
             "explicit_after (\"HH:MM\", house time), last_call_min (0-60), explicit (no | extra "
-            "| after), max_phones (5-100), renames_per_night (0-10), word_filter (true/false) — "
+            "| after), max_phones (5-100), renames_per_night (0-10), word_filter (true/false), "
+            "learn_first (true/false: a song the lights haven't learned is learned on the hidden "
+            "player before it plays; off, it plays at once un-analysed) — "
             "the free-play rules — free_skip_downs (2-10 ▼ to skip a song), free_skip_share "
             "(50-90, the percent of the votes that must be ▼), free_bumps_per_hour (0-10), "
             "free_play_next (host | off), free_jail_songs (0-15 songs a jailed guest's songs "

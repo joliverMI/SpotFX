@@ -969,6 +969,17 @@
    "choices": null
   },
   {
+   "key": "learn_first",
+   "card": "Requests",
+   "label": "Learn a new song before it plays (on the hidden player)",
+   "unit": "",
+   "kind": "bool",
+   "default": true,
+   "min": null,
+   "max": null,
+   "choices": null
+  },
+  {
    "key": "max_phones",
    "card": "Guests",
    "label": "Most phones tonight",

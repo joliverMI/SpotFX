@@ -238,6 +238,23 @@ class JukeboxGateway:
             return None
         return self._song(data)
 
+    def track_genres(self, uri: str) -> list[str]:
+        """The track's primary artist's genres, the same cached lookup a
+        normal capture uses (api.spotify_client._fetch_artist_genres) — so a
+        song the Jukebox dispatches to the hidden capture lane can carry
+        genres for its after-learn, genre-matched training profile pick. The
+        artist read goes through this gateway's own `_call` — spaced and
+        locked like every other Spotify call here — via `_SpacedClient`."""
+        from api.spotify_client import _fetch_artist_genres
+        tid = uri[len(_TRACK_ID):] if uri.startswith(_TRACK_ID) else uri
+        data = self._call(self._client().track, tid) or {}
+        artists = data.get("artists") or []
+        first = artists[0] if artists else {}
+        artist_id = first.get("id") or ""
+        if not artist_id:
+            return []
+        return _fetch_artist_genres(_SpacedClient(self), artist_id, first.get("name") or "")
+
     def search(self, query: str, limit: int = 10, offset: int = 0) -> list[dict]:
         """Spotify's own song search, `limit` a page: [{uri, title, artist,
         duration_ms, explicit, image, thumb}]."""
@@ -263,8 +280,23 @@ class JukeboxGateway:
                 "explicit": bool(t.get("explicit")), "image": image, "thumb": thumb}
 
 
+class _SpacedClient:
+    """A spotipy-shaped adapter whose `.artist(...)` runs through a
+    gateway's own `_call` — so api.spotify_client._fetch_artist_genres (built
+    for the main polling loop, which has no spacing of its own) obeys this
+    gateway's spacing/lock contract when `track_genres` hands it one of
+    these instead of the raw client."""
+
+    def __init__(self, gateway: JukeboxGateway) -> None:
+        self._gateway = gateway
+
+    def artist(self, artist_id: str) -> Any:
+        return self._gateway._call(self._gateway._client().artist, artist_id)
+
+
 READ_ONLY_METHODS = frozenset({"resolve_playlist", "playlist_snapshot", "playlist_items",
-                               "track", "device_id", "playback", "queue", "search", "tracks"})
+                               "track", "track_genres", "device_id", "playback", "queue",
+                               "search", "tracks"})
 
 
 class ReadOnlyGateway:

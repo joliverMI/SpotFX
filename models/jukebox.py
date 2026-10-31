@@ -135,10 +135,34 @@ class SetItem(_Model):
     thumb: str = ""
 
 
+LearnPhase = Literal["waiting", "learning", "learned", "parked", "unanalysed"]
+
+
+class LearnState(_Model):
+    """Where a song that the lights hadn't learned yet stands in phase 4's
+    absorb-then-queue (services/jukebox/learning.py is the binding
+    statement): waiting its turn on the hidden player, being learned now,
+    learned, PARKED (it couldn't be learned in MAX_ATTEMPTS tries: the
+    guest is refunded and the host decides), or let through UN-ANALYSED
+    (`why`: the host pressed it, or the music would otherwise run out)."""
+    state: LearnPhase = "waiting"
+    attempts: int = 0
+    job_id: str = ""
+    started_ms: int = 0              # this attempt's start
+    reason: str = ""                 # the last failed attempt's reason
+    detail: str = ""
+    why: str = ""                    # for "unanalysed": "host" | "dry"
+    # parked with a price paid: the guest is owed it back (guests.py's settling
+    # writes the refund; sticky whatever the host does next)
+    refund_due: bool = False
+
+
 class LineEntry(_Model):
     """A song in the jukebox line. `ready` is phase 4's absorb-then-queue
-    hook; until then every song is ready (an un-learned song plays
-    un-analysed and is learned as it plays)."""
+    gate (services/jukebox/learning.py): a song the lights haven't learned
+    waits, keeping its place, while the hidden player learns it — unless
+    learning is off or unavailable, when it plays un-analysed and is
+    learned as it plays (`learn` says where it stands)."""
     id: str
     uri: str
     title: str = ""
@@ -177,6 +201,7 @@ class LineEntry(_Model):
     # the HOST took it out (Remove): a paid song is refunded (§1 rule 5)
     removed: bool = False
     ready: bool = True
+    learn: Optional[LearnState] = None
     state: LineState = "queued"
     # A committed song he removed: it is already in Spotify's queue and can't
     # be taken out, so it is SKIPPED the moment it starts (the repair path).
@@ -394,6 +419,11 @@ class ShowConfig(_Model):
     max_phones: int = Field(40, ge=5, le=100)
     renames_per_night: int = Field(3, ge=0, le=10)
     word_filter: bool = True
+    # ABSORB-THEN-QUEUE (phase 4): a requested song the lights haven't
+    # learned is learned first on the hidden player and plays once it is
+    # (services/jukebox/learning.py). Off, or with no hidden player to
+    # learn on, it plays un-analysed and is learned as it plays.
+    learn_first: bool = True
     # FREE PLAY (report §6 and §4's Free play card, PR 2.3): nothing costs
     # anything, and counts keep it fair. A song is skipped once it has
     # `free_skip_downs` ▼ AND that share (a whole percent, rounded) of its

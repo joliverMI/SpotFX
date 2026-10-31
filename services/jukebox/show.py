@@ -94,6 +94,7 @@ GUEST_FIELDS: list[tuple[str, str, str, str]] = [
     ("last_call_min", "Requests", "Requests close before the end (last call)", "min"),
     ("explicit", "Requests", "Explicit songs", ""),
     ("explicit_after", "Requests", "Explicit songs allowed after", "house time"),
+    ("learn_first", "Requests", "Learn a new song before it plays (on the hidden player)", ""),
     ("max_phones", "Guests", "Most phones tonight", "phones"),
     ("renames_per_night", "Guests", "Name changes per night", "changes"),
     ("word_filter", "Guests", "Word filter on names", ""),
