@@ -2524,6 +2524,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Spotify\'s sign-in for SpotFX runs out six months after it was made, and when it does SpotFX\'s polling, Absorb and every Jukebox night stop at once. SpotFX now records when you sign in (at /api/spotify/login) and this line appears from 14 days before the end, naming the date.',
           'A sign-in from before that record existed has no known date, so the line asks you to sign in again before a party — that starts a known clock. If Spotify refuses the sign-in outright, the line says so.',
+          'The second account — the one the hidden "Serenity Capture" player learns songs on — has its own sign-in at /api/spotify/capture/login, never /api/spotify/login: SpotFX keeps one token for the main account, and signing account B in there would make SpotFX follow account B instead of your music. Use a private window; Spotify always asks who is signing in, and SpotFX refuses (and saves nothing) if it turns out to be the main account. /api/spotify/capture/status says who is signed in and until when.',
         ],
       },
       {

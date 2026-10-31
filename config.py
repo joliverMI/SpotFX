@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     spotipy_client_id: str = ""
     spotipy_client_secret: str = ""
     spotipy_redirect_uri: str = "http://127.0.0.1:8000/api/spotify/callback"
+    # The capture account's own sign-in (api/spotify_capture.py, G2): its own
+    # redirect URI on the same developer app, so it never lands in the main
+    # account's token.
+    spotipy_capture_redirect_uri: str = "http://127.0.0.1:8000/api/spotify/capture/callback"
     # Comma-separated list of Spotify Connect device names SpotFX reacts to.
     spotify_device_name: str = "Serenity"
 

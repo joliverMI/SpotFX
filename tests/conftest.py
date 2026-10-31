@@ -466,6 +466,17 @@ def _isolated_spotify_auth_age(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_spotify_capture(tmp_path, monkeypatch):
+    """The capture account's sign-in (api/spotify_capture.py): its token, its
+    record, and the main token it READS — never his real storage/."""
+    from api import spotify_capture
+    monkeypatch.setattr(spotify_capture, "TOKEN_CACHE", tmp_path / ".spotify_token_cache_capture")
+    monkeypatch.setattr(spotify_capture, "RECORD_FILE", tmp_path / "spotify_capture_auth.json")
+    monkeypatch.setattr(spotify_capture, "MAIN_TOKEN_CACHE", tmp_path / ".spotify_token_cache")
+    monkeypatch.setattr(spotify_capture, "_states", {})
+
+
+@pytest.fixture(autouse=True)
 def _isolated_jukebox(tmp_path, monkeypatch):
     """The Jukebox's stores (services/jukebox/store.py), its one
     process-wide runner (services/jukebox/night.py), and tonight's guests
