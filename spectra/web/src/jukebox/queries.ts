@@ -9,7 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { spotfxDel, spotfxGet, spotfxPost, spotfxPut } from '../api/client';
 import type {
   BonusCodesRead, CardRead, GuestsRead, JukeboxBoardRead, JukeboxEconomy, JukeboxPreview, JukeboxStatus,
-  NightReport, PriceCheck, ShowsRead,
+  LearningStatus, NightReport, PriceCheck, ShowsRead,
   ProgramConfig, SetMoveResult, ShowRead, SimResult,
 } from './types';
 
@@ -31,6 +31,31 @@ export function useJukeboxStatus() {
     queryKey: JUKEBOX_KEYS.status,
     queryFn: () => spotfxGet<JukeboxStatus>('/jukebox/status?count=20'),
     refetchInterval: (q) => (q.state.data?.running ? 3000 : 15_000),
+  });
+}
+
+/** Absorb-then-queue (services/jukebox/learning.py): what the hidden player
+ * is learning, what waits, what it couldn't learn — polled every 3 s while a
+ * night runs (the learning queue's own pass), every 15 s otherwise. */
+export function useJukeboxLearning(running: boolean) {
+  return useQuery({
+    queryKey: ['jukebox-learning'],
+    queryFn: () => spotfxGet<LearningStatus>('/jukebox/learning'),
+    refetchInterval: running ? 3000 : 15_000,
+  });
+}
+
+/** The host's two learning buttons on a waiting song: let it play
+ * un-analysed now, or give one the hidden player couldn't learn fresh tries. */
+export function useLearningAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (a: { entry_id: string; action: 'unanalysed' | 'relearn' }) =>
+      spotfxPost<{ status: string; reason?: string }>(`/jukebox/line/${encodeURIComponent(a.entry_id)}/${a.action}`, {}),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['jukebox-learning'] });
+      qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status });
+    },
   });
 }
 

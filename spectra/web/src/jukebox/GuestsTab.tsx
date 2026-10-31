@@ -13,6 +13,7 @@ import InfoTip from '../components/InfoTip';
 import { useToast } from '../components/Toast';
 import BoardLists from './BoardLists';
 import JukeboxLine from './JukeboxLine';
+import { lineBadge } from './jukeboxLearning';
 import {
   lineRows, lockstepWords, mergeCandidates, mergeWords, phoneActions, phoneLine, phoneTakes, sinceWords,
   type PhoneAction,
@@ -84,7 +85,8 @@ export default function GuestsTab({ status }: { status: JukeboxStatus | undefine
             r.sent ? 'sent to Spotify' : '',
             r.held ? 'on hold' : '', r.jailed ? 'sits out a time-out' : '',
             r.skipLocked ? 'kept from skips' : '',
-            r.doomed ? 'removed: skipped as it starts' : ''].filter(Boolean).join(' · ')}
+            r.doomed ? 'removed: skipped as it starts' : '',
+            lineBadge(r.entry) ?? ''].filter(Boolean).join(' · ')}
         </span>
       </span>
       <span className="jukebox-guest-actions">

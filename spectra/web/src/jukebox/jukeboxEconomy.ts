@@ -4,6 +4,7 @@
  * vocabulary); this only says them: the credits right now, the prices a guest
  * sees now, the night's recent events, and the line with who added each song,
  * what it paid, and whether it is held or sitting out a time-out. */
+import { lineBadge } from './jukeboxLearning';
 import { entryLine } from './jukeboxEditor';
 import { adderName, ordinal } from './jukeboxGuests';
 import type { EconomyCredits, EconomyEvent, EconomyPrices, GuestPhone, JukeboxEconomy, LineEntry } from './types';
@@ -88,5 +89,7 @@ export function liveLineWords(e: LineEntry, phones: GuestPhone[]): string {
     parts.push(`added by ${adderName(e, phones)}`);
   }
   if (e.paid) parts.push(`paid 🎟 ${e.paid}`);
+  const learning = lineBadge(e);
+  if (learning) parts.push(learning);
   return parts.join(' · ');
 }

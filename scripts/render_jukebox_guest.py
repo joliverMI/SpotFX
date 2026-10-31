@@ -21,7 +21,8 @@ the REAL guest app (jukebox_guest/), forwarding over an in-process loopback
 to SpotFX's REAL guest routes and services/jukebox/guests.py — only the
 night itself is a fixed scene (a set song playing, a line of songs, art
 drawn locally), switched between "plain", "your song is next", "your song
-is playing", "your songs are in a time-out" and "no night". Free play's
+is playing", "your songs are in a time-out", "your song is being learned
+first" (phase 4) and "no night". Free play's
 pieces are checked too (PR 2.3): the skip line under the vote buttons, the
 ⇅ on a song the phone may move and its sheet (whose button reaches the
 engine's bump), and the red time-out strip. Credits mode is checked too (PR
@@ -214,6 +215,15 @@ class Scene:
                                   image="/__art/3.png", thumb="/__art/3.png", added_by=ME))
             jail = {ME: 13}
             jail_kind = {ME: "timeout"}
+        learning: dict = {}
+        if self.name == "learning":
+            # your song is being learned first (absorb-then-queue, phase 4): it
+            # keeps its place in line but isn't in the program until it is
+            line.append(LineEntry(id="e4", uri="spotify:track:jbx0000000000000000004",
+                                  title="Mr. Brightside", artist="The Killers", duration_ms=222000,
+                                  image="/__art/3.png", thumb="/__art/3.png", added_by=ME,
+                                  ready=False))
+            learning = {"e4": {"state": "learning", "eta_s": 540, "attempts": 0, "ready": False}}
         if self.name == "credits" and self.jailed:
             jail = {self.me: 10 ** 9}           # credits mode's jail: until they break out
             jail_kind = {self.me: "breakout"}
@@ -224,7 +234,8 @@ class Scene:
                 "now": now, "is_playing": True,
                 "duration_ms": duration, "remaining_ms": remaining,
                 "next": with_start_times(nxt, remaining), "line": line, "set_items": sets,
-                "plays": 10, "jail": jail, "jail_kind": jail_kind, "no_skip": []}
+                "plays": 10, "jail": jail, "jail_kind": jail_kind, "no_skip": [],
+                "learning": learning}
 
 
 class Catalog:
@@ -746,6 +757,18 @@ async def run() -> int:
                 if await evaluate(ws, nid, "!!document.querySelector('.g-move-btn')"):
                     failures.append(f"{name}: ⇅ is offered during a time-out")
                 await check(phone, "13-time-out-queue")
+                # ── your song is being learned first (phase 4's absorb-then-queue) ──
+                scene.name = "learning"
+                await tap(".g-tab:nth-child(1)")
+                if not await wait_for("(document.querySelector('.g-strip')?.textContent || '')"
+                                      ".includes('being learned')", 8):
+                    failures.append(f"{name}: the strip doesn't say your song is being learned")
+                await check(phone, "23-learning")
+                await tap(".g-tab:nth-child(2)")
+                if not await wait_for("document.body.textContent.includes('The lights are learning it')", 4):
+                    failures.append(f"{name}: your song being learned doesn't say so on Queue")
+                await check(phone, "24-learning-queue")
+                scene.name = "jailed"
                 # ── the Board: tonight's top songs (the phone's own ▲ above is on it) ──
                 await tap(".g-tab:last-child")
                 if not await wait_for("document.querySelectorAll('.g-board-songs li').length >= 1"

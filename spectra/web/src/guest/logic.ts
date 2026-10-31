@@ -59,6 +59,17 @@ export function stripText(strip: Strip, elapsedMs: number, nowMs: number,
     return { tone: 'queued', label: 'Your song is on hold',
              detail: `${strip.title} · the host is holding it; it keeps its place` };
   }
+  // your song is being learned first (phase 4): short, like the queued
+  // strip's own line — the Queue row carries the whole sentence
+  const l = strip.tone === 'queued' && strip.learning && !strip.learning.ready ? strip.learning : null;
+  if (l && l.state === 'parked') {
+    return { tone: 'queued', label: "The lights couldn't learn your song", detail: 'the host will decide' };
+  }
+  if (l && (l.state === 'learning' || l.state === 'waiting')) {
+    const when = learningWhen(l, elapsedMs);
+    return { tone: 'queued', label: 'Your song is being learned',
+             detail: when ? `${when} · keeps its place` : 'it keeps its place' };
+  }
   switch (strip.tone) {
     case 'playing':
       return { tone: 'playing', label: 'Your song is playing', detail: strip.title };
@@ -269,10 +280,33 @@ export function myStatus(m: MySong, elapsedMs: number, nowMs: number, locale?: s
   if (m.state === 'playing') return 'Playing now';
   if (m.jailed) return 'Sits out your time-out · keeps its place';
   if (m.held) return 'On hold · the host is holding it, it keeps its place';
+  const learning = learningLine(m.learning, elapsedMs);
+  if (learning) return learning;
   if (m.starts_in_ms === null) return m.place ? `#${m.place}` : 'Further down the line';
   const left = Math.max(0, m.starts_in_ms - elapsedMs);
   const where = m.state === 'next' ? 'Next' : `#${m.place ?? '—'}`;
   return `${where} · ${inWords(left)} · ~${clockAt(nowMs, left, locale)}`;
+}
+
+/** Your song while the lights learn it first (absorb-then-queue, phase 4):
+ *  it keeps its place and plays once learned. The time is the server's own
+ *  estimate, counted down since the view arrived; with none, none is shown.
+ *  Null once it is ready (it then reads like any other song). */
+export function learningLine(l: MySong['learning'] | null, elapsedMs: number): string | null {
+  if (!l || l.ready) return null;
+  if (l.state === 'parked') return "The lights couldn't learn it · the host will decide · keeps its place";
+  if (l.state !== 'waiting' && l.state !== 'learning') return null;
+  const what = l.state === 'learning' ? 'The lights are learning it' : 'Waiting for the lights to learn it';
+  const when = learningWhen(l, elapsedMs);
+  return when ? `${what} · ${when} · keeps its place` : `${what} · keeps its place`;
+}
+
+/** "ready in ~4 min" from the server's own estimate, counted down; null
+ *  with none (never guessed). */
+export function learningWhen(l: MySong['learning'] | null, elapsedMs: number): string | null {
+  if (!l || l.eta_s === null || l.eta_s === undefined) return null;
+  const left = Math.max(0, l.eta_s * 1000 - elapsedMs);
+  return left < 60_000 ? 'ready in under a minute' : `ready in ~${Math.round(left / 60_000)} min`;
 }
 
 // ── credits mode (PR 3.2) ────────────────────────────────────────────────

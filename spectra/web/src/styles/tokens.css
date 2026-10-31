@@ -4010,8 +4010,14 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .jukebox-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .jukebox-title { display: inline-flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 700; margin: 0; }
 .jukebox-title svg { color: var(--accent); }
-.jukebox-tabs { display: inline-flex; gap: 4px; margin-left: auto; }
+.jukebox-tabs { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; margin-left: auto; max-width: 100%; min-width: 0; }
 .jukebox-tabs button { height: 32px; padding: 0 14px; }
+/* the Absorbing tab (phase 4): the song being learned, with a bar for how far through it is */
+.jukebox-sub { font-size: 13px; font-weight: 600; color: var(--text-muted); margin: 12px 0 4px; }
+.jukebox-absorbing-now { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.jukebox-absorbing-now > .jukebox-item-words { flex: 1 1 12em; }
+.jukebox-absorbing-bar { flex: 1 0 100%; height: 6px; border-radius: 3px; background: var(--surface2); overflow: hidden; }
+.jukebox-absorbing-bar > span { display: block; height: 100%; background: var(--accent); }
 .jukebox-tabs button.on, .jukebox-modes button.on { border-color: var(--accent); background: var(--surface2); color: var(--text); }
 .jukebox-sign-in { display: flex; align-items: center; gap: 8px; margin-bottom: 0; font-size: 13px; line-height: 1.4; }
 .jukebox-sign-in.warn { border-color: var(--warning); }

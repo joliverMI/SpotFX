@@ -4,7 +4,7 @@
  * same-origin through its own /api/jukebox routes; SPECTRA's backend is not
  * involved.
  *
- * FOUR TABS:
+ * THE TABS (Guests: GuestsTab.tsx):
  *   Set list  the editor: link the set playlist, choose where the jukebox
  *             slots go (Auto · Jukebox first · Manual), what happens when
  *             the set runs out; the program bar for one pass; the set
@@ -16,6 +16,9 @@
  *             when they start, the jukebox line, the log — read-only except
  *             for the line itself, which drags to reorder the same way the
  *             Guests tab's own line does (§7.2: both host views carry it).
+ *   Absorbing what the hidden player "Serenity Capture" is learning, the songs
+ *             waiting to be learned with when each will be ready, and the
+ *             ones it couldn't learn (AbsorbingTab.tsx, phase 4 PR 4.3).
  *   Credits   the party-size presets, the price check, and every credits
  *             setting (CreditsTab.tsx, phase 3.3).
  *   Simulate  the party simulator: a model night under the saved settings,
@@ -38,6 +41,7 @@ import InfoTip from '../components/InfoTip';
 import SonicChatPopover from '../components/SonicChatPopover';
 import { useToast } from '../components/Toast';
 import SortableList from '../lightshow/SortableList';
+import AbsorbingTab from './AbsorbingTab';
 import CreditsTab from './CreditsTab';
 import GuestsTab from './GuestsTab';
 import JukeboxLine from './JukeboxLine';
@@ -62,7 +66,7 @@ function errText(e: unknown): string {
 }
 
 export default function JukeboxPage() {
-  const [tab, setTab] = useState<'set' | 'live' | 'guests' | 'credits' | 'simulate'>('set');
+  const [tab, setTab] = useState<'set' | 'live' | 'guests' | 'absorbing' | 'credits' | 'simulate'>('set');
   const cfgQ = useJukeboxConfig();
   const statusQ = useJukeboxStatus();
   const cfg = cfgQ.data ?? null;
@@ -85,6 +89,8 @@ export default function JukeboxPage() {
             onClick={() => setTab('live')}>Live</button>
           <button role="tab" aria-selected={tab === 'guests'} className={tab === 'guests' ? 'on' : ''}
             onClick={() => setTab('guests')}>Guests</button>
+          <button role="tab" aria-selected={tab === 'absorbing'} className={tab === 'absorbing' ? 'on' : ''}
+            onClick={() => setTab('absorbing')}>Absorbing</button>
           <button role="tab" aria-selected={tab === 'credits'} className={tab === 'credits' ? 'on' : ''}
             onClick={() => setTab('credits')}>Credits</button>
           <button role="tab" aria-selected={tab === 'simulate'} className={tab === 'simulate' ? 'on' : ''}
@@ -106,6 +112,7 @@ export default function JukeboxPage() {
         status={status} />}
       {tab === 'live' && <LiveTab status={status} />}
       {tab === 'guests' && <GuestsTab status={status} />}
+      {tab === 'absorbing' && <AbsorbingTab status={status} />}
       {tab === 'credits' && <CreditsTab />}
       {tab === 'simulate' && <SimulateTab />}
       <SonicChatPopover helpTopic="sonic-jukebox" />

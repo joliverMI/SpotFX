@@ -855,6 +855,7 @@ def build_view(book: GuestBook, phone_id: str, gs: dict, now_ms: int,
                     "place": lead["place"] if lead else None,
                     "starts_in_ms": lead["starts_in_ms"] if lead else None,
                     "held": bool(lead and lead["held"]),
+                    "learning": lead.get("learning") if lead else None,
                     "count": len(mine_list)}
     return out
 
