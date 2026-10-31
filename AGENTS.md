@@ -10989,7 +10989,7 @@ Phase 4 — the interface (2026-10-21): SPECTRA's `/absorb` (Engine ▾ Absorb,
   BUILT `harness-dist` by `scripts/render_absorb_page.py`, which also fails
   on a sideways scroll or a page error — never the vite dev server, whose
   proxy would forward an unmocked request to the live :8000. Help section
-  `absorb-music` and its five topics.
+  `absorb-music` and its six topics.
 
 Phase 5 — Sonic (2026-10-21): domain `absorb`, `spectra/services/
 absorb_console.py` (its docstring is the binding statement; the
@@ -11001,9 +11001,11 @@ Three things:
 - **ASKING FIRST IS A TWO-CALL PROTOCOL**: a write that newly lets Absorb act
   on the house or his playlists without a press (start, force recapture ON,
   the schedule newly opening windows, the playlist changing while it is on,
-  running-while-asleep back ON, Recently Captured's cap lowered) answers
-  `needs_confirmation` + a single-use `confirm_id` bound to the op, its
-  arguments and his config as they were; only the second call acts.
+  running-while-asleep back ON, `use_capture_lane` ON (phase 4, PR 4.4 — the
+  hidden player learns songs with nobody pressing anything), Recently
+  Captured's cap lowered) answers `needs_confirmation` + a single-use
+  `confirm_id` bound to the op, its arguments and his config as they were;
+  only the second call acts.
 - **ONE VALIDATOR, DRY-RUN FIRST**: `PUT /api/absorb/config?dry_run=true`
   validates exactly as an edit and writes nothing, so he is never asked
   about a change that would be refused. `GET /api/absorb/playlists` (his
@@ -11122,6 +11124,16 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   `scripts/check_jukebox_absorbing.mjs` (`tests/test_jukebox_absorbing_page.py`),
   the Absorbing tab in `scripts/render_jukebox_page.py` and the learning scene
   in `scripts/render_jukebox_guest.py`.
+- **ABSORB'S BACKLOG ON THE HIDDEN PLAYER (phase 4, PR 4.4)** is
+  `services/absorb_lane.py` (its docstring is the binding statement; the
+  `absorb-music` skill carries the cold-start map), its own supervised task,
+  switched by `AbsorbConfig.use_capture_lane` (ships OFF; Sonic asks first to
+  turn it on). It learns only Absorb's FRESH songs, one at a time, and RESTS —
+  cancelling its song — during a Jukebox night (the learning queue's), an
+  Absorb window, sleeping or unreadable sleep (conservative: Order 27's only
+  exception is his grant for Absorb's proven-silent windows), account B signed
+  out, or a lane that says the hidden player is unusable. It never writes his
+  playlists. Spec: `tests/test_absorb_lane.py`.
 - **THE MASTER PAGE (PR 1.3)** is SPECTRA's `/jukebox` (Engine ▾ Jukebox,
   `spectra/web/src/jukebox/`): a Set list editor and a READ-ONLY Live tab,
   plus the sign-in line — a third tab, Credits, was added by PR 3.3

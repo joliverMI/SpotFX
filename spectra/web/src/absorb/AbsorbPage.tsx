@@ -37,13 +37,13 @@ import SonicChatPopover from '../components/SonicChatPopover';
 import { useToast } from '../components/Toast';
 import {
   agoLabel, countTiles, DAY_LETTER, DAY_SHORT, DAYS, DEFAULT_WINDOW, forceRecaptureMeaning,
-  headRateView, inLabel, lastOpenedRun, lightsLine, MODE_WORD, outcomeLine,
+  headRateView, inLabel, laneLine, laneTally, lastOpenedRun, lightsLine, MODE_WORD, outcomeLine,
   parkedLine, parsePlaylistLink, progressLine, realignedSongs, realignLine, reasonsLine,
   recaptureHeadLine, sameWindows, silenceLines, sleepingLine, stateView, windowLabel,
   windowOpen, windowProblems, type ProofLine,
 } from './absorbSummary';
 import {
-  ABSORB_QUERY_KEYS, useAbsorbConfig, useAbsorbParked, useAbsorbPreview, useAbsorbRun,
+  ABSORB_QUERY_KEYS, useAbsorbConfig, useAbsorbLane, useAbsorbParked, useAbsorbPreview, useAbsorbRun,
   useAbsorbSchedule, useRetryParked, useSaveAbsorbConfig, useSkipAbsorbSong,
   useSpotifyPlaylistOffers, useStartAbsorb, useStopAbsorb,
 } from './queries';
@@ -126,9 +126,43 @@ export default function AbsorbPage() {
           onRefresh={() => void previewQ.refetch()} />
         <AttentionCard cfg={cfg} open={open} run={run} earlier={earlier}
           parked={parkedQ.data?.parked ?? null} />
+        {cfg && <HiddenPlayerCard cfg={cfg} />}
       </div>
       <SonicChatPopover helpTopic="sonic-absorb" />
     </div>
+  );
+}
+
+// ── the hidden player (phase 4) ─────────────────────────────────────────────
+
+function HiddenPlayerCard({ cfg }: { cfg: AbsorbConfig }) {
+  const toast = useToast();
+  const save = useSaveAbsorbConfig();
+  const on = !!cfg.use_capture_lane;
+  const laneQ = useAbsorbLane(on);
+  const lane = laneQ.data;
+  const tally = laneTally(lane);
+  return (
+    <section className="card absorb-card" aria-label="Hidden player" data-testid="absorb-hidden-player">
+      <div className="absorb-card-head">
+        <span className="card-title absorb-card-title">Hidden player</span>
+      </div>
+      <div className="absorb-switch-row">
+        <PowerButton on={on} ariaLabel="learning on the hidden player" size={24}
+          title={on ? 'On — the hidden player learns the playlist\'s never-captured songs whenever nothing else runs. Press to stop.'
+            : 'Off — press to let the hidden player learn the playlist\'s never-captured songs when nothing else runs.'}
+          onChange={(v) => save.mutate({ use_capture_lane: v }, {
+            onSuccess: () => toast(v ? 'The hidden player will learn the backlog' : 'The hidden player rests', 'success'),
+            onError: (e) => toast(errText(e), 'error'),
+          })} />
+        <InfoTip topic="absorb-hidden-player"
+          text="When no Absorb window or Jukebox night runs and the house is awake, the hidden player Serenity Capture learns the linked playlist's songs that were never captured — one at a time, on the second Spotify account, so nothing is heard. It never changes your playlists.">
+          <span>Learn new songs on the hidden player</span>
+        </InfoTip>
+      </div>
+      <p className="absorb-dim absorb-note" data-testid="absorb-lane-line">{laneLine(lane)}</p>
+      {tally && <p className="absorb-dim absorb-note" data-testid="absorb-lane-tally">{tally}</p>}
+    </section>
   );
 }
 

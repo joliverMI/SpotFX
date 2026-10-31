@@ -60,6 +60,7 @@ let config: AbsorbConfig = {
   min_remaining_min: 20,
   max_resumes_per_window: 3,
   run_while_sleeping: true,
+  use_capture_lane: !IDLE,
   silence_recheck_s: 60,
 };
 
@@ -209,6 +210,17 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes('/api/absorb/preview')) return json(preview());
   if (url.includes('/api/absorb/schedule')) return json(schedule());
   if (url.includes('/api/absorb/parked')) return json({ parked });
+  // the backlog on the hidden player (phase 4): switched on with a window
+  // open, so it rests and says why; off when idle
+  if (url.includes('/api/absorb/lane')) {
+    return json(!IDLE
+      ? { enabled: true, state: 'resting', reason: 'An Absorb window is open; it captures the playlist itself.',
+          job: null, log: [], failed: [], passed_over: [],
+          learned: [{ uri: 'spotify:track:a', title: 'ABBA — Dancing Queen', at_ms: 1 },
+                    { uri: 'spotify:track:b', title: 'Queen — Don\'t Stop Me Now', at_ms: 2 }] }
+      : { enabled: false, state: 'off', reason: 'Off: the hidden player only learns songs during a Jukebox night.',
+          job: null, learned: [], failed: [], passed_over: [], log: [] });
+  }
   if (url.includes('/api/absorb/retry')) return json({ uri: body?.uri, unparked: true });
   if (url.includes('/api/absorb/start')) return json({ status: 'refused', reason: 'harness', detail: 'This is the mocked harness — nothing was started.', run: brief() });
   if (url.includes('/api/absorb/stop')) return json({ status: 'ended', run: brief() });

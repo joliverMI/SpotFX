@@ -113,6 +113,11 @@ class AbsorbConfig(_Model):
     # Q5 — the Order 27 exception and the proof it rides on (phase 2)
     run_while_sleeping: bool = True
     silence_recheck_s: int = Field(60, ge=10, le=600)
+    # THE HIDDEN PLAYER (the Jukebox plan's phase 4, PR 4.4; the study's Q9):
+    # when no Absorb window or Jukebox night runs and the house is awake, the
+    # capture lane learns this playlist's never-captured songs, inaudibly, on
+    # the second account (services/absorb_lane.py). Ships OFF.
+    use_capture_lane: bool = False
 
 
 class SongEntry(_Model):

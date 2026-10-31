@@ -22,6 +22,10 @@ SpotFX — Absorb Music API (services/absorb.py is the runner).
                                  reads only
   GET  /api/absorb/preview       already captured / to capture / to re-capture
                                  for the linked playlist — reads only
+  GET  /api/absorb/lane          the backlog on the hidden player (phase 4,
+                                 services/absorb_lane.py): what it is doing
+                                 or why it rests — reads only; switched by
+                                 PUT /config's use_capture_lane
   GET  /api/absorb/schedule      the schedule: switched on or not, his windows
                                  in house time, the one open now, the next
                                  one, and what the schedule did with each
@@ -58,6 +62,9 @@ async def put_config(request: Request, dry_run: bool = False) -> dict:
         raise HTTPException(status_code=422, detail="expected a JSON object")
     try:
         cfg = absorb.apply_config_patch(patch, save=not dry_run)
+        if not dry_run and isinstance(patch, dict) and "use_capture_lane" in patch:
+            from services import absorb_lane
+            absorb_lane.backlog.kick()        # switched: act (or stop) now, not in 30 s
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=[
             {"field": ".".join(str(p) for p in e["loc"]), "error": e["msg"]}
@@ -128,6 +135,16 @@ async def preview() -> dict:
     except Exception as exc:
         return {"linked": True, "resolved": False,
                 "detail": absorb.sentence("spotify_error", str(exc)[:120])}
+
+
+@router.get("/lane")
+async def get_lane() -> dict:
+    """Absorb's backlog on the hidden player (services/absorb_lane.py): on
+    or off, what it is doing or why it rests, the song it is learning, and
+    what it learned or failed lately — reads only."""
+    from services import absorb_lane
+    return {"enabled": bool(absorb_store.load_config().use_capture_lane),
+            **absorb_lane.backlog.status()}
 
 
 @router.get("/schedule")

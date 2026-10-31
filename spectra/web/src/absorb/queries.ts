@@ -10,7 +10,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { spotfxGet, spotfxPost, spotfxPut } from '../api/client';
 import type {
-  AbsorbActionResult, AbsorbConfig, AbsorbParkedSong, AbsorbPreview, AbsorbRunResponse,
+  AbsorbActionResult, AbsorbConfig, AbsorbLaneStatus, AbsorbParkedSong, AbsorbPreview, AbsorbRunResponse,
   AbsorbSchedule, SpotifyContextOffer,
 } from './types';
 
@@ -46,6 +46,16 @@ export function useAbsorbPreview(enabled: boolean) {
     enabled,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
+  });
+}
+
+/** The backlog on the hidden player: every 5 s while it is switched on,
+ * every 30 s otherwise (an in-memory read). */
+export function useAbsorbLane(on: boolean) {
+  return useQuery({
+    queryKey: ['absorb-lane'],
+    queryFn: () => spotfxGet<AbsorbLaneStatus>('/absorb/lane'),
+    refetchInterval: on ? 5000 : 30_000,
   });
 }
 
@@ -97,6 +107,7 @@ export function useSaveAbsorbConfig() {
         void qc.invalidateQueries({ queryKey: KEY.preview });
       }
       if ('windows' in patch || 'enabled' in patch) void qc.invalidateQueries({ queryKey: KEY.schedule });
+      if ('use_capture_lane' in patch) void qc.invalidateQueries({ queryKey: ['absorb-lane'] });
     },
   });
 }

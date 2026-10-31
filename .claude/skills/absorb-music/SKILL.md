@@ -18,7 +18,7 @@ binding statements (`services/absorb.py` for the runner, `absorb_silence.py`
 for the house guard, `absorb_schedule.py` for the schedule). His five plan
 answers, verbatim: "yes, yes, nothing, resume, yes" — head required; skipped
 songs listed, tagged; lights untouched; resume after his music goes quiet;
-allowed while sleeping, gated on the silence proof. Five things worth knowing
+allowed while sleeping, gated on the silence proof. Six things worth knowing
 cold:
 
 1. **It lives in SpotFX (`:8000`), not SPECTRA.** SPECTRA's page reaches
@@ -45,6 +45,16 @@ cold:
    schedule's memory. Only an edit writes the config; a run never does.
 5. **A HEAD RATE WITH NOTHING COMMITTED IS "NONE", NEVER 0 %.** Both the
    page (`absorbSummary.ts`) and Sonic (`absorb_head_report`) hold this.
+6. **THE HIDDEN PLAYER WORKS THE BACKLOG BETWEEN WINDOWS** (the Jukebox
+   plan's phase 4, `services/absorb_lane.py` — its docstring is the binding
+   statement; `AbsorbConfig.use_capture_lane`, ships OFF). It learns only
+   FRESH songs (Absorb's own bar) on "Serenity Capture" through the capture
+   lane (capture_lane/), never captures over a shape (so a re-capture with
+   its realign stays a window's), never writes his playlists (a learned song
+   is filed as "already captured" at the next window), and rests — cancelling
+   its song — during an Absorb window, a Jukebox night, sleeping or an
+   unreadable sleep. `GET /api/absorb/lane` reads it; the page's Hidden player
+   card switches it.
 
 ## Sonic reach
 
@@ -56,7 +66,7 @@ operations: `absorb_status` (+ `include_playlist`), `absorb_head_report`
 `absorb_skip_song`, `list_absorb_parked`, `retry_absorb_song` (one song, by
 title), `get_absorb_settings`, `set_absorb_setting` (`SETTING_KEYS`:
 max_attempts, play_window_size, overrun_grace_min, recently_captured_max,
-run_while_sleeping), `set_absorb_force_recapture`, `set_absorb_window`
+run_while_sleeping, use_capture_lane), `set_absorb_force_recapture`, `set_absorb_window`
 (replaces the list; `schedule_on` is the schedule switch),
 `set_absorb_playlist` (exact name or link, from `GET /api/absorb/playlists`;
 a close name is refused NAMING the candidate, a followed-not-owned
@@ -66,7 +76,7 @@ playlist is refused).
 newly lets Absorb act on the house or his playlists without a press —
 start, force recapture ON, the schedule newly opening (or opening different)
 windows, the playlist changing while the schedule is on, run_while_sleeping
-back ON, Recently Captured's cap LOWERED — answers `needs_confirmation`
+back ON, use_capture_lane ON, Recently Captured's cap LOWERED — answers `needs_confirmation`
 with a `confirm_id` and writes nothing; only a second call carrying the id
 acts. An id is single-use, expires (`CONFIRM_TTL_S`), belongs to one op and
 one argument set, and is refused if his config changed since he was asked.
@@ -93,4 +103,5 @@ anchors, River's hard block, the sleeping rule, Home Assistant unreadable —
 with the house volume never written), `tests/test_absorb_runner.py`,
 `tests/test_absorb_silence.py`, `tests/test_absorb_schedule.py`,
 `tests/test_absorb_stand_down.py`, `tests/test_absorb_api.py`,
+`tests/test_absorb_lane.py` (the backlog on the hidden player),
 `scripts/check_absorb_page.mjs` (via `tests/test_absorb_page.py`).

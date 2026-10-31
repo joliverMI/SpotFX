@@ -27,7 +27,10 @@ of arguments, and is refused if his settings changed after he was asked: he
 said yes to the question as asked, not to whatever the room became since. A
 config change is validated by the route's own dry run (PUT /config?dry_run=
 true) BEFORE the question, so he is never asked about an edit the validator
-would refuse. Stop, Skip this song, Retry and the plain numbers act at once,
+would refuse. Turning the hidden player's backlog work ON (use_capture_lane,
+phase 4 — services/absorb_lane.py on the SpotFX side) asks first too: it lets
+Absorb learn songs with nobody pressing anything, though inaudibly and without
+touching his playlists. Stop, Skip this song, Retry and the plain numbers act at once,
 as on the page: stopping gives the house back, which is never a thing to make
 him wait for.
 
@@ -88,9 +91,10 @@ SETTING_KEYS: tuple[str, ...] = (
     "overrun_grace_min",
     "recently_captured_max",
     "run_while_sleeping",
+    "use_capture_lane",
 )
 
-_BOOL_KEYS = frozenset({"run_while_sleeping"})
+_BOOL_KEYS = frozenset({"run_while_sleeping", "use_capture_lane"})
 
 _SETTING_LABELS = {
     "max_attempts": "attempts per song before it is parked",
@@ -98,6 +102,7 @@ _SETTING_LABELS = {
     "overrun_grace_min": "minutes a song may run past the window's end",
     "recently_captured_max": "Recently Captured's cap",
     "run_while_sleeping": "keep going while the house sleeps",
+    "use_capture_lane": "learn never-captured songs on the hidden player when nothing else runs",
 }
 
 _START_QUESTION = (
@@ -482,6 +487,16 @@ async def _op_absorb_status(include_playlist: bool = False) -> dict:
         "earlier": [_compact_run(r) for r in run.get("earlier") or []],
         "summary": _status_summary(brief, sched),
     }
+    lane, lerr = await _get("/api/absorb/lane")
+    if not lerr:
+        job = lane.get("job") or {}
+        out["hidden_player"] = {
+            "on": bool(lane.get("enabled")), "state": lane.get("state"),
+            "why_resting": lane.get("reason") or "",
+            "learning_now": (f"{job.get('artist')} — {job.get('title')}" if job.get("artist")
+                             else job.get("title")) if job else None,
+            "learned_lately": [x.get("title") for x in (lane.get("learned") or [])[-5:]],
+            "passed_over": len(lane.get("passed_over") or [])}
     if include_playlist:
         preview, err = await _get("/api/absorb/preview", timeout=PREVIEW_TIMEOUT_S)
         out["playlist"] = preview if preview is not None else {"detail": err["reason"]}
@@ -737,6 +752,12 @@ async def _op_set_absorb_setting(key: str, value: Any, confirm_id: Optional[str]
                     "Order 27 exception you granted for Absorb only: it rests on the silence "
                     "proof, re-proven every minute, and the window stops if a room can't be "
                     "read or silenced.")
+        if key == "use_capture_lane" and a and not b:
+            return ("Let the hidden player learn the linked playlist's never-captured songs on its "
+                    "own, one at a time, whenever no Absorb window or Jukebox night is running and "
+                    "the house is awake? It plays only on Serenity Capture under the second "
+                    "account — nothing is heard — and it never changes your playlists; Absorb files "
+                    "the songs it learned at its next window.")
         if key == "recently_captured_max" and isinstance(a, int) and isinstance(b, int) and a < b:
             return (f"Lower Recently Captured's cap from {b} to {a}? The next time a song is "
                     f"filed, every song past the newest {a} is taken out of Recently Captured.")
@@ -967,7 +988,8 @@ OPERATIONS: dict[str, SonicOperation] = {
     "set_absorb_setting": SonicOperation(
         name="set_absorb_setting", domain="absorb", kind="write",
         summary="Change one of Absorb's numbers (attempts, songs sent at a time, overrun grace, "
-                "Recently Captured's cap) or whether it keeps going while the house sleeps.",
+                "Recently Captured's cap), whether it keeps going while the house sleeps, or "
+                "whether the hidden player learns the backlog when nothing else runs.",
         instructions=(
             _INSTR_COMMON + _INSTR_CONFIRM
             + "One key per call. max_attempts = attempts per song in one window before it is "
@@ -975,8 +997,10 @@ OPERATIONS: dict[str, SonicOperation] = {
             "minutes a song may run past a scheduled window's end and still be finished; "
             "recently_captured_max = how many songs Recently Captured keeps (lowering it asks "
             "first — the oldest are taken out); run_while_sleeping = true/false (turning it "
-            "back on asks first). An out-of-range value is refused with SpotFX's own reason — "
-            "tell him the reason."),
+            "back on asks first); use_capture_lane = true/false (the hidden player Serenity "
+            "Capture learns the playlist's never-captured songs inaudibly whenever no window or "
+            "Jukebox night runs and the house is awake; turning it on asks first). An "
+            "out-of-range value is refused with SpotFX's own reason — tell him the reason."),
         input_schema={
             "type": "object",
             "properties": {

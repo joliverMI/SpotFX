@@ -202,6 +202,23 @@ export interface AbsorbConfig {
   max_resumes_per_window: number;
   run_while_sleeping: boolean;
   silence_recheck_s: number;
+  /** the hidden player learns never-captured songs when nothing else runs (phase 4; ships off) */
+  use_capture_lane?: boolean;
+}
+
+/** GET /api/absorb/lane — Absorb's backlog on the hidden player
+ * (services/absorb_lane.py). */
+export interface AbsorbLaneStatus {
+  enabled: boolean;
+  state: 'off' | 'resting' | 'learning' | 'idle';
+  /** why it isn't learning right now ("" while it is) */
+  reason: string;
+  job: { job_id: string; uri: string; title: string; artist: string; duration_ms: number; started_ms?: number } | null;
+  learned: { uri: string; title: string; at_ms: number }[];
+  failed: { uri: string; title: string; reason: string; attempt: number; at_ms: number }[];
+  /** songs passed over after using up their tries */
+  passed_over: string[];
+  log: string[];
 }
 
 export interface AbsorbPreviewCounts {
