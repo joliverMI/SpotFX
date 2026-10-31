@@ -87,6 +87,10 @@ export interface MySong extends Song {
   next?: NextQuote;
   place: number | null;
   starts_in_ms: number | null;
+  /** absorb-then-queue (phase 4): the lights are learning it first; it keeps
+   *  its place and plays once it is learned */
+  learning?: { state: 'waiting' | 'learning' | 'learned' | 'parked' | 'unanalysed';
+               eta_s: number | null; ready: boolean };
 }
 
 export type StripTone = 'none' | 'queued' | 'next' | 'playing' | 'jail';
@@ -96,6 +100,8 @@ export interface Strip {
   place: number | null;
   starts_in_ms: number | null;
   held: boolean;
+  /** your first song is being learned first (phase 4): see MySong.learning */
+  learning?: MySong['learning'] | null;
   count: number;
   jail_left?: number;
   jail_kind?: 'timeout' | 'breakout';

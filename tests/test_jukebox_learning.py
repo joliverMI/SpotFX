@@ -566,3 +566,49 @@ def test_the_learning_routes(monkeypatch):
         assert c.post(f"/api/jukebox/line/{eid}/relearn").json()["status"] == "waiting"
         assert r.entry(eid).ready is False
         assert c.post("/api/jukebox/line/nope/unanalysed").json()["status"] == "refused"
+
+
+# ── the guest page sees it ──────────────────────────────────────────────────
+
+def test_a_guests_own_view_and_strip_say_the_song_is_being_learned():
+    from tests.test_jukebox_credits_play import _phones, _setup
+
+    async def go():
+        r = Rig(set_s=600)
+        await r.start()
+        r.show = ShowConfig(play_mode="free")
+        g = _setup(r.w, r.show)
+        (ana,) = await _phones(g, 1)
+        code, out = await g.add(ana, jb_uri(0))
+        assert code == 200, out
+        await r.learner.tick()
+        code, out = await g.view(ana)
+        view = out["view"]
+        mine = view["mine"][0]
+        assert mine["learning"]["state"] == "learning" and mine["learning"]["ready"] is False
+        assert mine["learning"]["eta_s"] is not None
+        assert view["strip"]["learning"] == mine["learning"]
+        r.lane.finish("ok", learned=r.learned)
+        await r.learner.tick()
+        code, out = await g.view(ana)
+        view = out["view"]
+        assert "learning" not in view["mine"][0] and view["strip"]["learning"] is None
+    _run(go())
+
+
+def test_sonic_reads_what_the_hidden_player_is_doing_in_a_few_fields():
+    async def go():
+        r = Rig(jb_s=200)
+        await r.start()
+        await r.add(0)
+        await r.add(1)
+        return r.learner.status()
+    st = _run(go())
+    from spectra.services.jukebox_console import learning_summary
+    s = learning_summary(st)
+    assert s["can_learn"] is True and s["why_not"] == ""
+    assert s["learning_now"] == "J0" and s["learning_now_ready_in_s"] == st["queue"][0]["eta_s"]
+    assert s["waiting"] == 1 and s["first_waiting_ready_in_s"] == st["queue"][1]["eta_s"]
+    assert s["couldnt_learn"] == []
+    off = learning_summary({**st, "learn_first": False, "reason": "Learning first is off."})
+    assert off["can_learn"] is False and off["why_not"] == "Learning first is off."

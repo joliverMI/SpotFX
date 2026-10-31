@@ -6,8 +6,8 @@ jukebox/JukeboxPage.tsx against a mocked backend (see that file's header) —
 in a headless Chromium (data/jukebox-plan/report.md §9, PR 1.3's
 acceptance: the host tablet landscape and portrait, and a phone), three
 states (a night running, the shipped idle state, slots placed by hand), the
-Set list tab, the Live tab, the Credits tab and the Simulate tab (a model night paused
-mid-party) of the running night, and writes the PNGs to
+Set list tab, the Live tab, the Absorbing tab (running and idle), the Credits tab
+and the Simulate tab (a model night paused mid-party) of the running night, and writes the PNGs to
 docs/evidence/jukebox-page/.
 
 It also FAILS, not just draws, on the two things a screenshot can hide:
@@ -61,7 +61,7 @@ READY = """(() => {
 
 OVERFLOW = """(() => {
   const de = document.documentElement;
-  const wide = [...document.querySelectorAll('.jukebox-card, .jukebox-row, .jukebox-item, .jukebox-head, .jukebox-sign-in, .jukebox-field, .jukebox-price-row, .jukebox-preset, .jukebox-sim-tr, .jukebox-sim-guest, .jukebox-sim-transport, .jukebox-sim-controls, .jukebox-phone, .jukebox-guest-actions')]
+  const wide = [...document.querySelectorAll('.jukebox-card, .jukebox-row, .jukebox-item, .jukebox-head, .jukebox-sign-in, .jukebox-field, .jukebox-price-row, .jukebox-preset, .jukebox-sim-tr, .jukebox-sim-guest, .jukebox-sim-transport, .jukebox-sim-controls, .jukebox-phone, .jukebox-guest-actions, .jukebox-absorbing-now')]
     .filter((el) => el.scrollWidth > el.clientWidth + 1)
     .map((el) => el.className + ' ' + el.scrollWidth + '>' + el.clientWidth);
   return { page: de.scrollWidth + 'x' + de.clientWidth, pageWide: de.scrollWidth > de.clientWidth + 1, wide };
@@ -148,6 +148,11 @@ async def run() -> int:
             guests_tab = live_tab.replace("'Live'", "'Guests'")
             for size in VIEWPORTS:
                 await render("running", size, f"running-guests-{size[0]}x{size[1]}", after=guests_tab)
+            absorbing_tab = live_tab.replace("'Live'", "'Absorbing'")
+            for state in ("running", "idle"):
+                for size in VIEWPORTS:
+                    await render(state, size, f"{state}-absorbing-{size[0]}x{size[1]}",
+                                 after=absorbing_tab)
             credits_tab = live_tab.replace("'Live'", "'Credits'")
             for size in VIEWPORTS:
                 await render("running", size, f"running-credits-{size[0]}x{size[1]}", after=credits_tab)

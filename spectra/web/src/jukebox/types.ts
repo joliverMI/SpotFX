@@ -120,6 +120,64 @@ export interface LineEntry {
   /** credits mode: what its adder paid, and whether it has had its play next */
   paid?: number;
   nexted?: boolean;
+  /** phase 4's commit gate: a song waiting to be learned isn't sent to Spotify */
+  ready?: boolean;
+  /** absorb-then-queue: where a song the lights didn't know stands */
+  learn?: LearnState | null;
+}
+
+export type LearnPhase = 'waiting' | 'learning' | 'learned' | 'parked' | 'unanalysed';
+
+/** services/jukebox/learning.py — a song the lights didn't know, on its way
+ * through the hidden player. */
+export interface LearnState {
+  state: LearnPhase;
+  attempts: number;
+  job_id?: string;
+  started_ms?: number;
+  reason?: string;
+  detail?: string;
+  /** for "unanalysed": the host let it through, or nothing else would play */
+  why?: '' | 'host' | 'dry';
+  refund_due?: boolean;
+}
+
+/** One song in GET /api/jukebox/learning's queue or parked list. */
+export interface LearningRow {
+  entry_id: string;
+  uri: string;
+  title: string;
+  artist: string;
+  duration_ms: number;
+  added_by: string;
+  state: LearnPhase;
+  attempts: number;
+  reason: string;
+  detail: string;
+  /** seconds until it is learned (null: no estimate — the lane isn't learning) */
+  eta_s: number | null;
+  ready: boolean;
+  held: boolean;
+}
+
+/** GET /api/jukebox/learning */
+export interface LearningStatus {
+  available: boolean;
+  /** why songs aren't waiting to be learned right now ("" when they are) */
+  reason: string;
+  learn_first: boolean;
+  max_attempts: number;
+  lane: { state: string; job: { job_id: string; uri: string; title: string; artist: string; duration_ms: number } | null;
+          progress_ms: number | null };
+  /** the song being learned first, then the ones waiting, in line order */
+  queue: LearningRow[];
+  /** the songs it couldn't learn: they wait for the host */
+  parked: LearningRow[];
+  log: string[];
+  /** the lane's own measurements (or the priors, until it has some) */
+  numbers: { overhead_s: number; success: number };
+  /** the lane's own sentence for each reason a try can fail */
+  sentences?: Record<string, string>;
 }
 
 export interface JukeboxStatus {

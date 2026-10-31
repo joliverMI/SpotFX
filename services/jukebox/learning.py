@@ -455,7 +455,9 @@ class Learner:
                "max_attempts": MAX_ATTEMPTS,
                "lane": {"state": lane.get("state", "off"), "job": lane.get("job"),
                         "progress_ms": lane.get("progress_ms")},
-               "queue": [], "parked": [], "log": self.log[-20:]}
+               "queue": [], "parked": [], "log": self.log[-20:],
+               # the lane's own words for why a try failed (capture_lane/lane.py)
+               "sentences": lane.get("sentences") or {}}
         overhead, success = lane_numbers(lane.get("outcomes") or [])
         out["numbers"] = {"overhead_s": round(overhead), "success": round(success, 2)}
         if not getattr(runner, "running", False):

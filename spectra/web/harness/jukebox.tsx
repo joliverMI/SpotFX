@@ -151,6 +151,8 @@ const status = (): JukeboxStatus => {
     { ...J(1, 'Bad Romance', 'Lady Gaga', 294), state: 'committed' as const, doomed: false, commit_check: 'next' as const },
     { ...J(2, 'Take On Me', 'a-ha', 225, PHONES[0].id), state: 'queued' as const, doomed: false, commit_check: '' as const },
     { ...J(3, 'Murder on the Dancefloor', 'Sophie Ellis-Bextor', 230, PHONES[1].id, 2), state: 'queued' as const, doomed: false, commit_check: '' as const, held: true },
+    { ...J(4, 'Rasputin', 'Boney M.', 222, PHONES[0].id, 2), state: 'queued' as const, doomed: false, commit_check: '' as const,
+      ready: false, learn: { state: 'learning' as const, attempts: 1, reason: 'stalled' } },
   ];
   let at = 38_000;
   const nextItems: ProgramItem[] = [];
@@ -175,6 +177,32 @@ const status = (): JukeboxStatus => {
     history: [],
   };
 };
+
+// the Absorbing tab (phase 4): the hidden player halfway through one song,
+// two waiting with the server's own estimates, one it couldn't learn
+const learning = () => (RUNNING ? {
+  available: true, reason: '', learn_first: true, max_attempts: 3,
+  lane: { state: 'capturing', progress_ms: 101_000,
+          job: { job_id: 'job1', uri: J(4, '', '', 0).uri, title: 'Rasputin', artist: 'Boney M.', duration_ms: 222_000 } },
+  queue: [
+    { ...J(4, 'Rasputin', 'Boney M.', 222, PHONES[0].id), entry_id: 'entry4', state: 'learning' as const, attempts: 1,
+      reason: 'stalled', detail: '', eta_s: 206, ready: false, held: false },
+    { ...J(5, 'Gimme! Gimme! Gimme!', 'ABBA', 292, PHONES[1].id), entry_id: 'entry5', state: 'waiting' as const, attempts: 0,
+      reason: '', detail: '', eta_s: 703, ready: false, held: false },
+    { ...J(6, 'Toxic', 'Britney Spears', 199, 'host'), entry_id: 'entry6', state: 'waiting' as const, attempts: 0,
+      reason: '', detail: '', eta_s: 1084, ready: false, held: true },
+  ],
+  parked: [
+    { ...J(7, 'Bohemian Rhapsody - Remastered 2011', 'Queen', 354, PHONES[2].id), entry_id: 'entry7', state: 'parked' as const,
+      attempts: 3, reason: 'governor_drain', detail: '', eta_s: null, ready: false, held: false },
+  ],
+  log: [], numbers: { overhead_s: 85, success: 0.75 },
+  sentences: { governor_drain: 'Audio was dropped on the way to the lane.' },
+} : {
+  available: false, reason: "The hidden player isn't running, so new songs play un-analysed.", learn_first: true,
+  max_attempts: 3, lane: { state: 'off', job: null, progress_ms: null }, queue: [], parked: [], log: [],
+  numbers: { overhead_s: 85, success: 0.75 }, sentences: {},
+});
 
 const STATUS = {
   dark: false,
@@ -246,6 +274,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes('/api/jukebox/guests')) {
     return json(RUNNING ? { running: true, phones: PHONES, pending: 1, jailed: 1, crowd: 4 } : { running: false, phones: [] });
   }
+  if (url.includes('/api/jukebox/learning')) return json(learning());
   if (url.includes('/api/jukebox/line/')) return json({ status: 'refused', reason: 'harness', detail: 'This is the mocked harness — nothing changed.' });
   if (url.includes('/api/jukebox/price-check')) {
     const g = new URL(url, 'http://x').searchParams.get('guests') ?? '15';

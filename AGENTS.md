@@ -11112,6 +11112,16 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   `POST /api/jukebox/line/{id}/unanalysed|relearn`; Sonic sets
   `learn_first` and reads a learning summary in `jukebox_status`; the two
   buttons are named exclusions. Spec: `tests/test_jukebox_learning.py`.
+  The screens (PR 4.3): the master page's Absorbing tab
+  (`spectra/web/src/jukebox/AbsorbingTab.tsx`, words in `jukeboxLearning.ts`;
+  every time is the server's own `eta_s`, never guessed), a learning badge on
+  both line views, and on the guest page `learningLine`/`learningWhen`
+  (`guest/logic.ts`) — the strip carries the SHORT form, because the full
+  sentence wraps and pushes the vote buttons under the tab bar on iPhone
+  15/Pro Max (the renders' "23-learning" shot is the guard). Spec:
+  `scripts/check_jukebox_absorbing.mjs` (`tests/test_jukebox_absorbing_page.py`),
+  the Absorbing tab in `scripts/render_jukebox_page.py` and the learning scene
+  in `scripts/render_jukebox_guest.py`.
 - **THE MASTER PAGE (PR 1.3)** is SPECTRA's `/jukebox` (Engine ▾ Jukebox,
   `spectra/web/src/jukebox/`): a Set list editor and a READ-ONLY Live tab,
   plus the sign-in line — a third tab, Credits, was added by PR 3.3
