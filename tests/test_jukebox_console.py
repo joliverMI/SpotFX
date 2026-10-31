@@ -120,6 +120,60 @@ def test_status_counts_the_phones_on_the_guest_page(spotfx):
     assert not any(n.startswith("vote") or "guest" in n for n in jc.OPERATIONS)
 
 
+def test_status_reports_the_absorb_then_queue_learning_master_view(spotfx, monkeypatch):
+    """Phase 4's own master view for Sonic (jc.learning_summary): what the
+    hidden player is doing, through the REAL /api/jukebox/learning route —
+    proven end to end rather than by reading jukebox_console.py's source."""
+    from services.jukebox import learning as L
+    from tests.jukebox_world import jb_uri
+    from tests.test_jukebox_learning import FakeLane
+
+    w = spotfx.world
+    lane = FakeLane(w)
+    learned: set[str] = set()
+
+    async def after(uri: str) -> None:
+        pass
+
+    learner = L.Learner(L.LearnerDeps(
+        lane=lane, runner=lambda: w.runner, known=lambda uri: uri in learned,
+        signed_in=lambda: True, show=lambda: m.ShowConfig(learn_first=True, play_mode="free"),
+        after_learned=after, genres_for=lambda uri: [],
+        clock=w.clock, now_ms=lambda: int(w.clock.t * 1000), to_thread=w.deps.to_thread))
+    w.deps.ready_at_add = learner.ready_at_add
+    w.deps.learning_view = learner.view
+    w.deps.known = lambda uri: uri in learned
+    monkeypatch.setattr(L, "learner", learner)
+
+    spotfx.put("/api/jukebox/config", json={"playlist": PLAYLIST_URI})
+    spotfx.post("/api/jukebox/night/start", json={})
+
+    async def go():
+        await w.run(2)
+        await learner.tick()
+        out = await w.add(0)
+        assert out["status"] == "added", out
+        await learner.tick()        # dispatches the job to the (fake) hidden player
+        await learner.tick()        # a pass later: the lane's own status now carries it
+        return out["entry"]["id"]
+    eid = _run(go())
+
+    r = _run(jc._op_jukebox_status())
+    assert r["learning"] == {"can_learn": True, "why_not": "",
+                             "learning_now": "J0", "learning_now_ready_in_s": pytest.approx(185, abs=1),
+                             "waiting": 0, "first_waiting_ready_in_s": None, "couldnt_learn": []}
+    assert [e["id"] for e in r["line"] if e["uri"] == jb_uri(0)][0] == eid
+
+    lane.finish("ok", learned=learned)
+
+    async def learned_tick():
+        await learner.tick()
+    _run(learned_tick())
+    r = _run(jc._op_jukebox_status())
+    assert r["learning"]["learning_now"] is None and r["learning"]["waiting"] == 0
+    assert r["learning"]["couldnt_learn"] == []
+
+
 def test_settings_read_the_program_and_every_economy_field(spotfx):
     r = _run(jc._op_get_jukebox_settings())
     assert r["program"]["mode"] == "auto" and r["program"]["words"] == "a jukebox slot after every set song"
