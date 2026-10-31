@@ -551,11 +551,66 @@ def test_the_gateway_spaces_its_calls():
     assert time.monotonic() - t0 >= 0.45
 
 
-def test_the_capture_client_never_names_the_main_token(monkeypatch, tmp_path):
-    from api import spotify_capture
-    import inspect
-    src = inspect.getsource(spotify_capture.capture_client)
-    assert "TOKEN_CACHE" in src and "MAIN_TOKEN_CACHE" not in src
+def test_the_capture_client_never_reads_or_writes_the_main_token(monkeypatch):
+    """TOKEN_CACHE/MAIN_TOKEN_CACHE already point at `tmp_path` files via the
+    autouse `_isolated_spotify_capture` conftest fixture. Drive the REAL
+    spotipy auth manager (cache lookup + a token refresh) that
+    `capture_client()` hands to every API call, with only the network POST
+    stubbed, and prove it only ever touches the capture account's own
+    token — reading its refresh token, writing its refreshed token back —
+    while the main token file is never opened at all."""
+    from spotipy.oauth2 import SpotifyOAuth
+
+    from api import spotify_capture as cap
+    from config import settings
+
+    monkeypatch.setattr(settings, "spotipy_client_id", "client-id")
+    monkeypatch.setattr(settings, "spotipy_client_secret", "client-secret")
+
+    now = int(time.time())
+    capture_token = {"access_token": "at-capture-old", "refresh_token": "rt-capture",
+                     "expires_at": now - 10, "scope": cap.CAPTURE_SCOPES,
+                     "token_type": "Bearer"}
+    main_token = {"access_token": "at-main-old", "refresh_token": "rt-main",
+                 "expires_at": now - 10, "scope": cap.CAPTURE_SCOPES,
+                 "token_type": "Bearer"}
+    cap.TOKEN_CACHE.write_text(json.dumps(capture_token))
+    cap.MAIN_TOKEN_CACHE.write_text(json.dumps(main_token))
+    main_before = cap.MAIN_TOKEN_CACHE.read_bytes()
+
+    refreshed_with: list[str] = []
+
+    def fake_refresh(self, refresh_token):
+        refreshed_with.append(refresh_token)
+        fresh = {"access_token": "at-capture-fresh", "refresh_token": refresh_token,
+                 "expires_at": now + 3600, "scope": self.scope, "token_type": "Bearer"}
+        self.cache_handler.save_token_to_cache(fresh)
+        return fresh
+
+    monkeypatch.setattr(SpotifyOAuth, "refresh_access_token", fake_refresh)
+
+    real_open = open
+    opened: list[str] = []
+
+    def spying_open(path, *a, **k):
+        p = str(path)
+        opened.append(p)
+        if p == str(cap.MAIN_TOKEN_CACHE):
+            raise AssertionError("the capture client's auth manager opened the MAIN token cache")
+        return real_open(path, *a, **k)
+
+    with monkeypatch.context() as m:
+        m.setattr("builtins.open", spying_open)
+        client = cap.capture_client()
+        access = client.auth_manager.get_access_token(as_dict=False)
+
+    assert access == "at-capture-fresh"
+    assert refreshed_with == ["rt-capture"], \
+        "the refresh must use the capture account's own refresh token, never the main account's"
+    assert str(cap.TOKEN_CACHE) in opened
+    assert cap.MAIN_TOKEN_CACHE.read_bytes() == main_before, "the main token file is never written"
+    saved = json.loads(cap.TOKEN_CACHE.read_text())
+    assert saved["access_token"] == "at-capture-fresh" and saved["refresh_token"] == "rt-capture"
 
 
 # ── the server ──────────────────────────────────────────────────────────────
