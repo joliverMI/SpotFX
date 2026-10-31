@@ -95,6 +95,13 @@ class LearnerDeps:
     signed_in: Callable[[], bool]
     show: Callable[[], Any]
     after_learned: Callable[[str], Awaitable[None]]
+    # The requested song's artist genres, for the lane's own job (its
+    # after-learn auto-generate picks a genre-matched training profile,
+    # audio_shape_service._find_profile_for_genres) — the same cached lookup
+    # a normal capture uses. Blocking (a Spotify call); called off the loop
+    # (to_thread). Best-effort by the caller: a raised exception here must
+    # not delay or fail the job, only leave it genre-less.
+    genres_for: Callable[[str], list[str]] = lambda uri: []
     clock: Callable[[], float] = time.monotonic
     now_ms: Callable[[], int] = lambda: int(time.time() * 1000)
     to_thread: Callable[..., Awaitable[Any]] = asyncio.to_thread
@@ -103,6 +110,7 @@ class LearnerDeps:
 def production_deps() -> LearnerDeps:
     from api import spotify_capture
     from services.jukebox import library, night, store
+    from services.jukebox.gateway import default_gateway
     from services.jukebox.lane_client import LaneClient
 
     async def after_learned(uri: str) -> None:
@@ -114,9 +122,12 @@ def production_deps() -> LearnerDeps:
         if app_state.auto_generate_enabled:
             asyncio.create_task(shapes._auto_generate_for_uri(uri))
 
+    def genres_for(uri: str) -> list[str]:
+        return default_gateway().track_genres(uri)
+
     return LearnerDeps(lane=LaneClient(), runner=lambda: night.runner, known=library.known,
                        signed_in=lambda: bool(spotify_capture.status()["signed_in"]),
-                       show=store.load_show, after_learned=after_learned)
+                       show=store.load_show, after_learned=after_learned, genres_for=genres_for)
 
 
 def _lane_job(lane: dict) -> dict:
@@ -284,7 +295,6 @@ class Learner:
         lane_idle = lane is not None and self.lane.get("state") == "idle"
         learned: list[str] = []
         cancel: list[str] = []
-        downed: list[str] = []
 
         def edit(r) -> Optional[dict]:
             line = r.night.line
@@ -299,7 +309,7 @@ class Learner:
                     continue
                 o = outcomes.get(L.job_id)
                 if o is not None:
-                    self._finish(r, e, o, known_now.get(e.uri, False), learned, downed)
+                    self._finish(r, e, o, known_now.get(e.uri, False), learned)
                 elif lane_job.get("job_id") == L.job_id:
                     if e.state == "queued":
                         wanted.add(L.job_id)
@@ -354,6 +364,11 @@ class Learner:
                 pass
         if job:
             try:
+                job["genres"] = await d.to_thread(d.genres_for, job["uri"])
+            except Exception as exc:                              # noqa: BLE001
+                logger.debug("Jukebox learning: genre lookup failed for %s: %s", job["uri"], exc)
+                job["genres"] = []
+            try:
                 await d.lane.learn(job)
             except (LaneBusy, LaneUnavailable) as exc:
                 self._note(f"the hidden player didn't take {job['title'] or job['uri']} ({exc})")
@@ -371,7 +386,7 @@ class Learner:
         self._refresh_view(runner)
 
     def _finish(self, r, e: LineEntry, o: dict, known: bool,
-                learned: list[str], downed: list[str]) -> None:
+                learned: list[str]) -> None:
         L = e.learn
         reason = o.get("reason") or ""
         name = e.title or e.uri
@@ -383,7 +398,6 @@ class Learner:
             return
         if reason in LANE_DOWN:
             L.state = "waiting"
-            downed.append(reason)
             self._down(reason)               # before this pass dispatches anything
             r._log(f"the hidden player can't learn right now ({reason}); {name} waits")
             return

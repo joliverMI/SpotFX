@@ -238,6 +238,21 @@ class JukeboxGateway:
             return None
         return self._song(data)
 
+    def track_genres(self, uri: str) -> list[str]:
+        """The track's primary artist's genres, the same cached lookup a
+        normal capture uses (api.spotify_client._fetch_artist_genres) — so a
+        song the Jukebox dispatches to the hidden capture lane can carry
+        genres for its after-learn, genre-matched training profile pick."""
+        from api.spotify_client import _fetch_artist_genres
+        tid = uri[len(_TRACK_ID):] if uri.startswith(_TRACK_ID) else uri
+        data = self._call(self._client().track, tid) or {}
+        artists = data.get("artists") or []
+        first = artists[0] if artists else {}
+        artist_id = first.get("id") or ""
+        if not artist_id:
+            return []
+        return _fetch_artist_genres(self._client(), artist_id, first.get("name") or "")
+
     def search(self, query: str, limit: int = 10, offset: int = 0) -> list[dict]:
         """Spotify's own song search, `limit` a page: [{uri, title, artist,
         duration_ms, explicit, image, thumb}]."""
@@ -264,7 +279,8 @@ class JukeboxGateway:
 
 
 READ_ONLY_METHODS = frozenset({"resolve_playlist", "playlist_snapshot", "playlist_items",
-                               "track", "device_id", "playback", "queue", "search", "tracks"})
+                               "track", "track_genres", "device_id", "playback", "queue",
+                               "search", "tracks"})
 
 
 class ReadOnlyGateway:

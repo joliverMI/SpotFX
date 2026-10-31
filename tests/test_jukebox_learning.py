@@ -79,7 +79,8 @@ class FakeLane:
 
 
 class Rig:
-    def __init__(self, *, learn_first: bool = True, signed_in: bool = True, known=(), **world):
+    def __init__(self, *, learn_first: bool = True, signed_in: bool = True, known=(),
+                 genres_for=None, **world):
         self.w = World(**world)
         self.lane = FakeLane(self.w)
         self.learned: set[str] = set(known)
@@ -93,6 +94,7 @@ class Rig:
         self.learner = L.Learner(L.LearnerDeps(
             lane=self.lane, runner=lambda: self.w.runner, known=lambda uri: uri in self.learned,
             signed_in=lambda: self.signed, show=lambda: self.show, after_learned=after,
+            genres_for=genres_for or (lambda uri: []),
             clock=self.w.clock, now_ms=lambda: int(self.w.clock.t * 1000), to_thread=_inline))
         self.w.deps.ready_at_add = self.learner.ready_at_add
         self.w.deps.learning_view = self.learner.view
@@ -184,6 +186,37 @@ def test_songs_are_learned_one_at_a_time_in_line_order():
         await r.learner.tick()
         assert [j["uri"] for j in r.lane.learned_jobs] == [jb_uri(0), jb_uri(1)]
         assert r.entry(b).learn.state == "learning"
+    _run(go())
+
+
+# ── the lane job's genres ────────────────────────────────────────────────────
+
+def test_the_dispatched_job_carries_the_looked_up_genres():
+    async def go():
+        seen: list[str] = []
+
+        def lookup(uri: str) -> list[str]:
+            seen.append(uri)
+            return ["edm", "house"]
+
+        r = Rig(genres_for=lookup)
+        await r.start()
+        await r.add(0)
+        assert seen == [jb_uri(0)]
+        assert r.lane.learned_jobs[0]["genres"] == ["edm", "house"]
+    _run(go())
+
+
+def test_a_failed_genre_lookup_still_dispatches_the_job_with_no_genres():
+    async def go():
+        def lookup(uri: str) -> list[str]:
+            raise RuntimeError("no network here")
+
+        r = Rig(genres_for=lookup)
+        await r.start()
+        eid = await r.add(0)
+        assert r.entry(eid).learn.state == "learning"
+        assert r.lane.learned_jobs[0]["genres"] == []
     _run(go())
 
 
