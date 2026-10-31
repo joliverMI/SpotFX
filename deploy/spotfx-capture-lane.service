@@ -1,0 +1,30 @@
+# The Jukebox's CAPTURE LANE — its own process (capture_lane/, the plan's
+# phase 4), never inside SpotFX's main.py, whose event loop runs the music.
+# It learns one song at a time by playing it on the hidden player "Serenity
+# Capture" under the second Spotify account and reading that player's own
+# FIFO (/home/javi/spotify-stack/capture-audio/capturefifo), which snapserver
+# never reads — nothing it plays reaches a speaker. capture_lane/__init__.py
+# is the binding statement.
+#
+# NOT INSTALLED BY ANY BUILD. Deploying it is the owner's word:
+#   cp deploy/spotfx-capture-lane.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now spotfx-capture-lane
+#
+# Started, it does nothing until SpotFX asks it to learn a song (127.0.0.1
+# only, with the lane's key). It never plays as the main account and never
+# on any device but "Serenity Capture".
+
+[Unit]
+Description=SpotFX capture lane (learns songs on the hidden player)
+After=spotfx.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/javi/SpotFX
+ExecStart=/home/javi/SpotFX/.venv/bin/python -m capture_lane
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

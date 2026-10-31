@@ -11060,6 +11060,34 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   account is refused with nothing written (show_dialog, so Spotify always
   asks who), and the main token file is only ever read. `/capture/status`
   reads two files, never Spotify.
+- **THE CAPTURE LANE (phase 4, PR 4.1)** is `capture_lane/` — its own
+  process (`python -m capture_lane`, 127.0.0.1:8030, reference unit
+  `deploy/spotfx-capture-lane.service`, not installed by any build);
+  `capture_lane/lane.py`'s docstring is the binding statement. It plays ONE
+  song from 0:00 on the hidden player under account B
+  (`spotify_capture.capture_client()`, the token's only player) and reads
+  that player's own FIFO (`settings.capture_lane_fifo`, which snapserver
+  never mounts — nothing reaches a speaker), writing the same shape files a
+  normal capture does (`synthesize_frames_from_pcm`, `AudioShapeRecorder`,
+  the shared `audio_shape_service.detect_anchors` and
+  `_save_wav_and_analyze`), sidecar `captured_by: "capture_lane"`. Four
+  things: (1) NOTHING PLAYS until account B is confirmed from fresh reads
+  and is NOT the main account, exactly one device carries
+  `capture_lane_device_name`, the song isn't already learned, and the FIFO
+  is flowing steadily — every play/pause names the device id and the
+  gateway refuses without one; (2) a sample's song-time is the reader's
+  steady origin (`pcm.origin_from`, a low percentile past the opening
+  backlog burst) minus the governor's own `offset_ms` and
+  `capture_lane_extra_latency_ms` (0, unmeasured live) minus the song's
+  start from Spotify's progress — proven on a real FIFO in
+  `tests/test_capture_lane_timing.py` (a click at 2.0 s lands at 2008 ms,
+  and moves by the hold when the hold is left out); (3) it pauses the hidden
+  player on every way out, and a moved governor `seq`, a stalled progress
+  (`STALL_TOLERANCE_MS`) or missing samples (`pcm.drift_from`) fail the
+  song with nothing written; (4) it decides nothing: SpotFX tells it what
+  to learn (`POST /learn` with `storage/capture_lane_key`) and does the
+  main-account follow-ups itself. It has never driven the real hidden
+  player — that is a gate, not a test.
 - **THE MASTER PAGE (PR 1.3)** is SPECTRA's `/jukebox` (Engine ▾ Jukebox,
   `spectra/web/src/jukebox/`): a Set list editor and a READ-ONLY Live tab,
   plus the sign-in line — a third tab, Credits, was added by PR 3.3
