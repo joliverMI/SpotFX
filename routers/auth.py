@@ -138,4 +138,3 @@ async def capture_status():
     """Whether the capture account is signed in, as whom, and until when.
     Reads two small files; never calls Spotify."""
     return spotify_capture.status()
-
