@@ -187,6 +187,24 @@ def test_track_genres_is_empty_when_the_track_has_no_artist():
     assert sp.artist_calls == []
 
 
+def test_track_genres_artist_read_is_spaced_and_locked_like_every_other_call():
+    """The genre lookup makes TWO Spotify calls (track, then artist) — both
+    must obey the gateway's own spacing/lock contract, not just the first."""
+    clock = Clock()
+    sp = FakeSpotipy(clock)
+    sp.track_data = {"artists": [{"id": "jbx-genre-spacing-test", "name": "Spacing Artist"}]}
+    sp.artist_data = {"jbx-genre-spacing-test": {"genres": ["lofi"]}}
+    g = JukeboxGateway(sp, clock=clock, sleep=clock.sleep)
+    g.queue()                                  # an earlier call, to prime spacing
+    assert g.track_genres("spotify:track:xyz") == ["lofi"]
+    assert [name for name, _ in sp.times] == ["queue", "track", "artist"]
+    starts = [t for _, t in sp.times]
+    ends = [t + sp.cost for t in starts]
+    for prev_end, start in zip(ends, starts[1:]):
+        assert start - prev_end >= MIN_CALL_SPACING_S - 1e-9
+    assert len(clock.slept) == 2                # before `track`, and before `artist`
+
+
 @pytest.mark.parametrize("link, expected", [
     ("spotify:track:4uLU6hMCjMI75M1A2tKUQC", "spotify:track:4uLU6hMCjMI75M1A2tKUQC"),
     ("https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC?si=abc",
