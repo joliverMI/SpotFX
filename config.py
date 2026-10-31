@@ -731,6 +731,23 @@ class Settings(BaseSettings):
     absorb_governor_status_path: str = (
         "/home/javi/spotify-stack/spotify-config/parec-governor.json")
 
+    # ── The capture lane (capture_lane/, the Jukebox plan's phase 4) ──────────
+    # The hidden player "Serenity Capture" (account B, its own container in
+    # /home/javi/spotify-stack) writes its PCM into its OWN FIFO, which
+    # snapserver never reads, so nothing it plays is audible. The lane
+    # (`python -m capture_lane`, its own process, loopback only) reads that
+    # FIFO and turns one song at a time into the same shape files a normal
+    # capture makes. See capture_lane/__init__.py.
+    capture_lane_port: int = 8030
+    capture_lane_device_name: str = "Serenity Capture"
+    capture_lane_fifo: str = "/home/javi/spotify-stack/capture-audio/capturefifo"
+    capture_lane_governor_path: str = (
+        "/home/javi/spotify-stack/capture-config/parec-governor.json")
+    # Delay from Spotify's player to the governor's own input (PulseAudio's
+    # record buffer), which the governor does not measure. 0 until a live
+    # comparison against a normal capture of the same song says otherwise.
+    capture_lane_extra_latency_ms: int = 0
+
     # ── Absorb Music: the silence (services/absorb_silence.py, phase 2) ──────
     # How the house volume (input_number.snap_volume, via River's
     # script.music_volume_set) is reached. "spectra" (the default) goes

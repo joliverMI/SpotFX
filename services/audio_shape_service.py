@@ -64,6 +64,28 @@ def _capped_wait_s(wait_s: float, cap_s: float) -> Optional[float]:
     return min(wait_s, cap_s)
 
 
+def detect_anchors(meta, npz_path: Path) -> list:
+    """Early-feature anchor candidates for a just-saved shape (blocking; run
+    it off the event loop). One definition for both capture paths: this
+    process's own captures and the capture lane's (capture_lane/lane.py).
+
+    Tempo may not be available at first-capture time (librosa runs after).
+    When missing, the beat-twin penalty inside _score_uniqueness silently
+    no-ops — the backfill script re-runs anchor detection once librosa.json
+    exists."""
+    from services import anchor_detector, librosa_service
+    npz = np.load(npz_path)
+    analysis = librosa_service.get_analysis(meta)
+    tempo_bpm = float(analysis.tempo_bpm) if analysis else None
+    return anchor_detector.detect_anchor_candidates(
+        npz["timestamps_ms"],
+        npz["rms_total"],
+        npz["rms_low"],
+        npz["rms_high"],
+        tempo_bpm=tempo_bpm,
+    )
+
+
 class AudioShapeService:
     def __init__(self) -> None:
         self._recorder: Optional[AudioShapeRecorder] = None
@@ -1019,28 +1041,10 @@ class AudioShapeService:
                 anchors_ran = bool(_s.anchor_enabled)
                 if anchors_ran:
                     try:
-                        from services import anchor_detector, librosa_service
-
-                        # Tempo may not be available at first-capture time (librosa
-                        # runs after). When missing, the beat-twin penalty inside
-                        # _score_uniqueness silently no-ops — the backfill script
-                        # re-runs anchor detection once librosa.json exists.
-                        def _detect_anchors():
-                            npz = np.load(npz_path)
-                            analysis = librosa_service.get_analysis(meta)
-                            tempo_bpm = float(analysis.tempo_bpm) if analysis else None
-                            return anchor_detector.detect_anchor_candidates(
-                                npz["timestamps_ms"],
-                                npz["rms_total"],
-                                npz["rms_low"],
-                                npz["rms_high"],
-                                tempo_bpm=tempo_bpm,
-                            )
-
                         # Anchor detection is ~seconds of pure-Python CPU —
                         # executor, same reason as recorder.save above.
                         anchors = await asyncio.get_event_loop().run_in_executor(
-                            None, _detect_anchors
+                            None, detect_anchors, meta, npz_path
                         )
                         meta.anchor_candidates = [c.to_dict() for c in anchors]
                         if anchors:

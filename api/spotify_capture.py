@@ -30,8 +30,9 @@ Three more things it keeps true:
   state; the callback accepts only a state it issued in the last
   STATE_TTL_S, once.
 
-Nothing here plays, queues or reads playback. The capture worker that will
-use this token is phase 4's own work.
+Nothing here plays, queues or reads playback. `capture_client()` hands the
+token to the one thing that does — the capture lane (capture_lane/), which
+plays only on "Serenity Capture" and checks it is account B first.
 """
 from __future__ import annotations
 
@@ -158,6 +159,24 @@ def complete_sign_in(code: str, state: str, *,
     }
     _write_json(RECORD_FILE, record)
     return record
+
+
+def capture_client() -> spotipy.Spotify:
+    """A client signed in as account B, for the capture lane (capture_lane/)
+    — the ONE place anything plays with this token. Its refresh writes
+    TOKEN_CACHE only; the main token file is never opened here."""
+    return spotipy.Spotify(auth_manager=_oauth(CacheFileHandler(cache_path=str(TOKEN_CACHE))),
+                           requests_timeout=10)
+
+
+def signed_in_user() -> Optional[dict]:
+    """The record of who account B is — `{user_id, checked_not_main}` — or
+    None when it isn't signed in. Reads two small files; never calls
+    Spotify."""
+    st = status()
+    if not st["signed_in"] or not st["user_id"]:
+        return None
+    return {"user_id": st["user_id"], "checked_not_main": st["checked_not_main"]}
 
 
 def status(now_ms: Optional[int] = None) -> dict:

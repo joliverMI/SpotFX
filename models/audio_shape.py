@@ -58,6 +58,11 @@ class AudioShapeMeta(BaseModel):
     genres: list[str] = Field(default_factory=list)
     capture_complete: bool = False   # False while still being recorded
     capture_failed: bool = False     # True if capture was discarded (e.g. gap in data)
+    # Who made this capture: "" = this process, live, from the house's own
+    # playback; "capture_lane" = the hidden player "Serenity Capture" under
+    # the second account (capture_lane/), whose audio path never reaches
+    # the speakers.
+    captured_by: str = ""
     # Recapture-suggested flag: set by runtime detectors that observe the
     # captured shape is no longer aligning well (chronic anti-corr baselines,
     # repeated sweep-final Q < threshold, no usable U-Score windows, etc.).
