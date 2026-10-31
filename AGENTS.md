@@ -11088,6 +11088,30 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   to learn (`POST /learn` with `storage/capture_lane_key`) and does the
   main-account follow-ups itself. It has never driven the real hidden
   player — that is a gate, not a test.
+- **ABSORB-THEN-QUEUE (phase 4, PR 4.2)** is `services/jukebox/learning.py`
+  (its docstring is the binding statement), its own supervised task in
+  main.py, talking to the lane through `services/jukebox/lane_client.py`
+  (every way of not reaching it is ONE `LaneUnavailable`). A song the
+  lights don't know gets `LineEntry.learn` and `ready=False`, so
+  `night._fills` passes it — it keeps its place, a slot slides to the next
+  ready song — until the lane learns it (one song at a time, line order).
+  Four things: (1) NOTHING WAITS without a usable hidden player (lane down,
+  account B signed out, a lane outcome in `LANE_DOWN` → left alone for
+  `DOWN_BACKOFF_S`) or with `ShowConfig.learn_first` off — the plan's own
+  fallback, play un-analysed; (2) the host can let a song through
+  (`play_unanalysed`, `why: "host"`) and the program does it alone only
+  when `_project(1)` is empty (`why: "dry"`); (3) `MAX_ATTEMPTS` song
+  failures PARK it: `refund_due` makes guests.py's settling refund a paid
+  song once ("you get it back if it can't be learned", §1 rule 5), and it
+  waits for the host (`relearn` gives fresh tries); (4) the night's
+  `add`/`add_entry` ask `deps.ready_at_add` (no I/O) and judge last call on
+  the song's PLACE (as if ready) — the projection skips an unready song, so
+  asking otherwise would refuse every new song as too late. Every lane call
+  and file read happens outside the night's lock (`runner.edit_line` is the
+  one way in). Routes: `GET /api/jukebox/learning`,
+  `POST /api/jukebox/line/{id}/unanalysed|relearn`; Sonic sets
+  `learn_first` and reads a learning summary in `jukebox_status`; the two
+  buttons are named exclusions. Spec: `tests/test_jukebox_learning.py`.
 - **THE MASTER PAGE (PR 1.3)** is SPECTRA's `/jukebox` (Engine ▾ Jukebox,
   `spectra/web/src/jukebox/`): a Set list editor and a READ-ONLY Live tab,
   plus the sign-in line — a third tab, Credits, was added by PR 3.3

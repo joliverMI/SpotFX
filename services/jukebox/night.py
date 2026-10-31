@@ -212,6 +212,13 @@ class JukeboxDeps:
     # only ever called through `to_thread`; production_deps() wires the
     # library's own answer.
     known: Callable[[str], bool] = lambda uri: False
+    # ABSORB-THEN-QUEUE (phase 4, services/jukebox/learning.py): is a song
+    # just added ready to be sent, or does it wait to be learned first? And
+    # where each waiting song stands, for the guest page. The defaults keep
+    # every song ready (no hidden player): only production_deps() wires the
+    # learning queue.
+    ready_at_add: Callable[[LineEntry], bool] = lambda entry: True
+    learning_view: Callable[[], dict] = lambda: {}
 
 
 def production_deps() -> JukeboxDeps:
@@ -234,9 +241,13 @@ def production_deps() -> JukeboxDeps:
 
     from services.jukebox import library
 
+    from services.jukebox import learning
+
     return JukeboxDeps(gateway=default_gateway(), current_track=lambda: state.current_track,
                        device_name=device_name, sleeping=sleeping, absorb_busy=absorb_busy,
                        known=library.known,
+                       ready_at_add=lambda entry: learning.learner.ready_at_add(entry),
+                       learning_view=lambda: learning.learner.view(),
                        guest_link_start=lambda nid: guest_link.controller.on_night_start(nid),
                        guest_link_end=lambda nid: guest_link.controller.on_night_end(nid))
 
@@ -1008,10 +1019,30 @@ class JukeboxRunner:
                               image=meta.get("image") or "", thumb=meta.get("thumb") or "",
                               explicit=bool(meta.get("explicit")), known=known,
                               added_ms=self.deps.now_ms(), added_by=added_by)
+            entry.ready = self._ready_at_add(entry)
             self.night.line.append(entry)
             self._log(f"{added_by} added {entry.title or entry.uri}")
             await self._persist()
             return {"status": "added", "entry": entry.model_dump(mode="json")}
+
+    def _ready_at_add(self, entry: LineEntry) -> bool:
+        try:
+            return bool(self.deps.ready_at_add(entry))
+        except Exception:                                         # noqa: BLE001
+            logger.exception("Jukebox: the learning gate failed; the song plays un-analysed")
+            return True
+
+    async def edit_line(self, fn: Callable[["JukeboxRunner"], Any]) -> Any:
+        """Run `fn(self)` under the night's lock and save — the learning
+        queue's one way to change the line (services/jukebox/learning.py).
+        None, without calling it, when no night is running."""
+        async with self._get_lock():
+            self._ensure_loaded()
+            if not self.running:
+                return None
+            out = fn(self)
+            await self._persist()
+            return out
 
     async def _known(self, uri: str) -> bool:
         try:
@@ -1058,10 +1089,15 @@ class JukeboxRunner:
                         "detail": sentence("not_running")}
             idx = self.fair_index(entry.round, fair)
             self.night.line.insert(idx, entry)
+            # last call is judged on its place in line (learning first only
+            # ever slides it back; the projection skips a song that isn't
+            # ready, so it is asked as if it were)
+            entry.ready = True
             starts = self._starts_in(entry.id)
             if latest_start_ms is not None and (starts is None or starts > latest_start_ms):
                 self.night.line.remove(entry)
                 return {"status": "refused", "reason": "too_late", "starts_in_ms": starts}
+            entry.ready = self._ready_at_add(entry)
             self._log(f"{entry.added_by if entry.added_by == 'host' else 'a guest'} added "
                       f"{entry.title or entry.uri} (song {entry.round} of theirs tonight)")
             await self._persist()
@@ -1511,7 +1547,14 @@ class JukeboxRunner:
                 "duration_ms": duration, "remaining_ms": remaining,
                 "next": items, "line": list(n.line), "set_items": n.set_items,
                 "plays": n.plays, "jail": dict(n.jail), "jail_kind": dict(n.jail_kind),
-                "no_skip": list(n.no_skip), "next_jumps_set": self.cfg.next_jumps_set}
+                "no_skip": list(n.no_skip), "next_jumps_set": self.cfg.next_jumps_set,
+                "learning": self._learning_view()}
+
+    def _learning_view(self) -> dict:
+        try:
+            return dict(self.deps.learning_view() or {})
+        except Exception:                                         # noqa: BLE001
+            return {}
 
     async def read_set(self, cfg: ProgramConfig, refresh: bool = False) -> tuple[dict, list[SetItem]]:
         """The set for `cfg`: the running night's own copy when the night is

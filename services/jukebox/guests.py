@@ -828,6 +828,12 @@ def build_view(book: GuestBook, phone_id: str, gs: dict, now_ms: int,
                      "known": e.known,
                      "place": at["place"] if at else None,
                      "starts_in_ms": at["starts_in_ms"] if at else None})
+        # absorb-then-queue (services/jukebox/learning.py): a song waiting to
+        # be learned keeps its place but isn't sent until it is
+        learn = (gs.get("learning") or {}).get(e.id)
+        if learn and not e.known and e.state == "queued":
+            song["learning"] = {"state": learn.get("state"), "eta_s": learn.get("eta_s"),
+                                "ready": bool(learn.get("ready"))}
         if cr:
             song["paid"] = e.paid
             if at is not None:
@@ -860,6 +866,14 @@ def idle_view(now_ms: int, show: Optional[ShowConfig] = None) -> dict:
 
 
 EXPLICIT_EXTRA = 2            # credits mode, explicit "allowed": +2 credits (report §4)
+
+
+def _unlearnable(e: Any) -> bool:
+    """A paid song the hidden player couldn't learn: the plan's §1 rule 5
+    gives its price back (services/jukebox/learning.py's parking) — sticky,
+    whatever the host does with the song afterwards."""
+    learn = getattr(e, "learn", None)
+    return bool(learn is not None and learn.refund_due)
 
 
 def add_cost(duration_ms: int, known: bool, explicit: bool, wait_ms: Optional[int],
@@ -1154,7 +1168,7 @@ class Guests:
             return True
         if any(k != cur and k not in book.pots and w.pot(k)[0] for k in w.pledges):
             return True
-        return any(e.paid_seq and e.removed and not w.led.is_refunded(e.paid_seq)
+        return any(e.paid_seq and (e.removed or _unlearnable(e)) and not w.led.is_refunded(e.paid_seq)
                    for e in gs.get("line") or [])
 
     async def _settle(self, w: Any, book: GuestBook, gs: dict) -> bool:
@@ -1187,6 +1201,10 @@ class Guests:
         for e in gs.get("line") or []:
             if e.paid_seq and e.removed and not w.led.is_refunded(e.paid_seq):
                 w.noted([await self._ledger(w.led.refund, e.paid_seq, None, "the host removed it")])
+                changed = True
+            elif e.paid_seq and _unlearnable(e) and not w.led.is_refunded(e.paid_seq):
+                w.noted([await self._ledger(w.led.refund, e.paid_seq, None,
+                                            "the lights couldn't learn it")])
                 changed = True
         return changed
 
