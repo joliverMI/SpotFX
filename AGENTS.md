@@ -13483,6 +13483,61 @@ unconditional media query covers any width OUTSIDE band X too — a cap
 and its lifting override must share the same boundary, or state exactly
 why they don't.
 
+## THE TV PROBE — phase 0 of the TV display plan: `GET /spectra/tv/probe`
+
+Plan: `/home/javi/fleet-spotfx/data/tv-display-plan/{report.md,plan.html}`,
+approved 2026-11-01 — the Admiral's one note: "the media room vizio is
+legacy and should be ignored," so that TV is dropped from the whole plan
+outright (no targeting, discovery, or fallback to it anywhere, this PR or
+any later phase). The plan grows outward from the Jukebox toward "quality
+effects on the screen" in later phases (a TV app shell, a `screen` fx
+device, Milkdrop/twin looks); this PR is phase 0 only — it reads the TV's
+own browser and drives no light.
+
+`spectra/services/tv_probe.py`'s module docstring is the binding
+statement. A SELF-CONTAINED page (no build step, one `<style>`/`<script>`,
+no external fetches — the same reason-and-convention `spec_viewer.py`
+uses for `/spectra/spec`: it has to run unmodified on whatever webOS
+Chromium build the LG actually has) served at `spectra/api/tv_probe.py`'s
+`GET /tv/probe`, registered in `spectra/app.py` BEFORE any future static
+mount a later phase might add at `/tv` (an explicit route always wins a
+same-prefix `Mount` regardless of registration order otherwise — keep this
+one ahead of it). It reads WebGL 1/2 + GPU string via
+`WEBGL_debug_renderer_info` on two SEPARATE fresh canvases — a canvas
+whose context is already bound to one type (`"webgl"`) returns `null` for
+a different type (`"webgl2"`) on a later `getContext()` call per the HTML
+Canvas spec, so each needs its own canvas (the first-shipped version
+shared one and silently read `webgl2: false` on every real GPU; fixed
+same-day in review); runs a 10 s drawn-fps ladder (2D fill, a one-pass
+shader at 540p/720p/1080p, a `milkdrop_weight_approx` tier — several trig
+terms approximating Butterchurn's per-pixel cost, named so nothing
+downstream reads it as a measured Milkdrop number — and an
+`instanced_points` tier approximating the Live view's own "ONE instanced
+WebGL2 call, MAX blend" renderer, see the Live-view section above); times
+ping round-trips against `GET /api/tv/probe/ping` (a bare `{"ok": true}`
+— the ASGI/HTTP hop itself is what's measured, never a computation); and
+logs every `visibilitychange` (the screensaver). Results POST to
+`POST /api/tv/probe/result` and MERGE into ONE record per `probe_id`
+(`storage/spectra/tv_probe_results.json`, `TV_PROBE_FILE`, bounded
+`MAX_RESULTS=8`, oldest `updated_ms` evicted first — a diagnostic page
+opened repeatedly while tuning this build must not grow the store without
+limit), read back by `GET /api/tv/probe/results` and rendered at the
+bottom of the page itself. **The result is never a verdict, only a
+measurement** — reading what came back (buy a box? is the fps enough?) is
+the Admiral's, from the test evening.
+
+**Touches no light, structurally** — proven by driving every
+`/api/tv/probe/*` route through the real, fully-wired `create_app()` with
+`fx_seam.apply_writes`/`light_ownership.commit` poisoned to raise (both
+proven live first, so the poison is confirmed working before it's trusted
+as a negative — the two choke points any real scene/flare/colour write in
+this app passes through). No help topic — like `/spec`, this is a page a
+human opens directly in a browser tab, outside the SPA's own nav and
+`helpContent.ts`. Specs: `scripts/check_tv_probe_page.py` (a real headless
+Chromium over raw CDP against a real uvicorn server, running the page's
+own unattended fps/ping battery exactly as the LG would), `tests/
+test_tv_probe.py`.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

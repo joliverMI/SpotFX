@@ -50,7 +50,8 @@ from spectra.api import (av_sync, device_preview, devices as devices_api,
                          room_effects as room_effects_api, room_preview,
                          room_view as room_view_api, rooms,
                          scenes, sequencer, settings_console, show_review,
-                         sonic_usage, spec, test_session, testbed, triggers)
+                         sonic_usage, spec, test_session, testbed, triggers,
+                         tv_probe as tv_probe_api)
 
 
 class SPAStaticFiles(StaticFiles):
@@ -133,6 +134,13 @@ def create_app() -> FastAPI:
     app.include_router(test_session.router)
     app.include_router(timing_api.router)
     app.include_router(testbed.router)
+    # TV display plan phase 0 (data/tv-display-plan/plan.html PR 0.1): the
+    # probe page at /tv/probe. Registered BEFORE any future static mount a
+    # later phase might add at "/tv" (the TV app shell, PR 1.1) — an
+    # explicit route always wins over a later-registered Mount with the
+    # same prefix, so this ordering is what keeps /tv/probe reachable once
+    # that mount exists.
+    app.include_router(tv_probe_api.router)
     # BEFORE rooms: `/rooms/capture-queue` must never be eaten by a
     # `/rooms/{room_id}` pattern.
     app.include_router(capture_queue_api.router)

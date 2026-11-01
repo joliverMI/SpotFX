@@ -239,6 +239,17 @@ def _isolated_capture_health(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_tv_probe(tmp_path, monkeypatch):
+    """The TV probe's stored results (spectra/services/tv_probe.py,
+    data/tv-display-plan/plan.html PR 0.1) — no DI seam, module-level
+    config path read on every save/load. Autouse so a test that drives the
+    real `/api/tv/probe/*` routes never writes the repo's real
+    `storage/spectra/tv_probe_results.json`."""
+    from spectra import config as scfg
+    monkeypatch.setattr(scfg, "TV_PROBE_FILE", tmp_path / "tv_probe_results.json")
+
+
+@pytest.fixture(autouse=True)
 def _isolated_known_buffer(tmp_path, monkeypatch):
     """THE KNOWN AUDIO BUFFER (spectra/services/known_buffer.py) — same
     class as _isolated_fire_history below: no DI seam, module globals, and
