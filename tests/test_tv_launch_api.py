@@ -36,6 +36,23 @@ def test_put_launch_config_is_a_partial_update():
     assert c.get("/api/tv/launch-config").json() == r2.json()
 
 
+def test_put_launch_config_the_json_string_false_resolves_to_false_not_true():
+    c = _client()
+    c.put("/api/tv/launch-config", json={"auto_open_enabled": True})
+    r = c.put("/api/tv/launch-config", json={"auto_open_enabled": "false"})
+    assert r.status_code == 200
+    assert r.json()["auto_open_enabled"] is False
+    assert c.get("/api/tv/launch-config").json()["auto_open_enabled"] is False
+
+
+def test_put_launch_config_refuses_a_malformed_auto_open_value_with_422():
+    c = _client()
+    r = c.put("/api/tv/launch-config", json={"auto_open_enabled": "yes"})
+    assert r.status_code == 422
+    # the refused write must not have landed
+    assert c.get("/api/tv/launch-config").json()["auto_open_enabled"] is False
+
+
 @dataclass
 class _FakeHAResult:
     status: str

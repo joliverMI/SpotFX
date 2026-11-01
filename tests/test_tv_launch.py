@@ -45,6 +45,25 @@ def test_apply_patch_is_a_true_partial_update():
     assert cfg2.auto_open_enabled is False                # untouched
 
 
+def test_apply_patch_treats_the_json_string_false_as_false_never_true_by_truthiness():
+    tv_launch.save_config(tv_launch.TvLaunchConfig(auto_open_enabled=True))
+    cfg = tv_launch.apply_patch({"auto_open_enabled": "false"})
+    assert cfg.auto_open_enabled is False
+
+
+def test_apply_patch_accepts_the_string_true_case_insensitively():
+    cfg = tv_launch.apply_patch({"auto_open_enabled": "TRUE"})
+    assert cfg.auto_open_enabled is True
+
+
+def test_apply_patch_refuses_a_malformed_auto_open_value_rather_than_guessing():
+    tv_launch.save_config(tv_launch.TvLaunchConfig(auto_open_enabled=False))
+    with pytest.raises(tv_launch.TvLaunchPatchError):
+        tv_launch.apply_patch({"auto_open_enabled": "yes"})
+    # the refused write must not have landed
+    assert tv_launch.load_config().auto_open_enabled is False
+
+
 def test_an_unreadable_store_reads_as_the_default_and_logs_rather_than_raises(tmp_path, monkeypatch):
     from spectra import config as scfg
     bad = tmp_path / "corrupt.json"

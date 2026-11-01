@@ -98,6 +98,30 @@ class TvLaunchConfig:
                 "script_entity": self.script_entity}
 
 
+class TvLaunchPatchError(ValueError):
+    """Raised by `apply_patch` for a malformed field — the API layer maps
+    this to HTTP 422 rather than silently guessing a value."""
+
+
+def _coerce_bool(name: str, value: Any) -> bool:
+    """A real JSON/Python bool is the only trusted input; a bare
+    `bool(value)` cast (Python truthiness) would read the JSON STRING
+    `"false"` as `True`, inverting a safety-critical default (`AGENTS.md`'s
+    own `show_actions._coerce` bool branch is the precedent this mirrors:
+    check `isinstance(value, bool)` first, accept only the literal
+    `"true"`/`"false"` tokens case-insensitively as a leniency, and refuse
+    anything else by name instead of guessing)."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+    raise TvLaunchPatchError(f"{name}: expected true or false, got {value!r}")
+
+
 def _path(path=None):
     return path or scfg.TV_LAUNCH_FILE
 
@@ -142,7 +166,7 @@ def apply_patch(patch: dict, path=None) -> TvLaunchConfig:
     may send only part of)."""
     cfg = load_config(path)
     if "auto_open_enabled" in patch:
-        cfg.auto_open_enabled = bool(patch["auto_open_enabled"])
+        cfg.auto_open_enabled = _coerce_bool("auto_open_enabled", patch["auto_open_enabled"])
     if "script_entity" in patch:
         raw = patch["script_entity"]
         cfg.script_entity = (str(raw).strip() or None) if raw else None

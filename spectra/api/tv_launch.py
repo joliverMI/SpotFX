@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, HTTPException
 
 from spectra.services import tv_launch
 
@@ -20,7 +20,10 @@ async def get_launch_config() -> dict:
 
 @router.put("/api/tv/launch-config")
 async def put_launch_config(body: dict[str, Any] = Body(default={})) -> dict:
-    cfg = tv_launch.apply_patch(body)
+    try:
+        cfg = tv_launch.apply_patch(body)
+    except tv_launch.TvLaunchPatchError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return cfg.as_dict()
 
 
