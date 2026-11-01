@@ -51,7 +51,7 @@ from spectra.api import (av_sync, device_preview, devices as devices_api,
                          room_view as room_view_api, rooms,
                          scenes, sequencer, settings_console, show_review,
                          sonic_usage, spec, test_session, testbed, triggers,
-                         tv_probe as tv_probe_api)
+                         tv_feed as tv_feed_api, tv_probe as tv_probe_api)
 
 
 class SPAStaticFiles(StaticFiles):
@@ -141,6 +141,8 @@ def create_app() -> FastAPI:
     # same prefix, so this ordering is what keeps /tv/probe reachable once
     # that mount exists.
     app.include_router(tv_probe_api.router)
+    # TV display plan phase 1 (PR 1.2): the TV app's one WebSocket feed.
+    app.include_router(tv_feed_api.router)
     # BEFORE rooms: `/rooms/capture-queue` must never be eaten by a
     # `/rooms/{room_id}` pattern.
     app.include_router(capture_queue_api.router)

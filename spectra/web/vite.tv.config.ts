@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -20,8 +22,24 @@ import react from '@vitejs/plugin-react';
 // compare against once the feed exists.
 const BUILD_ID = String(Date.now());
 
+// A plain text manifest beside the build, read by spectra/services/
+// tv_feed.py (PR 1.2) so the SERVER can tell a connecting TV what the
+// currently-deployed build actually is — the client's own
+// `shouldReload()` (build.ts) decides whether that differs from what it
+// is running. A .js bundle isn't a convenient thing for the Python side
+// to inspect; a one-line text file is.
+function writeBuildIdManifest() {
+  return {
+    name: 'tv-build-id-manifest',
+    writeBundle() {
+      writeFileSync(resolve(__dirname, 'tv-dist', 'build-id.txt'), BUILD_ID);
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()], root: 'tv', base: '/spectra/tv/', publicDir: 'public',
+  plugins: [react(), writeBuildIdManifest()], root: 'tv', base: '/spectra/tv/',
+  publicDir: 'public',
   define: { __TV_BUILD_ID__: JSON.stringify(BUILD_ID) },
   build: { outDir: '../tv-dist', emptyOutDir: true, assetsInlineLimit: 0 },
 });
