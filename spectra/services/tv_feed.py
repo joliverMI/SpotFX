@@ -25,17 +25,18 @@ timestamps are taken as close to the actual recv/send as possible.
 PROVE that resistance by injecting a real delay there, rather than trusting
 the formula by inspection.
 
-THE JUKEBOX RELAY READS SPOTFX'S EXISTING `GET /api/jukebox/board`
-(PR 466), NOT the leaner purpose-built `/api/jukebox/tv` the plan's own
-row 1.3 adds — this PR is sequenced before that endpoint exists. `run_
-jukebox_loop` is written against `TvFeedDeps.fetch_jukebox`, a single
-swappable seam, so 1.3's own PR is a one-line change (point it at the new
-endpoint) rather than a second relay implementation. `running` — whether a
-night is playing right now — is read FROM that same fetched payload (the
-board endpoint already carries it), not from a second call: polling it
-separately to decide whether to poll it is circular, and SpotFX's own
-board read is already a lean, no-Spotify-call read (board.py's own
-docstring), so polling it every second regardless of state is cheap.
+THE JUKEBOX RELAY READS SPOTFX'S OWN `GET /api/jukebox/tv` (PR 1.3,
+services/jukebox/guests.py::Guests.tv_view — now/votes/next 3/board/link/
+revision, the leaner purpose-built shape the plan's own row 1.3 names).
+`run_jukebox_loop` is written against `TvFeedDeps.fetch_jukebox`, a single
+swappable seam — PR 1.2's own first version pointed this at the older
+`GET /api/jukebox/board` (PR 466) because 1.3's endpoint didn't exist yet;
+this is that one-line follow-up, not a second relay implementation.
+`running` — whether a night is playing right now — is read FROM that same
+fetched payload, not from a second call: polling it separately to decide
+whether to poll it is circular, and SpotFX's own read is already lean
+(no Spotify call — guests.py's own `_running()`/`tv_view()` docstrings),
+so polling it every second regardless of state is cheap.
 """
 from __future__ import annotations
 
@@ -78,7 +79,7 @@ async def _default_fetch_jukebox(http_url: str) -> Optional[dict]:
     import httpx
     try:
         async with httpx.AsyncClient(base_url=http_url, timeout=5.0) as client:
-            resp = await client.get("/api/jukebox/board")
+            resp = await client.get("/api/jukebox/tv")
             resp.raise_for_status()
             return resp.json()
     except Exception:                                      # noqa: BLE001
@@ -175,11 +176,10 @@ def layout_message(jukebox_running: Optional[bool]) -> dict:
 
 
 def jukebox_message(board: Optional[dict]) -> dict:
-    """`board` is SpotFX's own `GET /api/jukebox/board` response verbatim
-    (see the module docstring on why — this PR predates the leaner
-    `/api/jukebox/tv` endpoint PR 1.3 adds), or `None` when the relay
-    couldn't reach SpotFX at all (a transient fetch failure, named rather
-    than silently repeating the last good payload forever)."""
+    """`board` is SpotFX's own `GET /api/jukebox/tv` response verbatim
+    (see the module docstring), or `None` when the relay couldn't reach
+    SpotFX at all (a transient fetch failure, named rather than silently
+    repeating the last good payload forever)."""
     if board is None:
         return {"type": "jukebox", "running": None, "reachable": False}
     return {"type": "jukebox", "reachable": True, **board}

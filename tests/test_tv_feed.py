@@ -84,13 +84,13 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-async def _serve_jukebox_board(board: dict, port: int):
+async def _serve_jukebox_tv(board: dict, port: int):
     import uvicorn
     from fastapi import FastAPI
 
     app = FastAPI()
 
-    @app.get("/api/jukebox/board")
+    @app.get("/api/jukebox/tv")
     def _board():
         return board
 
@@ -107,14 +107,14 @@ async def _stop_server(server, task):
     await task
 
 
-def test_default_fetch_jukebox_reads_the_real_board_endpoint():
+def test_default_fetch_jukebox_reads_the_real_tv_endpoint():
     """Exercises the real, unmonkeypatched `_default_fetch_jukebox()`
     against a real HTTP server on loopback — the production default
     `run_jukebox_loop` actually calls."""
     async def scenario():
         port = free_port()
         board = {"running": True, "now": {"title": "Song"}, "next": []}
-        server, task = await _serve_jukebox_board(board, port)
+        server, task = await _serve_jukebox_tv(board, port)
         try:
             result = await tv_feed._default_fetch_jukebox(f"http://127.0.0.1:{port}")
             assert result == board
