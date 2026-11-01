@@ -1951,3 +1951,27 @@ export interface TestbedReferenceSet {
   transitions_per_minute: number | null;
   songs: TestbedReferenceSetRow[];
 }
+
+/** GET/PUT /api/second-account (spectra/api/second_account.py; the binding
+ * statement is fx/second_account.py): the Settings page's switch that must
+ * be ON before the system may do anything with the second Spotify account
+ * but read it. Ships off; an unreadable record is treated as off. */
+export interface SecondAccountChange {
+  enabled: boolean;
+  at_ms: number;
+  by: string;
+}
+
+export interface SecondAccountState {
+  enabled: boolean;
+  state: 'on' | 'off' | 'unreadable';
+  sentence: string;
+  detail: string;
+  changed_at_ms: number | null;
+  changed_by: string | null;
+  history: SecondAccountChange[];
+  /** The play the system started on the account and hasn't let go of yet. */
+  system_started: { device_id: string; uris: string[]; started_at_ms: number } | null;
+  /** On a PUT that turned it off while the system was playing on it. */
+  letting_go?: string;
+}

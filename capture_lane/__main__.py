@@ -22,7 +22,8 @@ def main(argv: list[str] | None = None) -> int:
     import uvicorn
 
     from capture_lane.app import create_app
-    uvicorn.run(create_app(), host="127.0.0.1", port=port, access_log=False, server_header=False)
+    uvicorn.run(create_app(recover_on_start=True), host="127.0.0.1", port=port,
+                access_log=False, server_header=False)
     return 0
 
 

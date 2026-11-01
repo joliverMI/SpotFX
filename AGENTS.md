@@ -11134,6 +11134,28 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   exception is his grant for Absorb's proven-silent windows), account B signed
   out, or a lane that says the hidden player is unusable. It never writes his
   playlists. Spec: `tests/test_absorb_lane.py`.
+- **THE SECOND ACCOUNT'S SWITCH (2026-11-01, the Admiral: "a solid barrier so
+  that the second user doesn't get their music taken from them by the
+  system")** — `fx/second_account.py` is the binding statement. SPECTRA's
+  Settings card (`SecondAccountCard.tsx`, `GET/PUT /api/second-account`)
+  writes ONE record, ships OFF; off or unreadable, nothing may write to
+  account B. Four things: (1) THE GATE IS IN THE CLIENT —
+  `api/spotify_capture.SecondAccountSpotify` wraps its own HTTP session and
+  asks `second_account.check()` (fresh from disk) before every non-GET, so a
+  new write path cannot bypass it; reads always pass. Never build an
+  account-B spotipy client any other way — `tests/test_second_account_lock.py`'s
+  guard scans the repo and fails. (2) The ONE write allowed while off is
+  LETTING GO (`release_system_playback`): it pauses only after a fresh read
+  shows the system's own recorded play (`second_account.note_started`) on
+  its own device; the second user's playback is never touched. The capture
+  lane has no bare `pause` any more — every stop is a release, ON or OFF.
+  (3) The lane re-reads the switch every poll (`_check_cancel`), so off
+  mid-song ends the job as `account_locked` within ~2 s; the learning queue
+  and the Absorb backlog treat it as "hidden player unusable" (songs play
+  un-analysed), never a song's failure (`NOT_A_TRY`). (4) Sonic has NO
+  operation for it, read or write, deliberately (named in
+  `spectra/api/second_account.py`). Tests run with it ON via conftest's
+  `_isolated_second_account`; help topic `second-account-lock`.
 - **THE MASTER PAGE (PR 1.3)** is SPECTRA's `/jukebox` (Engine ▾ Jukebox,
   `spectra/web/src/jukebox/`): a Set list editor and a READ-ONLY Live tab,
   plus the sign-in line — a third tab, Credits, was added by PR 3.3

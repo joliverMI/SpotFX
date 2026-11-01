@@ -77,10 +77,20 @@ class FakeSpotify:
             self.started_at = self.clock()
             self.uri = uri
 
-    def pause(self, device_id):
-        self.calls.append(("pause", device_id))
-        if self.pause_raises:
-            raise RuntimeError("spotify said no")
+    def release(self, end_of_song=False):
+        """CaptureGateway.release over this fake: the REAL decision
+        (second_account.is_system_playback) against what the fake is
+        playing now; a pause only when it is the system's own song."""
+        from fx import second_account
+        self.calls.append(("release", end_of_song))
+        record = {"device_id": DEV, "uris": [self.uri]} if self.uri else None
+        ours, why = second_account.is_system_playback(record, self.playback(),
+                                                      end_of_song=end_of_song)
+        if ours:
+            self.calls.append(("pause", DEV))
+            if self.pause_raises:
+                raise RuntimeError("spotify said no")
+        return {"paused": ours, "why": why}
 
     def full_volume(self, device_id):
         self.calls.append(("full_volume", device_id))
@@ -103,7 +113,7 @@ class FakeSpotify:
                 "device": {"id": DEV, "name": "Serenity Capture"}}
 
     def control_calls(self):
-        return [c for c in self.calls if c[0] in ("play", "pause", "full_volume")]
+        return [c for c in self.calls if c[0] in ("play", "pause", "full_volume", "release")]
 
 
 class FakeReader:
@@ -346,13 +356,18 @@ def test_no_audio_on_the_pipe_means_nothing_plays(tmp_path, monkeypatch):
     assert [c for c in sp.control_calls() if c[0] == "play"] == []
 
 
-@pytest.mark.parametrize("setup,reason", [
-    ("takeover", "interrupted"),
-    ("paused", "interrupted"),
-    ("stall", "stalled"),
-    ("never", "did_not_start"),
+@pytest.mark.parametrize("setup,reason,paused", [
+    # somebody else's song on the hidden player: theirs, left alone
+    ("takeover", "interrupted", False),
+    # somebody paused it: nothing of the system's is playing
+    ("paused", "interrupted", False),
+    # the system's own song, still playing: paused
+    ("stall", "stalled", True),
+    # it never started: nothing to stop
+    ("never", "did_not_start", False),
 ])
-def test_trouble_mid_song_ends_the_job_and_pauses_the_player(tmp_path, monkeypatch, setup, reason):
+def test_trouble_mid_song_ends_the_job_and_lets_go_of_only_its_own_song(
+        tmp_path, monkeypatch, setup, reason, paused):
     clock = Clock()
     sp = FakeSpotify(clock)
     if setup == "takeover":
@@ -366,7 +381,8 @@ def test_trouble_mid_song_ends_the_job_and_pauses_the_player(tmp_path, monkeypat
     lane, sp, rd, clock, d, analysed = make(tmp_path, monkeypatch, spotify=sp, clock=clock)
     out = run(lane, job())
     assert out.status == "failed" and out.reason == reason
-    assert ("pause", DEV) in sp.calls
+    assert ("release", False) in sp.calls
+    assert (("pause", DEV) in sp.calls) is paused
     assert not list(d.glob("*.npz")) and analysed == []
 
 
@@ -441,11 +457,11 @@ def test_an_analysis_that_fails_keeps_the_shape_and_says_so(tmp_path, monkeypatc
 def test_a_pause_that_fails_is_reported(tmp_path, monkeypatch):
     clock = Clock()
     sp = FakeSpotify(clock)
-    sp.takeover_at_s = 6
+    sp.stall_at_s = 6
     sp.pause_raises = True
     lane, sp, *_ = make(tmp_path, monkeypatch, spotify=sp, clock=clock)
     out = run(lane, job())
-    assert out.reason == "interrupted" and "pause failed" in out.detail
+    assert out.reason == "stalled" and "pause failed" in out.detail
 
 
 def test_outcomes_are_a_short_memory(tmp_path, monkeypatch):
@@ -534,7 +550,7 @@ class _Sp:
 def test_the_gateway_never_plays_without_a_device():
     sp = _Sp()
     gw = CaptureGateway(sp)
-    for call in (lambda: gw.play("", URI), lambda: gw.pause(""), lambda: gw.full_volume(None)):
+    for call in (lambda: gw.play("", URI), lambda: gw.full_volume(None)):
         with pytest.raises(NoDevice):
             call()
     assert sp.calls == []
@@ -546,9 +562,16 @@ def test_the_gateway_spaces_its_calls():
     sp = _Sp()
     gw = CaptureGateway(sp)
     t0 = time.monotonic()
-    gw.pause(DEV)
-    gw.pause(DEV)
+    gw.full_volume(DEV)
+    gw.full_volume(DEV)
     assert time.monotonic() - t0 >= 0.45
+
+
+def test_the_gateway_has_no_bare_pause():
+    """The lane stops things only by letting go (CaptureGateway.release),
+    which pauses nothing but the system's own song — a plain pause would be
+    a way to stop the second user's music."""
+    assert not hasattr(CaptureGateway, "pause")
 
 
 def test_the_capture_client_never_reads_or_writes_the_main_token(monkeypatch):

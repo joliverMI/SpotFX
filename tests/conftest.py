@@ -488,6 +488,23 @@ def _isolated_spotify_capture(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_second_account(tmp_path_factory, monkeypatch):
+    """The second Spotify account's lock (fx/second_account.py) ships OFF —
+    no record, nothing touches the account. Suites that are not about the
+    lock run as they did before it existed: its record (and the record of
+    what the system started) point at a temp dir, never his storage/, and
+    the record says ON — the house-lighting `enabled` precedent.
+    tests/test_second_account_lock.py proves the OFF default by taking the
+    record away."""
+    from fx import second_account
+    # its own temp dir, not the test's tmp_path (some tests need that empty)
+    d = tmp_path_factory.mktemp("second-account")
+    monkeypatch.setattr(second_account, "LOCK_FILE", d / "second_account.json")
+    monkeypatch.setattr(second_account, "STARTED_FILE", d / "second_account_started.json")
+    (d / "second_account.json").write_text('{"enabled": true, "changed_by": "tests/conftest.py"}')
+
+
+@pytest.fixture(autouse=True)
 def _isolated_jukebox(tmp_path, monkeypatch):
     """The Jukebox's stores (services/jukebox/store.py), its one
     process-wide runner (services/jukebox/night.py), and tonight's guests

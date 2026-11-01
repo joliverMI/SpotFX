@@ -43,6 +43,7 @@ from spectra.api import timing as timing_api
 from spectra.api import light_show as light_show_api
 from spectra.api import house as house_api
 from spectra.api import house_audio as house_audio_api
+from spectra.api import second_account as second_account_api
 from spectra.api import (av_sync, device_preview, devices as devices_api,
                          feedback, fire_history,
                          flare_preview, gradient2d, intensity_scale, journey,
@@ -152,6 +153,7 @@ def create_app() -> FastAPI:
     app.include_router(light_show_api.router)
     app.include_router(house_api.router)
     app.include_router(house_audio_api.router)
+    app.include_router(second_account_api.router)
 
     @app.websocket("/api/ws")
     async def ws_endpoint(ws: WebSocket):

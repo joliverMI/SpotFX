@@ -30,6 +30,7 @@ import type { SettingsChatMessage, SettingValue } from '../types';
 import Icon from '../components/Icon';
 import RoomCard from './RoomCard';
 import ScenesDropsCard from './ScenesDropsCard';
+import SecondAccountCard from './SecondAccountCard';
 
 function formatValue(spec: SettingValue): string {
   const { value, kind, unit } = spec;
@@ -190,6 +191,10 @@ export default function SettingsConsolePage() {
         * page. */}
       <RoomCard />
       <ScenesDropsCard />
+      {/* The second Spotify account's switch (2026-11-01, his ask) — the
+        * one control for a barrier the server enforces below every caller
+        * (fx/second_account.py); see the card's own docstring. */}
+      <SecondAccountCard />
 
       <div className="card settings-console-chat">
         <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

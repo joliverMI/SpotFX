@@ -3,6 +3,9 @@ The capture lane: ONE song at a time, played on the hidden player under
 account B and turned into the same shape files a normal capture makes.
 
 THE ORDER IS THE SAFETY (`Lane._run`):
+  0. The lock: the second account's switch on SPECTRA's Settings page
+     (fx/second_account.py) reads ON. Off — or unreadable — and nothing
+     plays; the gateway's own client would refuse the write anyway.
   1. Who: account B is signed in, `GET /me` is that account, and it is NOT
      the main account (read fresh, read-only; a sign-in that was never
      checked and a main account that can't be read now is a refusal, not a
@@ -13,14 +16,19 @@ THE ORDER IS THE SAFETY (`Lane._run`):
   3. Not already learned: a complete shape for the song is never captured
      over (re-learning a head is a later phase's, with its realign).
   4. Audio flowing in the FIFO, steady, BEFORE anything plays.
-  Only then the play, from 0:00. If any of 1-4 fails, nothing played.
+  Only then the play, from 0:00. If any of 0-4 fails, nothing played.
 
-WHILE IT PLAYS, every poll re-checks: still this song, still playing, still
-on the hidden player, Spotify's progress keeping time with the clock (a
-stalled player puts silence into the stream and slides everything after it),
-and the governor's `seq` (a drain drops audio silently). Any of them ends the
-job with its reason — and the lane PAUSES the hidden player on every way out
-(the `finally`), so a failed job never leaves account B playing on.
+WHILE IT PLAYS, every poll re-checks: the lock is still on, still this
+song, still playing, still on the hidden player, Spotify's progress keeping
+time with the clock (a stalled player puts silence into the stream and
+slides everything after it), and the governor's `seq` (a drain drops audio
+silently). Any of them ends the job with its reason — and the lane LETS GO
+on every way out (the `finally`): it pauses the hidden player only when a
+fresh read shows the song playing there is still the one it started
+(`CaptureGateway.release`), so a failed job never leaves account B playing
+the system's song on, and never stops a song the second user chose. A lock
+turned off mid-song is noticed within one poll (`_check_cancel`, at most
+POLL_S) and ends the job as `account_locked`.
 
 THE SONG-TIME of each sample: `origin + n/rate` is when sample n arrived
 (capture_lane.pcm); minus the governor's own reported hold (`offset_ms`,
@@ -52,6 +60,12 @@ from typing import Any, Awaitable, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
+
+def _lock_on() -> bool:
+    from fx import second_account
+    return second_account.write_allowed()
+
+
 RATE = 44100
 AUDIO_WAIT_S = 6.0          # the FIFO has this long to start flowing steadily
 START_TIMEOUT_S = 15.0      # playback has this long to start after the play
@@ -64,6 +78,8 @@ OUTCOMES_KEPT = 20
 STATES = ("idle", "preparing", "starting", "capturing", "finishing", "saving", "analysing")
 
 SENTENCES = {
+    "account_locked": "The second Spotify account is switched off on the Settings page, so "
+                      "nothing plays on it.",
     "not_signed_in": "Account B isn't signed in.",
     "wrong_account": "The capture token isn't account B (or is the main account), so nothing was played.",
     "cannot_check_account": "Account B was never checked against the main account and the main "
@@ -90,6 +106,10 @@ class Busy(Exception):
     pass
 
 
+class Locked(Exception):
+    """The second account's lock is off: no song is taken."""
+
+
 @dataclass
 class Job:
     uri: str
@@ -114,6 +134,7 @@ class Outcome:
     head_ms: Optional[int] = None
     latency_ms: Optional[int] = None
     npz_file: str = ""
+    released: str = ""          # how it let go: second_account.is_system_playback's words
 
 
 class JobFailed(Exception):
@@ -136,6 +157,8 @@ class LaneDeps:
     detect_anchors: Callable[[Any, Any], list]        # blocking: (meta, npz path)
     write_sidecar: Callable[[Any, Any], None]         # blocking: (meta, npz path)
     wav_and_analyze: Callable[[Any, Any, int], Awaitable[bool]]
+    # the second account's lock, read fresh every time (fx/second_account.py)
+    unlocked: Callable[[], bool] = _lock_on
     device_name: str = "Serenity Capture"
     extra_latency_ms: int = 0
     max_gap_ms: int = 200
@@ -241,6 +264,8 @@ class Lane:
     def learn(self, job: Job) -> Job:
         if self._task is not None and not self._task.done():
             raise Busy(self.job.uri if self.job else "")
+        if not self.deps.unlocked():
+            raise Locked()
         self.job = job
         self._cancel = False
         self.state = "preparing"
@@ -267,16 +292,35 @@ class Lane:
         return {"state": self.state, "job": job, "progress_ms": self.progress_ms,
                 "job_started_at_ms": self.job_started_at_ms if job else None,
                 "outcomes": [asdict(o) for o in self.outcomes],
+                "unlocked": bool(self.deps.unlocked()),
                 "sentences": SENTENCES}
+
+    async def recover(self) -> Optional[dict]:
+        """At the lane's start: a play the system started before a crash is
+        let go of (paused only if it is still the system's song on its
+        device). None when there was nothing to let go of."""
+        from fx import second_account
+        if self._task is not None and not self._task.done():
+            return None
+        if second_account.started() is None:
+            return None
+        try:
+            res = await self.deps.to_thread(self.deps.gateway.release, end_of_song=False)
+        except Exception as exc:                  # noqa: BLE001 — try again next start
+            logger.warning("Capture lane: couldn't let go of an earlier play: %s", exc)
+            return {"paused": False, "why": f"error: {exc}"}
+        logger.info("Capture lane: let go of an earlier play (%s)", res)
+        return res
 
     # ── one job ─────────────────────────────────────────────────────────────
 
     async def _run(self, job: Job) -> None:
+        from fx.second_account import SecondAccountLocked
         d = self.deps
         out = Outcome(job.job_id, job.uri, "failed", started_at_ms=d.wall_ms())
         reader = None
         device_id: Optional[str] = None
-        paused = False
+        released = False
         try:
             device_id = await self._preflight(job)
             self.state = "starting"
@@ -288,8 +332,9 @@ class Lane:
             starts = await self._start_playback(job, device_id)
             self.state = "capturing"
             offsets = await self._follow(job, device_id, starts, gov0)
-            await d.to_thread(d.gateway.pause, device_id)
-            paused = True
+            res = await d.to_thread(d.gateway.release, end_of_song=True)
+            released = True
+            out.released = str((res or {}).get("why") or "")
             self.state = "finishing"
             latency_s = ((statistics.median(offsets) if offsets else 0) + d.extra_latency_ms) / 1000.0
             out.latency_ms = round(latency_s * 1000)
@@ -315,6 +360,8 @@ class Lane:
         except JobFailed as exc:
             out.status = "cancelled" if exc.reason == "cancelled" else "failed"
             out.reason, out.detail = exc.reason, exc.detail
+        except SecondAccountLocked as exc:
+            out.reason, out.detail = "account_locked", str(exc)
         except Exception as exc:          # noqa: BLE001 — a lane never dies on one song
             logger.exception("Capture lane job %s failed", job.job_id)
             out.reason, out.detail = "error", str(exc)
@@ -324,9 +371,10 @@ class Lane:
                     reader.stop()
                 except Exception:
                     pass
-            if out.played and not paused and device_id:
+            if out.played and not released and device_id:
                 try:
-                    await d.to_thread(d.gateway.pause, device_id)
+                    res = await d.to_thread(d.gateway.release, end_of_song=False)
+                    out.released = str((res or {}).get("why") or "")
                 except Exception as exc:
                     logger.warning("Capture lane: couldn't pause the hidden player: %s", exc)
                     out.detail = (out.detail + "; " if out.detail else "") + f"pause failed: {exc}"
@@ -339,6 +387,8 @@ class Lane:
 
     async def _preflight(self, job: Job) -> str:
         d = self.deps
+        if not d.unlocked():
+            raise JobFailed("account_locked")
         who = d.signed_in_user()
         if not who:
             raise JobFailed("not_signed_in")
@@ -489,6 +539,8 @@ class Lane:
     def _check_cancel(self) -> None:
         if self._cancel:
             raise JobFailed("cancelled")
+        if not self.deps.unlocked():
+            raise JobFailed("account_locked", "the second account was switched off mid-song")
 
 
 def _uri_of(pb: dict) -> Optional[str]:

@@ -53,8 +53,10 @@ cold:
    its realign stays a window's), never writes his playlists (a learned song
    is filed as "already captured" at the next window), and rests — cancelling
    its song — during an Absorb window, a Jukebox night, sleeping or an
-   unreadable sleep. `GET /api/absorb/lane` reads it; the page's Hidden player
-   card switches it.
+   unreadable sleep, and while the SECOND ACCOUNT'S SWITCH (SPECTRA's
+   Settings page, `fx/second_account.py`, ships OFF) is off or unreadable —
+   `use_capture_lane` on is not enough by itself. `GET /api/absorb/lane`
+   reads it; the page's Hidden player card switches it.
 
 ## Sonic reach
 

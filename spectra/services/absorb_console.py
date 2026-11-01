@@ -999,7 +999,9 @@ OPERATIONS: dict[str, SonicOperation] = {
             "first — the oldest are taken out); run_while_sleeping = true/false (turning it "
             "back on asks first); use_capture_lane = true/false (the hidden player Serenity "
             "Capture learns the playlist's never-captured songs inaudibly whenever no window or "
-            "Jukebox night runs and the house is awake; turning it on asks first). An "
+            "Jukebox night runs and the house is awake — and only while the second Spotify "
+            "account's switch on the Settings page is on, which only he changes; turning it "
+            "on asks first). An "
             "out-of-range value is refused with SpotFX's own reason — tell him the reason."),
         input_schema={
             "type": "object",

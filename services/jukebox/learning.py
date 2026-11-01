@@ -64,14 +64,24 @@ RECENT_OUTCOMES = 12
 # the song goes back to waiting, untried, and the lane is left alone a while.
 LANE_DOWN = frozenset({"not_signed_in", "wrong_account", "cannot_check_account",
                        "device_missing", "device_ambiguous", "device_restricted", "no_audio"})
-# Outcomes that aren't the song's fault and don't use up a try.
-NOT_A_TRY = frozenset({"cancelled", "already_learned"})
+# Outcomes that aren't the song's fault and don't use up a try. A song the
+# lane gave up on because the second account was switched off is one: the
+# Learner's own lock check (below) is what keeps the lane alone while it's
+# off, so it needs no backoff on top.
+NOT_A_TRY = frozenset({"cancelled", "already_learned", "account_locked"})
 
 WORDS = {
     "lane_off": "The hidden player isn't running, so new songs play un-analysed.",
     "not_signed_in": "The capture account isn't signed in, so new songs play un-analysed.",
     "learning_off": "Learning first is off, so new songs play un-analysed.",
+    "account_locked": "The second Spotify account is switched off on SPECTRA's Settings page, "
+                      "so the hidden player learns nothing and new songs play un-analysed.",
 }
+
+
+def _second_account_unlocked() -> bool:
+    from fx import second_account
+    return second_account.write_allowed()
 
 
 def gate(entry: LineEntry, *, learn_first: bool, available: bool) -> bool:
@@ -102,6 +112,8 @@ class LearnerDeps:
     # (to_thread). Best-effort by the caller: a raised exception here must
     # not delay or fail the job, only leave it genre-less.
     genres_for: Callable[[str], list[str]] = lambda uri: []
+    # the second account's lock (fx/second_account.py), read fresh every pass
+    unlocked: Callable[[], bool] = _second_account_unlocked
     clock: Callable[[], float] = time.monotonic
     now_ms: Callable[[], int] = lambda: int(time.time() * 1000)
     to_thread: Callable[..., Awaitable[Any]] = asyncio.to_thread
@@ -266,10 +278,13 @@ class Learner:
             why = str(exc)
         now = d.clock()
         signed = bool(d.signed_in())
+        unlocked = bool(d.unlocked())
         if lane is None:
             self.available, self.reason = False, WORDS["lane_off"]
         elif not signed:
             self.available, self.reason = False, WORDS["not_signed_in"]
+        elif not unlocked:
+            self.available, self.reason = False, WORDS["account_locked"]
         elif now < self.down_until:
             self.available, self.reason = False, self.down_reason
         else:
