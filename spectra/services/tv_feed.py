@@ -84,10 +84,10 @@ async def _default_fetch_jukebox(http_url: str) -> Optional[dict]:
 
 
 def _default_show_clock() -> tuple[Optional[int], Optional[int], bool]:
-    from spectra.services import bridge, engine
+    from spectra.services import engine
     show = engine.current_show_clock_ms()
-    position = bridge.effective_position_ms()
-    playing = bool(bridge.is_playing())
+    position = engine.bridge.effective_position_ms()
+    playing = bool(engine.bridge.is_playing())
     return show, position, playing
 
 
