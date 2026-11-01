@@ -313,6 +313,16 @@ async def get_board() -> dict:
     return guests.book.host_board()
 
 
+@router.get("/tv")
+async def get_tv() -> dict:
+    """data/tv-display-plan/plan.html PR 1.3 — SPECTRA's TV feed relay
+    reads this (spectra/services/tv_feed.py), not /board: now playing with
+    live votes/progress, the next 3 program items with who added them,
+    only the people boards guests see, the guest join link while it's
+    live, and a revision that moves on any change. No Spotify call."""
+    return guests.book.tv_view()
+
+
 @router.post("/guests/{phone}")
 async def post_guest(phone: str, body: PhoneBody) -> JSONResponse:
     code, out = await guests.book.host_set(phone, approved=body.approved, blocked=body.blocked,

@@ -1899,6 +1899,86 @@ class Guests:
                        "by": board._by(adder, names), **tally(book, play_key(now))}
         return {"running": True, "settings": settings, "board": out, "now": now_out}
 
+    def tv_view(self) -> dict:
+        """SPECTRA's TV feed relay reads this (spectra/services/tv_feed.py,
+        data/tv-display-plan/plan.html PR 1.3): now playing with live
+        votes and progress, the next 3 program items with who added them,
+        the board (only the people boards guests see — `every_people_
+        board=False`, unlike `host_board`'s own master-page view), the
+        guest join link (only while it's actually live), and a revision
+        that changes whenever anything above does. No Spotify call — the
+        engine's own lean `guest_state` read and the guest book are both
+        already in memory; the board's banned-word test (board.py's own
+        docstring) still holds since this calls the SAME `build_board`
+        unmodified."""
+        from services.jukebox import board
+        gs = self._running()
+        link = self._tv_link()
+        if gs is None:
+            return self._tv_payload(running=False, now=None, next=[], board=None, link=link)
+        book = self._book_for(gs["night_id"])
+        show = self.deps.show()
+        info = board.song_info(gs)
+        names = _names(book)
+
+        now_out = None
+        now = gs.get("now")
+        if getattr(now, "kind", "") in ("set", "jukebox") and getattr(now, "uri", ""):
+            meta = info.get(now.uri, {})
+            adder = book.play_by.get(play_key(now)) or meta.get("added_by")
+            votes = tally(book, play_key(now))
+            duration = int(gs.get("duration_ms") or 0)
+            remaining = int(gs.get("remaining_ms") or 0)
+            now_out = {
+                "uri": now.uri, "title": now.title or meta.get("title", ""),
+                "artist": meta.get("artist", ""), "image": meta.get("image", ""),
+                "thumb": meta.get("thumb", ""), "open_url": open_url(now.uri),
+                "by": _by(adder, names), "up": votes["up"], "down": votes["down"],
+                "duration_ms": duration,
+                "progress_ms": max(0, duration - remaining) if duration else 0,
+                "is_playing": bool(gs.get("is_playing")),
+            }
+
+        entries = {e.id: e for e in (gs.get("line") or [])}
+        next_out: list[dict] = []
+        for it in gs.get("next") or []:
+            if it.kind not in ("set", "jukebox"):
+                continue
+            meta = info.get(it.uri, {})
+            entry = entries.get(it.entry_id) if it.entry_id else None
+            added_by = entry.added_by if entry is not None else meta.get("added_by")
+            next_out.append({
+                "uri": it.uri, "title": it.title or meta.get("title", ""),
+                "artist": it.artist or meta.get("artist", ""),
+                "image": meta.get("image", ""), "thumb": meta.get("thumb", ""),
+                "by": _by(added_by, names), "starts_in_ms": it.starts_in_ms,
+            })
+            if len(next_out) >= 3:
+                break
+
+        board_out = board.build_board(book, gs, show, self._tips_given(gs, show))
+        return self._tv_payload(running=True, now=now_out, next=next_out, board=board_out, link=link)
+
+    @staticmethod
+    def _tv_link() -> Optional[str]:
+        """The guest link's own join URL, named ONLY while it's actually
+        serving (`state == "live"`) — the plan's own Q5: the TV shows a
+        QR only while the link is live, else "ask the host for the
+        link"."""
+        from services.jukebox import guest_link
+        status = guest_link.controller.status()
+        return status.get("link") if status.get("state") == "live" else None
+
+    @staticmethod
+    def _tv_payload(*, running: bool, now: Optional[dict], next: list[dict],
+                    board: Optional[dict], link: Optional[str]) -> dict:
+        import json
+        import zlib
+        payload = {"running": running, "now": now, "next": next, "board": board, "link": link}
+        digest = zlib.crc32(json.dumps(payload, sort_keys=True, default=str).encode())
+        payload["revision"] = digest
+        return payload
+
     @_as_guest
     async def wallet_view(self, phone: Any) -> tuple[int, dict]:
         """The Shop: the balance and how it was made, what each thing costs

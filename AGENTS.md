@@ -13611,12 +13611,15 @@ a TV) opens directly, outside the SPA's own nav and `helpContent.ts`.
 deliberately NOT cut over here.** The existing Jukebox board page
 (`JukeboxTvPage.tsx`, phase 3 of the Jukebox plan, above) honours an
 on/off gate ("On the TV") with an honest off-message, and this shell
-still has no PARTY SCREEN to render that gated content (PR 1.2's feed
-relays `board_on_tv` through the Jukebox board payload, but nothing here
-draws it yet) — redirecting now would trade a working, gated feature for
-a placeholder with no gate awareness. The redirect is deferred to land
-once the Party screen (PR 1.4) can carry the gate forward, within the
-same approved phased plan; `/jukebox/tv` is unchanged by this PR.
+still has no PARTY SCREEN to render that gated content — the relay's own
+jukebox payload (`GET /api/jukebox/tv`, PR 1.3, below) carries no
+`board_on_tv` field at all, so its board is unconditional once a night
+runs, the guest page's own visibility rather than the gated one
+`JukeboxTvPage.tsx` honours — and redirecting now would trade a working,
+gated feature for a placeholder with no gate awareness. The redirect is
+deferred to land once the Party screen (PR 1.4) can carry the gate
+forward, within the same approved phased plan; `/jukebox/tv` is
+unchanged by this PR.
 
 Specs: `scripts/check_tv_app_shell.py` (a real headless Chromium over raw
 CDP against a real uvicorn server mounting the built `tv-dist/` exactly
@@ -13662,14 +13665,20 @@ things:
   client's own clock between pushes (corrected by the NTP offset) rather
   than timing anything by message arrival, so a late push never makes the
   drawn clock jump.
-- **THE JUKEBOX RELAY READS SPOTFX'S EXISTING `GET /api/jukebox/board`**,
-  not the plan's own leaner `/api/jukebox/tv` (that endpoint is PR 1.3's
-  own deliverable and doesn't exist yet) — through the one swappable seam
-  `TvFeedDeps.fetch_jukebox`, so 1.3 is a one-line change, not a second
-  relay. `running` (whether a night plays) is read FROM that same fetched
-  payload, never a second call — polling it separately to decide whether
-  to poll it would be circular, and the board read is already lean (no
-  Spotify call, `board.py`'s own docstring). Polled at `JUKEBOX_POLL_S`
+- **THE JUKEBOX RELAY READS SPOTFX'S OWN `GET /api/jukebox/tv`** (PR 1.3,
+  `services/jukebox/guests.py::Guests.tv_view()` — now playing with live
+  votes/progress, the next 3 program items with who added them, only the
+  people boards guests see, the guest join link while it's live, and a
+  revision that moves on any change), the leaner purpose-built shape the
+  plan's own row 1.3 names — through the one swappable seam
+  `TvFeedDeps.fetch_jukebox`. PR 1.2's own first version pointed this at
+  the older `GET /api/jukebox/board` (PR 466) as an interim source since
+  this endpoint didn't exist yet; 1.3 is exactly that one-line follow-up,
+  not a second relay implementation. `running` (whether a night plays) is
+  read FROM that same fetched payload, never a second call — polling it
+  separately to decide whether to poll it would be circular, and SpotFX's
+  own read is already lean (no Spotify call — `tv_view()`'s own
+  docstring). Polled at `JUKEBOX_POLL_S`
   (1.0s) and sent only when the payload actually changed (plain dict
   equality) — this structurally bounds "a vote reaches a TV" at one poll
   interval plus negligible send time, comfortably under the plan's own
@@ -13716,7 +13725,9 @@ test_tv_feed.py` (the pure message builders; the ping/pong formula's
 stall-resistance proven directly by injecting a real 300ms delay via
 `before_pong_send`; both background loops' quiet-vs-loud exception
 handling; the 1.5s jukebox-relay acceptance bound measured in real time;
-the full `/spectra/api/tv/ws` route over FastAPI's `TestClient`).
+the full `/spectra/api/tv/ws` route over FastAPI's `TestClient`); `tests/
+test_jukebox_tv_feed_endpoint.py` (`Guests.tv_view()` + the `GET
+/api/jukebox/tv` route itself, over the real fake Jukebox world).
 
 ## Maintaining this file
 
