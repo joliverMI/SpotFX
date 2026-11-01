@@ -82,3 +82,30 @@ body { overflow: hidden; font-family: system-ui, sans-serif; color: #ece7f7; }
   width: 8px; height: 8px; border-radius: 50%; background: #f87171;
 }
 .tv-system-dot[data-state="connected"] { background: #4ade80; }
+
+/* ── the Attract screen (PR 1.5) ────────────────────────────────────── */
+.tv-attract {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+}
+.tv-attract-card {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1.2vw; text-align: center; max-width: 70%;
+}
+.tv-attract-label { font-size: clamp(32px, 2vw, 40px); letter-spacing: 0.08em;
+  text-transform: uppercase; color: #b18cff; }
+.tv-attract-song-line { font-size: clamp(32px, 2.2vw, 40px); color: #ece7f7; }
+.tv-attract-qr-corner {
+  position: absolute; display: flex; flex-direction: column; align-items: center;
+  gap: 0.6vw; color: #c9c0de; font-size: clamp(32px, 1.6vw, 36px);
+}
+
+/* ── the Sleep screen (PR 1.5) — true black, no drift, no content ──── */
+.tv-sleep { position: absolute; inset: 0; background: #000; }
+
+/* ── the lost-connection overlay (PR 1.5) ───────────────────────────── */
+.tv-lost-mark {
+  position: absolute; left: 1.2%; top: 1%; font-size: clamp(32px, 1.6vw, 36px);
+  color: rgba(236, 231, 247, 0.5); background: rgba(0,0,0,0.4); padding: 0.5vw 1vw;
+  border-radius: 0.6vw;
+}
+.tv-lost-black { position: absolute; inset: 0; background: #000; z-index: 10; }

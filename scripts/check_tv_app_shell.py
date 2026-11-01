@@ -161,7 +161,13 @@ async def check_viewport(cdp_port: int, page_url: str, width: int, height: int) 
                 "expression": (
                     "JSON.stringify({"
                     "visual: !!document.querySelector('.tv-visual-plane'),"
-                    "info: !!document.querySelector('.tv-info-plane'),"
+                    # InfoPlane.tsx (since PR 1.4/1.5) delegates its content
+                    # entirely to PartyScreen/AttractScreen (each its own
+                    # top-level class) once connected — only the plain
+                    # not-connected placeholder still wears `.tv-info-plane`
+                    # itself. The Info plane rendered SOMETHING is the claim
+                    # worth checking, not that literal class name.
+                    "info: !!document.querySelector('.tv-info-plane, .tv-party, .tv-attract'),"
                     "system: !!document.querySelector('.tv-system-plane'),"
                     "w: document.documentElement.scrollWidth,"
                     "cw: document.documentElement.clientWidth"

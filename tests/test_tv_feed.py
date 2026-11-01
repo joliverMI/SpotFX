@@ -33,6 +33,42 @@ def test_director_layout_is_party_while_a_night_runs_else_attract():
     assert tv_feed.director_layout(None) == "attract"
 
 
+def test_resolve_layout_sleeps_past_the_10_minute_timeout_else_the_plain_split():
+    assert tv_feed.resolve_layout(True, 0.0) == "party"
+    assert tv_feed.resolve_layout(False, 0.0) == "attract"
+    assert tv_feed.resolve_layout(False, tv_feed.SLEEP_TIMEOUT_S - 1) == "attract"
+    assert tv_feed.resolve_layout(False, tv_feed.SLEEP_TIMEOUT_S) == "sleep"
+    # sleep wins outright even if a night is somehow still marked running —
+    # structurally impossible in production (a running night counts as
+    # "active" every tick, resetting idle_s to 0), but the function itself
+    # must not special-case it.
+    assert tv_feed.resolve_layout(True, tv_feed.SLEEP_TIMEOUT_S) == "sleep"
+
+
+def test_resolve_layout_falls_back_to_attract_once_a_running_boards_gone_stale():
+    """Plan §2.2's second Attract trigger: 'a night runs but the screen has
+    been unchanged a while' — independent of the idle/sleep clock (`idle_s`
+    stays 0 the whole time a night is running, by construction)."""
+    assert tv_feed.resolve_layout(True, 0.0, tv_feed.UNCHANGED_TIMEOUT_S - 1) == "party"
+    assert tv_feed.resolve_layout(True, 0.0, tv_feed.UNCHANGED_TIMEOUT_S) == "attract"
+    # it never fires while no night is running — that case is already
+    # "attract" via director_layout, with nothing new to compose onto it.
+    assert tv_feed.resolve_layout(False, 0.0, tv_feed.UNCHANGED_TIMEOUT_S) == "attract"
+    assert tv_feed.resolve_layout(None, 0.0, tv_feed.UNCHANGED_TIMEOUT_S) == "attract"
+    # sleep still wins outright over the unchanged-board fallback.
+    assert tv_feed.resolve_layout(True, tv_feed.SLEEP_TIMEOUT_S, tv_feed.UNCHANGED_TIMEOUT_S) == "sleep"
+
+
+def test_activity_tracker_resets_on_any_activity_and_accumulates_while_idle():
+    tracker = tv_feed.ActivityTracker()
+    assert tracker.idle_s(active=False, now_ms=0.0) == 0.0  # first call: never "already idle"
+    assert tracker.idle_s(active=False, now_ms=5000.0) == 5.0
+    assert tracker.idle_s(active=False, now_ms=600000.0) == 600.0
+    # activity (a night running, or music playing) resets the clock
+    assert tracker.idle_s(active=True, now_ms=600001.0) == 0.0
+    assert tracker.idle_s(active=False, now_ms=603001.0) == 3.0
+
+
 def test_config_message_carries_the_directors_pick_and_placeholders():
     msg = tv_feed.config_message({"screen_id": "lg"}, True, "build-42")
     assert msg == {"type": "config", "layout": "party", "look": None, "display_lead_ms": None,
@@ -284,21 +320,27 @@ async def _jukebox_loop_sends_only_on_change():
         if calls["n"] >= stop_after:
             raise asyncio.CancelledError()
 
-    deps = tv_feed.TvFeedDeps(fetch_jukebox=fetch, jukebox_poll_s=0.01)
+    deps = tv_feed.TvFeedDeps(fetch_jukebox=fetch, jukebox_poll_s=0.01,
+                              show_clock=lambda: (None, None, False))
     with pytest.raises(asyncio.CancelledError):
         await tv_feed.run_jukebox_loop(send, deps, fake_sleep)
 
     jukebox_msgs = [m for m in sent if m["type"] == "jukebox"]
     layout_msgs = [m for m in sent if m["type"] == "layout"]
-    # change on poll 1 (first ever, "a") and poll 3 ("b") — poll 2 ("a"
-    # again) must NOT send a second time.
+    # the BOARD changes on poll 1 (first ever, "a") and poll 3 ("b") —
+    # poll 2 ("a" again) must NOT send a second jukebox message.
     assert len(jukebox_msgs) == 2
     assert jukebox_msgs[0]["now"] == "a"
     assert jukebox_msgs[1]["now"] == "b"
-    assert len(layout_msgs) == 2
+    # the LAYOUT never changes across all three polls (running=True
+    # throughout -> "party" the whole time), so it's sent exactly ONCE —
+    # layout is decoupled from the board's own change (PR 1.5's rework,
+    # needed so sleep can be detected during a stretch with no board
+    # change at all).
+    assert layout_msgs == [{"type": "layout", "layout": "party"}]
 
 
-def test_jukebox_loop_sends_only_on_change_and_pairs_a_layout_message():
+def test_jukebox_loop_sends_only_on_board_change_layout_only_on_layout_change():
     _go(_jukebox_loop_sends_only_on_change())
 
 
@@ -324,6 +366,105 @@ async def _jukebox_loop_names_unreachable():
 
 def test_jukebox_loop_names_unreachable_distinctly_from_board_off():
     _go(_jukebox_loop_names_unreachable())
+
+
+async def _jukebox_loop_falls_asleep_after_the_timeout():
+    """A real idle-time simulation (a fake clock advancing by whole
+    minutes per poll, never real sleeping) proving the loop actually
+    reaches "sleep" once ActivityTracker's own 10-minute timeout is
+    crossed — not just that resolve_layout the pure function can return
+    it in isolation."""
+    async def fetch(url):
+        return {"running": False}
+
+    clock = {"t": 0.0}
+
+    async def now_ms():
+        return clock["t"]
+
+    tracker = tv_feed.ActivityTracker()
+    sent = []
+    polls = {"n": 0}
+
+    async def send(msg):
+        sent.append(msg)
+
+    async def fake_sleep(s):
+        polls["n"] += 1
+        clock["t"] += 120_000.0  # 2 simulated minutes per poll
+        if polls["n"] >= 6:  # 6 * 2min = 12 simulated minutes, past the 10min timeout
+            raise asyncio.CancelledError()
+
+    deps = tv_feed.TvFeedDeps(fetch_jukebox=fetch, show_clock=lambda: (None, None, False),
+                              now_ms=now_ms, idle_s=tracker.idle_s)
+    with pytest.raises(asyncio.CancelledError):
+        await tv_feed.run_jukebox_loop(send, deps, fake_sleep)
+
+    layouts = [m["layout"] for m in sent if m["type"] == "layout"]
+    assert layouts == ["attract", "sleep"]
+
+
+def test_jukebox_loop_falls_asleep_after_the_idle_timeout():
+    _go(_jukebox_loop_falls_asleep_after_the_timeout())
+
+
+async def _jukebox_loop_falls_back_to_attract_when_a_running_boards_gone_stale():
+    """A real staleness simulation (a fake clock, never real sleeping),
+    the plan §2.2 trigger: a RUNNING night whose relayed board stays
+    unchanged past UNCHANGED_TIMEOUT_S falls back to "attract" — distinct
+    from, and never confused with, the idle/sleep clock above (`running`
+    stays True throughout, so ActivityTracker's own idle_s is pinned at 0
+    the whole time, never reaching SLEEP_TIMEOUT_S; a fresh, non-shared
+    `ActivityTracker` is injected for the board clock so this test can't
+    pollute — or be polluted by — the module's own process-wide
+    singleton). Then, on the very next poll where the board actually
+    changes, the layout returns to "party" immediately — proving the
+    staleness clock resets on a real change rather than merely composing
+    correctly in resolve_layout isolation."""
+    board = {"running": True, "now": {"up": 1}}
+
+    async def fetch(url):
+        return dict(board)
+
+    clock = {"t": 0.0}
+
+    async def now_ms():
+        return clock["t"]
+
+    tracker = tv_feed.ActivityTracker()
+    sent = []
+    polls = {"n": 0}
+
+    async def send(msg):
+        sent.append(msg)
+
+    async def fake_sleep(s):
+        polls["n"] += 1
+        clock["t"] += 60_000.0  # 1 simulated minute per poll
+        if polls["n"] == 5:
+            # the board changes partway through the stale stretch — its
+            # effect is observed on the NEXT iteration's fetch, poll 6.
+            board["now"] = {"up": 2}
+        if polls["n"] >= 6:
+            raise asyncio.CancelledError()
+
+    deps = tv_feed.TvFeedDeps(fetch_jukebox=fetch, show_clock=lambda: (None, None, False),
+                              now_ms=now_ms, board_unchanged_s=tracker.idle_s)
+    with pytest.raises(asyncio.CancelledError):
+        await tv_feed.run_jukebox_loop(send, deps, fake_sleep)
+
+    layouts = [m["layout"] for m in sent if m["type"] == "layout"]
+    # poll 1 (t=0s): first-ever fetch, counts as a change -> party.
+    # polls 2-3 (t=60s, 120s): unchanged, still under the 180s timeout -> party.
+    # poll 4 (t=180s): unchanged for exactly 180s -> attract.
+    # poll 5 (t=240s): the board is still the OLD value here (the mutation
+    #   happens after this iteration's fetch, inside fake_sleep) -> still attract.
+    # poll 6 (t=300s): the board has now changed -> resets to party at once.
+    assert layouts == ["party", "attract", "party"]
+
+
+def test_jukebox_loop_falls_back_to_attract_when_a_running_boards_gone_stale_then_resets_on_change():
+    _go(_jukebox_loop_falls_back_to_attract_when_a_running_boards_gone_stale())
 
 
 async def _jukebox_loop_dead_socket(exc):
