@@ -188,6 +188,17 @@ def create_app() -> FastAPI:
             "room_wheel_position_deg": room.wheel_position_deg,
         }
 
+    # THE TV APP SHELL (PR 1.1) — registered BEFORE the catch-all "/" SPA
+    # mount below: Starlette tries routes in registration order, and a "/"
+    # Mount with html=True fallback matches every path, so it would eat
+    # "/tv/*" before a later-registered "/tv" mount ever got a chance.
+    # /tv/probe (phase 0's explicit route, registered earlier via
+    # include_router) still wins over EITHER mount, since an explicit Route
+    # is tried — and matches — before any Mount reaches it.
+    if config.TV_DIST.exists():
+        app.mount("/tv", SPAStaticFiles(directory=str(config.TV_DIST), html=True),
+                  name="spectra-tv")
+
     if config.WEB_DIST.exists():
         app.mount("/", SPAStaticFiles(directory=str(config.WEB_DIST), html=True),
                   name="spectra-app")

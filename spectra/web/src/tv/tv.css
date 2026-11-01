@@ -1,0 +1,30 @@
+/* THE TV APP'S OWN STYLESHEET — deliberately separate from the main
+ * app's tokens.css (no SPECTRA chrome ships here, and the TV app's own
+ * bundle size is part of PR 1.1's acceptance). True-black-background,
+ * large-type, safe-margin conventions follow plan §2.4. */
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; background: #06040b; }
+body { overflow: hidden; font-family: system-ui, sans-serif; color: #ece7f7; }
+
+.tv-app { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+
+.tv-visual-plane {
+  position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+}
+
+.tv-info-plane {
+  position: absolute; inset: 5%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center; gap: 1.2vw;
+}
+.tv-info-title { font-size: clamp(40px, 6vw, 80px); font-weight: 700; letter-spacing: -0.01em; }
+.tv-info-sub { font-size: clamp(20px, 2.4vw, 32px); color: #c9c0de; }
+
+.tv-system-plane {
+  position: absolute; left: 1.2%; bottom: 1%; display: flex; align-items: center;
+  gap: 8px; font-size: 13px; color: rgba(236, 231, 247, 0.35);
+  font-variant-numeric: tabular-nums;
+}
+.tv-system-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #f87171;
+}
+.tv-system-dot[data-state="connected"] { background: #4ade80; }

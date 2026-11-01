@@ -504,6 +504,11 @@ TRAINING_PROFILES_FILE = REPO_ROOT / "storage" / "training_profiles.json"
 
 WEB_DIST = Path(__file__).parent / "web" / "dist"
 
+# THE TV APP SHELL (data/tv-display-plan/plan.html PR 1.1) — its own small
+# build (spectra/web/vite.tv.config.ts -> tv-dist), served at /spectra/tv/,
+# never through the main SPA's bundle.
+TV_DIST = Path(__file__).parent / "web" / "tv-dist"
+
 # THE TV PROBE (data/tv-display-plan/plan.html PR 0.1): per-screen-id
 # measurement results (browser/GPU info, the drawn-fps ladder, ping
 # round-trips, the screensaver visibility log) — see
