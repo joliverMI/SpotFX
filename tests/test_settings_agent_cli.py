@@ -612,3 +612,18 @@ def test_the_jukebox_domain_widening_parses_from_its_structured_tool_result():
     assert [c["new"] for c in result["changes"]] == [{"add_base": 5}]
     assert [r["status"] for r in result["rejected"]] == ["needs_confirmation"]
     assert result["rejected"][0]["op"] == "start_jukebox_night"
+
+
+def test_put_on_tv_widening_parses_from_its_structured_tool_result():
+    """"One tap" (data/tv-display-plan/plan.html PR 1.6,
+    spectra/services/jukebox_console.py's `put_on_tv` op) on the CURRENT
+    manifest. It always asks first — an unconfirmed call must be parsed
+    as `needs_confirmation`, never as a change, whatever the model's own
+    reply prose claims it is about to do."""
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(
+        _load("cli_transcript_synthetic_tv_asks_first.json"))
+    assert result["changes"] == []
+    assert [r["status"] for r in result["rejected"]] == ["needs_confirmation"]
+    assert result["rejected"][0]["op"] == "put_on_tv"

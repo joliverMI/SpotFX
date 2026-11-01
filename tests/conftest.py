@@ -250,6 +250,15 @@ def _isolated_tv_probe(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_tv_launch(tmp_path, monkeypatch):
+    """"One tap"'s config (spectra/services/tv_launch.py, data/
+    tv-display-plan/plan.html PR 1.6) — same class as _isolated_tv_probe
+    above: no DI seam, module-level config path read on every load/save."""
+    from spectra import config as scfg
+    monkeypatch.setattr(scfg, "TV_LAUNCH_FILE", tmp_path / "tv_launch.json")
+
+
+@pytest.fixture(autouse=True)
 def _isolated_known_buffer(tmp_path, monkeypatch):
     """THE KNOWN AUDIO BUFFER (spectra/services/known_buffer.py) — same
     class as _isolated_fire_history below: no DI seam, module globals, and

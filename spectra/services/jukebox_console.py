@@ -10,7 +10,15 @@ very routes the Jukebox page uses. Nothing Sonic does can get around a gate
 the page has: a start through Sonic is the same Start, refused for the same
 reasons (no set playlist, the house asleep, Absorb running, a Spotify
 failure), in the same words. lock_console.py's and absorb_console.py's
-shape.
+shape. THE ONE EXCEPTION is `put_on_tv` (data/tv-display-plan/plan.html PR
+1.6) — "one tap" is SPECTRA-native end to end (`spectra/services/
+tv_launch.py`'s own module docstring is the binding statement: SPECTRA
+never talks to the TV directly, one Home Assistant script owns "open the
+TV app"), so that one op calls `tv_launch.put_on_tv()` in-process rather
+than hopping to SpotFX over HTTP. It is filed under this domain anyway —
+not a new one — because the plan's own diagram groups "Put on the TV"
+with the Jukebox page as the thing it opens, and it reuses this module's
+own asks-first confirm-gate rather than inventing a second one.
 
 EVERY CHANGE ASKS FIRST (firstmate's order for this domain: "Sonic changes
 ask first; start/stop a night must refuse unless explicitly confirmed").
@@ -681,6 +689,26 @@ async def _op_give_jukebox_credits(to: str, amount: int = 2,
             "phones": gift.get("phones")}
 
 
+async def _op_put_on_tv(script_entity: Optional[str] = None,
+                        confirm_id: Optional[str] = None) -> dict:
+    """"One tap", by voice (data/tv-display-plan/plan.html PR 1.6). Asks
+    first, because it is a real, visible action in the room — the TV
+    switching on and an app opening on it. SPECTRA-native: calls
+    `tv_launch.put_on_tv()` in-process (see the module docstring's "ONE
+    EXCEPTION"), never SpotFX's HTTP routes."""
+    from spectra.services import tv_launch
+    entity = (script_entity or "").strip() or None
+    question = ("Open the TV app via Home Assistant? This turns the TV on "
+               "if it is off.")
+    refusal = _gate("put_on_tv", {"script_entity": entity}, entity, confirm_id, question)
+    if refusal:
+        return refusal
+    result = await tv_launch.put_on_tv(entity)
+    if result.ok:
+        return {"status": "applied", "summary": "Opened the TV app via Home Assistant."}
+    return {"status": "rejected", "reason": result.detail or "Home Assistant call failed"}
+
+
 # ── declarations ─────────────────────────────────────────────────────────────
 
 _INSTR_COMMON = (
@@ -879,4 +907,17 @@ OPERATIONS: dict[str, SonicOperation] = {
                                      "confirm_id": _CONFIRM_PROP},
                       "required": ["to"], "additionalProperties": False},
         handler=_op_give_jukebox_credits),
+    "put_on_tv": SonicOperation(
+        name="put_on_tv", domain="jukebox", kind="write",
+        summary="Open the TV app via Home Assistant — \"put it on the TV\"; always asks first.",
+        instructions=(
+            "SPECTRA never talks to the TV directly — this calls Home Assistant's own script "
+            "(default script.tv_open_spectra), which also turns the TV on if it is off. Always "
+            "asks first, since it is a real, visible action in the room. `script_entity` is "
+            "optional — leave it out to use the configured script."),
+        input_schema={"type": "object",
+                      "properties": {"script_entity": {"type": "string"},
+                                     "confirm_id": _CONFIRM_PROP},
+                      "additionalProperties": False},
+        handler=_op_put_on_tv),
 }

@@ -806,6 +806,17 @@ async def _apply_ha_activate_scene(p: dict, ctx: "RunContext") -> Outcome:
     return _ha_outcome(result, f"HA scene activated: {p['scene']}")
 
 
+# "ONE TAP" (data/tv-display-plan/plan.html PR 1.6) — this step calls the
+# SAME ONE function every other "put the TV up" caller does
+# (spectra/services/tv_launch.py's own module docstring is the binding
+# statement for why there is only one), so a set that includes it behaves
+# identically to pressing the Jukebox page's own "Put on the TV" button.
+async def _apply_ha_put_on_tv(p: dict, ctx: "RunContext") -> Outcome:
+    from spectra.services import tv_launch
+    result = await tv_launch.put_on_tv(p.get("script") or None)
+    return _ha_outcome(result, "Put the TV app up")
+
+
 def _ease_param() -> Param:
     from spectra.services import ha_volume_ease
     return Param("ease_s", "number", "Ease", default=ha_volume_ease.DEFAULT_EASE_S,
@@ -862,6 +873,23 @@ register(ActionKind(
     restore="Nothing to put back — an HA scene activation is explicit, "
             "like its own switch.",
     apply=_apply_ha_activate_scene, check=_check_ha_scene, needs_room=False,
+    help_topic="show-ha-actions"))
+
+register(ActionKind(
+    name="ha_put_on_tv", label="Put the TV app up", group="ha",
+    params=[Param("script", "text", "HA script (optional)", required=False,
+                  default="",
+                  help="An explicit Home Assistant script.* entity to "
+                       "call for this step only — leave blank to use the "
+                       "configured one (default script.tv_open_spectra, "
+                       "set on the Jukebox page or by Sonic).")],
+    help="Open the TV app via Home Assistant's script — the same action "
+         "the Jukebox page's own \"Put on the TV\" button calls. "
+         "SPECTRA never talks to the TV directly; the HA script owns "
+         "turning it on and opening the app.",
+    restore="Nothing to put back — opening the TV app is explicit, like "
+            "pressing a remote.",
+    apply=_apply_ha_put_on_tv, needs_room=False,
     help_topic="show-ha-actions"))
 
 

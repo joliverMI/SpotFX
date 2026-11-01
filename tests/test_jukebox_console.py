@@ -465,3 +465,74 @@ def test_sonic_lists_saved_shows_and_loads_one_only_after_asking(spotfx):
     assert store.load_guest_link()[0].enabled is False
     # saving and deleting stay the Credits tab's (named exclusions)
     assert not {"save_jukebox_show", "delete_jukebox_show"} & set(jc.OPERATIONS)
+
+
+# ═══ "one tap" (data/tv-display-plan/plan.html PR 1.6) — SPECTRA-native, ═══
+# never an HTTP call to SpotFX; no test here reaches a real HA endpoint.
+
+class _FakeHAResult:
+    def __init__(self, ok: bool, detail: str = ""):
+        self._ok = ok
+        self.detail = detail
+
+    @property
+    def ok(self) -> bool:
+        return self._ok
+
+
+def test_put_on_tv_asks_first_then_calls_tv_launch_in_process(monkeypatch):
+    from spectra.services import tv_launch
+
+    calls: list[typing.Optional[str]] = []
+
+    async def fake_put_on_tv(script_entity=None):
+        calls.append(script_entity)
+        return _FakeHAResult(True)
+
+    monkeypatch.setattr(tv_launch, "put_on_tv", fake_put_on_tv)
+
+    ask = _run(jc._op_put_on_tv())
+    assert ask["status"] == "needs_confirmation"
+    assert "Open the TV app via Home Assistant" in ask["question"]
+    assert calls == []                                          # nothing called yet
+    done = _run(jc._op_put_on_tv(confirm_id=ask["confirm_id"]))
+    assert done["status"] == "applied"
+    assert calls == [None]                                      # the configured script
+
+
+def test_put_on_tv_with_an_explicit_script_is_a_different_question(monkeypatch):
+    from spectra.services import tv_launch
+
+    async def fake_put_on_tv(script_entity=None):
+        return _FakeHAResult(True)
+
+    monkeypatch.setattr(tv_launch, "put_on_tv", fake_put_on_tv)
+
+    ask_default = _run(jc._op_put_on_tv())
+    ask_other = _run(jc._op_put_on_tv(script_entity="script.some_other_tv"))
+    assert ask_default["confirm_id"] != ask_other["confirm_id"]
+    # the default's confirm_id does not cover the other script's question
+    rejected = _run(jc._op_put_on_tv(script_entity="script.some_other_tv",
+                                     confirm_id=ask_default["confirm_id"]))
+    assert rejected["status"] == "rejected"
+
+
+def test_put_on_tv_reports_a_failed_ha_call_as_rejected_not_a_crash(monkeypatch):
+    from spectra.services import tv_launch
+
+    async def fake_put_on_tv(script_entity=None):
+        return _FakeHAResult(False, "Home Assistant is not configured on this host")
+
+    monkeypatch.setattr(tv_launch, "put_on_tv", fake_put_on_tv)
+
+    ask = _run(jc._op_put_on_tv())
+    done = _run(jc._op_put_on_tv(confirm_id=ask["confirm_id"]))
+    assert done["status"] == "rejected"
+    assert "not configured" in done["reason"]
+
+
+def test_put_on_tv_is_in_the_jukebox_domain_and_asks_first():
+    assert "put_on_tv" in jc.OPERATIONS
+    op = jc.OPERATIONS["put_on_tv"]
+    assert op.domain == "jukebox" and op.kind == "write"
+    assert "confirm_id" in op.input_schema["properties"]

@@ -1255,5 +1255,11 @@ async def give_jukebox_credits(to: str, amount: int = 2, confirm_id: Optional[st
     return await _call("give_jukebox_credits", to=to, amount=amount, confirm_id=confirm_id)
 
 
+@mcp.tool()
+async def put_on_tv(script_entity: Optional[str] = None, confirm_id: Optional[str] = None) -> dict:
+    """Open the TV app via Home Assistant — "put it on the TV" (always asks first)."""
+    return await _call("put_on_tv", script_entity=script_entity, confirm_id=confirm_id)
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
