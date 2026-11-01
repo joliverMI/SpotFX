@@ -11476,9 +11476,13 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   text. **THE WI-FI PASSWORD IS TYPED THERE AND NEVER LEAVES THE PAGE** —
   React state only, QRs drawn in the browser (`jukebox/cardQr.ts`); never
   add it to a request, a store or the URL (the check asserts all three).
-  `GET /api/jukebox/card` hands the page the link, the unused codes and the
-  QR bonus, MAKING the party token if there is none (the cards carry it) but
-  never switching the link on. The QR encoder is `qrcode-generator` (MIT,
+  `GET /api/jukebox/card` hands the page the link, the home-Wi-Fi address
+  (`lan_link` — the 2026-11-01 "wifi option," no Funnel needed), the unused
+  codes and the QR bonus, MAKING the party token if there is none (the cards
+  carry it) but never switching the link on. The Jukebox QR uses the public
+  link when one is saved, else falls back to `lan_link` — the card still
+  prints and scans, just for a phone already on Serenity's own Wi-Fi. The
+  QR encoder is `qrcode-generator` (MIT,
   pinned; told to encode UTF-8 — its default keeps a character's low 8
   bits); `jsqr` is dev-only, for decoding every code back — a deploy needs
   `npm ci` in spectra/web. Sonic: a named exclusion (`jukebox_console`).
