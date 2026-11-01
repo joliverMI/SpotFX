@@ -13686,11 +13686,30 @@ things:
   rather than waiting on the relay loop's own first poll tick — a stale
   "attract" for up to a whole poll interval right at connect would be the
   wrong screen for a night already running.
-- **THE LAYOUT DIRECTOR IS TWO STATES TODAY** (`director_layout`:
-  "party" while a night plays, else "attract", `None` reading as the
-  calmer "attract") — the plan's own richer idle-timeout/sleep/burn-in
-  state machine (row 1.5) isn't built yet; the client's `Layout` type
-  already carries `'sleep' | 'calibrate' | 'lost'` as placeholders for it.
+- **THE LAYOUT DIRECTOR (`resolve_layout`) COMPOSES THREE DECISIONS IN ONE
+  PRIORITY ORDER, PR 1.5** — `director_layout`'s own plain split ("party"
+  while a night plays, else "attract", `None` reading as the calmer
+  "attract") is still the base case, with two fallbacks layered on top of
+  it, each checked first:
+  `sleep` wins outright once the process-wide `ActivityTracker` instance
+  `_activity` (fed by "a night is running OR music is playing") has
+  accumulated `SLEEP_TIMEOUT_S` (600s, plan row 1.5/Q8: "black after 10
+  min with no night and no music") of idle time; else, while a night IS
+  running, `attract` wins too once a SECOND, independent
+  `ActivityTracker` instance `_board_activity` (fed by "the relayed board
+  actually changed this tick" — the same comparison `run_jukebox_loop`
+  already makes for its own send-on-change dedup) shows the board has sat
+  unchanged for `UNCHANGED_TIMEOUT_S` (180s, plan §2.2's own "a night runs
+  but the screen has been unchanged a while") — a running night always
+  counts as "active" for the sleep clock, so without this a
+  quiet-but-running night (no votes, same song still playing) would show
+  `party` forever; else `director_layout`'s own split. Both trackers are
+  process-wide (outside `TvFeedDeps`), for the same reason: the room's
+  idle time and the board's own staleness are each a single fact, not a
+  per-connection one — a fresh `TvFeedDeps()` built per connection would
+  otherwise give every TV its own idea of either clock. The client's
+  `Layout` type still carries `'calibrate' | 'lost'` as placeholders for
+  later phases.
 - **BUILD-ID RELOAD IS NOW COMPLETE END TO END** (closing PR 1.1's own
   deferred acceptance item): `vite.tv.config.ts`'s `writeBuildIdManifest`
   plugin writes a plain-text `tv-dist/build-id.txt` beside the build (a

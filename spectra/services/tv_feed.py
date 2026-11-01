@@ -36,6 +36,22 @@ stateful tracker INSIDE it would give every TV its own idea of how long
 the room has been idle. `TvFeedDeps.idle_s` is the swappable seam a test
 injects instead.
 
+THE "BOARD WENT STALE" FALLBACK (plan §2.2: "a night runs but the screen
+has been unchanged a while, or between nights: a slow deck") is a SECOND,
+independent reason to show "attract" — a running night always counts as
+"active" for the sleep clock above (`idle_s` stays pinned at 0 the whole
+time a night plays), so without this a genuinely running-but-quiet night
+(no votes, the same song still playing) would show "party" forever. It is
+tracked the same way — a second process-wide `ActivityTracker` instance,
+`_board_activity` — fed by whether the relayed board ACTUALLY changed this
+tick: the exact same comparison `run_jukebox_loop` already makes for its
+own send-on-change dedup (`board != last_board`), never a second,
+differently-computed notion of "changed". `sleep` still wins outright over
+this (checked first in `resolve_layout`); this fallback only fires while a
+night IS running and is NOT idle in the `ActivityTracker`/`SLEEP_TIMEOUT_S`
+sense — `jukebox_running` falsy already resolves to "attract" on its own,
+via `director_layout`.
+
 THE JUKEBOX RELAY READS SPOTFX'S OWN `GET /api/jukebox/tv` (PR 1.3,
 services/jukebox/guests.py::Guests.tv_view — now/votes/next 3/board/link/
 revision, the leaner purpose-built shape the plan's own row 1.3 names).
@@ -109,13 +125,27 @@ def _default_show_clock() -> tuple[Optional[int], Optional[int], bool]:
 #: Plan row 1.5/Q8: "black after 10 min with no night and no music".
 SLEEP_TIMEOUT_S = 600.0
 
+#: Plan §2.2's second reason for "attract": "a night runs but the screen
+#: has been unchanged a while" — independent of SLEEP_TIMEOUT_S, which
+#: only covers "between nights" (no night running AND no music playing).
+#: A running night always counts as "active" for SLEEP_TIMEOUT_S, so
+#: without this a quiet-but-running night (no votes, same song still
+#: playing) would show "party" forever.
+UNCHANGED_TIMEOUT_S = 180.0
+
 
 class ActivityTracker:
-    """How long the room has gone with no jukebox night AND no music
-    playing. A fresh tracker starts "just became active" (never "already
-    idle") so a process restart can't fall asleep before actually
-    observing a real 10 idle minutes — see the module docstring for why
-    this is process-wide, not per-connection."""
+    """How long some boolean "activity" signal has been false. Two
+    process-wide instances share this one shape for two different
+    signals: `_activity` (fed by "a night is running OR music is
+    playing", driving the SLEEP_TIMEOUT_S clock) and `_board_activity`
+    (fed by "the relayed board actually changed this tick", driving the
+    UNCHANGED_TIMEOUT_S fallback) — both are process-wide, not
+    per-connection, because each is a single fact about the room/the
+    board, not a per-connection one (see the module docstring for the
+    full reasoning). A fresh tracker starts "just became active" (never
+    "already idle") so a process restart can't trip either timeout
+    before actually observing the real elapsed time."""
 
     def __init__(self) -> None:
         self._last_active_ms: Optional[float] = None
@@ -128,10 +158,15 @@ class ActivityTracker:
 
 
 _activity = ActivityTracker()
+_board_activity = ActivityTracker()
 
 
 def _default_idle_s(active: bool, now_ms: float) -> float:
     return _activity.idle_s(active, now_ms)
+
+
+def _default_board_unchanged_s(changed: bool, now_ms: float) -> float:
+    return _board_activity.idle_s(changed, now_ms)
 
 
 def _default_build_id() -> Optional[str]:
@@ -162,6 +197,7 @@ class TvFeedDeps:
     show_clock: Callable[[], tuple[Optional[int], Optional[int], bool]] = _default_show_clock
     build_id: Callable[[], Optional[str]] = _default_build_id
     idle_s: Callable[[bool, float], float] = _default_idle_s
+    board_unchanged_s: Callable[[bool, float], float] = _default_board_unchanged_s
     clock_push_s: float = CLOCK_PUSH_S
     jukebox_poll_s: float = JUKEBOX_POLL_S
 
@@ -181,15 +217,24 @@ def director_layout(jukebox_running: Optional[bool]) -> str:
     return "party" if jukebox_running else "attract"
 
 
-def resolve_layout(jukebox_running: Optional[bool], idle_s: float) -> str:
+def resolve_layout(jukebox_running: Optional[bool], idle_s: float,
+                   board_unchanged_s: float = 0.0) -> str:
     """The full director decision (plan row 1.5, Q8: "black after 10 min
-    with no night and no music"). `idle_s` — how long neither a night has
-    run nor music has played — is computed by the caller's own
-    `ActivityTracker`, never derived here, so this stays a pure function
-    of its two inputs; sleep wins outright once the timeout is reached,
-    otherwise it's exactly `director_layout`'s plain split."""
+    with no night and no music"; plan §2.2's own second reason, "a night
+    runs but the screen has been unchanged a while"). `idle_s` and
+    `board_unchanged_s` are both computed by the caller's own
+    `ActivityTracker` instances, never derived here, so this stays a pure
+    function of its three inputs. Precedence: `sleep` wins outright once
+    `idle_s` crosses `SLEEP_TIMEOUT_S`, regardless of anything else; else,
+    while a night IS running, `attract` wins too once `board_unchanged_s`
+    crosses `UNCHANGED_TIMEOUT_S` — a NEW, independent reason to fall
+    back, never reached while `jukebox_running` is falsy (that case is
+    already "attract" via `director_layout` below); else exactly
+    `director_layout`'s plain split."""
     if idle_s >= SLEEP_TIMEOUT_S:
         return "sleep"
+    if jukebox_running and board_unchanged_s >= UNCHANGED_TIMEOUT_S:
+        return "attract"
     return director_layout(jukebox_running)
 
 
@@ -204,7 +249,14 @@ def config_message(hello: dict[str, Any], jukebox_running: Optional[bool],
     `shouldReload()` compares this against what it's actually running.
     `idle_s` (default 0 — the caller passes the real value) lets a
     reconnecting TV land on "sleep" immediately rather than waiting for
-    the jukebox loop's own next tick to correct an initial "attract"."""
+    the jukebox loop's own next tick to correct an initial "attract".
+    `board_unchanged_s` (unparameterized here, always `resolve_layout`'s
+    own default of 0) deliberately does NOT get the same treatment — the
+    caller has no board-change comparison to make yet at handshake time,
+    so a reconnecting TV during a stale-but-running night briefly shows
+    "party" until the jukebox loop's own very first tick (which always
+    sends a `layout` message, win or lose) corrects it, within one poll
+    interval."""
     return {
         "type": "config",
         "layout": resolve_layout(jukebox_running, idle_s),
@@ -227,13 +279,6 @@ def clock_message(show_clock_ms: Optional[int], position_ms: Optional[int],
 
 def _layout_payload(layout: str) -> dict:
     return {"type": "layout", "layout": layout}
-
-
-def layout_message(jukebox_running: Optional[bool]) -> dict:
-    """The plain two-state message — unaware of sleep (`resolve_layout`
-    is what `run_jukebox_loop` actually sends from, below). Kept for
-    whatever still only cares about the party/attract split."""
-    return _layout_payload(director_layout(jukebox_running))
 
 
 def jukebox_message(board: Optional[dict]) -> dict:
@@ -291,15 +336,23 @@ async def run_jukebox_loop(send: Callable[[dict], Awaitable[None]], deps: TvFeed
     `jukebox` message only when the payload actually changed — a plain
     dict-equality check against the last sent payload, cheap and exact,
     never a hash (the payload is already small: now + next 3 + the board).
+    That same comparison (`board_changed` below) is ALSO what feeds
+    `deps.board_unchanged_s` — the one definition of "did the board just
+    change", shared by the send-on-change dedup (did we need to tell the
+    TV) and the staleness clock (how long since it last told us something
+    new) rather than two independently-computed notions that could
+    disagree.
 
     The LAYOUT, separately, is re-resolved on EVERY tick regardless of
     whether the board changed — a `layout` message is sent only when the
     RESOLVED layout itself changes, never tied to the board's own change
-    (PR 1.2's original pairing). This split is what makes sleep possible:
-    the room can sit with an unchanging, not-running board for the whole
-    10-minute timeout, and nothing would ever re-check idle time if the
-    layout push only ever rode along with a board change that, by
-    definition, isn't happening during that idle stretch."""
+    (PR 1.2's original pairing). This split is what makes sleep AND the
+    unchanged-board fallback possible: the room can sit with an
+    unchanging, not-running board for the whole 10-minute sleep timeout,
+    or an unchanging, RUNNING board for the whole 3-minute attract
+    fallback, and nothing would ever re-check either clock if the layout
+    push only ever rode along with a board change that, by definition,
+    isn't happening during either stretch."""
     last_board: Any = object()  # never equals a real payload — forces the first send
     last_layout: Optional[str] = None
     while True:
@@ -307,14 +360,16 @@ async def run_jukebox_loop(send: Callable[[dict], Awaitable[None]], deps: TvFeed
             http_url = deps.http_url()
             board = await deps.fetch_jukebox(http_url)
             running = board.get("running") if isinstance(board, dict) else None
-            if board != last_board:
+            board_changed = board != last_board
+            if board_changed:
                 last_board = board
                 await send(jukebox_message(board))
 
             _show, _pos, is_playing = deps.show_clock()
             now_ms = await deps.now_ms()
             idle_s = deps.idle_s(bool(running) or is_playing, now_ms)
-            layout = resolve_layout(running, idle_s)
+            board_unchanged_s = deps.board_unchanged_s(board_changed, now_ms)
+            layout = resolve_layout(running, idle_s, board_unchanged_s)
             if layout != last_layout:
                 last_layout = layout
                 await send(_layout_payload(layout))
