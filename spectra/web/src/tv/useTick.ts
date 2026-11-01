@@ -1,7 +1,9 @@
 /** Forces a re-render every `intervalMs` — used only by components that
  * display a continuously-advancing value (the Party screen's progress
  * bar/clock) computed from interpolation, not from a new feed message.
- * Returns nothing; callers read the clock themselves at render time. */
+ * The returned timestamp is unused today (every caller reads the clock
+ * itself, via feed.ts's `nowMs()`, at render time) — it exists only so
+ * a future caller isn't forced into a second `Date.now()` call. */
 import { useEffect, useState } from 'react';
 
 export function useTick(intervalMs: number): number {
