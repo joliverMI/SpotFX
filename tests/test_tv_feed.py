@@ -50,6 +50,88 @@ def test_default_build_id_reads_the_real_manifest_or_is_honestly_none(tmp_path, 
     assert tv_feed._default_build_id() == "1234567890"
 
 
+def test_default_show_clock_calls_the_real_bridge_singleton_without_raising():
+    """Exercises the real, unmonkeypatched `_default_show_clock()` — the
+    production default `run_clock_loop` actually calls. Before the fix for
+    the round-1 finding (it read `bridge.effective_position_ms()` off the
+    `bridge` MODULE rather than the `engine.bridge` singleton instance),
+    this raised `AttributeError` every single call."""
+    show, position, playing = tv_feed._default_show_clock()
+    assert isinstance(playing, bool)
+    assert show is None or isinstance(show, int)
+    assert position is None or isinstance(position, int)
+
+
+def test_default_night_http_url_reads_env_override_and_falls_back(monkeypatch):
+    """Exercises the real, unmonkeypatched `_default_night_http_url()`
+    against the real `bridge.default_http_url()` it delegates to."""
+    monkeypatch.delenv("SPECTRA_BRIDGE_HTTP_URL", raising=False)
+    monkeypatch.delenv("SPOTFX_PORT", raising=False)
+    assert tv_feed._default_night_http_url() == "http://127.0.0.1:8000"
+
+    monkeypatch.setenv("SPOTFX_PORT", "9123")
+    assert tv_feed._default_night_http_url() == "http://127.0.0.1:9123"
+
+    monkeypatch.setenv("SPECTRA_BRIDGE_HTTP_URL", "http://example.test:1234/")
+    assert tv_feed._default_night_http_url() == "http://example.test:1234"
+
+
+def free_port() -> int:
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+async def _serve_jukebox_board(board: dict, port: int):
+    import uvicorn
+    from fastapi import FastAPI
+
+    app = FastAPI()
+
+    @app.get("/api/jukebox/board")
+    def _board():
+        return board
+
+    server = uvicorn.Server(uvicorn.Config(
+        app, host="127.0.0.1", port=port, log_level="warning", lifespan="off"))
+    task = asyncio.create_task(server.serve())
+    while not server.started:
+        await asyncio.sleep(0.02)
+    return server, task
+
+
+async def _stop_server(server, task):
+    server.should_exit = True
+    await task
+
+
+def test_default_fetch_jukebox_reads_the_real_board_endpoint():
+    """Exercises the real, unmonkeypatched `_default_fetch_jukebox()`
+    against a real HTTP server on loopback — the production default
+    `run_jukebox_loop` actually calls."""
+    async def scenario():
+        port = free_port()
+        board = {"running": True, "now": {"title": "Song"}, "next": []}
+        server, task = await _serve_jukebox_board(board, port)
+        try:
+            result = await tv_feed._default_fetch_jukebox(f"http://127.0.0.1:{port}")
+            assert result == board
+        finally:
+            await _stop_server(server, task)
+
+    _go(scenario())
+
+
+def test_default_fetch_jukebox_returns_none_when_unreachable():
+    async def scenario():
+        port = free_port()  # nothing is listening on this port
+        result = await tv_feed._default_fetch_jukebox(f"http://127.0.0.1:{port}")
+        assert result is None
+
+    _go(scenario())
+
+
 def test_jukebox_message_names_unreachable_rather_than_repeating_stale_data():
     assert tv_feed.jukebox_message(None) == {"type": "jukebox", "running": None, "reachable": False}
     board = {"running": True, "now": {"title": "x"}}

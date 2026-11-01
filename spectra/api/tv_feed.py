@@ -22,9 +22,11 @@ router = APIRouter(tags=["spectra-tv-feed"])
 async def tv_ws(ws: WebSocket) -> None:
     await ws.accept()
     deps = tv_feed.production_deps()
+    send_lock = asyncio.Lock()
 
     async def send(msg: dict) -> None:
-        await ws.send_json(msg)
+        async with send_lock:
+            await ws.send_json(msg)
 
     try:
         hello = await ws.receive_json()

@@ -214,6 +214,7 @@ async def run_clock_loop(send: Callable[[dict], Awaitable[None]], deps: TvFeedDe
             server_ms = await deps.now_ms()
             await send(clock_message(show_clock_ms, position_ms, is_playing, server_ms))
         except Exception:                                  # noqa: BLE001
+            logger.warning("tv feed: clock loop ended", exc_info=True)
             return
         await sleep(deps.clock_push_s)
 
@@ -238,5 +239,6 @@ async def run_jukebox_loop(send: Callable[[dict], Awaitable[None]], deps: TvFeed
                 await send(jukebox_message(board))
                 await send(layout_message(running))
         except Exception:                                  # noqa: BLE001
+            logger.warning("tv feed: jukebox loop ended", exc_info=True)
             return
         await sleep(deps.jukebox_poll_s)
