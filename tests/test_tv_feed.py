@@ -426,6 +426,78 @@ def fast_deps(monkeypatch):
     return board
 
 
+class _FakeTvWebSocket:
+    """Minimal stand-in for Starlette's `WebSocket`, driving the real
+    `tv_ws()` dispatch loop directly (not through TestClient, which has no
+    way to force a `send_json` to raise mid-round-trip). `_send_exc` fires
+    on the reply to the ping specifically, simulating a TV connection
+    ending while a ping round-trip is in flight."""
+
+    def __init__(self, send_exc):
+        self._send_exc = send_exc
+        self._recv_calls = 0
+
+    async def accept(self):
+        pass
+
+    async def receive_json(self):
+        self._recv_calls += 1
+        if self._recv_calls == 1:
+            return {"kind": "tv"}
+        if self._recv_calls == 2:
+            return {"type": "ping", "t": 0.0}
+        await asyncio.sleep(999)
+
+    async def send_json(self, msg):
+        if msg.get("type") == "pong":
+            raise self._send_exc
+
+    async def close(self):
+        pass
+
+
+async def _dispatch_loop_dead_socket(exc, fast_deps_obj):
+    from spectra.api import tv_feed as tv_feed_api
+
+    ws = _FakeTvWebSocket(exc)
+    await tv_feed_api.tv_ws(ws)  # must not raise
+
+
+@pytest.mark.parametrize("exc", [
+    RuntimeError('Cannot call "send" once a close message has been sent.'),
+    tv_feed.WebSocketDisconnect(code=1006),
+])
+def test_dispatch_loop_ends_quietly_when_the_socket_is_dead(exc, caplog, fast_deps):
+    """The router's own ping-dispatch loop (`tv_ws()` in
+    spectra/api/tv_feed.py) must stay as quiet about a dead socket as the
+    two background loops already are (see the same-shaped tests above for
+    `run_clock_loop`/`run_jukebox_loop`) — a TV connection ending mid-ping
+    (a deploy restart, an ordinary reconnect race) is routine teardown,
+    not a bug to log at WARNING."""
+    with caplog.at_level(logging.WARNING, logger="spectra.api.tv_feed"):
+        _go(_dispatch_loop_dead_socket(exc, fast_deps))
+    assert caplog.records == []
+
+
+def test_dispatch_loop_logs_a_warning_for_a_genuinely_unexpected_error(caplog, fast_deps):
+    """Unlike the dead-socket case above, a genuinely unexpected error from
+    the dispatch loop must still surface loudly."""
+    from spectra.api import tv_feed as tv_feed_api
+
+    class _BrokenWebSocket(_FakeTvWebSocket):
+        async def receive_json(self):
+            self._recv_calls += 1
+            if self._recv_calls == 1:
+                return {"kind": "tv"}
+            raise AttributeError("boom")
+
+    with caplog.at_level(logging.WARNING, logger="spectra.api.tv_feed"):
+        _go(tv_feed_api.tv_ws(_BrokenWebSocket(RuntimeError("unused"))))
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelno == logging.WARNING
+    assert caplog.records[0].exc_info is not None
+
+
 def test_route_hello_config_ping_pong_clock_jukebox_end_to_end(fast_deps):
     client = _client()
     with client.websocket_connect("/api/tv/ws") as ws:

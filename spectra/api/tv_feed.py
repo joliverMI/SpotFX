@@ -53,7 +53,7 @@ async def tv_ws(ws: WebSocket) -> None:
                 continue
             if msg.get("type") == "ping":
                 await send(await tv_feed.handle_ping(msg, deps))
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         pass
     except Exception:                                      # noqa: BLE001
         logger.warning("tv feed: connection ended abnormally", exc_info=True)
