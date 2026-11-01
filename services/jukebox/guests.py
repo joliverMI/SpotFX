@@ -1911,7 +1911,7 @@ class Guests:
         already in memory; the board's banned-word test (board.py's own
         docstring) still holds since this calls the SAME `build_board`
         unmodified."""
-        from services.jukebox import board, guest_link
+        from services.jukebox import board
         gs = self._running()
         link = self._tv_link()
         if gs is None:
