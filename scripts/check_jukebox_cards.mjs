@@ -255,5 +255,39 @@ console.log('\n§3 the page, mounted — the sheet, the codes, and the password 
   ok(qrOf(cards[0].querySelectorAll('svg')[0]) === 'WIFI:T:nopass;S:Guests;;', 'an open network\'s code has no password');
   P.unmount();
 }
+{
+  // the Admiral's chosen configuration (data/jukebox-plan): Funnel/the
+  // guest link stay off, so `link` never comes — the cards must still
+  // print, from the home-Wi-Fi address alone.
+  world = { card: { link: null, lan_link: LAN_LINK, host: null, state: 'off', public_port: 8443,
+                    token_created_ms: 1, unused: ['ABCD-EFGH', 'K7Q2-M9XD'], codes_error: null,
+                    qr_bonus: 5, play_mode: 'credits' } };
+  requests.length = 0;
+  const c = P.mount();
+  await P.settle();
+  ok(c.querySelector('[data-testid="jukebox-cards-lan-link"]')?.textContent.includes(LAN_LINK),
+    'the home-Wi-Fi link is shown even with no Funnel address at all');
+  ok(!!c.querySelector('[data-testid="jukebox-cards-lan-only-note"]')
+    && !!c.querySelector('input[aria-label="The guest link\'s address"]'),
+    'it names the cards as home-Wi-Fi-only, and still offers to save a public address');
+  ok(!c.querySelector('[data-testid="jukebox-cards-problems"]')
+    || !c.textContent.includes('The guest link has no address yet.'),
+    'the lan-only address counts as an address — Print is not stuck waiting for Funnel');
+  type(c.querySelector('input[aria-label="Wi-Fi network name"]'), 'Serenity Guests');
+  type(c.querySelector('input[aria-label="Wi-Fi password"]'), 'party-password');
+  type(c.querySelector('input[aria-label="How many cards"]'), '2');
+  await P.settle();
+  ok(!btn(c, /^Print/).disabled, 'Print is enabled off the home-Wi-Fi address alone, with no Funnel address saved');
+  const cards = [...c.querySelectorAll('[data-testid="jukebox-card"]')];
+  ok(cards.length === 2, `two cards (${cards.length})`);
+  const joins = cards.map((card) => qrOf(card.querySelectorAll('svg')[1]));
+  ok(joins[0] === `${LAN_LINK}&b=ABCD-EFGH` && joins[1] === `${LAN_LINK}&b=K7Q2-M9XD`,
+    'the Jukebox QR is built from the home-Wi-Fi address, bonus code and all, when Funnel is off');
+  ok(cards.every((card) => card.textContent.includes('home Wi-Fi')),
+    'the card itself says the QR is home-Wi-Fi-only');
+  await click(btn(c, /^Print 2 cards$/));
+  ok(printed === 2, 'Print prints the lan-only sheet too');
+  P.unmount();
+}
 
 report();
