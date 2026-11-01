@@ -42,7 +42,7 @@ const SCREEN_ID_KEY = 'spectra-tv-screen-id';
  * adding it back gives a monotonic-enough clock already on the server's
  * own epoch-ms scale — the "fixed origin" `clock.ts`'s own docstring
  * anticipates callers needing. */
-function nowMs(): number {
+export function nowMs(): number {
   return performance.timeOrigin + performance.now();
 }
 

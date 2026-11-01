@@ -17,6 +17,7 @@
  * §2.4): body >= 32px, song lines >= 40px, the now-playing title
  * 64-80px, a 5% safe margin — tv.css's own `.tv-party-*` rules. */
 import { useFeed } from './useFeed';
+import { nowMs } from './feed';
 import { useTick } from './useTick';
 import { interpolatedProgressMs, fmtMMSS, progressFraction, showCallout, byWords } from './partyLogic';
 import JoinQr from './JoinQr';
@@ -37,7 +38,7 @@ export default function PartyScreen() {
     );
   }
 
-  const progressMs = interpolatedProgressMs(now, feed.jukeboxReceivedAtMs, Date.now());
+  const progressMs = interpolatedProgressMs(now, feed.jukeboxReceivedAtMs, nowMs());
   const callout = showCallout(now, next, progressMs);
 
   return (
