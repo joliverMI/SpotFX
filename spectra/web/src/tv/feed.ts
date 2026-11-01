@@ -28,6 +28,18 @@ const PING_INTERVAL_MS = 2000;
 const RECONNECT_MS = 2000;
 const SCREEN_ID_KEY = 'spectra-tv-screen-id';
 
+/** `performance.now()` is relative to page-navigation start, not the
+ * wall clock; `tv_feed.py`'s own timestamps are `time.time() * 1000.0`
+ * (epoch ms) — mixing the two makes `NtpClock`'s offset meaningless (it
+ * reads as the page's own age, not a real clock skew). `performance.
+ * timeOrigin` is the epoch-ms moment `performance.now()` counts from, so
+ * adding it back gives a monotonic-enough clock already on the server's
+ * own epoch-ms scale — the "fixed origin" `clock.ts`'s own docstring
+ * anticipates callers needing. */
+function nowMs(): number {
+  return performance.timeOrigin + performance.now();
+}
+
 function screenId(): string {
   let id = '';
   try {
@@ -104,7 +116,7 @@ export class TvFeed {
 
   private sendPing(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    this.ws.send(JSON.stringify({ type: 'ping', t: performance.now() }));
+    this.ws.send(JSON.stringify({ type: 'ping', t: nowMs() }));
   }
 
   private handleMessage(raw: string): void {
@@ -127,7 +139,7 @@ export class TvFeed {
         this.setState({ layout: (msg.layout as Layout) ?? this.state.layout });
         break;
       case 'pong': {
-        const clientRecvMs = performance.now();
+        const clientRecvMs = nowMs();
         this.ntp.record(
           msg.client_t as number, msg.server_recv_ms as number,
           msg.server_send_ms as number, clientRecvMs,
