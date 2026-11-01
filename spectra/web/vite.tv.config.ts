@@ -16,10 +16,11 @@ import react from '@vitejs/plugin-react';
 //
 // BUILD_ID: a fresh id baked in at build time (Date.now(), not a content
 // hash — this only has to differ across deploys, not describe the content),
-// exposed to the app as `__TV_BUILD_ID__`. Phase 1.2's feed carries the
-// server's own build id in its `hello`/`config` exchange; the shell's job
-// here is only to know its OWN id so that comparison has something to
-// compare against once the feed exists.
+// exposed to the app as `__TV_BUILD_ID__`. PR 1.2's feed carries the
+// server's own build id (read off the manifest below) in its `hello`/
+// `config` exchange; the shell's job here is only to know its OWN id so
+// that comparison (feed.ts, on every `config` message) has something to
+// compare against.
 const BUILD_ID = String(Date.now());
 
 // A plain text manifest beside the build, read by spectra/services/

@@ -13572,26 +13572,29 @@ than being resized once it lands), and `SystemPlane.tsx` (a small, dim
 diagnostic corner: the shell's own build id from `build.ts`'s
 `TV_BUILD_ID`, baked in at build time by `vite.tv.config.ts`'s `define` —
 a fresh `Date.now()` id, not a content hash, which only has to differ
-across deploys — plus a plain not-connected dot). `build.ts`'s
-`shouldReload(serverBuildId)` is the pure half of "build-id reload" (the
-plan's own "nobody stands at the TV to press refresh"): an empty/missing
-server id is never evidence of staleness and never triggers a reload. The
-feed that will actually call it with a real server id, and that replaces
-the Info plane's placeholder content with real now-playing/votes/up-next/
-board/QR content, is PR 1.2 — not built here; this shell's structure is
-meant to not change under it.
+across deploys — plus a connected/not-connected dot and a clock-offset
+readout, both now driven by the real feed; see "THE TV FEED" below).
+`build.ts`'s `shouldReload(serverBuildId)` is the pure half of "build-id
+reload" (the plan's own "nobody stands at the TV to press refresh"): an
+empty/missing server id is never evidence of staleness and never triggers
+a reload — PR 1.2's feed is what actually calls it with the server's real
+id, on every `config` message. The richer Info plane content (real
+now-playing/votes/up-next/board/QR) is still PRs 1.4/1.5's job; this
+shell's structure hasn't needed to change under either PR built on it so
+far.
 
 No help topic — like `/spec` and `/tv/probe`, this is a page a human (or
 a TV) opens directly, outside the SPA's own nav and `helpContent.ts`.
 **The plan's own row lists a `/jukebox/tv` redirect for this PR; it was
 deliberately NOT cut over here.** The existing Jukebox board page
 (`JukeboxTvPage.tsx`, phase 3 of the Jukebox plan, above) honours an
-on/off gate ("On the TV") with an honest off-message, and this shell has
-no feed yet to carry that gate forward — redirecting now would trade a
-working, gated feature for a placeholder with no gate awareness. The
-redirect is deferred to land once the feed/Party screen (PRs 1.2-1.4) can
-carry the gate forward, within the same approved phased plan;
-`/jukebox/tv` is unchanged by this PR.
+on/off gate ("On the TV") with an honest off-message, and this shell
+still has no PARTY SCREEN to render that gated content (PR 1.2's feed
+relays `board_on_tv` through the Jukebox board payload, but nothing here
+draws it yet) — redirecting now would trade a working, gated feature for
+a placeholder with no gate awareness. The redirect is deferred to land
+once the Party screen (PR 1.4) can carry the gate forward, within the
+same approved phased plan; `/jukebox/tv` is unchanged by this PR.
 
 Specs: `scripts/check_tv_app_shell.py` (a real headless Chromium over raw
 CDP against a real uvicorn server mounting the built `tv-dist/` exactly
@@ -13600,6 +13603,98 @@ as production does — the gzip budget, both target viewports [1920x1080,
 `tests/test_tv_app_shell.py` (the mount-order/fallback contract, against
 a throwaway hand-written `index.html` rather than depending on a real
 build having run).
+
+## THE TV FEED — phase 1, PR 1.2 of the TV display plan: `/spectra/api/tv/ws`
+
+`spectra/services/tv_feed.py`'s module docstring is the binding statement
+for the wire protocol; `spectra/web/src/tv/{clock,feed,useFeed}.ts` is the
+client half. One WebSocket carries everything the shell (PR 1.1, above)
+needs that a static build can't: the `hello`/`config` handshake, an
+NTP-style ping/pong clock, a 4 Hz show-clock anchor, the layout director's
+"party"/"attract" pick, and a relay of SpotFX's own Jukebox board. Six
+things:
+
+- **PING/PONG IS CLIENT-INITIATED, deliberately NOT `av_sync_session.
+  ClockMap`** (that module is server-initiated, built for the opposite
+  direction — a phone filming a fixture). The TV sends `{"type": "ping",
+  "t": <client_send_ms>}` every 2s; the server replies with its own
+  `server_recv_ms`/`server_send_ms`, bracketing whatever work
+  (`handle_ping`'s `before_pong_send` hook, a no-op in production) runs
+  between them — the classic 4-timestamp NTP formula is resistant to a
+  PROCESSING delay there (SPECTRA's event loop is known to stall —
+  AGENTS.md's own "THE PREVIEW STREAM IS PROTOCOL 2" section is the
+  standing evidence): the stall shows up as added round-trip delay, never
+  as skew, provided both server timestamps are taken close to the real
+  recv/send.
+  `clock.ts`'s `NtpClock` keeps the fastest (lowest-RTT) of the last 8
+  samples' offset. Both ends must share one epoch-ms scale —
+  `feed.ts`'s `nowMs()` is `performance.timeOrigin + performance.now()`,
+  never bare `performance.now()` (relative to page-navigation start,
+  which would make the offset read as the page's own age, not a real
+  clock skew).
+- **THE SHOW CLOCK IS PUSHED AT `CLOCK_PUSH_S` (0.25s, "4 Hz anchors")**,
+  read through `engine.current_show_clock_ms()` + `engine.bridge`'s own
+  position/is-playing (the live singleton instance `engine.py` constructs
+  — `bridge.py` itself has no module-level equivalents to call directly).
+  `clock.ts`'s `interpolateShowClockMs` advances the anchor 1:1 with the
+  client's own clock between pushes (corrected by the NTP offset) rather
+  than timing anything by message arrival, so a late push never makes the
+  drawn clock jump.
+- **THE JUKEBOX RELAY READS SPOTFX'S EXISTING `GET /api/jukebox/board`**,
+  not the plan's own leaner `/api/jukebox/tv` (that endpoint is PR 1.3's
+  own deliverable and doesn't exist yet) — through the one swappable seam
+  `TvFeedDeps.fetch_jukebox`, so 1.3 is a one-line change, not a second
+  relay. `running` (whether a night plays) is read FROM that same fetched
+  payload, never a second call — polling it separately to decide whether
+  to poll it would be circular, and the board read is already lean (no
+  Spotify call, `board.py`'s own docstring). Polled at `JUKEBOX_POLL_S`
+  (1.0s) and sent only when the payload actually changed (plain dict
+  equality) — this structurally bounds "a vote reaches a TV" at one poll
+  interval plus negligible send time, comfortably under the plan's own
+  1.5s acceptance bound. The very first `config` reply reads a FRESH board
+  rather than waiting on the relay loop's own first poll tick — a stale
+  "attract" for up to a whole poll interval right at connect would be the
+  wrong screen for a night already running.
+- **THE LAYOUT DIRECTOR IS TWO STATES TODAY** (`director_layout`:
+  "party" while a night plays, else "attract", `None` reading as the
+  calmer "attract") — the plan's own richer idle-timeout/sleep/burn-in
+  state machine (row 1.5) isn't built yet; the client's `Layout` type
+  already carries `'sleep' | 'calibrate' | 'lost'` as placeholders for it.
+- **BUILD-ID RELOAD IS NOW COMPLETE END TO END** (closing PR 1.1's own
+  deferred acceptance item): `vite.tv.config.ts`'s `writeBuildIdManifest`
+  plugin writes a plain-text `tv-dist/build-id.txt` beside the build (a
+  .js bundle isn't convenient for the Python side to inspect);
+  `tv_feed._default_build_id` reads it (a missing file is `None`, never a
+  reason to instruct a reload); `config_message` carries it in the one
+  `config` reply every connection gets, so a reconnect (the client's own
+  fixed-backoff retry, `feed.ts`) is what catches a TV up to a newer
+  build; the client's own `shouldReload()` (built in PR 1.1, unchanged)
+  decides. `SystemPlane.tsx` shows the live connected/not-connected dot
+  plus the measured clock offset, and `InfoPlane.tsx` shows a
+  connection/layout-dependent line — the one visible proof, at the TV
+  itself, that the feed and the NTP sync are actually working, useful for
+  the phase 0/1.2 test evening without devtools. The richer Party/Attract
+  screen CONTENT (now-playing/votes/up-next/board/QR) is still PRs
+  1.4/1.5's job.
+- **EVERY WS SEND SHARES ONE LOCK.** `spectra/api/tv_feed.py` serializes
+  every send (the two background loops plus the ping/pong dispatch)
+  through a single `asyncio.Lock` — three independent writers on one
+  socket otherwise race `ws.send_json`. A dead socket
+  (`WebSocketDisconnect`, or the `RuntimeError` FastAPI raises on a send
+  after close) ends a background loop quietly; any OTHER exception logs a
+  warning — a routine disconnect must not read as a bug, and a real one
+  must never be swallowed.
+
+No help topic — like `/spec`, `/tv/probe` and the shell, this is a page a
+human (or a TV) opens directly, outside the SPA's own nav and
+`helpContent.ts`. Specs: `scripts/check_tv_clock.mjs` (the pure NTP
+math — skew recovery through a deliberate 300ms processing stall,
+fastest-of-8, the show-clock interpolator, `shouldReload`), `tests/
+test_tv_feed.py` (the pure message builders; the ping/pong formula's
+stall-resistance proven directly by injecting a real 300ms delay via
+`before_pong_send`; both background loops' quiet-vs-loud exception
+handling; the 1.5s jukebox-relay acceptance bound measured in real time;
+the full `/spectra/api/tv/ws` route over FastAPI's `TestClient`).
 
 ## Maintaining this file
 

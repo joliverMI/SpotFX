@@ -17,10 +17,11 @@ WHY THE SERVER SIDE CANNOT JUST TIMESTAMP ONCE. The classic 4-timestamp
 NTP formula — `offset = ((server_recv - client_send) + (server_send -
 client_recv)) / 2` — is specifically resistant to a PROCESSING delay
 between `server_recv` and `server_send` (SPECTRA's event loop is known to
-stall; AGENTS.md's §7.1 note on the preview stream is the standing
-evidence): the stall shows up as added round-trip delay, never as skew,
-PROVIDED both timestamps are taken as close to the actual recv/send as
-possible. `handle_ping`'s own `before_pong_send` hook exists so a test can
+stall; AGENTS.md's "THE PREVIEW STREAM IS PROTOCOL 2" section — "THE
+STREAM IS A PASSENGER ON THE EVENT LOOP" — is the standing evidence): the
+stall shows up as added round-trip delay, never as skew, PROVIDED both
+timestamps are taken as close to the actual recv/send as possible.
+`handle_ping`'s own `before_pong_send` hook exists so a test can
 PROVE that resistance by injecting a real delay there, rather than trusting
 the formula by inspection.
 
