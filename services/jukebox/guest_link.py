@@ -48,6 +48,16 @@ new phone's link against.
 Every outcome is recorded (`last_action`, the night's own log line) and a
 failure never stops the music: a link that would not open is a warning on a
 night that plays on.
+
+THE HOME-WIFI LINK IS A SEPARATE, ALREADY-ON PATH (the Admiral, 2026-11-01,
+"do wifi option"): `jukebox_guest/app.py`'s own process listens on 0.0.0.0,
+so a phone on Serenity's home Wi-Fi reaches it directly at
+`http://<serenity LAN IP>:<guest_port>/?t=<token>` — no Funnel, no
+`enabled`, no `tailscale` call of any kind. `status()`'s own `lan_link`
+field builds that address (`lan_link()`, using `GuestLinkDeps.lan_ip` — a
+pure routing-table read, no network traffic) from the SAME token this
+module already mints lazily (`ensure_token`/`on_night_start`), so it is
+non-None whenever a token exists, link on or off, Funnel armed or not.
 """
 from __future__ import annotations
 
@@ -91,6 +101,16 @@ def link_for(host: str, port: int, token: str) -> Optional[str]:
     if not host or not token:
         return None
     return f"https://{host}{'' if port == 443 else f':{port}'}/?t={token}"
+
+
+def lan_link(ip: str, port: int, token: str) -> Optional[str]:
+    """The guest page's HOME-WIFI address (the Admiral's 2026-11-01 "wifi
+    option") — plain http, Funnel irrelevant: `http://<serenity LAN
+    IP>:<guest_port>/?t=<token>`. `None` when there is no LAN address to
+    read (no network) or no token minted yet."""
+    if not ip or not token:
+        return None
+    return f"http://{ip}{'' if port == 80 else f':{port}'}/?t={token}"
 
 
 def target(cfg: GuestLinkConfig) -> str:
@@ -252,11 +272,28 @@ def _probe(url: str, timeout: float) -> Optional[int]:
         return None
 
 
+def _lan_ip() -> str:
+    """Serenity's own LAN IPv4 address, read with NO network traffic: a UDP
+    `connect()` only asks the kernel's routing table which local interface
+    it would use — it sends nothing on the wire. `""` with no route at all
+    (no network, or a host with none configured)."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except OSError:
+        return ""
+    finally:
+        s.close()
+
+
 @dataclass
 class GuestLinkDeps:
     run: Callable[[list[str], float], tuple[int, str, str]] = field(
         default_factory=lambda: (lambda argv, timeout: run_command(argv, timeout)))
     probe: Callable[[str, float], Optional[int]] = _probe
+    lan_ip: Callable[[], str] = _lan_ip
     to_thread: Callable[..., Awaitable[Any]] = asyncio.to_thread
     now_ms: Callable[[], int] = lambda: int(time.time() * 1000)
     night_running: Callable[[], bool] = lambda: _night_running()
@@ -285,10 +322,14 @@ class GuestLink:
                                                           and cfg.enabled) else
                  "armed" if cfg.enabled else "off")
         host = st.host or cfg.public_host
+        # the home-Wi-Fi address (the Admiral's "wifi option") — no Funnel
+        # needed, so it reads regardless of `cfg.enabled`/`state`
+        lan_link_value = lan_link(self.deps.lan_ip(), cfg.guest_port, st.token)
         return {"config": cfg.model_dump(mode="json"), "state": state,
                 "funnel_open": st.funnel_open, "opened_ms": st.opened_ms,
                 "opened_for_night": st.opened_for_night or None,
                 "link": link_for(host, cfg.public_port, st.token),
+                "lan_link": lan_link_value,
                 "host": host or None, "token_created_ms": st.token_created_ms,
                 "open_command": " ".join(open_argv(cfg)), "close_command": " ".join(close_argv(cfg)),
                 "last_action": st.last_action.model_dump(mode="json") if st.last_action else None,

@@ -1,10 +1,17 @@
 # The Jukebox's GUEST PAGE — its own small process (jukebox_guest/, the plan's
 # PR 2.1), never inside SpotFX's main.py, whose event loop runs the music.
-# It answers nothing but the guest page on 127.0.0.1:8020 and forwards a short
+# It answers nothing but the guest page, on :8020, and forwards a short
 # allowlist of calls to SpotFX over loopback (jukebox_guest/__init__.py is the
-# binding statement). Tailscale Funnel publishes that port, and only that
-# port, while a night runs — services/jukebox/guest_link.py, switched OFF
-# until G4 (his). With Funnel off nothing outside Serenity reaches it.
+# binding statement). Since the Admiral's 2026-11-01 "wifi option" it listens
+# on 0.0.0.0, so it also answers directly on Serenity's home-LAN address
+# (http://<serenity LAN IP>:8020/?t=<party token>) — a phone on the home
+# Wi-Fi reaches it without Tailscale at all. The party token is still
+# required on every route that needs it, exactly as before. Tailscale
+# Funnel — publishing the SAME port to the public internet — stays a
+# SEPARATE, still-OFF option: services/jukebox/guest_link.py's
+# `GuestLinkConfig.enabled` is False until he turns it on, and nothing here
+# arms it. With Funnel off, only the home Wi-Fi (and Serenity itself) can
+# reach it.
 #
 # NOT INSTALLED BY ANY BUILD. Deploying it is the owner's word:
 #   cd spectra/web && npx vite build --config vite.guest.config.ts
@@ -25,7 +32,7 @@ After=spotfx.service
 [Service]
 Type=simple
 WorkingDirectory=/home/javi/SpotFX
-ExecStart=/home/javi/SpotFX/.venv/bin/python -m jukebox_guest --host 127.0.0.1 --port 8020
+ExecStart=/home/javi/SpotFX/.venv/bin/python -m jukebox_guest --host 0.0.0.0 --port 8020
 Restart=always
 RestartSec=3
 

@@ -195,6 +195,25 @@ def test_a_direct_connection_cant_choose_its_own_address(tmp_path, dist):
         assert codes.count(429) == 2
 
 
+def test_two_real_lan_phones_are_limited_independently(tmp_path, dist):
+    """The home-Wi-Fi deploy (`--host 0.0.0.0`): each phone connects
+    DIRECTLY, so its own peer address already IS its identity — one phone
+    exhausting its own `hello` bucket must not throttle a DIFFERENT real
+    phone on the same Wi-Fi. (The whole-party `hello_all` bucket is shared
+    by design — it bounds a QR rush, not one address — so this drives it
+    well under that burst.)"""
+    sp = SpotFX(status=403, body={"status": "refused", "reason": "needs_link", "detail": "x"})
+    app = guest_app.create_app(key_file=tmp_path / "key", dist_dir=dist,
+                               transport=httpx.MockTransport(sp.handler))
+    phone_a = TestClient(app, client=("192.168.40.50", 50000))
+    phone_b = TestClient(app, client=("192.168.40.51", 50000))
+    codes_a = [phone_a.post("/g/hello", json={}).status_code for _ in range(6)]
+    assert codes_a == [403] * 6                          # A's own bucket (6 burst) isn't exhausted yet
+    assert phone_a.post("/g/hello", json={}).status_code == 429   # the 7th taps it out
+    # B, a genuinely different LAN address, is unaffected by A's limit
+    assert phone_b.post("/g/hello", json={}).status_code == 403
+
+
 def test_a_big_body_is_refused_before_anything_is_sent(tmp_path, dist):
     sp = SpotFX()
     with _client(tmp_path, dist, sp) as c:
@@ -293,4 +312,34 @@ def test_two_phones_join_and_vote_through_the_guest_app(tmp_path, dist, monkeypa
         assert (await stranger.post("/g/vote", json={"vote": "down"})).status_code == 403
         for c in (a, b, stranger):
             await c.aclose()
+    asyncio.run(go())
+
+
+def test_a_wrong_token_is_still_refused_from_a_direct_lan_connection(tmp_path, dist, monkeypatch):
+    """The home-Wi-Fi deploy doesn't loosen the party token: a phone
+    reaching the app over a DIRECT, non-loopback peer — the shape every
+    real LAN phone connects as — with the wrong token is refused exactly
+    like one reaching it over loopback. The right token still joins."""
+    from services.jukebox import guest_link, store
+
+    async def go():
+        w = World()
+        await w.start()
+        await w.run(2)
+        monkeypatch.setattr(night_mod, "runner", w.runner)
+        guest_link.GuestLink().ensure_token()
+        token = store.load_guest_link()[1].token
+        monkeypatch.setattr(G, "book", G.Guests(G.GuestDeps(rng=random.Random(7))))
+        spotfx = FastAPI()
+        spotfx.include_router(jukebox_guest_router.router)
+        guest = guest_app.create_app(key_file=jukebox_guest_router.KEY_FILE, dist_dir=dist,
+                                     transport=httpx.ASGITransport(app=spotfx))
+        lan = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=guest, client=("192.168.40.50", 51000)),
+            base_url="http://guest")
+        wrong = await lan.post("/g/hello", json={"token": "wrong-guess"})
+        assert wrong.status_code == 403 and wrong.json()["reason"] == "needs_link"
+        right = await lan.post("/g/hello", json={"token": token})
+        assert right.status_code == 200 and right.json()["view"]["me"]["joined"] is False
+        await lan.aclose()
     asyncio.run(go())

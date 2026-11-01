@@ -11287,7 +11287,7 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   `tests/test_jukebox_report.py` — regenerate it when the report changes.
 - **THE GUEST PAGE (PR 2.1) IS ITS OWN PROCESS, and `jukebox_guest/
   __init__.py` is the binding statement.** `python -m jukebox_guest`
-  (127.0.0.1:8020, reference unit `deploy/spotfx-jukebox-guest.service`,
+  (:8020, reference unit `deploy/spotfx-jukebox-guest.service`,
   not installed by any build) serves the page built from
   `spectra/web/src/guest/` (`npx vite build --config vite.guest.config.ts`
   → `guest-dist/`) and answers EXACTLY `app.ROUTES` — no docs, no OpenAPI,
@@ -11309,6 +11309,23 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   `tests/test_jukebox_guest_page.py`. Web push (iPhone alerts from a Home
   Screen icon, Android lock-screen alerts) is NOT built: it needs the HTTPS
   link (G4) to test.
+  **REACHABLE ON THE HOME LAN SINCE 2026-11-01 (the Admiral: "do wifi
+  option")**: the shipped unit listens on `0.0.0.0`, so a phone on
+  Serenity's own Wi-Fi opens `http://<serenity LAN IP>:8020/?t=<party
+  token>` directly — the token is still checked exactly as before, and
+  Tailscale Funnel (the alternative, public-internet option,
+  `services/jukebox/guest_link.py`) stays a SEPARATE, still-off setting
+  nothing here arms. Nothing about the per-address rate limits
+  (`jukebox_guest/app.py`'s `_client()`) changes for this: a direct
+  connection's own peer address already IS its identity (never collapsed
+  to one bucket), and the loopback+`X-Forwarded-For` trust branch stays
+  scoped to the Funnel case, where every connection genuinely does arrive
+  from tailscaled on loopback. `guest_link.status()`'s own `lan_link`
+  field (`GuestLinkDeps.lan_ip`, a routing-table read with no network
+  traffic) is this address with tonight's token already on it, served on
+  `GET /api/jukebox/guest-link` and `GET /api/jukebox/card` (the
+  "Print the cards" page shows it) whether or not a token or Funnel
+  address exists otherwise.
 - **SEARCH AND ADD, AND THE HOST'S CONTROLS (PR 2.2)** are
   `services/jukebox/guests.py` too (its docstring is the binding statement):
   a guest's song goes in by FAIR ORDER — `LineEntry.round` is its adder's

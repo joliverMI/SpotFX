@@ -110,6 +110,12 @@ export default function JukeboxCardsPage() {
 
         <fieldset className="jukebox-cards-fields">
           <legend>The Jukebox link</legend>
+          {data?.lan_link && (
+            <p className="jukebox-muted" data-testid="jukebox-cards-lan-link">
+              On the home Wi-Fi: <code>{data.lan_link}</code> — a phone already on Serenity&apos;s network opens
+              this directly, no Tailscale Funnel needed.
+            </p>
+          )}
           {data?.link ? (
             <p className="jukebox-muted" data-testid="jukebox-cards-link">
               {data.host}{data.public_port === 443 ? '' : `:${data.public_port}`} — tonight&apos;s party link. It
