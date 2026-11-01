@@ -5,7 +5,10 @@
 import { useEffect, useState } from 'react';
 import { feed, FeedState } from './feed';
 
-const INITIAL: FeedState = { connected: false, layout: null, clock: null, jukebox: null, offsetMs: null };
+const INITIAL: FeedState = {
+  connected: false, layout: null, clock: null, jukebox: null,
+  jukeboxReceivedAtMs: null, offsetMs: null,
+};
 
 export function useFeed(): FeedState {
   const [state, setState] = useState<FeedState>(INITIAL);

@@ -13600,26 +13600,26 @@ readout, both now driven by the real feed; see "THE TV FEED" below).
 reload" (the plan's own "nobody stands at the TV to press refresh"): an
 empty/missing server id is never evidence of staleness and never triggers
 a reload — PR 1.2's feed is what actually calls it with the server's real
-id, on every `config` message. The richer Info plane content (real
-now-playing/votes/up-next/board/QR) is still PRs 1.4/1.5's job; this
-shell's structure hasn't needed to change under either PR built on it so
-far.
+id, on every `config` message. The Info plane's real content — now
+playing/votes/progress/up-next/join QR — is PR 1.4's own Party screen
+(below); the Attract/Sleep/lost-connection screens are still PR 1.5's.
+This shell's structure hasn't needed to change under any PR built on it
+so far — `InfoPlane.tsx` just gained one more conditional branch.
 
 No help topic — like `/spec` and `/tv/probe`, this is a page a human (or
 a TV) opens directly, outside the SPA's own nav and `helpContent.ts`.
 **The plan's own row lists a `/jukebox/tv` redirect for this PR; it was
-deliberately NOT cut over here.** The existing Jukebox board page
-(`JukeboxTvPage.tsx`, phase 3 of the Jukebox plan, above) honours an
-on/off gate ("On the TV") with an honest off-message, and this shell
-still has no PARTY SCREEN to render that gated content — the relay's own
-jukebox payload (`GET /api/jukebox/tv`, PR 1.3, below) carries no
-`board_on_tv` field at all, so its board is unconditional once a night
-runs, the guest page's own visibility rather than the gated one
-`JukeboxTvPage.tsx` honours — and redirecting now would trade a working,
-gated feature for a placeholder with no gate awareness. The redirect is
-deferred to land once the Party screen (PR 1.4) can carry the gate
-forward, within the same approved phased plan; `/jukebox/tv` is
-unchanged by this PR.
+deliberately NOT cut over here, and still isn't — PR 1.4's own Party
+screen (below) renders now/next/votes/QR, never the board.** The
+existing Jukebox board page (`JukeboxTvPage.tsx`, phase 3 of the Jukebox
+plan, above) honours an on/off gate ("On the TV") with an honest
+off-message; the relay's own jukebox payload (`GET /api/jukebox/tv`, PR
+1.3, below) still carries no `board_on_tv` field at all, so redirecting
+`/jukebox/tv` to this shell today would still trade a working, gated
+board for a screen with no board at all. The redirect stays deferred to
+whichever later PR gives the TV shell a board of its own and carries the
+gate forward, within the same approved phased plan; `/jukebox/tv`
+remains unchanged.
 
 Specs: `scripts/check_tv_app_shell.py` (a real headless Chromium over raw
 CDP against a real uvicorn server mounting the built `tv-dist/` exactly
@@ -13704,9 +13704,9 @@ things:
   plus the measured clock offset, and `InfoPlane.tsx` shows a
   connection/layout-dependent line — the one visible proof, at the TV
   itself, that the feed and the NTP sync are actually working, useful for
-  the phase 0/1.2 test evening without devtools. The richer Party/Attract
-  screen CONTENT (now-playing/votes/up-next/board/QR) is still PRs
-  1.4/1.5's job.
+  the phase 0/1.2 test evening without devtools. The Party screen's
+  content is PR 1.4's own ("THE PARTY SCREEN" below); the Attract/Sleep/
+  lost-connection screens are still PR 1.5's.
 - **EVERY WS SEND SHARES ONE LOCK.** `spectra/api/tv_feed.py` serializes
   every send (the two background loops plus the ping/pong dispatch)
   through a single `asyncio.Lock` — three independent writers on one
@@ -13728,6 +13728,77 @@ handling; the 1.5s jukebox-relay acceptance bound measured in real time;
 the full `/spectra/api/tv/ws` route over FastAPI's `TestClient`); `tests/
 test_jukebox_tv_feed_endpoint.py` (`Guests.tv_view()` + the `GET
 /api/jukebox/tv` route itself, over the real fake Jukebox world).
+
+## THE PARTY SCREEN — phase 1, PR 1.4 of the TV display plan
+
+`spectra/web/src/tv/PartyScreen.tsx`'s own module docstring is the
+binding statement. `InfoPlane.tsx` renders it only while `feed.connected
+&& feed.layout === 'party' && feed.jukebox` all hold (the feed, PR 1.2,
+above) — otherwise the same placeholder text as before; the real
+Attract/Sleep/lost-connection screens are still PR 1.5's row. Five
+things:
+
+- **ART IS NEVER ALTERED, structurally, not by convention** — Spotify's
+  Design and Branding Guidelines (no crop/overlay/animation/blur).
+  `.tv-party-art`'s `object-fit: contain` can't crop, and nothing in the
+  DOM draws on top of it (no `::after`, never composited with the
+  room's own colour haze behind everything, `VisualPlane.tsx` — two
+  separate layers, always). `check_tv_party_screen.py` reads the
+  rendered `src`/`object-fit`/`filter` back off the real DOM rather than
+  trusting the markup.
+- **PROGRESS IS CLIENT-SIDE INTERPOLATION BETWEEN ~1 Hz RELAY PUSHES, not
+  a live read** — `now.progress_ms` is a snapshot from the jukebox relay
+  loop (PR 1.2/1.3, above), advanced forward by elapsed CLIENT time
+  while `is_playing` (`partyLogic.interpolatedProgressMs`, clamped at
+  the song's own length), the same shape the show-clock interpolation
+  already uses and for the identical reason. **Both the anchor
+  (`FeedState.jukeboxReceivedAtMs`, stamped on every `jukebox` message)
+  and the "now" it's measured against must share `feed.ts`'s own
+  `nowMs()` (`performance.timeOrigin + performance.now()`) — caught in
+  review after `PartyScreen` first measured against `Date.now()`, a
+  different clock than the one that stamped the anchor.** This is the
+  same "both ends must share one epoch-ms scale" lesson "THE TV FEED"
+  section above already names for ping/pong; `nowMs()` is now exported
+  from `feed.ts` for exactly this second caller.
+- **THE UP-NEXT CALLOUT FIRES IN THE LAST 30s OF A SONG, once a next song
+  is known** (`partyLogic.showCallout`) — `next` already excludes an
+  unfilled jukebox slot (`tv_view()`'s own filter, `services/jukebox/
+  guests.py`), so a non-empty list alone means a real next song and the
+  callout is purely the 30s window on top of that; it shows only the
+  next item's title and who added it, never prices or credits.
+- **THE JOIN QR REUSES THE ONE SHARED ENCODER** (`../lib/qr.ts`,
+  extracted out of the printed guest cards' own `cardQr.ts` in PR 1.3
+  specifically so the TV screens never grow a second one — see "THE
+  PRINTED CARD (N2)" above) and shows only while `jukebox.link` is
+  non-null, the plan's own Q5; "Ask the host for the link to join"
+  otherwise.
+- **A MALFORMED `jukebox` MESSAGE RENDERS NOTHING, never crashes**:
+  `jukeboxTypes.isJukeboxView` is a loose runtime check (only the one
+  field the Party screen actually branches on, `next` being an array)
+  run before the feed ever stores the message — it's JSON off the
+  network, never trusted blindly.
+
+Text floors (plan §2.4: body >= 32px, song lines >= 40px, the
+now-playing title 64-80px) are `tv.css`'s own `clamp()` MINIMUM
+argument, never the vw-relative "preferred" term — raised on the shared
+`InfoPlane.tsx` placeholder text too (`.tv-info-title`/`.tv-info-sub`),
+so the floor holds on every screen this plane shows, placeholder
+included, not just the Party content. `useTick.ts` forces a 500ms
+re-render so the progress bar/clock visibly advances between relay
+pushes; its own return value is unused — every caller reads the clock
+itself via `nowMs()`.
+
+No help topic — like the probe and the shell, this is a page a TV opens
+directly, outside the SPA's own nav and `helpContent.ts`. Specs:
+`scripts/check_tv_party.mjs` (the pure logic — progress interpolation,
+the callout window, `fmtMMSS`/`byWords` — against synthetic clocks, no
+DOM/network) and `scripts/check_tv_party_screen.py` (a developer-run
+real-browser check, the same convention as `check_tv_app_shell.py`: a
+real uvicorn server with `tv_feed.production_deps` swapped for a canned
+Party scenario, a real headless Chromium over raw CDP — no page
+overflow, every text node >= 32px, the art unaltered, the attribution
+link present, and the up-next callout itself rendered and naming the
+next song).
 
 ## Maintaining this file
 

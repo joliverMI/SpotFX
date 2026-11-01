@@ -16,8 +16,62 @@ body { overflow: hidden; font-family: system-ui, sans-serif; color: #ece7f7; }
   position: absolute; inset: 5%; display: flex; flex-direction: column;
   align-items: center; justify-content: center; text-align: center; gap: 1.2vw;
 }
-.tv-info-title { font-size: clamp(40px, 6vw, 80px); font-weight: 700; letter-spacing: -0.01em; }
-.tv-info-sub { font-size: clamp(20px, 2.4vw, 32px); color: #c9c0de; }
+/* Plan §2.4's floors (body >= 32px, a now-playing title 64-80px) apply to
+ * EVERY screen this plane shows, placeholder included — `clamp()`'s own
+ * minimum argument is what guarantees the floor regardless of viewport,
+ * never the "preferred" (vw-relative) term alone. */
+.tv-info-title { font-size: clamp(64px, 6vw, 80px); font-weight: 700; letter-spacing: -0.01em; }
+.tv-info-sub { font-size: clamp(32px, 2.4vw, 40px); color: #c9c0de; }
+
+/* ── the Party screen (PR 1.4) ──────────────────────────────────────── */
+.tv-party {
+  position: absolute; inset: 5%; display: flex; gap: 3%;
+  color: #ece7f7; font-family: system-ui, sans-serif;
+}
+.tv-party-now { flex: 0 0 58%; display: flex; flex-direction: column; justify-content: center; gap: 1.2vw; min-width: 0; }
+.tv-party-row { display: flex; gap: 1.6vw; align-items: flex-start; min-width: 0; }
+.tv-party-art, .tv-party-mini-art {
+  flex: none; border-radius: 1vw; background: #140d1f;
+  /* Spotify's Design & Branding Guidelines: the art is shown as-is — no
+   * crop, no blur, no overlay. object-fit: contain never crops; nothing
+   * else here draws on top of it (no ::after, no background composite). */
+  object-fit: contain;
+}
+.tv-party-art { width: 21vw; height: 21vw; max-width: 380px; max-height: 380px; }
+.tv-party-mini-art { width: 5vw; height: 5vw; max-width: 72px; max-height: 72px; }
+.tv-party-now-words { display: flex; flex-direction: column; gap: 0.6vw; min-width: 0; }
+/* Plan §2.4's 32px floor applies to every visible text, label captions
+ * included — there is no "small caption" exception in the acceptance
+ * check, so this is deliberately larger than the desktop mockup's own
+ * 1.5cqw caption proportions. */
+.tv-party-label { font-size: clamp(32px, 1.6vw, 36px); letter-spacing: 0.08em; text-transform: uppercase; color: #b18cff; }
+.tv-party-title { font-size: clamp(64px, 4.2vw, 80px); font-weight: 700; line-height: 1.05;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv-party-artist { font-size: clamp(40px, 2.6vw, 48px); color: #c9c0de; }
+.tv-party-by, .tv-party-next-by { font-size: clamp(32px, 2vw, 36px); color: #9585b5; }
+.tv-party-votes { font-size: clamp(40px, 3vw, 48px); font-weight: 700; display: flex; gap: 1.6vw;
+  font-variant-numeric: tabular-nums; }
+.tv-party-up { color: #4ade80; }
+.tv-party-down { color: #f87171; }
+.tv-party-bar { height: 0.5vw; min-height: 6px; background: rgba(255,255,255,0.14); border-radius: 1vw; overflow: hidden; }
+.tv-party-bar i { display: block; height: 100%; background: #b18cff; }
+.tv-party-progress-row { display: flex; justify-content: space-between; align-items: center;
+  font-size: clamp(32px, 1.8vw, 36px); font-variant-numeric: tabular-nums; }
+.tv-party-spotify { color: #8ee3a5; text-decoration: none; font-size: clamp(32px, 1.6vw, 34px); }
+.tv-party-next { flex: 1; display: flex; flex-direction: column; gap: 1.1vw; justify-content: center; min-width: 0; }
+.tv-party-next-row { gap: 1.2vw; }
+.tv-party-next-title { font-size: clamp(40px, 2.6vw, 44px); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv-party-join { display: flex; align-items: center; gap: 1.6vw; margin-top: 0.8vw; }
+.tv-qr { width: 11vw; height: 11vw; max-width: 180px; max-height: 180px; background: #fff; border-radius: 0.8vw; }
+.tv-party-join-words { font-size: clamp(32px, 1.8vw, 36px); }
+.tv-party-sub { font-size: clamp(32px, 2.4vw, 40px); color: #c9c0de; }
+
+.tv-callout {
+  position: absolute; left: 5%; right: 5%; bottom: 5%;
+  background: rgba(177,140,255,0.16); border: 1px solid rgba(177,140,255,0.45);
+  border-radius: 1vw; padding: 1.2vw 1.6vw; font-size: clamp(32px, 2.2vw, 40px);
+}
 
 .tv-system-plane {
   position: absolute; left: 1.2%; bottom: 1%; display: flex; align-items: center;
