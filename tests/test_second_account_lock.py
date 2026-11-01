@@ -162,6 +162,18 @@ def test_what_counts_as_the_systems_own_playback(playback, end, ours, why):
     assert sa.is_system_playback(None, playback) == (False, "nothing_started")
 
 
+def test_a_context_started_plays_track_matches_the_stored_context():
+    """start_playback(context_uri=...) stores [context_uri]; Spotify then
+    reports the TRACK playing inside it, with the context's own uri on the
+    side — that must still read as the system's own."""
+    record = {"device_id": DEV, "uris": ["spotify:playlist:x"]}
+    playback = {"is_playing": True, "item": {"uri": URI}, "device": {"id": DEV},
+               "context": {"uri": "spotify:playlist:x"}}
+    assert sa.is_system_playback(record, playback) == (True, "system_song")
+    elsewhere = {**playback, "context": {"uri": "spotify:playlist:y"}}
+    assert sa.is_system_playback(record, elsewhere) == (False, "other_song")
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 2. the gate in the client — over a modelled Spotify
 
@@ -202,7 +214,8 @@ class Account:
                 body = {"is_playing": self.playing["is_playing"],
                         "progress_ms": int(min(el, self.duration_ms)),
                         "item": {"uri": self.playing["uri"], "duration_ms": self.duration_ms},
-                        "device": {"id": self.playing["device_id"], "name": "x"}}
+                        "device": {"id": self.playing["device_id"], "name": "x"},
+                        "context": self.playing.get("context")}
         elif m == "GET" and path.endswith("/me/player/devices"):
             body = {"devices": list(self.devices)}
         elif m == "GET" and path.endswith("/me"):
@@ -441,6 +454,41 @@ def test_the_end_of_the_systems_song_lets_go_of_its_continuation(account):
     assert account.writes() == [("PUT", "/v1/me/player/pause")]
 
 
+def test_a_context_started_play_is_recognised_and_released(account):
+    """start_playback(context_uri=...) stores the context's own uri; Spotify
+    then reports a TRACK playing inside that context, never the context uri
+    itself as the item — release_system_playback must still recognise and
+    pause it."""
+    c = _client()
+    sa.set_enabled(True, by="test")
+    c.start_playback(device_id=DEV, context_uri="spotify:playlist:x")
+    assert sa.started()["uris"] == ["spotify:playlist:x"]
+    sa.set_enabled(False, by="test")
+    account.requests.clear()
+    account.playing = {"uri": URI, "device_id": DEV, "is_playing": True, "at": time.monotonic(),
+                       "context": {"uri": "spotify:playlist:x"}}
+    res = c.release_system_playback()
+    assert res == {"paused": True, "why": "system_song"}
+    assert account.writes() == [("PUT", "/v1/me/player/pause")]
+    assert sa.started() is None
+
+
+def test_someone_elses_play_in_a_different_context_is_never_paused(account):
+    """The same system context-started play, but the second user has since
+    switched account B to a DIFFERENT context — that must be left alone."""
+    c = _client()
+    sa.set_enabled(True, by="test")
+    c.start_playback(device_id=DEV, context_uri="spotify:playlist:x")
+    sa.set_enabled(False, by="test")
+    account.requests.clear()
+    account.playing = {"uri": THEIRS, "device_id": DEV, "is_playing": True, "at": time.monotonic(),
+                       "context": {"uri": "spotify:playlist:y"}}
+    res = c.release_system_playback()
+    assert res["paused"] is False
+    assert account.writes() == []
+    assert sa.started() is None
+
+
 def test_the_permit_is_this_threads_alone(account):
     """While a release's own pause is in flight on one thread, a pause from
     another thread is still refused."""
@@ -646,8 +694,32 @@ def test_at_its_start_the_lane_lets_go_of_a_play_from_before_a_crash(
 
 
 def test_the_real_lane_process_recovers_at_start():
-    src = (REPO / "capture_lane" / "__main__.py").read_text()
-    assert "create_app(recover_on_start=True)" in src
+    """The real entrypoint (capture_lane/__main__.py) builds its app with
+    recover_on_start=True — but what matters is that the app's lifespan
+    actually RUNS Lane.recover() at startup, not that some source line looks
+    right. Drive the real create_app()/lifespan over a fake lane and prove
+    it."""
+    from capture_lane.app import create_app
+
+    class FakeLane:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.ran = threading.Event()
+
+        async def recover(self):
+            self.calls += 1
+            self.ran.set()
+            return None
+
+    recovering = FakeLane()
+    with TestClient(create_app(lane=recovering, key="k", recover_on_start=True)):
+        assert recovering.ran.wait(5), "recover() was never called at startup"
+    assert recovering.calls == 1
+
+    not_recovering = FakeLane()
+    with TestClient(create_app(lane=not_recovering, key="k", recover_on_start=False)):
+        pass
+    assert not_recovering.calls == 0
 
 
 # ═════════════════════════════════════════════════════════════════════════════

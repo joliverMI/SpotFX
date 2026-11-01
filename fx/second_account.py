@@ -236,7 +236,9 @@ def is_system_playback(record: Optional[dict], playback: Optional[dict], *,
       nothing_started   the system has no play of its own on record
       not_playing       nothing is playing, so there is nothing to stop
       other_device      it is playing somewhere else — the second user's own
-      system_song       the system's own song, on the system's own device
+      system_song       the system's own song, on the system's own device —
+                        the stored uri matches either the playing track or
+                        (for a context-started play) the playing CONTEXT
       continuation      a different song on the system's device straight
                         after the system's own song ended (Spotify's autoplay
                         carrying on from the system's play) — only when the
@@ -251,8 +253,12 @@ def is_system_playback(record: Optional[dict], playback: Optional[dict], *,
     device = ((playback.get("device") or {}).get("id"))
     if device != record["device_id"]:
         return False, "other_device"
+    started_uris = record.get("uris") or []
     uri = ((playback.get("item") or {}).get("uri"))
-    if uri and uri in (record.get("uris") or []):
+    if uri and uri in started_uris:
+        return True, "system_song"
+    context_uri = ((playback.get("context") or {}).get("uri"))
+    if context_uri and context_uri in started_uris:
         return True, "system_song"
     if end_of_song:
         return True, "continuation"
