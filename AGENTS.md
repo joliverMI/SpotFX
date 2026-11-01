@@ -13538,6 +13538,69 @@ Chromium over raw CDP against a real uvicorn server, running the page's
 own unattended fps/ping battery exactly as the LG would), `tests/
 test_tv_probe.py`.
 
+## THE TV APP SHELL — phase 1, PR 1.1 of the TV display plan: `/spectra/tv/`
+
+`spectra/web/src/tv/TvApp.tsx`'s own module docstring is the binding
+statement. Its own small Vite build (`spectra/web/vite.tv.config.ts`, `cd
+spectra/web && npx vite build --config vite.tv.config.ts` →
+`spectra/web/tv-dist/` — the guest page's own build, above, is the
+precedent this copies) measures ~46 KB gz (JS+CSS) against the plan's <=
+120 KB target, and is served by `spectra/config.py::TV_DIST` /
+`spectra/app.py` mounting it at `/tv` (reached at `/spectra/tv/`) — never
+through the main SPA's ~1.89 MB bundle. It reuses the SAME
+`SPAStaticFiles` class the `/spectra` SPA mount already uses (not a third
+subclass), so it inherits that class's Cache-Control contract for free —
+see "SPA `index.html` must revalidate every request" above.
+
+**Registration order is load-bearing, and the mount site's own comment in
+`spectra/app.py` says so**: the `/tv` mount is registered BEFORE the main
+`/` SPA mount (a `Mount("/", ..., html=True)` would otherwise catch every
+unmatched path first) but AFTER `/tv/probe`'s own explicit route (phase
+0, above) — an explicit `Route` always wins over a same-prefix `Mount`
+regardless of registration order, so the ordering only has to protect
+against the SPA's catch-all. With no TV build on disk (`TV_DIST`
+missing), no `/tv` mount is added at all and the request falls through to
+the main SPA's own catch-all — never a dead mount.
+
+Three planes stacked in one page, no app chrome: `VisualPlane.tsx`
+(canvas, behind everything — phase 1 draws only a slow, OLED-safe
+two-blob colour-haze drift with no real room-colour data yet), `InfoPlane.tsx`
+(DOM, sized for an 83" TV read from ~3.5m per the plan's own §2.4
+reading-distance floors — body >= 32px, a now-playing title 64-80px — so
+later real content slots into type that's already the right size, rather
+than being resized once it lands), and `SystemPlane.tsx` (a small, dim
+diagnostic corner: the shell's own build id from `build.ts`'s
+`TV_BUILD_ID`, baked in at build time by `vite.tv.config.ts`'s `define` —
+a fresh `Date.now()` id, not a content hash, which only has to differ
+across deploys — plus a plain not-connected dot). `build.ts`'s
+`shouldReload(serverBuildId)` is the pure half of "build-id reload" (the
+plan's own "nobody stands at the TV to press refresh"): an empty/missing
+server id is never evidence of staleness and never triggers a reload. The
+feed that will actually call it with a real server id, and that replaces
+the Info plane's placeholder content with real now-playing/votes/up-next/
+board/QR content, is PR 1.2 — not built here; this shell's structure is
+meant to not change under it.
+
+No help topic — like `/spec` and `/tv/probe`, this is a page a human (or
+a TV) opens directly, outside the SPA's own nav and `helpContent.ts`.
+**The plan's own row lists a `/jukebox/tv` redirect for this PR; it was
+deliberately NOT cut over here.** The existing Jukebox board page
+(`JukeboxTvPage.tsx`, phase 3 of the Jukebox plan, above) honours an
+on/off gate ("On the TV") with an honest off-message, and this shell has
+no feed yet to carry that gate forward — redirecting now would trade a
+working, gated feature for a placeholder with no gate awareness. The
+redirect is deferred to land once the feed/Party screen (PRs 1.2-1.4) can
+carry the gate forward, within the same approved phased plan;
+`/jukebox/tv` is unchanged by this PR.
+
+Specs: `scripts/check_tv_app_shell.py` (a real headless Chromium over raw
+CDP against a real uvicorn server mounting the built `tv-dist/` exactly
+as production does — the gzip budget, both target viewports [1920x1080,
+1280x720], the `/tv/probe` route still answering alongside the mount),
+`tests/test_tv_app_shell.py` (the mount-order/fallback contract, against
+a throwaway hand-written `index.html` rather than depending on a real
+build having run).
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
