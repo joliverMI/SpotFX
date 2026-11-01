@@ -11,10 +11,16 @@ A REAL uvicorn server (spectra.app.create_app(), mounted under /spectra
 exactly as production does) with `tv_feed.production_deps` swapped for a
 canned scenario (a song playing, two "up next" items, a live guest link)
 so the Party screen renders real content with no live SpotFX/engine
-needed, and a REAL headless Chromium over raw CDP. Checks, on the actual
+needed, and a REAL headless Chromium over raw CDP. The canned song's own
+`progress_ms` is deliberately inside the up-next callout's 30s window
+(partyLogic.ts's `showCallout`), so `UpNextCallout` — one of this PR's
+three headline features — actually renders during this proof rather
+than only in the separate pure-logic test. Checks, on the actual
 rendered DOM at 1920x1080:
   - no page overflow (scrollWidth == clientWidth, scrollHeight ==
     clientHeight);
+  - the up-next callout (.tv-callout) is present and names the next
+    song;
   - every text node under .tv-party/.tv-callout computes a font-size of
     at least 32px (the plan's own §2.4 body floor);
   - the cover art's computed style never crops it (object-fit is
@@ -65,7 +71,7 @@ def _canned_deps():
             "uri": "spotify:track:now", "title": "Dancing Queen", "artist": "ABBA",
             "image": ART_URL, "thumb": ART_URL, "open_url": OPEN_URL,
             "by": {"kind": "guest", "name": "Disco Ana"}, "up": 12, "down": 2,
-            "duration_ms": 231000, "progress_ms": 127000, "is_playing": True,
+            "duration_ms": 231000, "progress_ms": 215000, "is_playing": True,
         },
         "next": [
             {"uri": "spotify:track:n1", "title": "Mr. Brightside", "artist": "The Killers",
@@ -164,6 +170,7 @@ JSON.stringify((function () {
   var link = Array.from(document.querySelectorAll('a')).find(function (a) {
     return a.textContent.indexOf('Music from Spotify') !== -1;
   });
+  var callout = party.querySelector('.tv-callout');
   return {
     ready: true,
     smallText: smallText,
@@ -171,6 +178,9 @@ JSON.stringify((function () {
     artObjectFit: artStyle ? artStyle.objectFit : null,
     artFilter: artStyle ? artStyle.filter : null,
     attributionHref: link ? link.getAttribute('href') : null,
+    calloutPresent: !!callout,
+    calloutText: callout ? callout.textContent.trim() : null,
+    calloutFontSize: callout ? parseFloat(getComputedStyle(callout).fontSize) : null,
     scrollWidth: document.documentElement.scrollWidth,
     clientWidth: document.documentElement.clientWidth,
     scrollHeight: document.documentElement.scrollHeight,
@@ -234,7 +244,7 @@ async def main() -> int:
                 r = await session.send("Runtime.evaluate", {"expression": EXPR, "returnByValue": True})
                 raw_val = r.get("result", {}).get("value")
                 result = json.loads(raw_val) if raw_val else {"ready": False}
-                if result.get("ready"):
+                if result.get("ready") and result.get("calloutPresent"):
                     break
                 await asyncio.sleep(0.3)
             await session.close()
@@ -262,7 +272,13 @@ async def main() -> int:
         print(f"  attribution present: {'OK' if attribution_ok else 'FAIL'} "
               f"(href={result['attributionHref']!r})")
 
-        ok = no_overflow and not small and art_ok and attribution_ok
+        callout_ok = (result.get("calloutPresent") and "Mr. Brightside" in (result.get("calloutText") or "")
+                     and (result.get("calloutFontSize") or 0) >= 32)
+        print(f"  up-next callout rendered, names the next song, >= 32px: "
+              f"{'OK' if callout_ok else 'FAIL'} "
+              f"(text={result.get('calloutText')!r} size={result.get('calloutFontSize')!r})")
+
+        ok = no_overflow and not small and art_ok and attribution_ok and callout_ok
         print("PASS" if ok else "FAIL")
         return 0 if ok else 1
     finally:
