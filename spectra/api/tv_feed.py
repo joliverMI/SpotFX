@@ -37,12 +37,16 @@ async def tv_ws(ws: WebSocket) -> None:
         hello = {}
 
     # The FIRST config's layout reads a fresh board rather than waiting for
-    # the relay loop's own first poll tick — a stale "attract" for up to a
-    # whole poll interval right at connect would be the wrong screen.
+    # the relay loop's own first poll tick — a stale "attract" (or a stale
+    # "party" that should already be "sleep") for up to a whole poll
+    # interval right at connect would be the wrong screen.
     http_url = deps.http_url()
     initial_board = await deps.fetch_jukebox(http_url)
     running0 = initial_board.get("running") if isinstance(initial_board, dict) else None
-    await send(tv_feed.config_message(hello, running0, deps.build_id()))
+    _show0, _pos0, is_playing0 = deps.show_clock()
+    now0 = await deps.now_ms()
+    idle0 = deps.idle_s(bool(running0) or is_playing0, now0)
+    await send(tv_feed.config_message(hello, running0, deps.build_id(), idle0))
 
     clock_task = asyncio.create_task(tv_feed.run_clock_loop(send, deps, asyncio.sleep))
     jukebox_task = asyncio.create_task(tv_feed.run_jukebox_loop(send, deps, asyncio.sleep))

@@ -7,7 +7,7 @@ import { feed, FeedState } from './feed';
 
 const INITIAL: FeedState = {
   connected: false, layout: null, clock: null, jukebox: null,
-  jukeboxReceivedAtMs: null, offsetMs: null,
+  jukeboxReceivedAtMs: null, offsetMs: null, disconnectedAtMs: null,
 };
 
 export function useFeed(): FeedState {

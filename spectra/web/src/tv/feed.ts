@@ -26,6 +26,11 @@ export interface FeedState {
    * show clock already uses for the identical reason. */
   jukeboxReceivedAtMs: number | null;
   offsetMs: number | null;
+  /** nowMs() at the moment the socket most recently went DOWN, or null
+   * while connected — the lost-connection screen (PR 1.5) reads this to
+   * decide "quiet blip" (<5s) vs "reconnecting" overlay (5-60s) vs black
+   * (>=60s). Cleared the instant `onopen` fires again. */
+  disconnectedAtMs: number | null;
 }
 
 type Listener = (state: FeedState) => void;
@@ -71,7 +76,7 @@ export class TvFeed {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private state: FeedState = {
     connected: false, layout: null, clock: null, jukebox: null,
-    jukeboxReceivedAtMs: null, offsetMs: null,
+    jukeboxReceivedAtMs: null, offsetMs: null, disconnectedAtMs: null,
   };
   private listeners = new Set<Listener>();
   private started = false;
@@ -108,13 +113,13 @@ export class TvFeed {
         height: window.innerHeight,
         webgl2: !!document.createElement('canvas').getContext('webgl2'),
       }));
-      this.setState({ connected: true });
+      this.setState({ connected: true, disconnectedAtMs: null });
       this.pingTimer = setInterval(() => this.sendPing(), PING_INTERVAL_MS);
       this.sendPing();
     };
     ws.onmessage = (ev) => this.handleMessage(String(ev.data));
     ws.onclose = () => {
-      this.setState({ connected: false });
+      this.setState({ connected: false, disconnectedAtMs: this.state.disconnectedAtMs ?? nowMs() });
       if (this.pingTimer) clearInterval(this.pingTimer);
       this.reconnectTimer = setTimeout(() => this.connect(), RECONNECT_MS);
     };

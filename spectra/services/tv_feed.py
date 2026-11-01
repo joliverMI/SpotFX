@@ -25,6 +25,17 @@ timestamps are taken as close to the actual recv/send as possible.
 PROVE that resistance by injecting a real delay there, rather than trusting
 the formula by inspection.
 
+THE SLEEP TIMEOUT (PR 1.5, plan row 1.5/Q8: "black after 10 min with no
+night and no music") is tracked by a process-wide `ActivityTracker` — one
+instance, shared by every connected TV (the room's own idle time is a
+single fact, not a per-connection one). `resolve_layout` is pure (idle
+seconds in, a layout string out); the tracker is the one piece of real
+mutable state, and it lives OUTSIDE `TvFeedDeps` on purpose: a fresh
+`TvFeedDeps()` is built per connection (`production_deps()`), so putting a
+stateful tracker INSIDE it would give every TV its own idea of how long
+the room has been idle. `TvFeedDeps.idle_s` is the swappable seam a test
+injects instead.
+
 THE JUKEBOX RELAY READS SPOTFX'S OWN `GET /api/jukebox/tv` (PR 1.3,
 services/jukebox/guests.py::Guests.tv_view — now/votes/next 3/board/link/
 revision, the leaner purpose-built shape the plan's own row 1.3 names).
@@ -95,6 +106,34 @@ def _default_show_clock() -> tuple[Optional[int], Optional[int], bool]:
     return show, position, playing
 
 
+#: Plan row 1.5/Q8: "black after 10 min with no night and no music".
+SLEEP_TIMEOUT_S = 600.0
+
+
+class ActivityTracker:
+    """How long the room has gone with no jukebox night AND no music
+    playing. A fresh tracker starts "just became active" (never "already
+    idle") so a process restart can't fall asleep before actually
+    observing a real 10 idle minutes — see the module docstring for why
+    this is process-wide, not per-connection."""
+
+    def __init__(self) -> None:
+        self._last_active_ms: Optional[float] = None
+
+    def idle_s(self, active: bool, now_ms: float) -> float:
+        if active or self._last_active_ms is None:
+            self._last_active_ms = now_ms
+            return 0.0
+        return (now_ms - self._last_active_ms) / 1000.0
+
+
+_activity = ActivityTracker()
+
+
+def _default_idle_s(active: bool, now_ms: float) -> float:
+    return _activity.idle_s(active, now_ms)
+
+
 def _default_build_id() -> Optional[str]:
     """The TV app's own build id, read off the plain-text manifest
     vite.tv.config.ts writes beside the build — "build-id reload" (PR
@@ -122,6 +161,7 @@ class TvFeedDeps:
     fetch_jukebox: Callable[[str], Awaitable[Optional[dict]]] = _default_fetch_jukebox
     show_clock: Callable[[], tuple[Optional[int], Optional[int], bool]] = _default_show_clock
     build_id: Callable[[], Optional[str]] = _default_build_id
+    idle_s: Callable[[bool, float], float] = _default_idle_s
     clock_push_s: float = CLOCK_PUSH_S
     jukebox_poll_s: float = JUKEBOX_POLL_S
 
@@ -133,27 +173,41 @@ def production_deps() -> TvFeedDeps:
 # ── pure message builders ───────────────────────────────────────────────────
 
 def director_layout(jukebox_running: Optional[bool]) -> str:
-    """The layout director's phase-1.2 rule: "party" while a night plays,
-    "attract" otherwise — the richer idle-timeout/sleep/burn-in state
-    machine (plan row 1.5) isn't built yet, so this is deliberately the
-    two-state version. `None` (we don't know yet — no board read has
+    """The director's plain two-state split: "party" while a night plays,
+    "attract" otherwise. `None` (we don't know yet — no board read has
     landed) reads as "attract", the calmer of the two, never a guess at
-    "party"."""
+    "party". `resolve_layout` below layers "sleep" on top of this — this
+    function alone never names it."""
     return "party" if jukebox_running else "attract"
 
 
+def resolve_layout(jukebox_running: Optional[bool], idle_s: float) -> str:
+    """The full director decision (plan row 1.5, Q8: "black after 10 min
+    with no night and no music"). `idle_s` — how long neither a night has
+    run nor music has played — is computed by the caller's own
+    `ActivityTracker`, never derived here, so this stays a pure function
+    of its two inputs; sleep wins outright once the timeout is reached,
+    otherwise it's exactly `director_layout`'s plain split."""
+    if idle_s >= SLEEP_TIMEOUT_S:
+        return "sleep"
+    return director_layout(jukebox_running)
+
+
 def config_message(hello: dict[str, Any], jukebox_running: Optional[bool],
-                   build_id: Optional[str] = None) -> dict:
+                   build_id: Optional[str] = None, idle_s: float = 0.0) -> dict:
     """The server's reply to a client's `hello`. `look`/`display_lead_ms`
     are `None` placeholders — a look needs the screen fixture (phase 3);
     a display lead needs an `/avsync` measurement of this screen (phase 2)
     — carried now so the wire shape doesn't change when either lands.
     `build_id` is the DEPLOYED build's own id (read off disk, never the
     client's own `hello.build_id` echoed back) — the client's
-    `shouldReload()` compares this against what it's actually running."""
+    `shouldReload()` compares this against what it's actually running.
+    `idle_s` (default 0 — the caller passes the real value) lets a
+    reconnecting TV land on "sleep" immediately rather than waiting for
+    the jukebox loop's own next tick to correct an initial "attract"."""
     return {
         "type": "config",
-        "layout": director_layout(jukebox_running),
+        "layout": resolve_layout(jukebox_running, idle_s),
         "look": None,
         "display_lead_ms": None,
         "build_id": build_id,
@@ -171,8 +225,15 @@ def clock_message(show_clock_ms: Optional[int], position_ms: Optional[int],
     }
 
 
+def _layout_payload(layout: str) -> dict:
+    return {"type": "layout", "layout": layout}
+
+
 def layout_message(jukebox_running: Optional[bool]) -> dict:
-    return {"type": "layout", "layout": director_layout(jukebox_running)}
+    """The plain two-state message — unaware of sleep (`resolve_layout`
+    is what `run_jukebox_loop` actually sends from, below). Kept for
+    whatever still only cares about the party/attract split."""
+    return _layout_payload(director_layout(jukebox_running))
 
 
 def jukebox_message(board: Optional[dict]) -> dict:
@@ -230,19 +291,33 @@ async def run_jukebox_loop(send: Callable[[dict], Awaitable[None]], deps: TvFeed
     `jukebox` message only when the payload actually changed — a plain
     dict-equality check against the last sent payload, cheap and exact,
     never a hash (the payload is already small: now + next 3 + the board).
-    Also sends a `layout` message on the SAME change, since the director's
-    pick depends on this exact payload's `running` field and nothing else
-    here recomputes it independently."""
-    last: Any = object()  # never equals a real payload — forces the first send
+
+    The LAYOUT, separately, is re-resolved on EVERY tick regardless of
+    whether the board changed — a `layout` message is sent only when the
+    RESOLVED layout itself changes, never tied to the board's own change
+    (PR 1.2's original pairing). This split is what makes sleep possible:
+    the room can sit with an unchanging, not-running board for the whole
+    10-minute timeout, and nothing would ever re-check idle time if the
+    layout push only ever rode along with a board change that, by
+    definition, isn't happening during that idle stretch."""
+    last_board: Any = object()  # never equals a real payload — forces the first send
+    last_layout: Optional[str] = None
     while True:
         try:
             http_url = deps.http_url()
             board = await deps.fetch_jukebox(http_url)
-            if board != last:
-                last = board
-                running = board.get("running") if isinstance(board, dict) else None
+            running = board.get("running") if isinstance(board, dict) else None
+            if board != last_board:
+                last_board = board
                 await send(jukebox_message(board))
-                await send(layout_message(running))
+
+            _show, _pos, is_playing = deps.show_clock()
+            now_ms = await deps.now_ms()
+            idle_s = deps.idle_s(bool(running) or is_playing, now_ms)
+            layout = resolve_layout(running, idle_s)
+            if layout != last_layout:
+                last_layout = layout
+                await send(_layout_payload(layout))
         except (WebSocketDisconnect, RuntimeError):
             return
         except Exception:                                  # noqa: BLE001
