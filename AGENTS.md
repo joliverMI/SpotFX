@@ -4867,7 +4867,7 @@ configured" rather than failing silently or raising. Deploy contract
 (`deploy/spectra.service`'s own comment has the exact `EnvironmentFile=`
 line) — never inlined into the checked-in unit file.
 
-Three Light Show action kinds (`spectra/services/show_actions.py`'s "ha"
+Four Light Show action kinds (`spectra/services/show_actions.py`'s "ha"
 group), all `needs_room=False` (they have nothing to do with who owns the
 lights, so they still fire from a released or dark room — AND they never
 consult `house.py`: a resting house mode must never block or defer an HA
@@ -4886,7 +4886,11 @@ and trigger it as part of the light show" — ANY `scene.*` entity, typed
 by its full id or picked from `ha_client.list_scenes()`'s live
 `GET /api/states` fetch, `GET /api/light-show/ha-scenes` the route that
 serves it; `scene.music_mode` is only the step's own suggested default,
-never a stored list). **Both volume steps EASE** (`ease_s`, default 1 s, 0 = the old single
+never a stored list), and `ha_put_on_tv` (opens the dedicated TV app —
+"THE ONE TAP" section, below, is the binding statement; its Sonic reach is
+`jukebox_console.put_on_tv`, not a `show_console` op, since "one tap" is
+SPECTRA-native end to end rather than an ad-hoc `show_actions.fire()`
+call). **Both volume steps EASE** (`ease_s`, default 1 s, 0 = the old single
 call; the Admiral, 2026-10-11, widened 2026-10-13 after he asked how
 smooth the ramp was and whether it could be smoother) — SPECTRA writes
 snap_volume ONE WHOLE PERCENT at a time (never a fraction, never
@@ -13908,6 +13912,72 @@ Attract's deck/text-floor/card-change, the haze's measured dim, Sleep's
 pure-black DOM with nothing painted underneath, and the lost-connection
 timing itself, which alone takes over a minute of real wall-clock time and
 is a one-off manual proof, not a fast per-commit check).
+
+## THE ONE TAP — phase 1, PR 1.6 of the TV display plan (closes phases 0-1)
+
+`spectra/services/tv_launch.py`'s module docstring is the binding
+statement. SPECTRA never talks to the TV directly — ONE Home Assistant
+script (River's own, default `script.tv_open_spectra`) owns "open the TV
+app," and every one of the four ways to trigger it funnels through the
+ONE function here, `put_on_tv()`, into `ha_client.call_service("script",
+"turn_on", ...)`: the Jukebox page's "Put on the TV" button
+(`spectra/api/tv_launch.py`'s `POST /api/tv/put-on-tv`), a Light Show HA
+step (`show_actions.py`'s `ha_put_on_tv`, the fourth kind in the "ha"
+group — see that section above), the optional auto-open poller (below),
+and Sonic (`jukebox_console.put_on_tv`, asks first — the one op in that
+domain that calls here in-process rather than hopping to SpotFX over
+HTTP like every other op there; filed under `jukebox` anyway because the
+plan's own diagram groups "Put on the TV" with the Jukebox page as the
+thing it opens, not because it is a new domain). Inert without
+`SPECTRA_HA_URL` configured, structurally — no second gate was added on
+top of `ha_client.py`'s own "unset URL == inert" rule. Five things:
+
+- **THE CONFIG IS ITS OWN TINY STORE** (`storage/spectra/tv_launch.json`,
+  `TvLaunchConfig`: `auto_open_enabled` default `False`, `script_entity`
+  default `None` meaning `DEFAULT_SCRIPT_ENTITY`) — never a
+  `RoomControlState` field (that's lighting) and never a `ShowConfig`/
+  `ProgramConfig` field (the Jukebox's own settings live in SpotFX, which
+  this module may not import). `GET/PUT /api/tv/launch-config` is a TRUE
+  PARTIAL UPDATE (`room_controls.merge_room_controls`'s own precedent).
+- **A MALFORMED `auto_open_enabled` IS REFUSED, NEVER GUESSED** —
+  `_coerce_bool` accepts a real bool or the literal strings `"true"`/
+  `"false"` case-insensitively and raises `TvLaunchPatchError` (mapped to
+  HTTP 422) on anything else, so a bare `bool(value)` truthiness cast can
+  never read the JSON string `"false"` as `True` and silently invert a
+  safety-critical default — the same discipline `show_actions._coerce`'s
+  own bool branch already holds for Light Show params.
+- **THE AUTO-OPEN POLLER IS ITS OWN ALWAYS-RUNNING TASK**
+  (`run_auto_open_supervised`, wired in `spectra/app.py`'s lifespan),
+  deliberately NOT riding `tv_feed.run_jukebox_loop`'s existing
+  per-connection poll — that loop only runs once a TV is already
+  connected, exactly the case auto-open exists to cover (nobody has the
+  TV open yet). It polls SpotFX's `GET /api/jukebox/tv` on its own
+  10 s cadence and fires on the RISING EDGE of `running`, only while
+  `auto_open_enabled` (default OFF — the plan's own Q4: "a TV switching
+  itself on is surprising"). THE FIRST POLL OF A FRESH PROCESS NEVER
+  FIRES, even if a night is already running — only an edge OBSERVED by
+  this poller counts, so a process restart mid-night can never fire a
+  spurious auto-open (`tv_feed.ActivityTracker`'s own "a fresh tracker
+  starts just became active, never already idle" reasoning, restated
+  here for the identical restart hazard). A failed fetch is "unknown,"
+  never "not running," and an unknown→True transition DOES count as an
+  edge — the conservative direction, risking one unneeded open over
+  silently missing a real night start on one dropped poll.
+- **NO TV CALL IN ANY TEST** — every test injects a fake `call_service`/
+  `put_on_tv`/`fetch_running`, structurally (nothing imports httpx/
+  `ha_client` at module load time).
+- **THIS CLOSES THE TV DISPLAY PLAN'S PHASES 0 AND 1** (the Admiral's
+  approval note on the whole plan: the media room Vizio stays out of
+  scope here exactly as in every prior PR). The `tv-display` skill
+  (`.claude/skills/tv-display/SKILL.md`) is the cold-start map across
+  every phase/PR; load it before touching any TV-plan file.
+
+Help: `put-on-the-tv` (the Jukebox section, linked from the button's own
+`InfoTip`) and the widened `show-ha-actions` entry (above). Specs:
+`tests/test_tv_launch.py`, `tests/test_tv_launch_api.py`,
+`tests/test_show_ha_actions.py`'s `ha_put_on_tv` section,
+`tests/test_jukebox_console.py`'s "one tap" section,
+`tests/test_settings_agent_cli.py`'s `put_on_tv` widening fixture.
 
 ## Maintaining this file
 
