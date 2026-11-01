@@ -13602,9 +13602,15 @@ empty/missing server id is never evidence of staleness and never triggers
 a reload — PR 1.2's feed is what actually calls it with the server's real
 id, on every `config` message. The Info plane's real content — now
 playing/votes/progress/up-next/join QR — is PR 1.4's own Party screen
-(below); the Attract/Sleep/lost-connection screens are still PR 1.5's.
-This shell's structure hasn't needed to change under any PR built on it
-so far — `InfoPlane.tsx` just gained one more conditional branch.
+(below); the Attract/Sleep/lost-connection screens are PR 1.5's own, one
+section further down ("THE ATTRACT, SLEEP AND LOST-CONNECTION SCREENS").
+This shell's three-plane structure held through PR 1.4 (`InfoPlane.tsx`
+just gained one more conditional branch) but gained a real fourth piece
+under PR 1.5: `TvApp.tsx` now also mounts a `ConnectionOverlay` above all
+three planes and short-circuits to a separate, smaller tree (`SleepScreen`
++ `ConnectionOverlay` only) whenever `layout === 'sleep'` — see that
+section for why sleep is deliberately not just another `InfoPlane`
+branch.
 
 No help topic — like `/spec` and `/tv/probe`, this is a page a human (or
 a TV) opens directly, outside the SPA's own nav and `helpContent.ts`.
@@ -13725,7 +13731,8 @@ things:
   itself, that the feed and the NTP sync are actually working, useful for
   the phase 0/1.2 test evening without devtools. The Party screen's
   content is PR 1.4's own ("THE PARTY SCREEN" below); the Attract/Sleep/
-  lost-connection screens are still PR 1.5's.
+  lost-connection screens are PR 1.5's own ("THE ATTRACT, SLEEP AND
+  LOST-CONNECTION SCREENS" below).
 - **EVERY WS SEND SHARES ONE LOCK.** `spectra/api/tv_feed.py` serializes
   every send (the two background loops plus the ping/pong dispatch)
   through a single `asyncio.Lock` — three independent writers on one
@@ -13753,8 +13760,9 @@ test_jukebox_tv_feed_endpoint.py` (`Guests.tv_view()` + the `GET
 `spectra/web/src/tv/PartyScreen.tsx`'s own module docstring is the
 binding statement. `InfoPlane.tsx` renders it only while `feed.connected
 && feed.layout === 'party' && feed.jukebox` all hold (the feed, PR 1.2,
-above) — otherwise the same placeholder text as before; the real
-Attract/Sleep/lost-connection screens are still PR 1.5's row. Five
+above) — a connected TV on any OTHER layout renders the real Attract
+screen instead ("THE ATTRACT, SLEEP AND LOST-CONNECTION SCREENS" below,
+PR 1.5); only "not yet connected" still keeps the plain placeholder. Five
 things:
 
 - **ART IS NEVER ALTERED, structurally, not by convention** — Spotify's
@@ -13818,6 +13826,88 @@ Party scenario, a real headless Chromium over raw CDP — no page
 overflow, every text node >= 32px, the art unaltered, the attribution
 link present, and the up-next callout itself rendered and naming the
 next song).
+
+## THE ATTRACT, SLEEP AND LOST-CONNECTION SCREENS — phase 1, PR 1.5 of the TV display plan
+
+`spectra/services/tv_feed.py`'s own "THE SLEEP TIMEOUT"/"THE 'BOARD WENT
+STALE' FALLBACK" docstring sections are the binding statement for WHEN
+each layout fires (server side; "THE TV FEED" above already covers
+`resolve_layout`'s precedence in full — this section doesn't repeat it).
+The three screens' own module docstrings (`AttractScreen.tsx`,
+`SleepScreen.tsx`, `ConnectionOverlay.tsx`) are the binding statement for
+WHAT each one draws. Five things:
+
+- **`InfoPlane.tsx` IS NOW A TWO-SCREEN SPLIT, NOT A PLACEHOLDER**: while
+  connected, `layout === 'party'` with jukebox data renders the Party
+  screen (PR 1.4, above); anything else connected renders `AttractScreen`.
+  Only "not yet connected" keeps the plain placeholder text. `layout ===
+  'sleep'` never reaches `InfoPlane` at all — `TvApp.tsx` short-circuits
+  to a SEPARATE, SMALLER tree (`SleepScreen` + `ConnectionOverlay` only,
+  no `VisualPlane`/`InfoPlane`/`SystemPlane`) before `InfoPlane` mounts,
+  because true black has zero burn-in risk ONLY because nothing is drawn
+  underneath it — if the haze or the status dot kept rendering while
+  "asleep," a multi-hour sleep would itself become the static-pixel risk
+  this screen exists to prevent.
+- **BURN-IN SAFETY IS PURE ARITHMETIC OF ELAPSED TIME** (`burnIn.ts`): the
+  Attract deck cycles cards (join/top/now) every 15s (`ATTRACT_CARD_MS`),
+  the card drifts up to ±16px over an 8-minute triangle wave
+  (`DRIFT_PERIOD_MS`/`DRIFT_AMPLITUDE_PX`, x/y phases offset by a third of
+  the period so neither axis peaks alone), and the join QR cycles all
+  four corners every 10 minutes (`QR_SWAP_PERIOD_MS`). The drift period
+  (8 min) is DELIBERATELY SHORTER than the plan's own 10-minute "no
+  element static" acceptance window — a continuous, non-constant function
+  with a period under the sampling window has already cycled through its
+  whole range before that window closes. `VisualPlane.tsx`'s haze also
+  dims to 0.4x (`dimRef`, a mutable ref the draw loop reads every frame —
+  never a dependency of the canvas setup effect, so a layout change
+  doesn't tear down and rebuild the canvas/`ResizeObserver`) while
+  `layout === 'attract'`, the plan's own "a very dim haze."
+- **THE LOST-CONNECTION OVERLAY IS A FOURTH, ALWAYS-MOUNTED PLANE**
+  (`ConnectionOverlay.tsx`, stacked above the other three in `TvApp.tsx`
+  so it can cover them once the 60s mark passes): nothing for the first
+  5s (`MARK_AFTER_MS`, a quiet blip leaves whatever's already on screen
+  fully visible), a small dim "Reconnecting…" mark from 5-60s, full black
+  (`.tv-lost-black`, `z-index: 10`) at 60s (`BLACK_AFTER_MS`) — matching
+  the plan's own acceptance text exactly. `feed.disconnectedAtMs` is
+  stamped with `feed.ts`'s own `nowMs()` (`performance.timeOrigin +
+  performance.now()`), never `Date.now()` — the same clock-source mismatch
+  PartyScreen's own PR 1.4 review already caught once for its progress
+  interpolation (see "THE PARTY SCREEN" above); comparing it against a
+  different clock here would have reintroduced that exact bug. Cleared
+  the instant `onopen` fires again (`feed.ts`'s own `disconnectedAtMs:
+  null`).
+- **THE LAYOUT PUSH STAYS DECOUPLED FROM THE BOARD'S OWN CHANGE** — see
+  `run_jukebox_loop`'s own docstring: a `layout` message is sent only
+  when the RESOLVED layout itself changes, never tied to a `jukebox`
+  message landing, which is what lets the room sit on an unchanging board
+  for the whole sleep timeout OR the whole stale-board fallback window
+  and still have either clock re-checked every poll tick. The dead
+  `layout_message()` helper (PR 1.2's board-paired shape, superseded by
+  `_layout_payload` + `resolve_layout`) was removed in review rather than
+  left behind as an unused second definition.
+- **NOTHING ABOUT THE OTHER PLANES' OWN SHAPE CHANGED** — `VisualPlane`
+  still draws the same two-blob haze and `SystemPlane` still reads the
+  same feed; this PR only ADDS the dim ref to the former and the fourth
+  overlay plane plus the sleep short-circuit to `TvApp.tsx` ("THE TV APP
+  SHELL" above has the updated structure).
+
+No help topic — like `/spec`, `/tv/probe` and the shell, this is a page a
+TV opens directly, outside the SPA's own nav and `helpContent.ts`. Specs:
+`scripts/check_tv_burnin.mjs` (+ `tests/test_tv_burnin.py` — the pure
+drift/QR/card-rotation arithmetic over simulated time, no DOM/browser),
+`tests/test_tv_feed.py` (`resolve_layout`'s full precedence table,
+`ActivityTracker`'s reset-on-activity/accumulate-while-idle behaviour, and
+both background-loop simulations driven on a fake clock — one that
+actually reaches "sleep" after enough simulated idle polls, one that
+falls back to "attract" after enough simulated unchanged-board polls and
+then recovers to "party" on the very next real board change), and
+`scripts/check_tv_attract_sleep.py` (a developer-run real-browser check,
+the same convention as `check_tv_app_shell.py`/`check_tv_party_screen.py`:
+four scenarios over a real uvicorn server + real headless Chromium —
+Attract's deck/text-floor/card-change, the haze's measured dim, Sleep's
+pure-black DOM with nothing painted underneath, and the lost-connection
+timing itself, which alone takes over a minute of real wall-clock time and
+is a one-off manual proof, not a fast per-commit check).
 
 ## Maintaining this file
 
