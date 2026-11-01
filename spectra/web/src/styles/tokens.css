@@ -3632,6 +3632,11 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   .settings-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .settings-row-value { text-align: left; }
 }
+/* "Second Spotify account" (settings/SecondAccountCard.tsx): one row and
+ * the server's own sentence for what the switch means right now. */
+.settings-second-account-card .settings-row { border-bottom: 0; }
+.settings-second-account-line { margin: 2px 0 0; font-size: 12px; color: var(--text-muted); }
+.settings-second-account-line.warn { color: var(--warning); }
 /* "Scenes & drops" keeps every row it holds today — WHICH rows belong
  * here is a design-choice question with the Admiral (Q4: the three
  * compact rows the mockup drew, or every setting the Scenes popover used

@@ -73,6 +73,9 @@ class LaneClient:
         r = await self._call("POST", "/learn", job)
         if r.status_code == 409:
             raise LaneBusy(str(self._json(r).get("uri") or ""))
+        if r.status_code == 423:          # the second account is switched off
+            raise LaneUnavailable(str(self._json(r).get("sentence")
+                                      or "the second Spotify account is switched off"))
         if r.status_code != 202:
             raise LaneUnavailable(f"the capture lane refused the song ({r.status_code})")
         return self._json(r)

@@ -36,7 +36,9 @@ switched on (`settings.fx_in_process`, default off).
 SpotFX-authored modules living in `fx/` (NOT fork code, no upstream to
 re-diff against): `headless.py`, `facade.py`, `host.py`, `light_ownership.py`,
 `audio_ingest.py`, `device_model.py`, `device_schema.py`, `device_timing.py`,
-`virtual_gain_mask.py`, `device_identity.py`.
+`virtual_gain_mask.py`, `device_identity.py`, `second_account.py` (the second
+Spotify account's lock — not a render module; it lives here because fx/ is the
+one library SPECTRA, SpotFX and the capture lane may all import).
 
 Dropped entirely (per report Option C): `core.py`, the aiohttp server and
 `ledfx/api/*`, the LedFX frontend, zeroconf/mDNS, integrations, sentry, tray

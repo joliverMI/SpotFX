@@ -299,6 +299,12 @@ const JSON_BY_URL: [RegExp, unknown][] = [
   [/\/energy\/timeline/, ENERGY],
   [/\/audio-shape\/data/, SHAPE],
   [/\/settings-console\/registry/, { settings: [] }],
+  [/\/api\/second-account/, {
+    enabled: false, state: 'off', detail: 'never turned on', changed_at_ms: null,
+    changed_by: null, history: [], system_started: null,
+    sentence: 'Off: the system only reads the second Spotify account and never plays, '
+      + 'pauses, queues or changes anything on it.',
+  }],
   [/\/settings-console\/log/, []],
   [/\/api\/settings/, { shape_average_window_ms: 4000 }],
   [/\/api\/profiles/, {}],

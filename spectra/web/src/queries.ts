@@ -17,7 +17,7 @@ import type {
   EnergyTimeline, EngineStatus, FeedbackCapture, FeedbackEntry, FireResult, IntensityScaleMark,
   PreDropLooks, PreDropWindow, Registry,
   ReviewSession, ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult,
-  SceneV2, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
+  SceneV2, SecondAccountState, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
   Liveness, SonicUsageSummary, SpectraTrigger, SpotColorSetCard, TestSessionStatus,
   TestbedDropReferenceSet, TestbedEngineMarks, TestbedMarks, TestbedPromoteRequest, TestbedPromoteResult,
   TestbedPromotionLogEntry, TestbedReferenceSet, TestbedSong, TestbedWaveform,
@@ -725,6 +725,26 @@ export function useSaveRoomControls() {
     mutationFn: (state: RoomControlState) =>
       apiPut<RoomControlsSaveResult>('/room-controls', state),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['spectra-room-controls'] }),
+  });
+}
+
+/** The second Spotify account's switch (spectra/api/second_account.py).
+ * Polled gently so a change made elsewhere (another tab, later Home
+ * Assistant) reaches the Settings card without a reload. */
+export function useSecondAccount() {
+  return useQuery({
+    queryKey: ['spectra-second-account'],
+    queryFn: () => apiGet<SecondAccountState>('/second-account'),
+    refetchInterval: 15_000,
+  });
+}
+
+export function useSetSecondAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiPut<SecondAccountState>('/second-account', { enabled, source: 'settings-page' }),
+    onSuccess: (st) => qc.setQueryData(['spectra-second-account'], st),
   });
 }
 

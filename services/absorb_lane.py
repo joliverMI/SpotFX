@@ -16,9 +16,11 @@ IT SHIPS OFF (`AbsorbConfig.use_capture_lane`) and acts only when ALL hold:
     lane is inaudible, but Order 27's only exception is his grant for
     Absorb's own proven-silent windows, so this conservative rule holds
     until he says otherwise;
-  * account B is signed in and the lane answers.
+  * account B is signed in, the second account's switch on SPECTRA's
+    Settings page is ON (fx/second_account.py — it ships off, and off or
+    unreadable is a rest), and the lane answers.
 When any of them stops holding while a song is being learned, that song is
-cancelled (the lane pauses the hidden player on its way out).
+cancelled (the lane lets go on its way out, pausing only its own song).
 
 WHAT IT TAKES: Absorb's own bar (services/absorb_bar.py) calls a song
 "fresh" (no complete shape) or "recapture" (a complete shape that fails the
@@ -57,7 +59,7 @@ SLEEP_CHECK_S = 60.0
 # the lane's outcomes that say the hidden player can't be used (not the song's fault)
 LANE_DOWN = frozenset({"not_signed_in", "wrong_account", "cannot_check_account",
                        "device_missing", "device_ambiguous", "device_restricted", "no_audio"})
-NOT_A_TRY = frozenset({"cancelled", "already_learned"})
+NOT_A_TRY = frozenset({"cancelled", "already_learned", "account_locked"})
 
 WORDS = {
     "off": "Off: the hidden player only learns songs during a Jukebox night.",
@@ -67,10 +69,17 @@ WORDS = {
     "sleeping": "The house is asleep, so the hidden player rests.",
     "sleep_unknown": "Whether the house is asleep can't be read, so the hidden player rests.",
     "signed_out": "The capture account isn't signed in.",
+    "account_locked": "The second Spotify account is switched off on SPECTRA's Settings page, "
+                      "so the hidden player rests.",
     "lane_off": "The hidden player isn't running.",
     "busy": "The hidden player is busy.",
     "done": "Every song in the playlist that was never captured has been tried.",
 }
+
+
+def _second_account_unlocked() -> bool:
+    from fx import second_account
+    return second_account.write_allowed()
 
 
 @dataclass
@@ -87,6 +96,8 @@ class BacklogDeps:
     signed_in: Callable[[], bool]
     recording_uri: Callable[[], Optional[str]]
     after_learned: Callable[[str], Awaitable[None]]
+    # the second account's lock (fx/second_account.py), read fresh every tick
+    unlocked: Callable[[], bool] = _second_account_unlocked
     clock: Callable[[], float] = time.monotonic
     now_ms: Callable[[], int] = lambda: int(time.time() * 1000)
     to_thread: Callable[..., Awaitable[Any]] = asyncio.to_thread
@@ -220,6 +231,8 @@ class LaneBacklog:
             return await self._rest("sleeping" if asleep else "sleep_unknown")
         if not d.signed_in():
             return await self._rest("signed_out")
+        if not d.unlocked():
+            return await self._rest("account_locked")
         from services.jukebox.lane_client import LaneBusy, LaneUnavailable
         try:
             lane = await d.lane.status()

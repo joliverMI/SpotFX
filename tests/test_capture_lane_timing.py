@@ -47,8 +47,12 @@ class Player:
         self.calls.append(("play", device_id, uri))
         self.started_at = time.monotonic()
 
-    def pause(self, device_id):
-        self.calls.append(("pause", device_id))
+    def release(self, end_of_song=False):
+        """CaptureGateway.release: it lets go of its own song (still playing
+        here, on the hidden player), so it pauses it."""
+        if self.started_at is not None:
+            self.calls.append(("pause", DEV))
+        return {"paused": self.started_at is not None, "why": "system_song"}
 
     def full_volume(self, device_id):
         pass

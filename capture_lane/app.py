@@ -5,30 +5,48 @@ lane's key (capture_lane.key), so only SpotFX on this machine drives it.
   GET  /status   what the lane is doing, the song, its progress, and the
                  outcomes of its last songs (what SpotFX reads)
   POST /learn    {uri, title, artist, duration_ms, genres?, job_id?} — start
-                 one song; 409 while another is running
-  POST /cancel   {job_id?} — stop the running one (the hidden player is
-                 paused on the way out)
+                 one song; 409 while another is running; 423 while the
+                 second account is switched off (fx/second_account.py)
+  POST /cancel   {job_id?} — stop the running one (the lane lets go on the
+                 way out: the system's own song is paused, nothing else)
+
+With `recover_on_start` (the real process, capture_lane/__main__.py), a play
+the system started before the lane last stopped is let go of first
+(Lane.recover).
 
 No docs, no OpenAPI, nothing else answers.
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from typing import Optional
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from capture_lane import key as lane_key
-from capture_lane.lane import Busy, Job, Lane
+from capture_lane.lane import SENTENCES, Busy, Job, Lane, Locked
 
 ROUTES = frozenset({("GET", "/status"), ("POST", "/learn"), ("POST", "/cancel")})
 BODY_MAX = 4096
 
 
-def create_app(lane: Optional[Lane] = None, key: Optional[str] = None) -> FastAPI:
+def create_app(lane: Optional[Lane] = None, key: Optional[str] = None,
+               recover_on_start: bool = False) -> FastAPI:
     lane = lane or Lane()
     secret = key if key is not None else lane_key.load_or_create()
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app):
+        task = asyncio.create_task(lane.recover()) if recover_on_start else None
+        try:
+            yield
+        finally:
+            if task is not None and not task.done():
+                task.cancel()
+
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.lane = lane
 
     def refused(req: Request) -> Optional[JSONResponse]:
@@ -75,6 +93,9 @@ def create_app(lane: Optional[Lane] = None, key: Optional[str] = None) -> FastAP
             lane.learn(job)
         except Busy as exc:
             return JSONResponse({"detail": "busy", "uri": str(exc)}, status_code=409)
+        except Locked:
+            return JSONResponse({"detail": "locked", "reason": "account_locked",
+                                 "sentence": SENTENCES["account_locked"]}, status_code=423)
         return JSONResponse({"job_id": job.job_id, "state": lane.state}, status_code=202)
 
     @app.post("/cancel")

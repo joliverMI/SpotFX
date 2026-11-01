@@ -33,21 +33,42 @@ Three more things it keeps true:
 Nothing here plays, queues or reads playback. `capture_client()` hands the
 token to the one thing that does — the capture lane (capture_lane/), which
 plays only on "Serenity Capture" and checks it is account B first.
+
+THE LOCK LIVES IN THE CLIENT (fx/second_account.py is the binding
+statement; the Admiral, 2026-11-01: "a solid barrier so that the second user
+doesn't get their music taken from them by the system"). Every account-B
+client is a `SecondAccountSpotify`, whose HTTP session asks
+`second_account.check()` before ANY request that isn't a read (GET/HEAD/
+OPTIONS) leaves — play, pause, skip, queue, transfer, volume, playlist and
+library writes alike, whichever spotipy method (or a raw `_put`/`_post`/
+`_delete`, or the session itself) sends it. Reads always pass: the lock
+stops the system USING the account, never reading it. The one write it lets
+through while locked is letting go of the system's own song
+(`release_system_playback`), and only after a fresh read has shown the song
+playing now IS the one the system started, on the device it started it on.
+tests/test_second_account_lock.py holds the gate, and fails if anything
+builds an account-B client any other way.
 """
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
+import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional
+from urllib.parse import urlsplit
 
 import spotipy
 from spotipy.cache_handler import CacheFileHandler, MemoryCacheHandler
 from spotipy.oauth2 import SpotifyOAuth
 
 from config import PROFILES_DIR, settings
+from fx import second_account
+
+logger = logging.getLogger(__name__)
 
 # What the capture worker needs on "Serenity Capture": start a song there and
 # read its progress. Nothing about playlists or the library.
@@ -72,6 +93,93 @@ class SignInRefused(Exception):
         super().__init__(message)
         self.reason = reason
         self.message = message
+
+
+READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+PAUSE_PATH = "/me/player/pause"
+
+
+class SecondAccountSpotify(spotipy.Spotify):
+    """A spotipy client for ACCOUNT B whose every write asks the lock.
+
+    The gate sits on the instance's own HTTP session (`session.request`),
+    the one door every spotipy call — named method, `_internal_call`, or the
+    session's own `put`/`post`/`delete` — goes through, so no method can be
+    a way round it. The token refresh is not behind it: that is the auth
+    manager's own session, and it reads nothing and plays nothing.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        # a real Session, always: a falsy value would make spotipy use the
+        # `requests` MODULE as its session, and gating that would gate the
+        # whole process
+        kwargs["requests_session"] = True
+        super().__init__(*args, **kwargs)
+        self._release_permit = threading.local()
+        session = self._session
+        send = session.request
+
+        def request(method, url, *a, **k):
+            verb = str(method).upper()
+            if verb not in READ_METHODS:
+                path = urlsplit(str(url)).path
+                if not self._permitted(verb, path):
+                    second_account.check(f"{verb} {path}")
+            return send(method, url, *a, **k)
+
+        session.request = request
+
+    def _permitted(self, verb: str, path: str) -> bool:
+        """The release's own pause, once, on this thread only."""
+        if getattr(self._release_permit, "armed", False) and verb == "PUT" \
+                and path.endswith(PAUSE_PATH):
+            self._release_permit.armed = False
+            return True
+        return False
+
+    def start_playback(self, device_id=None, context_uri=None, uris=None, offset=None,
+                       position_ms=None):
+        """A play the system starts: asked of the lock first, then written
+        down (second_account.note_started) BEFORE it leaves, so letting go
+        later — even after a crash — can tell the system's song from the
+        second user's."""
+        second_account.check("start playback")
+        second_account.note_started(device_id, list(uris or ([context_uri] if context_uri else [])))
+        try:
+            return super().start_playback(device_id=device_id, context_uri=context_uri,
+                                          uris=uris, offset=offset, position_ms=position_ms)
+        except second_account.SecondAccountLocked:
+            second_account.clear_started()        # locked in between: nothing left
+            raise
+
+    def release_system_playback(self, *, end_of_song: bool = False) -> dict:
+        """Let go of the play the system started: pause it if — and only if
+        — a fresh read shows it is what is playing now, on the device the
+        system started it on (second_account.is_system_playback). Allowed
+        while the lock is off: stopping the system's own song is what
+        turning it off asks for. Anything else is left alone.
+
+        `end_of_song` lets a different song on the system's own device
+        straight after its song ended (Spotify carrying on from the system's
+        play) count as the system's — the capture lane passes it only on a
+        song's natural end."""
+        record = second_account.started()
+        if not record:
+            return {"paused": False, "why": "nothing_started"}
+        playback = self.current_playback()
+        ours, why = second_account.is_system_playback(record, playback, end_of_song=end_of_song)
+        if not ours:
+            second_account.clear_started()        # nothing of the system's is playing now
+            logger.info("Second account: let go without pausing (%s)", why)
+            return {"paused": False, "why": why}
+        self._release_permit.armed = True
+        try:
+            self.pause_playback(device_id=record["device_id"])
+        finally:
+            self._release_permit.armed = False
+        second_account.clear_started()
+        logger.info("Second account: paused the system's own song (%s)", why)
+        return {"paused": True, "why": why}
 
 
 def _oauth(cache_handler) -> SpotifyOAuth:
@@ -136,7 +244,7 @@ def complete_sign_in(code: str, state: str, *,
                             "/api/spotify/capture/login again in a private window.")
     exchange = exchange or (lambda c: _oauth(MemoryCacheHandler()).get_access_token(
         c, as_dict=True, check_cache=False))
-    who = who or (lambda access: spotipy.Spotify(auth=access, requests_timeout=10).me())
+    who = who or (lambda access: SecondAccountSpotify(auth=access, requests_timeout=10).me())
     main_id = main_id or _main_account_id
     token = exchange(code)
     me = who(token["access_token"]) or {}
@@ -161,12 +269,13 @@ def complete_sign_in(code: str, state: str, *,
     return record
 
 
-def capture_client() -> spotipy.Spotify:
+def capture_client() -> SecondAccountSpotify:
     """A client signed in as account B, for the capture lane (capture_lane/)
-    — the ONE place anything plays with this token. Its refresh writes
-    TOKEN_CACHE only; the main token file is never opened here."""
-    return spotipy.Spotify(auth_manager=_oauth(CacheFileHandler(cache_path=str(TOKEN_CACHE))),
-                           requests_timeout=10)
+    — the ONE place anything plays with this token, and every write it sends
+    asks the second account's lock first (SecondAccountSpotify). Its refresh
+    writes TOKEN_CACHE only; the main token file is never opened here."""
+    return SecondAccountSpotify(auth_manager=_oauth(CacheFileHandler(cache_path=str(TOKEN_CACHE))),
+                                requests_timeout=10)
 
 
 def signed_in_user() -> Optional[dict]:
