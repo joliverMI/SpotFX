@@ -99,17 +99,47 @@ def test_post_result_without_an_id_is_refused():
     assert resp.status_code == 422
 
 
-def test_touches_no_light_structurally():
-    """Neither the service nor the API module imports anything that could
-    reach a fixture — a diagnostic page must never grow a write path to a
-    light. Checked against the SOURCE (not just the rendered HTML, which
-    only proves nothing was NAMED on screen)."""
-    import inspect
+def test_touches_no_light_when_driven_through_the_real_app(monkeypatch):
+    """Driving every TV-probe route through the real, fully-wired app
+    (create_app()) must never reach the production light-write seam
+    (fx_seam.apply_writes) or the ownership record
+    (light_ownership.commit) — the two choke points any real
+    scene/flare/colour write in this app passes through. Both are
+    poisoned to raise so a call from anywhere in the request path would
+    fail this test loudly; the poison is proven live by calling each
+    directly before driving the routes."""
+    import asyncio
 
-    from spectra.api import tv_probe as tv_probe_api
-    for mod in (tv_probe, tv_probe_api):
-        src = inspect.getsource(mod)
-        for forbidden in ("fx_seam", "light_ownership", "fx.devices",
-                          "from fx import", "import fx", "engine.conductor",
-                          "scene_compiler"):
-            assert forbidden not in src, f"{mod.__name__} mentions {forbidden!r}"
+    import pytest
+
+    from fx import light_ownership
+    from spectra.services import fx_seam
+
+    called: list[str] = []
+
+    async def _poison_apply_writes(*a, **k):
+        called.append("fx_seam.apply_writes")
+        raise AssertionError("fx_seam.apply_writes was called")
+
+    def _poison_commit(*a, **k):
+        called.append("light_ownership.commit")
+        raise AssertionError("light_ownership.commit was called")
+
+    monkeypatch.setattr(fx_seam, "apply_writes", _poison_apply_writes)
+    monkeypatch.setattr(light_ownership, "commit", _poison_commit)
+
+    with pytest.raises(AssertionError):
+        asyncio.run(fx_seam.apply_writes([]))
+    with pytest.raises(AssertionError):
+        light_ownership.commit("tok")
+    called.clear()
+
+    c = _client()
+    assert c.get("/tv/probe").status_code == 200
+    assert c.get("/api/tv/probe/ping").status_code == 200
+    assert c.post("/api/tv/probe/result", json={
+        "probe_id": "behavioral-1", "user_agent": "UA",
+    }).status_code == 200
+    assert c.get("/api/tv/probe/results").status_code == 200
+
+    assert called == []

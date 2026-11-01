@@ -222,10 +222,15 @@ th { color: var(--muted); font-weight: 600; }
       webgl1: false, webgl2: false,
       gpu_vendor: "", gpu_renderer: "",
     };
-    var probe = document.createElement("canvas");
-    var gl1 = probe.getContext("webgl") || probe.getContext("experimental-webgl");
+    // Separate canvases: once a canvas's context is bound to one type
+    // ("webgl"), a later getContext() call for a DIFFERENT type on the
+    // SAME canvas always returns null, per the HTML Canvas spec — so
+    // webgl1 and webgl2 must each get their own fresh canvas.
+    var probe1 = document.createElement("canvas");
+    var gl1 = probe1.getContext("webgl") || probe1.getContext("experimental-webgl");
     info.webgl1 = !!gl1;
-    var gl2 = probe.getContext("webgl2");
+    var probe2 = document.createElement("canvas");
+    var gl2 = probe2.getContext("webgl2");
     info.webgl2 = !!gl2;
     var gl = gl2 || gl1;
     if (gl) {
