@@ -2594,6 +2594,15 @@ export const HELP_SECTIONS: HelpSection[] = [
           'It is a model: the guests and the songs are the plan\'s model of how people behave and his library\'s song lengths, while every price is the real rule under your settings. Nothing reaches Spotify, the lights or the house, and nothing is saved. "Another night" plays a different night with the same settings.',
         ],
       },
+      {
+        id: 'put-on-the-tv',
+        title: 'Put on the TV',
+        keywords: 'put on the tv one tap home assistant script open app launch screen',
+        body: [
+          'Opens the dedicated TV app via Home Assistant — one tap, from the button here, a Light Show step, Sonic (which always asks first before doing it), or optionally on its own when a Jukebox night starts. SPECTRA never talks to the TV directly: one Home Assistant script owns turning the TV on and opening the app, so the same thing happens whichever way it is triggered.',
+          'If nothing happens, Home Assistant likely isn\'t configured on this host yet, or the configured script doesn\'t exist in Home Assistant — the button names which.',
+        ],
+      },
     ],
   },
   {
@@ -3456,13 +3465,13 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'show-ha-actions',
         title: 'Home Assistant actions',
-        keywords: 'home assistant ha volume snap_volume absolute relative step scene activate music mode ease fade ramp seconds',
+        keywords: 'home assistant ha volume snap_volume absolute relative step scene activate music mode ease fade ramp seconds put on the tv one tap script',
         body: [
-          'Three steps reach out to Home Assistant: HA volume (absolute) sets the snap_volume to an exact level (0-100); HA volume (relative step) nudges it up or down by a signed step (e.g. +8 or -8); Activate HA scene turns on any HA scene — type its entity id (e.g. scene.music_mode, his first one) or pick from the live list fetched straight from Home Assistant. There is no fixed list on this side: make or rename a scene in HA and it is reachable here right away.',
+          'Four steps reach out to Home Assistant: HA volume (absolute) sets the snap_volume to an exact level (0-100); HA volume (relative step) nudges it up or down by a signed step (e.g. +8 or -8); Activate HA scene turns on any HA scene — type its entity id (e.g. scene.music_mode, his first one) or pick from the live list fetched straight from Home Assistant; Put the TV app up opens the dedicated TV app the same way the Jukebox page\'s "Put on the TV" button does. There is no fixed list on this side for the scene: make or rename a scene in HA and it is reachable here right away.',
           'Both volume steps EASE: Ease (s) is how long the volume takes to get there, default 1 second, 0 jumps at once. Home Assistant has no native fade for this entity, so SPECTRA walks the snap_volume there itself, one whole percent at a time, at up to five writes a second (a longer change over a short ease takes bigger steps rather than writing faster) — never asking Home Assistant to ramp. A newer volume step, from any set, arm or Sonic, stops an unfinished ease where it is and takes over: an absolute level eases from wherever the volume got to, and a relative step adds to where the volume was heading, so two quick +8 steps make +16. If SPECTRA restarts mid-ease the volume simply stays at the last whole-percent level it reached, somewhere between the start and the target.',
-          'None of the three need SPECTRA to own the lights or the room to be live — they still run from a released or dark room, and a resting house mode never blocks or defers them: they always reach Home Assistant when they run.',
+          'None of the four need SPECTRA to own the lights or the room to be live — they still run from a released or dark room, and a resting house mode never blocks or defers them: they always reach Home Assistant when they run.',
           'If Home Assistant is not configured on this host (the SPECTRA_HA_URL/SPECTRA_HA_TOKEN environment values), the step reports "Home Assistant is not configured" and changes nothing — it is not a silent no-op.',
-          'Sonic can fire any of the three ad-hoc, by voice — naming a scene by his own words for it (matched against the live HA list) or by its full entity id.',
+          'Sonic can fire any of the four ad-hoc, by voice — naming a scene by his own words for it (matched against the live HA list) or by its full entity id; opening the TV always asks first.',
         ],
       },
       {

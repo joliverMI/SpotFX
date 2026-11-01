@@ -52,7 +52,8 @@ from spectra.api import (av_sync, device_preview, devices as devices_api,
                          room_view as room_view_api, rooms,
                          scenes, sequencer, settings_console, show_review,
                          sonic_usage, spec, test_session, testbed, triggers,
-                         tv_feed as tv_feed_api, tv_probe as tv_probe_api)
+                         tv_feed as tv_feed_api, tv_launch as tv_launch_api,
+                         tv_probe as tv_probe_api)
 
 
 class SPAStaticFiles(StaticFiles):
@@ -144,6 +145,8 @@ def create_app() -> FastAPI:
     app.include_router(tv_probe_api.router)
     # TV display plan phase 1 (PR 1.2): the TV app's one WebSocket feed.
     app.include_router(tv_feed_api.router)
+    # TV display plan phase 1 (PR 1.6): "one tap" — put-on-tv + its config.
+    app.include_router(tv_launch_api.router)
     # BEFORE rooms: `/rooms/capture-queue` must never be eaten by a
     # `/rooms/{room_id}` pattern.
     app.include_router(capture_queue_api.router)
@@ -385,6 +388,16 @@ async def _standalone_lifespan(app):
     # feeds nothing back into the fire path.
     clock_push_task = asyncio.create_task(
         engine.run_clock_push_supervised(), name="spectra-clock-push")
+    # "ONE TAP"'s optional auto-open (data/tv-display-plan/plan.html PR
+    # 1.6, spectra/services/tv_launch.py): an always-running poll,
+    # independent of any connected TV, of SpotFX's own jukebox "running"
+    # state — fires `put_on_tv()` on the rising edge, and ONLY while
+    # `auto_open_enabled` is set (default False). Idle-cheap and inert
+    # with no Home Assistant configured (ha_client's own "unset URL ==
+    # inert" rule).
+    from spectra.services import tv_launch
+    tv_auto_open_task = asyncio.create_task(
+        tv_launch.run_auto_open_supervised(), name="spectra-tv-auto-open")
     logger.info("SPECTRA started — own process, pid %d", os.getpid())
     yield
     all_tasks = (watchdog_task, reconciler_task, ambient_verify_task,
@@ -392,7 +405,7 @@ async def _standalone_lifespan(app):
                 activation_recheck_task, dark_fixture_task,
                 known_buffer_poll_task, known_buffer_sse_task,
                 light_show_task, house_task, house_fixtures_task,
-                clock_push_task)
+                clock_push_task, tv_auto_open_task)
     for task in all_tasks:
         task.cancel()
     for task in all_tasks:

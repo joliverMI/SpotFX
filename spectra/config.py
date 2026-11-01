@@ -515,6 +515,11 @@ TV_DIST = Path(__file__).parent / "web" / "tv-dist"
 # spectra/services/tv_probe.py. Bounded, newest-last-seen kept.
 TV_PROBE_FILE = SPECTRA_STORAGE / "tv_probe_results.json"
 
+# "ONE TAP" (data/tv-display-plan/plan.html PR 1.6): the auto-open-at-
+# night-start setting and the configured HA script entity — see
+# spectra/services/tv_launch.py.
+TV_LAUNCH_FILE = SPECTRA_STORAGE / "tv_launch.json"
+
 
 def ledfx_url() -> str:
     """Base URL of the external LedFX service (the owner's real-fire path

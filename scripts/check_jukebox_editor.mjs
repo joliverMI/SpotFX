@@ -379,6 +379,10 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const SET = [setItem(0, 'Mr. Brightside'), setItem(1, 'Dancing Queen'), setItem(2, 'September'), setItem(3, 'Hey Ya!')];
 const GF = JSON.parse(readFileSync(join(web, 'harness/jukeboxShowSnapshot.json'), 'utf8')).guest_fields;
 let world;
+// "Put on the TV" (data/tv-display-plan/plan.html PR 1.6) — the ONE
+// SPECTRA-native call on this page, `/spectra/api/tv/put-on-tv`, outside
+// the `/api/jukebox/*` mock branches below (see §2f).
+let tvResult = { status: 'sent' };
 // the Simulate tab's mock: the harness's own snapshot of the server's answer
 // (tests/test_jukebox_simulator.py holds it to the real route)
 const SIM = JSON.parse(readFileSync(join(web, 'harness/jukeboxSimSnapshot.json'), 'utf8'));
@@ -550,6 +554,10 @@ globalThis.fetch = async (url, init = {}) => {
       manual_equivalent: [{ after_uri: t(1), count: 1 }, { after_uri: t(3), count: 1 }],
       lap: { set_songs: SET.length, slots: lapFor(world.config).filter((x) => x.kind === 'open').length, unbounded: false, notes: [] } });
   }
+  // "Put on the TV" (§2f) — the page's ONE `apiPost` call, outside every
+  // `/api/jukebox/*` branch above; `tvResult` lets the test drive both
+  // the "sent" and the "not configured" answers.
+  if (u.startsWith('/spectra/api/tv/put-on-tv')) return json(tvResult);
   return json({});
 };
 
@@ -1054,6 +1062,29 @@ export function unmount() { if (root) act(() => { root.unmount(); }); root = nul
   TV.unmount();
 }
 
+console.log('\n§2f "Put on the TV" (data/tv-display-plan/plan.html PR 1.6) — the button POSTs the one SPECTRA-native call');
+{
+  world = newWorld('auto');
+  tvResult = { status: 'sent' };
+  const c = P.mount();
+  await P.settle();
+  const btn = buttonByText(c, /Put on the TV/);
+  ok(!!btn, 'the button is on the page header, whether or not a night is running');
+  await click(btn);
+  const req = world.requests.filter((r) => r.url === '/spectra/api/tv/put-on-tv').at(-1);
+  ok(req?.method === 'POST' && JSON.stringify(req?.body) === '{}',
+    `clicking it POSTs exactly /spectra/api/tv/put-on-tv (${JSON.stringify(req)})`);
+  ok(text(c).includes('Opened the TV app.'), 'a "sent" answer toasts success');
+
+  world.requests = [];
+  tvResult = { status: 'unconfigured', detail: 'Home Assistant is not configured on this host (SPECTRA_HA_URL is unset)' };
+  await click(buttonByText(c, /Put on the TV/));
+  ok(world.requests.some((r) => r.url === '/spectra/api/tv/put-on-tv'), 'a second press calls it again');
+  ok(text(c).includes('Home Assistant is not configured on this host'),
+    'an "unconfigured" answer toasts Home Assistant\'s own reason, never a silent no-op');
+  P.unmount();
+}
+
 // ── 3. help ───────────────────────────────────────────────────────────────
 console.log('\n§3 help — every topic is real and reachable from the page');
 {
@@ -1061,7 +1092,10 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     'jukebox-credits', 'jukebox-presets', 'jukebox-price-check', 'jukebox-simulator', 'sonic-jukebox',
     'jukebox-report', 'jukebox-guest-page', 'jukebox-guests', 'jukebox-free-play', 'jukebox-credits-mode',
     'jukebox-skip-lock', 'jukebox-board', 'jukebox-gifts', 'jukebox-bonus-cards', 'jukebox-cards',
-    'jukebox-merge-phones', 'jukebox-economy', 'jukebox-shows', 'jukebox-lockstep'];
+    'jukebox-merge-phones', 'jukebox-economy', 'jukebox-shows', 'jukebox-lockstep',
+    // "put on the tv" (data/tv-display-plan/plan.html PR 1.6): its own InfoTip
+    // on the page header's PutOnTvButton, always reached by hoverAll().
+    'put-on-the-tv'];
   const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
   const knownIds = new Set();
   for (const section of HELP_SECTIONS) {
@@ -1114,7 +1148,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     if (id && id !== 'sonic-scene-backups') reached.add(id);
   }
   ok(topics.every((id) => reached.has(id)) && reached.size === topics.length,
-    `the page's own controls and its 💬 Sonic open exactly the twenty-four jukebox topics (${[...reached].sort().join(', ')})`);
+    `the page's own controls and its 💬 Sonic open exactly the twenty-five jukebox topics (${[...reached].sort().join(', ')})`);
   P.unmount();
 }
 

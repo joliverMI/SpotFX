@@ -57,7 +57,7 @@ import {
 } from './jukeboxEditor';
 import {
   useGuests, useJukeboxConfig, useJukeboxEconomy, useJukeboxPreview, useJukeboxReport, useJukeboxStatus,
-  useMoveEntry, useMoveSetSong, useReloadSet, useSaveJukeboxConfig,
+  useMoveEntry, useMoveSetSong, usePutOnTv, useReloadSet, useSaveJukeboxConfig,
 } from './queries';
 import type { JukeboxPreview, JukeboxStatus, ProgramConfig, RunOut, SetItem, SlotMode } from './types';
 
@@ -96,6 +96,7 @@ export default function JukeboxPage() {
           <button role="tab" aria-selected={tab === 'simulate'} className={tab === 'simulate' ? 'on' : ''}
             onClick={() => setTab('simulate')}>Simulate</button>
         </div>
+        <PutOnTvButton />
       </div>
       {sign && (
         <InfoTip topic="jukebox-sign-in"
@@ -117,6 +118,28 @@ export default function JukeboxPage() {
       {tab === 'simulate' && <SimulateTab />}
       <SonicChatPopover helpTopic="sonic-jukebox" />
     </div>
+  );
+}
+
+// ── "Put on the TV" — "one tap" (data/tv-display-plan/plan.html PR 1.6) ────
+
+function PutOnTvButton() {
+  const toast = useToast();
+  const put = usePutOnTv();
+  return (
+    <InfoTip topic="put-on-the-tv"
+      text="Opens the TV app via Home Assistant, which also turns the TV on if it is off. SPECTRA never talks to the TV directly.">
+      <button className="jukebox-small jukebox-put-on-tv" disabled={put.isPending}
+        onClick={() => put.mutate(undefined, {
+          onSuccess: (r) => {
+            if (r.status === 'sent') toast('Opened the TV app.', 'success');
+            else toast(r.detail || 'Home Assistant did not answer.', 'error');
+          },
+          onError: (e) => toast(errText(e), 'error'),
+        })}>
+        <Icon name="devices" size={14} /> Put on the TV
+      </button>
+    </InfoTip>
   );
 }
 

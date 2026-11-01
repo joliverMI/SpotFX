@@ -193,6 +193,52 @@ def test_activate_scene_default_is_music_mode():
     assert params["scene"] == "scene.music_mode"
 
 
+# ── ha_put_on_tv: "one tap" (data/tv-display-plan/plan.html PR 1.6) ────────
+# — it calls `tv_launch.put_on_tv()` in-process, which itself calls
+# `ha_client.call_service` the SAME way `ha_activate_scene` does, so the
+# `ha_calls` fixture's existing monkeypatch of that one function already
+# covers it — no second transport to fake.
+
+def test_put_on_tv_calls_the_configured_script_by_default(room, ha_calls):
+    calls, _ = ha_calls
+    run = fire([A("ha_put_on_tv")])
+    assert run["steps"][0]["status"] == "applied"
+    from spectra.services import tv_launch
+    assert calls == [{"domain": "script", "service": "turn_on",
+                      "data": {"entity_id": tv_launch.DEFAULT_SCRIPT_ENTITY}}]
+
+
+def test_put_on_tv_an_explicit_script_param_wins(room, ha_calls):
+    calls, _ = ha_calls
+    run = fire([A("ha_put_on_tv", script="script.some_other_tv")])
+    assert run["steps"][0]["status"] == "applied"
+    assert calls == [{"domain": "script", "service": "turn_on",
+                      "data": {"entity_id": "script.some_other_tv"}}]
+
+
+def test_put_on_tv_needs_no_room(room, ha_calls):
+    room.gate["reason"] = "the room is released"
+    run = fire([A("ha_put_on_tv")])
+    assert run["steps"][0]["status"] == "applied", \
+        "opening the TV app must run even while the show may not touch the lights"
+
+
+def test_put_on_tv_ignores_an_actively_resting_house_mode(room, ha_calls, monkeypatch):
+    _house_actively_resting(monkeypatch)
+    calls, _ = ha_calls
+    run = fire([A("ha_put_on_tv")])
+    assert run["steps"][0]["status"] == "applied"
+    assert len(calls) == 1
+
+
+def test_put_on_tv_reports_unconfigured_as_failed_not_a_crash(room, ha_calls):
+    _, result = ha_calls
+    result["status"] = ha_client.STATUS_UNCONFIGURED
+    result["detail"] = "Home Assistant is not configured on this host"
+    run = fire([A("ha_put_on_tv")])
+    assert run["steps"][0]["status"] == "failed"
+
+
 # ── Sonic ad-hoc ops ─────────────────────────────────────────────────────────
 
 def test_sonic_can_fire_ha_volume_absolute(room, ha_calls):

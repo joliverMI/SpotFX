@@ -6,7 +6,7 @@
  * server caches the set for 60 s, so re-reading it after every click costs
  * no Spotify call — `refresh` (his Reload) reads the playlist again. */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { spotfxDel, spotfxGet, spotfxPost, spotfxPut } from '../api/client';
+import { apiPost, spotfxDel, spotfxGet, spotfxPost, spotfxPut } from '../api/client';
 import type {
   BonusCodesRead, CardRead, GuestsRead, JukeboxBoardRead, JukeboxEconomy, JukeboxPreview, JukeboxStatus,
   LearningStatus, NightReport, PriceCheck, ShowsRead,
@@ -417,5 +417,16 @@ export function useRemoveEntry() {
       qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status });
       qc.invalidateQueries({ queryKey: ['jukebox-guests'] });
     },
+  });
+}
+
+/** "Put on the TV" (data/tv-display-plan/plan.html PR 1.6) — the ONE
+ * SPECTRA-native call on this page (`apiPost`, not `spotfxPost`):
+ * spectra/services/tv_launch.py's module docstring is the binding
+ * statement for why SPECTRA never talks to the TV directly and every
+ * caller funnels through its one `put_on_tv()` function. */
+export function usePutOnTv() {
+  return useMutation({
+    mutationFn: () => apiPost<{ status: string; detail?: string }>('/tv/put-on-tv', {}),
   });
 }
