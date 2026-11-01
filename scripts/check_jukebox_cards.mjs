@@ -89,6 +89,7 @@ ok(Q.wifiProblem({ ssid: '', password: 'x', security: 'WPA', hidden: false }).in
    && Q.wifiProblem({ ssid: 'N', password: '', security: 'nopass', hidden: false }) === '',
    'what is missing, said before a card is drawn');
 const LINK = 'https://serenity.tail1234.ts.net:8443/?t=Tq3vR8mJx2LwP9sZk4YbN7cH1dFgE6aU0iOoKpQrSt';
+const LAN_LINK = 'http://192.168.40.145:8020/?t=Tq3vR8mJx2LwP9sZk4YbN7cH1dFgE6aU0iOoKpQrSt';
 ok(Q.joinLink(LINK, 'ABCD-EFGH') === `${LINK}&b=ABCD-EFGH` && Q.joinLink(LINK, null) === LINK
    && Q.joinLink('https://h/', 'K7Q2-M9XD') === 'https://h/?b=K7Q2-M9XD', 'the join link carries the card\'s code (?b=)');
 ok(JSON.stringify(Q.cardCodes(['A', 'B'], 4, true)) === '["A","B",null,null]'
@@ -189,12 +190,15 @@ const qrOf = (svg) => decodeMatrix(matrixFromPath(svg.querySelector('path').getA
 
 console.log('\n§3 the page, mounted — the sheet, the codes, and the password never leaving');
 {
-  world = { card: { link: LINK, host: 'serenity.tail1234.ts.net', state: 'off', public_port: 8443, token_created_ms: 1,
-                    unused: ['ABCD-EFGH', 'K7Q2-M9XD', 'WXYZ-2345'], codes_error: null, qr_bonus: 5, play_mode: 'credits' } };
+  world = { card: { link: LINK, lan_link: LAN_LINK, host: 'serenity.tail1234.ts.net', state: 'off', public_port: 8443,
+                    token_created_ms: 1, unused: ['ABCD-EFGH', 'K7Q2-M9XD', 'WXYZ-2345'], codes_error: null,
+                    qr_bonus: 5, play_mode: 'credits' } };
   const c = P.mount();
   await P.settle();
   ok(!c.querySelector('[data-testid="jukebox-cards-sheet"]') && c.textContent.includes("Wi-Fi's name"),
     'no sheet until the Wi-Fi is typed, and it says what is missing');
+  ok(c.querySelector('[data-testid="jukebox-cards-lan-link"]')?.textContent.includes(LAN_LINK),
+    'the home-Wi-Fi link is shown for the host to copy, Funnel or not');
   ok(btn(c, /^Print/).disabled, 'Print waits for the Wi-Fi');
   type(c.querySelector('input[aria-label="Wi-Fi network name"]'), 'Serenity Guests');
   type(c.querySelector('input[aria-label="Wi-Fi password"]'), PASSWORD);
@@ -229,13 +233,14 @@ console.log('\n§3 the page, mounted — the sheet, the codes, and the password 
   P.unmount();
 }
 {
-  world = { card: { link: null, host: null, state: 'off', public_port: 8443, token_created_ms: 1, unused: [],
-                    codes_error: null, qr_bonus: 5, play_mode: 'free' } };
+  world = { card: { link: null, lan_link: null, host: null, state: 'off', public_port: 8443, token_created_ms: 1,
+                    unused: [], codes_error: null, qr_bonus: 5, play_mode: 'free' } };
   requests.length = 0;
   const c = P.mount();
   await P.settle();
   ok(c.textContent.includes('no address yet') && !!c.querySelector('input[aria-label="The guest link\'s address"]'),
     'with no address yet, it asks for Serenity\'s public address');
+  ok(!c.querySelector('[data-testid="jukebox-cards-lan-link"]'), 'no LAN link shown when the host\'s address could not be read');
   type(c.querySelector('input[aria-label="The guest link\'s address"]'), 'serenity.tail1234.ts.net');
   await click(btn(c, /^Save$/));
   const put = requests.find((r) => r.method === 'PUT');
@@ -248,6 +253,40 @@ console.log('\n§3 the page, mounted — the sheet, the codes, and the password 
   ok(cards.length === 8 && cards.every((card) => !card.querySelector('[data-testid="jukebox-card-code"]')),
     'in free play the cards carry no bonus codes');
   ok(qrOf(cards[0].querySelectorAll('svg')[0]) === 'WIFI:T:nopass;S:Guests;;', 'an open network\'s code has no password');
+  P.unmount();
+}
+{
+  // the Admiral's chosen configuration (data/jukebox-plan): Funnel/the
+  // guest link stay off, so `link` never comes — the cards must still
+  // print, from the home-Wi-Fi address alone.
+  world = { card: { link: null, lan_link: LAN_LINK, host: null, state: 'off', public_port: 8443,
+                    token_created_ms: 1, unused: ['ABCD-EFGH', 'K7Q2-M9XD'], codes_error: null,
+                    qr_bonus: 5, play_mode: 'credits' } };
+  requests.length = 0;
+  const c = P.mount();
+  await P.settle();
+  ok(c.querySelector('[data-testid="jukebox-cards-lan-link"]')?.textContent.includes(LAN_LINK),
+    'the home-Wi-Fi link is shown even with no Funnel address at all');
+  ok(!!c.querySelector('[data-testid="jukebox-cards-lan-only-note"]')
+    && !!c.querySelector('input[aria-label="The guest link\'s address"]'),
+    'it names the cards as home-Wi-Fi-only, and still offers to save a public address');
+  ok(!c.querySelector('[data-testid="jukebox-cards-problems"]')
+    || !c.textContent.includes('The guest link has no address yet.'),
+    'the lan-only address counts as an address — Print is not stuck waiting for Funnel');
+  type(c.querySelector('input[aria-label="Wi-Fi network name"]'), 'Serenity Guests');
+  type(c.querySelector('input[aria-label="Wi-Fi password"]'), 'party-password');
+  type(c.querySelector('input[aria-label="How many cards"]'), '2');
+  await P.settle();
+  ok(!btn(c, /^Print/).disabled, 'Print is enabled off the home-Wi-Fi address alone, with no Funnel address saved');
+  const cards = [...c.querySelectorAll('[data-testid="jukebox-card"]')];
+  ok(cards.length === 2, `two cards (${cards.length})`);
+  const joins = cards.map((card) => qrOf(card.querySelectorAll('svg')[1]));
+  ok(joins[0] === `${LAN_LINK}&b=ABCD-EFGH` && joins[1] === `${LAN_LINK}&b=K7Q2-M9XD`,
+    'the Jukebox QR is built from the home-Wi-Fi address, bonus code and all, when Funnel is off');
+  ok(cards.every((card) => card.textContent.includes('home Wi-Fi')),
+    'the card itself says the QR is home-Wi-Fi-only');
+  await click(btn(c, /^Print 2 cards$/));
+  ok(printed === 2, 'Print prints the lan-only sheet too');
   P.unmount();
 }
 

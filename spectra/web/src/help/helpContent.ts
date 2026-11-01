@@ -2400,9 +2400,10 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'jukebox-guest-page',
         title: 'The guest page',
-        keywords: 'guest page phones guests vote up down party link token qr name welcome house rules queue your song next banner add to home screen iphone android free play add search ready skip move bump time-out jail',
+        keywords: 'guest page phones guests vote up down party link token qr name welcome house rules queue your song next banner add to home screen iphone android free play add search ready skip move bump time-out jail wifi lan home network funnel reach',
         body: [
           'The page guests open on their phones. It is its own small app on its own port (8020), separate from SpotFX and SPECTRA, and it answers nothing but the guest page: none of your controls can be reached through it.',
+          'A phone on your home Wi-Fi opens it directly, no Tailscale needed. The Print the cards page shows that home-Wi-Fi address to copy, and — once the guest Wi-Fi details are typed in — prints a card whose Jukebox QR code scans straight to it when no public address is saved; with one saved, the QR uses that address instead. Publishing it to the public internet through Tailscale Funnel is a separate, still-off setting (the guest link); turning it on is a choice for later, not needed for a party at home.',
           'A phone joins only through tonight\'s party link (the token in it is new for every party). It gets a fun name it can change (shuffled freely on the welcome screen, then as many changes as the Guests tab allows), reads the house rules, and taps Let\'s go. No sign-in and no account: the page keeps a random code for the phone, for tonight only.',
           'Now shows the song playing (its own album art from Spotify, who added it, "Music from Spotify" and an Open Spotify link) with two big buttons: Up and Down. One vote per phone per song; tap it again to take it back. Nobody votes on their own song. Queue shows everything coming up, with the host\'s set locked and the song already sent to Spotify marked.',
           'Add finds a song: your own library first ("Ready: the lights already know these"), then Spotify, ten at a time. Each result shows its badges (Ready, a long song\'s length, Explicit) and whether it can go in. A guest has up to two songs in line (the Credits tab\'s setting); 1st songs go before 2nd songs, so a quiet guest\'s first pick isn\'t stuck behind someone\'s second. Nothing is accepted after last call, nor anything that would start after the night ends, and explicit songs follow your rule.',
@@ -2478,11 +2479,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'jukebox-cards',
         title: 'The printed guest cards',
-        keywords: 'print cards card qr code wifi password guest network join link bonus code party printable',
+        keywords: 'print cards card qr code wifi password guest network join link bonus code party printable lan home wifi address funnel',
         body: [
           'Print the cards opens /jukebox/cards (from the Credits tab\'s Bonus cards card): a sheet of cards, each with the guest Wi-Fi\'s QR code, the Jukebox\'s QR code — tonight\'s party link carrying that card\'s one-time bonus code, used when the guest taps Let\'s go — and the code as text for typing into the Shop. Two cards across, four down, on Letter paper; the controls don\'t print.',
           'Type the guest Wi-Fi\'s name and password at print time. The password stays on that page: nothing sends or saves it, and the QR codes are drawn in the browser. The Wi-Fi QR code IS the password (anyone who photographs a card can join), so hand the cards out at the party and change or expire the guest password afterwards. "Print the password as text too" is off unless you want it, for a phone that can\'t scan.',
-          'The party link changes after a party that used it, so print fresh cards for each party. If the guest link has no address yet the page asks for Serenity\'s public address (serenity.<your tailnet>.ts.net) — saving it never switches the link on. Codes come from the Bonus cards card; when there are fewer unused codes than cards, the rest print without one, and in free play the cards carry none.',
+          'Above the "The Jukebox link" field is the home-Wi-Fi address — a plain web address a phone already on your Wi-Fi can type in or you can copy for it, no Tailscale and no public Funnel address needed. It shows up any time a party token exists, on or off.',
+          'With no public address saved, the Jukebox QR on each card is built from that home-Wi-Fi address — it still prints and still scans, just for a phone already on Serenity\'s own network, and the page says so. The party link changes after a party that used it, so print fresh cards for each party. If you\'d rather reach guests off your own network too, save Serenity\'s public address (serenity.<your tailnet>.ts.net) — saving it never switches the link on by itself; that\'s only for publishing it to the public internet through Funnel, a separate choice from the home-Wi-Fi address above, and once it\'s on the cards\' QR uses it instead. Codes come from the Bonus cards card; when there are fewer unused codes than cards, the rest print without one, and in free play the cards carry none.',
         ],
       },
       {

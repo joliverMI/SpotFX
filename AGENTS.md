@@ -11291,7 +11291,7 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   `tests/test_jukebox_report.py` — regenerate it when the report changes.
 - **THE GUEST PAGE (PR 2.1) IS ITS OWN PROCESS, and `jukebox_guest/
   __init__.py` is the binding statement.** `python -m jukebox_guest`
-  (127.0.0.1:8020, reference unit `deploy/spotfx-jukebox-guest.service`,
+  (:8020, reference unit `deploy/spotfx-jukebox-guest.service`,
   not installed by any build) serves the page built from
   `spectra/web/src/guest/` (`npx vite build --config vite.guest.config.ts`
   → `guest-dist/`) and answers EXACTLY `app.ROUTES` — no docs, no OpenAPI,
@@ -11313,6 +11313,23 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   `tests/test_jukebox_guest_page.py`. Web push (iPhone alerts from a Home
   Screen icon, Android lock-screen alerts) is NOT built: it needs the HTTPS
   link (G4) to test.
+  **REACHABLE ON THE HOME LAN SINCE 2026-11-01 (the Admiral: "do wifi
+  option")**: the shipped unit listens on `0.0.0.0`, so a phone on
+  Serenity's own Wi-Fi opens `http://<serenity LAN IP>:8020/?t=<party
+  token>` directly — the token is still checked exactly as before, and
+  Tailscale Funnel (the alternative, public-internet option,
+  `services/jukebox/guest_link.py`) stays a SEPARATE, still-off setting
+  nothing here arms. Nothing about the per-address rate limits
+  (`jukebox_guest/app.py`'s `_client()`) changes for this: a direct
+  connection's own peer address already IS its identity (never collapsed
+  to one bucket), and the loopback+`X-Forwarded-For` trust branch stays
+  scoped to the Funnel case, where every connection genuinely does arrive
+  from tailscaled on loopback. `guest_link.status()`'s own `lan_link`
+  field (`GuestLinkDeps.lan_ip`, a routing-table read with no network
+  traffic) is this address with tonight's token already on it, served on
+  `GET /api/jukebox/guest-link` and `GET /api/jukebox/card` (the
+  "Print the cards" page shows it) whether or not a token or Funnel
+  address exists otherwise.
 - **SEARCH AND ADD, AND THE HOST'S CONTROLS (PR 2.2)** are
   `services/jukebox/guests.py` too (its docstring is the binding statement):
   a guest's song goes in by FAIR ORDER — `LineEntry.round` is its adder's
@@ -11463,9 +11480,13 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   text. **THE WI-FI PASSWORD IS TYPED THERE AND NEVER LEAVES THE PAGE** —
   React state only, QRs drawn in the browser (`jukebox/cardQr.ts`); never
   add it to a request, a store or the URL (the check asserts all three).
-  `GET /api/jukebox/card` hands the page the link, the unused codes and the
-  QR bonus, MAKING the party token if there is none (the cards carry it) but
-  never switching the link on. The QR encoder is `qrcode-generator` (MIT,
+  `GET /api/jukebox/card` hands the page the link, the home-Wi-Fi address
+  (`lan_link` — the 2026-11-01 "wifi option," no Funnel needed), the unused
+  codes and the QR bonus, MAKING the party token if there is none (the cards
+  carry it) but never switching the link on. The Jukebox QR uses the public
+  link when one is saved, else falls back to `lan_link` — the card still
+  prints and scans, just for a phone already on Serenity's own Wi-Fi. The
+  QR encoder is `qrcode-generator` (MIT,
   pinned; told to encode UTF-8 — its default keeps a character's low 8
   bits); `jsqr` is dev-only, for decoding every code back — a deploy needs
   `npm ci` in spectra/web. Sonic: a named exclusion (`jukebox_console`).

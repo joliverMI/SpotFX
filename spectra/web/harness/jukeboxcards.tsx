@@ -11,6 +11,7 @@ import JukeboxCardsPage from '../src/jukebox/JukeboxCardsPage';
 
 const CARD = {
   link: 'https://serenity.tail1234.ts.net:8443/?t=Tq3vR8mJx2LwP9sZk4YbN7cH1dFgE6aU0iOoKpQrSt',
+  lan_link: 'http://192.168.40.145:8020/?t=Tq3vR8mJx2LwP9sZk4YbN7cH1dFgE6aU0iOoKpQrSt',
   host: 'serenity.tail1234.ts.net', state: 'armed', public_port: 8443, token_created_ms: Date.now(),
   unused: ['K7Q2-M9XD', 'ABCD-EFGH', 'WXYZ-2345', 'HJKM-NPQR', 'STVW-XYZ2', '3456-789A', 'BCDE-FGHJ', 'KMNP-QRST'],
   codes_error: null, qr_bonus: 5, play_mode: 'credits',

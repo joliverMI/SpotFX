@@ -41,6 +41,9 @@ def test_the_card_read_makes_the_party_token_and_lists_the_unused_codes():
     assert out["link"] is None and out["host"] is None          # no address yet: the page asks
     _cfg, st = store.load_guest_link()
     assert st.token and out["token_created_ms"]                   # the cards carry it, so it exists now
+    # the home-Wi-Fi link needs no Funnel address at all — it's either None
+    # (this host read no LAN address) or already the full URL with the token
+    assert out["lan_link"] is None or out["lan_link"].endswith(f":8020/?t={st.token}")
     assert c.put("/api/jukebox/guest-link", json={"public_host": "serenity.tail1234.ts.net"}).status_code == 200
     a, b = bonus_codes.mint(2, "party")
     bonus_codes.claim(a, "n", "Ana", 1)
@@ -52,6 +55,18 @@ def test_the_card_read_makes_the_party_token_and_lists_the_unused_codes():
     again = c.get("/api/jukebox/card").json()
     assert again["link"] == out["link"]                            # the token is kept, not remade
     assert not any("wifi" in k.lower() or "password" in k.lower() for k in out)
+
+
+def test_the_card_carries_the_lan_link_whether_or_not_funnel_is_addressed(monkeypatch):
+    """The home-Wi-Fi link (the Admiral's "wifi option") shows up on the
+    printed-card read even with no Funnel public address saved at all —
+    deterministic here via an injected `lan_ip`, not the real socket."""
+    link = guest_link.GuestLink(guest_link.GuestLinkDeps(lan_ip=lambda: "192.168.40.145"))
+    monkeypatch.setattr(guest_link, "controller", link)
+    out = _client().get("/api/jukebox/card").json()
+    _cfg, st = store.load_guest_link()
+    assert out["link"] is None                                    # still no Funnel address
+    assert out["lan_link"] == f"http://192.168.40.145:8020/?t={st.token}"
 
 
 def test_an_unreadable_codes_file_is_said_and_the_link_still_comes():

@@ -34,7 +34,8 @@ process on its own port (phase 2) and never reaches these routes.
   GET    /api/jukebox/guest-link      the guests' public link (N1): off/armed/
                                       live/error, the link with tonight's party
                                       token, what it would publish, the last
-                                      step and self-test
+                                      step and self-test, and `lan_link` — the
+                                      home-Wi-Fi address (no Funnel needed)
   PUT    /api/jukebox/guest-link      a PARTIAL edit {enabled, public_host,
                                       public_port, guest_port}; `?dry_run=true`.
                                       enabled SHIPS FALSE; switching it off
@@ -46,7 +47,8 @@ process on its own port (phase 2) and never reaches these routes.
                                       the public address while live
   GET    /api/jukebox/card            the printable card (N2): the join link
                                       (making the party token if there is none
-                                      yet), the unused bonus codes, the bonus
+                                      yet), the home-Wi-Fi link (`lan_link`),
+                                      the unused bonus codes, the bonus
                                       amount and the play mode
   GET    /api/jukebox/report          the post-party report of the latest night
                                       (services/jukebox/night_report.py): what
@@ -615,7 +617,7 @@ def _card_read() -> dict:
     except ValueError as exc:
         codes, err = {"codes": []}, str(exc)
     show_cfg = store.load_show()
-    return {"link": st["link"], "host": st["host"], "state": st["state"],
+    return {"link": st["link"], "lan_link": st["lan_link"], "host": st["host"], "state": st["state"],
             "public_port": st["config"]["public_port"], "token_created_ms": st["token_created_ms"],
             "unused": [c["code"] for c in codes["codes"] if not c["used"]], "codes_error": err,
             "qr_bonus": show_cfg.economy.qr_bonus, "play_mode": show_cfg.play_mode}
@@ -625,8 +627,9 @@ def _card_read() -> dict:
 async def get_card() -> dict:
     """What the printable card (report §9's N2) needs: the join link with the
     party token — made now if there is none yet, since the cards carry it —
-    the unused bonus codes and the QR bonus. The Wi-Fi name and password are
-    typed on the card page and never reach SpotFX. The mint is serialized
+    the home-Wi-Fi link (`lan_link`, no Funnel needed), the unused bonus
+    codes and the QR bonus. The Wi-Fi name and password are typed on the
+    card page and never reach SpotFX. The mint is serialized
     with every other guest-link mutator (edit/rotate/on_night_start) before
     the rest of the read runs off the loop, so a card read racing a night
     start can't each mint and save a different token."""

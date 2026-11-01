@@ -47,12 +47,17 @@ export default function JukeboxCardsPage() {
   const wifiWhy = wifiProblem(wifi);
   const wifiText = wifiWhy ? '' : wifiPayload(wifi);
   const codesOn = withCodes && !!data && data.play_mode === 'credits';
-  const cards = data?.link ? cardCodes(data.unused, Number(count) || 0, codesOn) : [];
+  // the public Funnel link, when set, is unchanged; with none, the
+  // home-Wi-Fi address still lets the cards print (the Admiral's "wifi
+  // option") — just on Serenity's own network, not the public internet.
+  const joinUrl = data?.link ?? data?.lan_link ?? null;
+  const usingLan = !data?.link && !!data?.lan_link;
+  const cards = data && joinUrl ? cardCodes(data.unused, Number(count) || 0, codesOn) : [];
   const short = codesOn && data ? cards.filter((c) => c === null).length : 0;
   const problems = [
-    !data?.link ? 'The guest link has no address yet.' : '',
+    !joinUrl ? 'The guest link has no address yet.' : '',
     wifiWhy,
-    cards.length === 0 && data?.link ? 'Choose how many cards (1-60).' : '',
+    cards.length === 0 && joinUrl ? 'Choose how many cards (1-60).' : '',
   ].filter(Boolean);
   const ready = problems.length === 0;
 
@@ -110,22 +115,37 @@ export default function JukeboxCardsPage() {
 
         <fieldset className="jukebox-cards-fields">
           <legend>The Jukebox link</legend>
+          {data?.lan_link && (
+            <p className="jukebox-muted" data-testid="jukebox-cards-lan-link">
+              On the home Wi-Fi: <code>{data.lan_link}</code> — a phone already on Serenity&apos;s network opens
+              this directly, no Tailscale Funnel needed.
+            </p>
+          )}
           {data?.link ? (
             <p className="jukebox-muted" data-testid="jukebox-cards-link">
               {data.host}{data.public_port === 443 ? '' : `:${data.public_port}`} — tonight&apos;s party link. It
               changes after a party that used it, so print fresh cards for each party.
             </p>
           ) : data && (
-            <div className="jukebox-cards-field">
-              <span className="jukebox-field-label">Serenity&apos;s public address</span>
-              <span className="jukebox-cards-row">
-                <input type="text" value={host} placeholder="serenity.<tailnet>.ts.net" aria-label="The guest link's address"
-                       onChange={(e) => setHost(e.target.value)} />
-                <button type="button" disabled={!host.trim() || saveHost.isPending}
-                        onClick={() => saveHost.mutate(host.trim())}>Save</button>
-              </span>
-              {saveHost.isError && <span className="jukebox-error">{String((saveHost.error as Error)?.message ?? saveHost.error)}</span>}
-            </div>
+            <>
+              {usingLan && (
+                <p className="jukebox-muted" data-testid="jukebox-cards-lan-only-note">
+                  No public address is saved, so these cards use the home-Wi-Fi address above — they will
+                  only work for a phone already on Serenity&apos;s own Wi-Fi, not over the public internet.
+                  Save a public address below to switch the cards to the Tailscale Funnel link instead.
+                </p>
+              )}
+              <div className="jukebox-cards-field">
+                <span className="jukebox-field-label">Serenity&apos;s public address</span>
+                <span className="jukebox-cards-row">
+                  <input type="text" value={host} placeholder="serenity.<tailnet>.ts.net" aria-label="The guest link's address"
+                         onChange={(e) => setHost(e.target.value)} />
+                  <button type="button" disabled={!host.trim() || saveHost.isPending}
+                          onClick={() => saveHost.mutate(host.trim())}>Save</button>
+                </span>
+                {saveHost.isError && <span className="jukebox-error">{String((saveHost.error as Error)?.message ?? saveHost.error)}</span>}
+              </div>
+            </>
           )}
         </fieldset>
 
@@ -160,7 +180,7 @@ export default function JukeboxCardsPage() {
         </button>
       </section>
 
-      {ready && data?.link && (
+      {ready && data && joinUrl && (
         <section className="jukebox-cards-sheet" data-testid="jukebox-cards-sheet">
           {cards.map((code, i) => (
             <article key={code ?? `card-${i}`} className="jukebox-card-print" data-testid="jukebox-card">
@@ -177,10 +197,10 @@ export default function JukeboxCardsPage() {
                   </figcaption>
                 </figure>
                 <figure>
-                  <QrSvg text={joinLink(data.link as string, code)} label="Open the Jukebox" />
+                  <QrSvg text={joinLink(joinUrl, code)} label="Open the Jukebox" />
                   <figcaption>
                     <strong>2 · Open the Jukebox</strong>
-                    <span>vote and add songs</span>
+                    <span>{usingLan ? 'on the home Wi-Fi' : 'vote and add songs'}</span>
                   </figcaption>
                 </figure>
               </div>

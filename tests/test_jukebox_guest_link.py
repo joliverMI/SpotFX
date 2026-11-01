@@ -169,6 +169,44 @@ def test_the_token_and_the_link():
     assert gl.link_for("", 8443, "abc") is None
 
 
+# ═══ 2b. the home-Wi-Fi link (the Admiral's "wifi option") ══════════════════
+
+def test_the_lan_link_needs_no_tailscale_at_all():
+    assert gl.lan_link("192.168.40.145", 8020, "abc") == "http://192.168.40.145:8020/?t=abc"
+    assert gl.lan_link("192.168.40.145", 80, "abc") == "http://192.168.40.145/?t=abc"
+    assert gl.lan_link("", 8020, "abc") is None               # no LAN address: nothing to show
+    assert gl.lan_link("192.168.40.145", 8020, "") is None    # no token yet
+
+
+def test_the_status_carries_the_lan_link_whether_or_not_funnel_is_on():
+    """`lan_link` reads regardless of `cfg.enabled`/Funnel's own state — the
+    whole point of the Admiral's wifi option: it needs no Funnel at all."""
+    link = gl.GuestLink(gl.GuestLinkDeps(lan_ip=lambda: "192.168.40.145"))
+    link.ensure_token()
+    token = store.load_guest_link()[1].token
+    out = link.status()
+    assert out["state"] == "off" and out["lan_link"] == f"http://192.168.40.145:8020/?t={token}"
+    # a host with no readable LAN address shows no LAN link, said plainly
+    link2 = gl.GuestLink(gl.GuestLinkDeps(lan_ip=lambda: ""))
+    assert link2.status()["lan_link"] is None
+
+
+def test_lan_ip_sends_no_network_traffic_and_fails_closed(monkeypatch):
+    """A UDP `connect()` only asks the kernel's routing table; it never
+    raises on a host with no route at all, it just reports no address."""
+    import socket as socket_mod
+
+    class _NoRoute:
+        def connect(self, addr):
+            raise OSError("Network is unreachable")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(socket_mod, "socket", lambda *a, **k: _NoRoute())
+    assert gl._lan_ip() == ""
+
+
 # ═══ 3. on: open with the night, close with it ═══════════════════════════════
 
 def test_a_night_opens_one_port_to_the_guest_app_and_closes_it(world):

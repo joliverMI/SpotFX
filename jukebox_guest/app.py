@@ -105,9 +105,14 @@ def _valid_phone(v: Any) -> bool:
 
 
 def _client(request: Request) -> str:
-    """Who is asking, for the per-address limit. Behind Tailscale Funnel
-    every connection comes from tailscaled on loopback, so the first
-    X-Forwarded-For hop is the phone's; a direct connection is its peer."""
+    """Who is asking, for the per-address limit. A phone on the home Wi-Fi
+    (the shipped `--host 0.0.0.0`) connects DIRECTLY, so its own peer
+    address already IS its identity — it is never loopback, so its own
+    X-Forwarded-For (if it sent one) is ignored, and a different phone on
+    the same Wi-Fi gets its own bucket, never a shared one. Only behind
+    Tailscale Funnel does every connection arrive from tailscaled on
+    loopback, in which case the first X-Forwarded-For hop is the real one
+    (Funnel's own)."""
     peer = request.client.host if request.client else ""
     xff = request.headers.get("x-forwarded-for", "")
     if peer in ("127.0.0.1", "::1") and xff:

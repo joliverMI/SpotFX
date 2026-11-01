@@ -4,6 +4,18 @@ The Jukebox's GUEST APP (data/jukebox-plan/report.md §7 and §9 phase 2, PR
 port (`python -m jukebox_guest`, :8020) — never inside SpotFX's main.py,
 whose event loop runs the music (the plan's risk 7).
 
+REACHABILITY (the Admiral, 2026-11-01, "do wifi option"): the shipped
+deploy unit (`deploy/spotfx-jukebox-guest.service`) listens on 0.0.0.0, so
+a phone on Serenity's home Wi-Fi opens it directly at
+`http://<serenity LAN IP>:8020/?t=<party token>` — no Tailscale involved.
+Tailscale Funnel (`services/jukebox/guest_link.py`) is a SEPARATE, still-off
+way to publish the SAME port to the public internet; nothing here arms it.
+Listening on 0.0.0.0 does not weaken anything below: the party token is
+still checked by SpotFX on every route that needs it, and every per-address
+rate limit already keys on the real connecting peer (never a forwarded
+header) unless that peer is loopback itself — the Funnel-only case, where
+tailscaled's own X-Forwarded-For is the phone's real address.
+
 FOUR THINGS IT KEEPS TRUE:
   * NOTHING BUT GUEST ROUTES ANSWER. app.ROUTES is the whole surface: the
     page and its files, and the calls under /g/. No docs, no OpenAPI, no
