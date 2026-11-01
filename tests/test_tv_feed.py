@@ -7,6 +7,7 @@ tests/test_absorb_runner.py and tests/test_night_self_take.py already use."""
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 import pytest
@@ -218,16 +219,48 @@ def test_clock_loop_pushes_at_the_configured_cadence_then_stops_cleanly():
     _go(_clock_loop_pushes_at_cadence())
 
 
-async def _clock_loop_dead_socket():
+async def _clock_loop_dead_socket(exc):
     async def send(msg):
-        raise RuntimeError("socket closed")
+        raise exc
 
     deps = tv_feed.TvFeedDeps(show_clock=lambda: (None, None, False))
     await tv_feed.run_clock_loop(send, deps, asyncio.sleep)  # must not raise
 
 
-def test_clock_loop_ends_quietly_when_the_socket_is_dead():
-    _go(_clock_loop_dead_socket())
+@pytest.mark.parametrize("exc", [
+    RuntimeError('Cannot call "send" once a close message has been sent.'),
+    tv_feed.WebSocketDisconnect(code=1006),
+])
+def test_clock_loop_ends_quietly_when_the_socket_is_dead(exc, caplog):
+    """A dead socket (Starlette's post-close RuntimeError, or the
+    WebSocketDisconnect it raises for a mid-write OSError) is ROUTINE
+    teardown on a wall-mounted kiosk — this must stay quiet, not log a
+    warning on every ordinary disconnect."""
+    with caplog.at_level(logging.WARNING, logger="spectra.services.tv_feed"):
+        _go(_clock_loop_dead_socket(exc))
+    assert caplog.records == []
+
+
+async def _clock_loop_unexpected_error():
+    async def send(msg):
+        return None
+
+    def broken_show_clock():
+        raise AttributeError("module has no attribute 'effective_position_ms'")
+
+    deps = tv_feed.TvFeedDeps(show_clock=broken_show_clock)
+    await tv_feed.run_clock_loop(send, deps, asyncio.sleep)  # must not raise
+
+
+def test_clock_loop_logs_a_warning_for_a_genuinely_unexpected_error(caplog):
+    """Unlike the dead-socket case above, a bug in `deps.show_clock()`
+    (the exact round-1 AttributeError class) must still surface loudly —
+    this is the signal the round-2 logging fix exists to preserve."""
+    with caplog.at_level(logging.WARNING, logger="spectra.services.tv_feed"):
+        _go(_clock_loop_unexpected_error())
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelno == logging.WARNING
+    assert caplog.records[0].exc_info is not None
 
 
 # ── the jukebox relay loop ───────────────────────────────────────────────────
@@ -291,6 +324,46 @@ async def _jukebox_loop_names_unreachable():
 
 def test_jukebox_loop_names_unreachable_distinctly_from_board_off():
     _go(_jukebox_loop_names_unreachable())
+
+
+async def _jukebox_loop_dead_socket(exc):
+    async def fetch(url):
+        return {"running": True}
+
+    async def send(msg):
+        raise exc
+
+    deps = tv_feed.TvFeedDeps(fetch_jukebox=fetch)
+    await tv_feed.run_jukebox_loop(send, deps, asyncio.sleep)  # must not raise
+
+
+@pytest.mark.parametrize("exc", [
+    RuntimeError('Cannot call "send" once a close message has been sent.'),
+    tv_feed.WebSocketDisconnect(code=1006),
+])
+def test_jukebox_loop_ends_quietly_when_the_socket_is_dead(exc, caplog):
+    with caplog.at_level(logging.WARNING, logger="spectra.services.tv_feed"):
+        _go(_jukebox_loop_dead_socket(exc))
+    assert caplog.records == []
+
+
+async def _jukebox_loop_unexpected_error():
+    def broken_http_url():
+        raise AttributeError("module has no attribute 'default_http_url'")
+
+    async def send(msg):
+        return None
+
+    deps = tv_feed.TvFeedDeps(http_url=broken_http_url)
+    await tv_feed.run_jukebox_loop(send, deps, asyncio.sleep)  # must not raise
+
+
+def test_jukebox_loop_logs_a_warning_for_a_genuinely_unexpected_error(caplog):
+    with caplog.at_level(logging.WARNING, logger="spectra.services.tv_feed"):
+        _go(_jukebox_loop_unexpected_error())
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelno == logging.WARNING
+    assert caplog.records[0].exc_info is not None
 
 
 async def _vote_reaches_relay_within_bound():

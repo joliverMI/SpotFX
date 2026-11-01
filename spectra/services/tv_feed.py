@@ -43,6 +43,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
+from fastapi import WebSocketDisconnect
+
 logger = logging.getLogger(__name__)
 
 #: "4 Hz anchors" — the plan's own §7.1 feed table, row `clock`.
@@ -213,8 +215,10 @@ async def run_clock_loop(send: Callable[[dict], Awaitable[None]], deps: TvFeedDe
             show_clock_ms, position_ms, is_playing = deps.show_clock()
             server_ms = await deps.now_ms()
             await send(clock_message(show_clock_ms, position_ms, is_playing, server_ms))
+        except (WebSocketDisconnect, RuntimeError):
+            return
         except Exception:                                  # noqa: BLE001
-            logger.warning("tv feed: clock loop ended", exc_info=True)
+            logger.warning("tv feed: clock loop ended unexpectedly", exc_info=True)
             return
         await sleep(deps.clock_push_s)
 
@@ -238,7 +242,9 @@ async def run_jukebox_loop(send: Callable[[dict], Awaitable[None]], deps: TvFeed
                 running = board.get("running") if isinstance(board, dict) else None
                 await send(jukebox_message(board))
                 await send(layout_message(running))
+        except (WebSocketDisconnect, RuntimeError):
+            return
         except Exception:                                  # noqa: BLE001
-            logger.warning("tv feed: jukebox loop ended", exc_info=True)
+            logger.warning("tv feed: jukebox loop ended unexpectedly", exc_info=True)
             return
         await sleep(deps.jukebox_poll_s)
