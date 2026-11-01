@@ -11,6 +11,7 @@
  * server reports a newer build. */
 import { shouldReload, TV_BUILD_ID } from './build';
 import { ClockAnchor, NtpClock } from './clock';
+import { isJukeboxView, JukeboxView } from './jukeboxTypes';
 
 export type Layout = 'party' | 'attract' | 'sleep' | 'calibrate' | 'lost';
 
@@ -18,7 +19,12 @@ export interface FeedState {
   connected: boolean;
   layout: Layout | null;
   clock: ClockAnchor | null;
-  jukebox: Record<string, unknown> | null;
+  jukebox: JukeboxView | null;
+  /** The client's own clock (nowMs()) at the moment `jukebox` last
+   * changed — the Party screen (PR 1.4) interpolates `now.progress_ms`
+   * forward from here between ~1 Hz relay pushes, the same shape the
+   * show clock already uses for the identical reason. */
+  jukeboxReceivedAtMs: number | null;
   offsetMs: number | null;
 }
 
@@ -64,7 +70,8 @@ export class TvFeed {
   private pingTimer: ReturnType<typeof setInterval> | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private state: FeedState = {
-    connected: false, layout: null, clock: null, jukebox: null, offsetMs: null,
+    connected: false, layout: null, clock: null, jukebox: null,
+    jukeboxReceivedAtMs: null, offsetMs: null,
   };
   private listeners = new Set<Listener>();
   private started = false;
@@ -157,7 +164,9 @@ export class TvFeed {
         });
         break;
       case 'jukebox':
-        this.setState({ jukebox: msg });
+        if (isJukeboxView(msg)) {
+          this.setState({ jukebox: msg, jukeboxReceivedAtMs: nowMs() });
+        }
         break;
       default:
         break;

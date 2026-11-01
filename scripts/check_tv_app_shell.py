@@ -182,6 +182,12 @@ async def check_viewport(cdp_port: int, page_url: str, width: int, height: int) 
 
 
 async def main() -> int:
+    # The feed's jukebox relay would otherwise default to SpotFX's own
+    # production port (:8000) — a real, possibly-in-use address on a
+    # shared host. Point it at a certainly-unused port so a fetch fails
+    # fast (connection refused) rather than touching anything real.
+    os.environ["SPOTFX_PORT"] = str(free_port())
+
     if not os.path.isdir(TV_DIST):
         print(f"TV app build missing: {TV_DIST} — run "
              f"'(cd spectra/web && npx vite build --config vite.tv.config.ts)' first",
