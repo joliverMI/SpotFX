@@ -504,6 +504,12 @@ TRAINING_PROFILES_FILE = REPO_ROOT / "storage" / "training_profiles.json"
 
 WEB_DIST = Path(__file__).parent / "web" / "dist"
 
+# THE TV PROBE (data/tv-display-plan/plan.html PR 0.1): per-screen-id
+# measurement results (browser/GPU info, the drawn-fps ladder, ping
+# round-trips, the screensaver visibility log) — see
+# spectra/services/tv_probe.py. Bounded, newest-last-seen kept.
+TV_PROBE_FILE = SPECTRA_STORAGE / "tv_probe_results.json"
+
 
 def ledfx_url() -> str:
     """Base URL of the external LedFX service (the owner's real-fire path
