@@ -24,8 +24,10 @@
  *   Simulate  the party simulator: a model night under the saved settings,
  *             played back in five minutes, beside the tuned settings
  *             (SimulateTab.tsx, phase 3.4).
- * Above both: the Spotify sign-in line (PR 1.2) when a warning is due —
- * every night stops if the sign-in lapses.
+ * Above both: Start/Stop the night (NightControl, below), on every tab —
+ * the same `POST /api/jukebox/night/{start,stop}` Sonic uses, for when it
+ * isn't answering — then the Spotify sign-in line (PR 1.2) when a warning
+ * is due (every night stops if the sign-in lapses).
  *
  * The floating 💬 Sonic (spectra/services/jukebox_console.py) is the same
  * chat as everywhere, scoped by its help topic to `sonic-jukebox`; it
@@ -57,7 +59,7 @@ import {
 } from './jukeboxEditor';
 import {
   useGuests, useJukeboxConfig, useJukeboxEconomy, useJukeboxPreview, useJukeboxReport, useJukeboxStatus,
-  useMoveEntry, useMoveSetSong, usePutOnTv, useReloadSet, useSaveJukeboxConfig,
+  useMoveEntry, useMoveSetSong, usePutOnTv, useReloadSet, useSaveJukeboxConfig, useStartNight, useStopNight,
 } from './queries';
 import type { JukeboxPreview, JukeboxStatus, ProgramConfig, RunOut, SetItem, SlotMode } from './types';
 
@@ -98,6 +100,7 @@ export default function JukeboxPage() {
         </div>
         <PutOnTvButton />
       </div>
+      <NightControl status={status} />
       {sign && (
         <InfoTip topic="jukebox-sign-in"
           text="Spotify's sign-in for SpotFX runs out six months after it was made; when it does, every night (and Absorb, and SpotFX's own polling) stops at once.">
@@ -139,6 +142,81 @@ function PutOnTvButton() {
         })}>
         <Icon name="devices" size={14} /> Put on the TV
       </button>
+    </InfoTip>
+  );
+}
+
+// ── Start / Stop the night — right under the header, on every tab ──────────
+
+const START_WARNING = 'This starts music on Serenity, from the main Spotify account, at the house’s current volume.';
+
+function NightControl({ status }: { status: JukeboxStatus | undefined }) {
+  const toast = useToast();
+  const start = useStartNight();
+  const stop = useStopNight();
+  const [confirming, setConfirming] = useState<'start' | 'stop' | null>(null);
+  const running = !!status?.running;
+  const pending = start.isPending || stop.isPending;
+
+  const doStart = () => {
+    setConfirming(null);
+    start.mutate(undefined, {
+      onSuccess: (r) => toast(r.status === 'running' ? 'The night has started.' : (r.detail || 'The night could not start.'),
+        r.status === 'running' ? 'success' : 'error'),
+      onError: (e) => toast(errText(e), 'error'),
+    });
+  };
+  const doStop = (pause: boolean) => {
+    setConfirming(null);
+    stop.mutate(pause, {
+      onSuccess: (r) => toast(r.status === 'ended' ? (pause ? 'Stopped — the music is paused.' : 'Stopped — the music plays on.')
+        : (r.detail || 'No night was running.'), r.status === 'ended' ? 'success' : 'error'),
+      onError: (e) => toast(errText(e), 'error'),
+    });
+  };
+
+  return (
+    <InfoTip topic="jukebox-night-control"
+      text="Start begins tonight's set; Stop ends it. Sonic can do both too (ask it to start the jukebox), but a button is here in case it isn't answering.">
+      <div className="card jukebox-night-control" data-testid="jukebox-night-control">
+        <span className="jukebox-night-control-state" data-testid="jukebox-night-control-state">
+          {nightLine(status?.night)}
+        </span>
+        {!confirming && (
+          running ? (
+            <button className="jukebox-small jukebox-night-stop" disabled={pending}
+              data-testid="jukebox-night-stop-btn" onClick={() => setConfirming('stop')}>
+              <Icon name="pause" size={14} /> Stop the night
+            </button>
+          ) : (
+            <button className="jukebox-small jukebox-night-start" disabled={pending}
+              data-testid="jukebox-night-start-btn" onClick={() => setConfirming('start')}>
+              <Icon name="play" size={14} /> Start the night
+            </button>
+          )
+        )}
+        {confirming === 'start' && (
+          <div className="jukebox-night-confirm" data-testid="jukebox-night-start-confirm">
+            <p className="jukebox-night-confirm-text">{START_WARNING}</p>
+            <div className="jukebox-night-confirm-actions">
+              <button className="jukebox-night-confirm-go" disabled={pending} onClick={doStart}>Start the night</button>
+              <button disabled={pending} onClick={() => setConfirming(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
+        {confirming === 'stop' && (
+          <div className="jukebox-night-confirm" data-testid="jukebox-night-stop-confirm">
+            <p className="jukebox-night-confirm-text">Stop the Jukebox night?</p>
+            <div className="jukebox-night-confirm-actions">
+              <button className="jukebox-night-confirm-go" disabled={pending} onClick={() => doStop(true)}>
+                Stop and pause the music
+              </button>
+              <button disabled={pending} onClick={() => doStop(false)}>Stop, keep the music playing</button>
+              <button disabled={pending} onClick={() => setConfirming(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
     </InfoTip>
   );
 }

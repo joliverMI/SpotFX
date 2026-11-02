@@ -4024,6 +4024,15 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 .jukebox-absorbing-bar { flex: 1 0 100%; height: 6px; border-radius: 3px; background: var(--surface2); overflow: hidden; }
 .jukebox-absorbing-bar > span { display: block; height: 100%; background: var(--accent); }
 .jukebox-tabs button.on, .jukebox-modes button.on { border-color: var(--accent); background: var(--surface2); color: var(--text); }
+/* Start / Stop the night (NightControl, on every tab) */
+.jukebox-night-control { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 0; }
+.jukebox-night-control-state { flex: 1 1 14em; min-width: 0; font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+.jukebox-night-start { border-color: var(--ok); color: var(--ok); flex: none; }
+.jukebox-night-stop { border-color: var(--danger); color: var(--danger); flex: none; }
+.jukebox-night-confirm { flex: 1 0 100%; display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.jukebox-night-confirm-text { font-size: 13px; color: var(--text-muted); margin: 0; overflow-wrap: anywhere; }
+.jukebox-night-confirm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.jukebox-night-confirm-go { border-color: var(--accent); background: var(--surface2); color: var(--text); }
 .jukebox-sign-in { display: flex; align-items: center; gap: 8px; margin-bottom: 0; font-size: 13px; line-height: 1.4; }
 .jukebox-sign-in.warn { border-color: var(--warning); }
 .jukebox-sign-in.warn svg { color: var(--warning); flex: none; }

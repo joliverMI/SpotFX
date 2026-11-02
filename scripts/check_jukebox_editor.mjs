@@ -26,6 +26,14 @@
 // Block/Rename/Lock on a phone), the Credits tab (§1b, §2b, phase 3.3) and the party simulator's
 // playback (§1c pure, §2c mounted against the harness's own snapshot of the
 // server's answer, phase 3.4): it only ever POSTs /api/jukebox/simulate.
+// §2g: Start/Stop the night (NightControl, under the header on every tab —
+// the Admiral's "sonic is not responding, add a button"): not-running vs.
+// running render different buttons; Start's confirm names Serenity, the
+// main account and the current volume before anything is sent; Stop's
+// confirm offers "pause the music" (default) and "keep the music playing",
+// each POSTing its own `pause` value; the button disables mid-flight; and
+// a REFUSAL (a plain 200 answer — no HTTP error) shows its own sentence,
+// both as a toast and in the state line, never a silent no-op.
 //
 // Run: node scripts/check_jukebox_editor.mjs (tests/test_jukebox_editor.py).
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -431,6 +439,8 @@ const ECON = { running: true, play_mode: 'credits', crowd: 4, joined: 3, jailed:
   events: [{ at_ms: Date.UTC(2026, 9, 28, 1, 42), kind: 'add', who: 'Disco Ana', what: 'added “Take On Me”', credits: -6 },
            { at_ms: Date.UTC(2026, 9, 28, 1, 40), kind: 'host_gift', who: 'the host', what: 'gave 3 guests 2 each', credits: 2, phones: 3 }] };
 function statusOf() {
+  // §2g's NightControl tests: a refused/ended night, overriding everything else.
+  if (world.nightOverride) return world.nightOverride;
   if (!world.running) return { night: null, running: false, now: null, next: [], line: [], warnings: [sign.warning], spotify_auth: sign, log: [], history: [] };
   return {
     night: { id: 'n', state: 'running', started_ms: 1, started_by: 'press', ended_ms: null, end_reason: '', end_detail: '', playlist_name: 'Saturday set', playlist_uri: '', played: 3, jukebox_played: 1 },
@@ -542,6 +552,25 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.startsWith('/api/jukebox/skip-lock')) {
     if (body.locked) world.noSkip.add(body.uri); else world.noSkip.delete(body.uri);
     return json({ status: body.locked ? 'locked' : 'unlocked', uri: body.uri });
+  }
+  // Start / Stop the night (§2g, NightControl) — `startResult`/`stopResult`
+  // let the test drive every answer (running, refused, not_running); a
+  // delayed `startDelay`/`stopDelay` proves the button disables mid-flight.
+  if (u.startsWith('/api/jukebox/night/start')) {
+    if (world.startDelay) await world.startDelay;
+    const r = world.startResult ?? { status: 'running', reason: '', detail: '',
+      night: { id: 'n', state: 'running', started_ms: 2, started_by: body.started_by, ended_ms: null,
+               end_reason: '', end_detail: '', playlist_name: 'Saturday set', playlist_uri: '', played: 0, jukebox_played: 0 } };
+    if (r.status === 'running') world.running = true;
+    return json(r);
+  }
+  if (u.startsWith('/api/jukebox/night/stop')) {
+    if (world.stopDelay) await world.stopDelay;
+    const r = world.stopResult ?? { status: 'ended', reason: 'stopped', detail: 'Stopped.',
+      night: { id: 'n', state: 'ended', started_ms: 1, started_by: 'press', ended_ms: 3,
+               end_reason: 'stopped', end_detail: 'Stopped.', playlist_name: 'Saturday set', playlist_uri: '', played: 3, jukebox_played: 1 } };
+    if (r.status === 'ended') world.running = false;
+    return json(r);
   }
   if (u.startsWith('/api/jukebox/price-check')) return json(PC);
   if (u.startsWith('/api/jukebox/simulate')) return json(SIM);
@@ -1085,6 +1114,101 @@ console.log('\n§2f "Put on the TV" (data/tv-display-plan/plan.html PR 1.6) — 
   P.unmount();
 }
 
+console.log('\n§2g Start / Stop the night (NightControl) — the state line, the confirm step, and the refusal reason');
+{
+  // not running: the Start button, no confirm shown yet
+  world = newWorld('auto');
+  let c = P.mount();
+  await P.settle();
+  ok(!!buttonByText(c, /Start the night/), 'not running: the Start button is on every tab, right under the header');
+  ok(!buttonByText(c, /Stop the night/), 'not running: no Stop button');
+  ok(text($(c, '[data-testid="jukebox-night-control-state"]')).includes('No night yet'),
+    'not running: the state line says so');
+  ok(!$(c, '[data-testid="jukebox-night-start-confirm"]'), 'no confirm panel until Start is pressed');
+
+  // pressing Start opens the confirm, which names the house/account/volume before doing anything
+  await click(buttonByText(c, /Start the night/));
+  const confirm = $(c, '[data-testid="jukebox-night-start-confirm"]');
+  ok(!!confirm && /Serenity/.test(text(confirm)) && /main Spotify account/.test(text(confirm)) && /current volume/.test(text(confirm)),
+    `the confirm names Serenity, the main account and the current volume (${text(confirm)})`);
+  ok(!world.requests.some((r) => r.url === '/api/jukebox/night/start'), 'nothing is sent until the confirm is answered');
+
+  // Cancel backs out with no request
+  await click(buttonByText(confirm, /^Cancel$/));
+  ok(!$(c, '[data-testid="jukebox-night-start-confirm"]'), 'Cancel closes the confirm');
+  ok(!world.requests.some((r) => r.url === '/api/jukebox/night/start'), 'Cancel sent nothing');
+
+  // confirming Start POSTs exactly the start route, disables the button while it is in flight,
+  // and a REFUSAL (a 200 answer, never an HTTP error) shows its reason, not a silent nothing
+  let resolveStart;
+  world.startDelay = new Promise((res) => { resolveStart = res; });
+  world.startResult = { status: 'refused', reason: 'no_playlist', detail: 'No set playlist is linked — link one first.',
+    night: { id: 'n', state: 'refused', started_ms: 5, started_by: 'press', ended_ms: 5, end_reason: 'no_playlist',
+             end_detail: 'No set playlist is linked — link one first.', playlist_name: '', playlist_uri: '', played: 0, jukebox_played: 0 } };
+  world.nightOverride = { night: world.startResult.night, running: false, now: null, next: [], line: [],
+    warnings: [], spotify_auth: sign, log: [], history: [] };
+  await click(buttonByText(c, /Start the night/));
+  await click(buttonByText($(c, '[data-testid="jukebox-night-start-confirm"]'), /Start the night/));
+  const startReq = world.requests.filter((r) => r.url === '/api/jukebox/night/start').at(-1);
+  ok(startReq?.method === 'POST' && JSON.stringify(startReq?.body) === JSON.stringify({ play: true, start_index: 0, started_by: 'press' }),
+    `confirming Start POSTs exactly play/start_index/started_by (${JSON.stringify(startReq)})`);
+  ok(buttonByText(c, /Start the night/)?.disabled === true, 'the button is disabled while the start is still in flight');
+  resolveStart();
+  await P.settle();
+  ok(text(c).includes('No set playlist is linked — link one first.'), 'a refusal’s own sentence shows, clearly — never a silent no-op');
+  ok(text($(c, '[data-testid="jukebox-night-control-state"]')).includes('refused') &&
+     text($(c, '[data-testid="jukebox-night-control-state"]')).includes('No set playlist is linked'),
+    'the state line itself says the last start was refused, with the reason');
+  P.unmount();
+
+  // running: the Stop button, its two-choice confirm, and each choice's own body/toast
+  world = newWorld('running');
+  c = P.mount();
+  await P.settle();
+  ok(!!buttonByText(c, /Stop the night/), 'running: the Stop button');
+  ok(!buttonByText(c, /Start the night/), 'running: no Start button');
+  ok(text($(c, '[data-testid="jukebox-night-control-state"]')).includes('Running since'), 'running: the state line says so');
+
+  await click(buttonByText(c, /Stop the night/));
+  let stopConfirm = $(c, '[data-testid="jukebox-night-stop-confirm"]');
+  ok(!!buttonByText(stopConfirm, /^Stop and pause the music$/) && !!buttonByText(stopConfirm, /^Stop, keep the music playing$/),
+    'Stop offers both choices, pause the default');
+  await click(buttonByText(stopConfirm, /^Cancel$/));
+  ok(!$(c, '[data-testid="jukebox-night-stop-confirm"]') && !world.requests.some((r) => r.url === '/api/jukebox/night/stop'),
+    'Cancel on Stop backs out with no request');
+
+  world.stopResult = { status: 'ended', reason: 'stopped', detail: 'Stopped.',
+    night: { id: 'n', state: 'ended', started_ms: 1, started_by: 'press', ended_ms: 9, end_reason: 'stopped',
+             end_detail: 'Stopped.', playlist_name: 'Saturday set', playlist_uri: '', played: 3, jukebox_played: 1 } };
+  world.nightOverride = { night: world.stopResult.night, running: false, now: null, next: [], line: [],
+    warnings: [], spotify_auth: sign, log: [], history: [] };
+  await click(buttonByText(c, /Stop the night/));
+  stopConfirm = $(c, '[data-testid="jukebox-night-stop-confirm"]');
+  await click(buttonByText(stopConfirm, /^Stop and pause the music$/));
+  const pauseReq = world.requests.filter((r) => r.url === '/api/jukebox/night/stop').at(-1);
+  ok(pauseReq?.method === 'POST' && JSON.stringify(pauseReq?.body) === '{"pause":true}',
+    `"Stop and pause the music" POSTs pause:true (${JSON.stringify(pauseReq)})`);
+  ok(text(c).includes('Stopped — the music is paused.'), 'the pause choice toasts that the music was paused');
+  ok(text($(c, '[data-testid="jukebox-night-control-state"]')).includes('ended at') &&
+     text($(c, '[data-testid="jukebox-night-control-state"]')).includes('Stopped.'),
+    'the state line now says the night ended');
+  P.unmount();
+
+  world = newWorld('running');
+  world.stopResult = { status: 'ended', reason: 'stopped', detail: 'Stopped.',
+    night: { id: 'n', state: 'ended', started_ms: 1, started_by: 'press', ended_ms: 9, end_reason: 'stopped',
+             end_detail: 'Stopped.', playlist_name: 'Saturday set', playlist_uri: '', played: 3, jukebox_played: 1 } };
+  c = P.mount();
+  await P.settle();
+  await click(buttonByText(c, /Stop the night/));
+  await click(buttonByText($(c, '[data-testid="jukebox-night-stop-confirm"]'), /^Stop, keep the music playing$/));
+  const keepReq = world.requests.filter((r) => r.url === '/api/jukebox/night/stop').at(-1);
+  ok(keepReq?.method === 'POST' && JSON.stringify(keepReq?.body) === '{"pause":false}',
+    `"Stop, keep the music playing" POSTs pause:false (${JSON.stringify(keepReq)})`);
+  ok(text(c).includes('Stopped — the music plays on.'), 'the keep-playing choice toasts that the music plays on');
+  P.unmount();
+}
+
 // ── 3. help ───────────────────────────────────────────────────────────────
 console.log('\n§3 help — every topic is real and reachable from the page');
 {
@@ -1095,7 +1219,10 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     'jukebox-merge-phones', 'jukebox-economy', 'jukebox-shows', 'jukebox-lockstep',
     // "put on the tv" (data/tv-display-plan/plan.html PR 1.6): its own InfoTip
     // on the page header's PutOnTvButton, always reached by hoverAll().
-    'put-on-the-tv'];
+    'put-on-the-tv',
+    // Start / Stop the night (NightControl): its own InfoTip, always on
+    // every tab right under the header, always reached by hoverAll().
+    'jukebox-night-control'];
   const { HELP_SECTIONS } = loadData(join(web, 'src/help/helpContent.ts'), 'help');
   const knownIds = new Set();
   for (const section of HELP_SECTIONS) {
@@ -1148,7 +1275,7 @@ console.log('\n§3 help — every topic is real and reachable from the page');
     if (id && id !== 'sonic-scene-backups') reached.add(id);
   }
   ok(topics.every((id) => reached.has(id)) && reached.size === topics.length,
-    `the page's own controls and its 💬 Sonic open exactly the twenty-five jukebox topics (${[...reached].sort().join(', ')})`);
+    `the page's own controls and its 💬 Sonic open exactly the twenty-six jukebox topics (${[...reached].sort().join(', ')})`);
   P.unmount();
 }
 
