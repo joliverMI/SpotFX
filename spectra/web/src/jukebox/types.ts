@@ -199,6 +199,23 @@ export interface JukeboxStatus {
   guests?: { phones: number; joined: number; pending?: number };
 }
 
+/** POST /api/jukebox/night/start — never an HTTP error for a refusal (the
+ *  engine's own gates answer with a reason + sentence, always 200). */
+export interface NightStartResult {
+  status: 'running' | 'refused' | 'already_running';
+  reason: string;
+  detail: string;
+  night: NightBrief | null;
+}
+
+/** POST /api/jukebox/night/stop */
+export interface NightStopResult {
+  status: 'ended' | 'not_running';
+  reason: string;
+  detail: string;
+  night: NightBrief | null;
+}
+
 /** The Live tab's economy panel (SpotFX GET /api/jukebox/economy,
  *  services/jukebox/economy_live.py): the credits right now, the prices a
  *  guest sees now, and the night's recent events. */

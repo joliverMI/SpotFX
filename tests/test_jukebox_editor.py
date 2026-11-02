@@ -6,9 +6,11 @@ data/jukebox-plan/report.md).
 recording fake of SpotFX's /api/jukebox routes: each Manual click PUTs the
 slots the rule says, Auto → Manual copies the server's own pattern, the
 Live tab is read-only except its own jukebox line (it drags the same way
-the Guests tab's does and nothing else on Live writes), and hovering the
-page's own controls opens each of its help topics. This test runs it so
-the proof fires on every full test run.
+the Guests tab's does and nothing else on Live writes), hovering the
+page's own controls opens each of its help topics, and Start/Stop the
+night (NightControl, under the header on every tab) renders the right
+state and confirm step and surfaces a refusal's own reason. This test runs
+it so the proof fires on every full test run.
 
 Skipped (not failed) when the frontend toolchain isn't installed — the
 same posture as tests/test_absorb_page.py. The script itself skips its

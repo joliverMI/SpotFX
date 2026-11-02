@@ -9,7 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiPost, spotfxDel, spotfxGet, spotfxPost, spotfxPut } from '../api/client';
 import type {
   BonusCodesRead, CardRead, GuestsRead, JukeboxBoardRead, JukeboxEconomy, JukeboxPreview, JukeboxStatus,
-  LearningStatus, NightReport, PriceCheck, ShowsRead,
+  LearningStatus, NightReport, NightStartResult, NightStopResult, PriceCheck, ShowsRead,
   ProgramConfig, SetMoveResult, ShowRead, SimResult,
 } from './types';
 
@@ -89,6 +89,27 @@ export function useReloadSet() {
   return useMutation({
     mutationFn: () => spotfxGet<JukeboxPreview>('/jukebox/preview?count=20&refresh=true'),
     onSuccess: (r) => qc.setQueryData(JUKEBOX_KEYS.preview, r),
+  });
+}
+
+/** Start a night (services/jukebox/night.py): a REFUSAL is an ordinary 200
+ * answer — no set playlist linked, the house asleep, Absorb running, Spotify
+ * not answering — never an HTTP error, so the caller reads `r.status`. */
+export function useStartNight() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => spotfxPost<NightStartResult>('/jukebox/night/start', { play: true, start_index: 0, started_by: 'press' }),
+    onSettled: () => qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status }),
+  });
+}
+
+/** Stop the running night — `pause: true` (default, "stop and pause the
+ * music") or `false` ("stop the jukebox, keep the music playing"). */
+export function useStopNight() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (pause: boolean) => spotfxPost<NightStopResult>('/jukebox/night/stop', { pause }),
+    onSettled: () => qc.invalidateQueries({ queryKey: JUKEBOX_KEYS.status }),
   });
 }
 

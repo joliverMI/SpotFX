@@ -2387,6 +2387,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'jukebox-night-control',
+        title: 'Start / Stop the night',
+        keywords: 'start stop night button jukebox on off running since not running sonic not responding confirm pause keep playing refused reason',
+        body: [
+          'A Start/Stop button sits right under the header on every tab — the same `POST /api/jukebox/night/start`/`stop` Sonic uses, for when it isn\'t answering, or any time you\'d rather press a button than talk.',
+          'Start asks first: it starts music on Serenity, from the main Spotify account, at the house\'s current volume. A refusal — no set playlist linked, the house asleep, Absorb Music running, Serenity not reachable, or Spotify refusing — shows its reason right there and nothing starts.',
+          'Stop offers a choice: "Stop and pause the music" (the default) or "Stop, keep the music playing" — the Jukebox lets go of the set and the line either way; only whether the music itself pauses differs.',
+          'Not running, running since, or a night that ended or was refused with its reason: the line beside the button always says which, on every tab.',
+        ],
+      },
+      {
         id: 'jukebox-economy',
         title: 'The economy right now',
         keywords: 'economy live credits held per guest made unspent prices add skip play next break out recent events lately tips bumps',
