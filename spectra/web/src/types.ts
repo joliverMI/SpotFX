@@ -1034,6 +1034,13 @@ export interface SettingsMessageResult {
   reply: string;
   changes: SonicAppliedChange[];
   rejected: SonicRejectedChange[];
+  /** Non-null only on the "cli" backend's degraded-manifest path (a
+   * deploy fast-forwarded the on-disk code without restarting
+   * spectra.service — settings_agent_cli.py's own "A STALE RESTART MUST
+   * DEGRADE" docstring section) — the same plain-language notice already
+   * prepended to `reply`. Carried here too so a future UI can style it
+   * distinctly without re-parsing `reply`'s text. */
+  degraded?: string | null;
 }
 
 export interface UndoResult extends AppliedSettingChange {

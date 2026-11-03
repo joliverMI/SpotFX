@@ -3389,7 +3389,14 @@ SAME `settings_agent._dispatch()` the API backend uses — no second authority;
 one hand-written function per `ALL_OPERATIONS` entry, see that file's own
 docstring for why it's not generated) exposes, and re-verifies the live
 `system/init` tool manifest on every single response before trusting
-anything in it. That last check exists because a live re-proof caught
+anything in it — refusing the whole turn on a mismatch, **except one
+deliberately narrow shape (2026-11-02, a stale un-restarted deploy):
+extra-only drift (every expected tool present, plus newer ones this
+process doesn't recognise yet) DEGRADES instead, since every tool_use
+still has to round-trip the running process's own unwidened dispatch
+table regardless — see that file's own module docstring section "A
+STALE RESTART MUST DEGRADE" for the full reasoning.** That
+refusal/degrade check exists because a live re-proof caught
 `claude-haiku-4-5` fabricating tool-call output in plain prose, twice, when
 the real tool manifest didn't contain what it claimed — `_parse_transcript()`
 reads ONLY structured `tool_use`/`tool_result` blocks, never the model's

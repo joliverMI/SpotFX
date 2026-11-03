@@ -116,13 +116,23 @@ def record(*, backend: str, model: str,
           input_tokens: int = 0, output_tokens: int = 0,
           cache_creation_input_tokens: int = 0, cache_read_input_tokens: int = 0,
           cost_usd: Optional[float] = None, session_id: Optional[str] = None,
-          rounds: Optional[int] = None, now_ms: Optional[int] = None) -> None:
+          rounds: Optional[int] = None, now_ms: Optional[int] = None,
+          outcome: str = "ok") -> None:
     """Append one durable usage entry. One entry per Sonic TURN, not per
     underlying API call — settings_agent.py sums its own multi-round
     Anthropic calls into one entry before calling this; settings_agent_cli.py's
     single `-p` subprocess call already reports one whole-turn total. Never
     raises: a broken usage record must never break the chat turn it's
-    recording (same posture as fire_history.record_fire)."""
+    recording (same posture as fire_history.record_fire).
+
+    `outcome` is an ADDITIVE tag ("ok" default, or "degraded"/"refused" —
+    settings_agent_cli.py's own manifest-check verdict, 2026-11-02
+    hardening): real tokens were genuinely spent either way, so it never
+    changes WHAT is summed here (day/week/last_query all still include
+    every entry regardless of outcome — his own ask was "how much usage,"
+    not "how much successful usage") — it only lets a future reader tell
+    a refused turn's real cost apart from a completed one, rather than
+    conflating "tokens spent" with "the turn actually answered him"."""
     if now_ms is None:
         now_ms = int(time.time() * 1000)
     try:
@@ -141,6 +151,7 @@ def record(*, backend: str, model: str,
             "cost_usd": cost_usd,
             "session_id": session_id,
             "rounds": rounds,
+            "outcome": outcome,
         })
         if len(log) > USAGE_LOG_MAX_ENTRIES:
             log = log[-USAGE_LOG_MAX_ENTRIES:]

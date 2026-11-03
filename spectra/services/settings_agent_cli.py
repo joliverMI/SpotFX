@@ -77,11 +77,55 @@ this:
      default.
   5. _verify_tool_manifest() below re-checks, on every single call, that
      the live system/init event's `tools` field is byte-identical to
-     what's expected -- if a hook, a stray MCP server, or a future CLI
-     default ever widens that manifest without this file being updated
-     to match, the WHOLE turn is refused (SettingsAgentUnavailable)
-     before any tool_result is trusted, rather than quietly trusting a
-     transcript that turned out wider than intended.
+     what's expected -- EXCEPT for one deliberately narrow, provably safe
+     case (below): every other mismatch still refuses the WHOLE turn
+     (SettingsAgentUnavailable) before any tool_result is trusted, rather
+     than quietly trusting a transcript that turned out wider or
+     narrower than intended.
+
+A STALE RESTART MUST DEGRADE, NOT GO SILENT (2026-11-02, data/
+sonic-jukebox-unresponsive/report.md). PR 491 added one Sonic operation
+(`put_on_tv`) and the live `spectra.service` was fast-forwarded onto that
+code WITHOUT a restart: the running process's own `TOOL_NAMES` (frozen at
+import time, 127 names) no longer matched what the freshly-spawned MCP
+subprocess -- importing the NEWER on-disk code -- reported in its
+system/init event (128 names). Every Sonic turn refused with a bare 503,
+no journal line said why, and the chat UI's hard-coded "is
+ANTHROPIC_API_KEY configured?" hint was wrong for this backend. The fix
+is a RESTART, but the failure mode itself should never again look like
+Sonic going silent for an unexplained reason.
+
+`_verify_tool_manifest()` now distinguishes two shapes of tool-name
+mismatch, and only one of them is safe to proceed past:
+
+  - EXTRA-ONLY DRIFT (every tool this process expects IS present in the
+    live manifest, which additionally reports some names this process
+    doesn't recognise yet) is exactly the shape above: the on-disk code
+    the MCP subprocess imported is NEWER than the running process. This
+    is safe to DEGRADE rather than refuse, because the actual anti-
+    fabrication guarantee lives one layer below this check, at the real
+    dispatch choke point (spectra/api/settings_console.py's /dispatch
+    route -> settings_agent._dispatch(), the SAME exhaustive lookup both
+    backends share): any tool_use the model emits still has to round-trip
+    through the RUNNING process's own, unwidened ALL_OPERATIONS table to
+    produce a tool_result at all, so a call to one of the extra,
+    not-yet-restarted-into names would already have come back as a real,
+    visible rejected/error result in the transcript -- never a fabricated
+    success. Degrading therefore widens nothing Sonic can actually DO
+    this turn; it only stops throwing away a transcript whose own,
+    already-gated tool calls were perfectly trustworthy. The reply
+    carries a plain-language "running in reduced mode, restart SPECTRA"
+    notice naming the extra tool(s), and the mismatch is logged at
+    WARNING with the short set difference -- never the two full,
+    multi-hundred-entry lists the pre-hardening 503 body dumped.
+  - ANY OTHER SHAPE (a tool this process expects is MISSING from the live
+    manifest, an empty manifest, a wrong/extra MCP server, or no
+    system/init event at all) still refuses outright, exactly as before.
+    A missing tool means the live manifest reports LESS than this
+    process trusts -- the on-disk code is OLDER, broken, or something
+    genuinely unaudited is going on -- which is the shape every
+    historical-capture and fabrication regression fixture below
+    exercises, and none of them is loosened by this change.
 
 WHY THE MODEL'S OWN PROSE IS NEVER TRUSTED AS EVIDENCE: the live re-proof
 (report.md Finding 7) caught claude-haiku-4-5 fabricating tool-call
@@ -111,7 +155,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from spectra import config
 from spectra.services import settings_agent, sonic_usage
@@ -122,6 +166,78 @@ logger = logging.getLogger(__name__)
 MCP_SERVER_NAME = "settings-console"
 TOOL_NAMES = tuple(sorted(f"mcp__{MCP_SERVER_NAME}__{t['name']}" for t in TOOLS))
 CLI_TIMEOUT_S = 90
+
+# How many short tool names a plain-language mismatch message/log line
+# names before collapsing the rest to "+N more" -- the whole point of
+# this cap is never dumping the two full, multi-hundred-entry manifests
+# the pre-hardening 503 body used to (11 KB on the live incident).
+_DRIFT_NAMES_SHOWN = 5
+
+
+def _short_tool_name(qualified: str) -> str:
+    """"mcp__settings-console__put_on_tv" -> "put_on_tv" -- for a message
+    a human reads, never for comparison (TOOL_NAMES/init["tools"] both
+    stay fully-qualified everywhere else)."""
+    prefix = f"mcp__{MCP_SERVER_NAME}__"
+    return qualified[len(prefix):] if qualified.startswith(prefix) else qualified
+
+
+def _names_phrase(names) -> str:
+    """A short, plain-language list of short tool names, capped at
+    _DRIFT_NAMES_SHOWN -- "put_on_tv" or "foo, bar, +3 more", never the
+    full qualified-name lists."""
+    shown = sorted(_short_tool_name(n) for n in names)
+    rest = len(shown) - _DRIFT_NAMES_SHOWN
+    phrase = ", ".join(shown[:_DRIFT_NAMES_SHOWN])
+    return f"{phrase}, +{rest} more" if rest > 0 else phrase
+
+
+class _ManifestVerdict(NamedTuple):
+    """outcome is one of "ok" (exact match), "degraded" (extra-only
+    drift -- safe to proceed, see module docstring), or "refused" (every
+    other mismatch shape). notice is None for "ok", else the short,
+    plain-language sentence _verify_tool_manifest() either returns (for
+    "degraded") or raises (for "refused")."""
+    outcome: str
+    notice: Optional[str]
+
+
+def _classify_manifest(events: list[dict]) -> _ManifestVerdict:
+    """Pure classification, never raises -- the ONE place the degrade-
+    vs-refuse decision is made, shared by _verify_tool_manifest() (which
+    acts on it) and _record_usage() (which only needs to TAG a usage
+    record with it, never to act on it, even when the transcript as a
+    whole later gets refused)."""
+    init = next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), None)
+    if init is None:
+        return _ManifestVerdict("refused",
+            "settings-agent CLI produced no system/init event -- refusing to trust this turn")
+
+    actual = tuple(sorted(init.get("tools") or ()))
+    if actual != TOOL_NAMES:
+        expected_set, actual_set = frozenset(TOOL_NAMES), frozenset(actual)
+        missing, extra = expected_set - actual_set, actual_set - expected_set
+        servers = {s.get("name"): s.get("status") for s in (init.get("mcp_servers") or [])}
+        if missing or servers != {MCP_SERVER_NAME: "connected"}:
+            return _ManifestVerdict("refused",
+                "settings-agent CLI tool manifest mismatch -- "
+                f"missing: {_names_phrase(missing) if missing else '(none)'}; "
+                f"extra: {_names_phrase(extra) if extra else '(none)'} "
+                "-- refusing to trust this turn")
+        # Extra-only drift, the one trusted server still connected -- see
+        # module docstring's "A STALE RESTART MUST DEGRADE" section for
+        # why this exact shape is safe to proceed past rather than refuse.
+        return _ManifestVerdict("degraded",
+            "Sonic is running in reduced mode: SPECTRA is running older "
+            f"code than Sonic's tools (extra: {_names_phrase(extra)}). "
+            "Restart SPECTRA to bring Sonic fully back.")
+
+    servers = {s.get("name"): s.get("status") for s in (init.get("mcp_servers") or [])}
+    if servers != {MCP_SERVER_NAME: "connected"}:
+        return _ManifestVerdict("refused",
+            f"settings-agent CLI mcp_servers was {servers!r}, expected only "
+            f"{MCP_SERVER_NAME!r} connected -- refusing to trust this turn")
+    return _ManifestVerdict("ok", None)
 
 
 def _client_available() -> str:
@@ -247,23 +363,22 @@ def _subprocess_env(token: str, workdir: Path) -> dict:
     return env
 
 
-def _verify_tool_manifest(events: list[dict]) -> None:
-    """Module docstring point 5 -- re-checked on every call, not assumed
-    from the launch flags alone. Raises SettingsAgentUnavailable (never
-    silently trusts a wider transcript) if the live tool manifest, MCP
-    server set, or permission mode isn't exactly what was configured."""
-    init = next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), None)
-    if init is None:
-        raise SettingsAgentUnavailable("settings-agent CLI produced no system/init event -- refusing to trust this turn")
-    if tuple(sorted(init.get("tools") or ())) != TOOL_NAMES:
-        raise SettingsAgentUnavailable(
-            f"settings-agent CLI tool manifest was {init.get('tools')!r}, "
-            f"expected exactly {list(TOOL_NAMES)} -- refusing to trust this turn")
-    servers = {s.get("name"): s.get("status") for s in (init.get("mcp_servers") or [])}
-    if servers != {MCP_SERVER_NAME: "connected"}:
-        raise SettingsAgentUnavailable(
-            f"settings-agent CLI mcp_servers was {servers!r}, expected only "
-            f"{MCP_SERVER_NAME!r} connected -- refusing to trust this turn")
+def _verify_tool_manifest(events: list[dict]) -> Optional[str]:
+    """Module docstring point 5 / "A STALE RESTART MUST DEGRADE" --
+    re-checked on every call, not assumed from the launch flags alone.
+    Delegates the actual decision to _classify_manifest() (shared with
+    _record_usage() below, so the two can never disagree about what
+    happened this turn) and then ACTS on it: "ok" returns None, "degraded"
+    logs at WARNING and returns the short, plain-language notice instead
+    of raising, "refused" logs the same way and raises
+    SettingsAgentUnavailable with that notice as the message."""
+    verdict = _classify_manifest(events)
+    if verdict.outcome == "ok":
+        return None
+    logger.warning("settings-agent CLI tool manifest %s this turn: %s", verdict.outcome, verdict.notice)
+    if verdict.outcome == "refused":
+        raise SettingsAgentUnavailable(verdict.notice)
+    return verdict.notice
 
 
 def _record_usage(events: list[dict]) -> None:
@@ -278,13 +393,24 @@ def _record_usage(events: list[dict]) -> None:
     `usage` key at all — that is the "runtime didn't report it" case
     sonic_usage.py's module docstring says never to paper over with a
     fabricated zero. Never raises — a broken usage record must never
-    break a real chat turn."""
+    break a real chat turn.
+
+    Tags the record with the SAME manifest verdict _verify_tool_manifest()
+    would reach ("ok" / "degraded" / "refused"), via the shared, non-
+    raising _classify_manifest() — real tokens were spent either way
+    (hence this function still runs unconditionally, before that trust
+    decision is acted on), but a refused turn must never be counted
+    alongside a genuinely successful one in any later "how much usage
+    actually got him an answer" reading of this log (2026-11-02
+    hardening, data/sonic-jukebox-unresponsive/report.md's optional
+    recommendation)."""
     final = next((e for e in reversed(events) if e.get("type") == "result"), None)
     if final is None or "usage" not in final:
         return
     usage = final.get("usage") or {}
     model_usage = final.get("modelUsage") or {}
     model_name = next(iter(model_usage), None) or config.settings_agent_model()
+    outcome = _classify_manifest(events).outcome
     try:
         sonic_usage.record(
             backend="cli", model=model_name,
@@ -295,6 +421,7 @@ def _record_usage(events: list[dict]) -> None:
             cost_usd=final.get("total_cost_usd"),
             session_id=final.get("session_id"),
             rounds=final.get("num_turns"),
+            outcome=outcome,
         )
     except Exception:
         logger.exception("sonic-usage record failed (cli backend)")
@@ -310,8 +437,11 @@ def _parse_transcript(events: list[dict]) -> dict:
     cross-domain operation set (settings_agent.ALL_OPERATIONS) without a
     per-operation special case here. `reply` is the terminal result
     event's own text, shown to the user as conversation, never consulted
-    to decide what changed."""
-    _verify_tool_manifest(events)
+    to decide what changed -- EXCEPT for a degraded-manifest notice
+    (below), which is prepended to it so the reduced-mode warning is
+    visible in the one place a chat UI always renders without any
+    frontend change: the reply area itself."""
+    degraded_notice = _verify_tool_manifest(events)
 
     tool_use_names: dict[str, str] = {}
     applied: list[dict] = []
@@ -345,11 +475,16 @@ def _parse_transcript(events: list[dict]) -> dict:
     if final.get("is_error"):
         raise SettingsAgentUnavailable(str(final.get("result") or "settings-agent CLI call failed"))
 
+    reply = final.get("result", "")
+    if degraded_notice:
+        reply = f"{degraded_notice}\n\n{reply}" if reply else degraded_notice
+
     return {
         "session_id": final.get("session_id"),
-        "reply": final.get("result", ""),
+        "reply": reply,
         "changes": applied,
         "rejected": rejected,
+        "degraded": degraded_notice,
     }
 
 
