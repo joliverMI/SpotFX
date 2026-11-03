@@ -79,6 +79,14 @@ TOKEN_CACHE = PROFILES_DIR.parent / ".spotify_token_cache_capture"
 RECORD_FILE = PROFILES_DIR.parent / "spotify_capture_auth.json"
 MAIN_TOKEN_CACHE = PROFILES_DIR.parent / ".spotify_token_cache"   # read only
 
+# After Spotify refuses an end-of-song pause, how long its player state may
+# still claim the song is playing: measured live on the second G5 trial
+# (2026-11-02) — a read 115 ms after the 403 still said "playing", one ~470 ms
+# later said stopped. So up to REREAD_TRIES reads, REREAD_GAP_S apart (~2 s).
+REREAD_TRIES = 4
+REREAD_GAP_S = 0.5
+_reread_sleep = time.sleep          # tests replace it
+
 STATE_TTL_S = 15 * 60
 LIFETIME_DAYS = 180              # Spotify's refresh tokens, like the main one
 DAY_MS = 86_400_000
@@ -170,9 +178,12 @@ class SecondAccountSpotify(spotipy.Spotify):
         violated" — what it answers for pausing a stopped player; seen live
         on the first G5 trial, 2026-11-02, where it threw away a complete
         capture). So on the end-of-song let-go ONLY, a failed pause is
-        followed by a fresh read: if the system's song is no longer playing
-        it has let go by itself (`why: "ended"`, record cleared); if it still
-        is, the pause's own error is raised and the record is KEPT, so the
+        followed by fresh reads — Spotify's own player state lags its 403 by
+        about half a second, so up to REREAD_TRIES of them, REREAD_GAP_S
+        apart: the first that shows nothing of the system's playing means it
+        has let go by itself (`why: "ended"`, record cleared); still the
+        system's after the last, the pause's own error is raised and the
+        record is KEPT, so the
         caller's next release can still stop it. Every other release raises
         a failed pause exactly as before."""
         record = second_account.started()
@@ -204,16 +215,23 @@ class SecondAccountSpotify(spotipy.Spotify):
         return {"paused": True, "why": why}
 
     def _stopped_by_itself(self, record: dict) -> bool:
-        """After a refused end-of-song pause: does a fresh read show nothing
-        of the system's playing any more? An unreadable answer is "no" — the
-        pause's own error stands."""
-        try:
-            after = self.current_playback()
-        except Exception as exc:          # noqa: BLE001 — the pause's error is the one to raise
-            logger.warning("Second account: couldn't re-read after a refused pause: %s", exc)
-            return False
-        still, _why = second_account.is_system_playback(record, after, end_of_song=True)
-        return not still
+        """After a refused end-of-song pause: within the bounded window
+        (REREAD_TRIES reads, REREAD_GAP_S apart, each after its wait), does
+        a read show nothing of the system's playing any more? A read that
+        fails counts as "still playing" for that try; none in the window
+        saying stopped means "no" — the pause's own error stands."""
+        for n in range(1, REREAD_TRIES + 1):
+            _reread_sleep(REREAD_GAP_S)
+            try:
+                after = self.current_playback()
+            except Exception as exc:      # noqa: BLE001 — the pause's error is the one to raise
+                logger.warning("Second account: couldn't re-read after a refused pause "
+                               "(try %d of %d): %s", n, REREAD_TRIES, exc)
+                continue
+            still, _why = second_account.is_system_playback(record, after, end_of_song=True)
+            if not still:
+                return True
+        return False
 
 
 def _oauth(cache_handler) -> SpotifyOAuth:
