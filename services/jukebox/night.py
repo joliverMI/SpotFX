@@ -1081,7 +1081,9 @@ class JukeboxRunner:
         """A guest's song (services/jukebox/guests.py): placed by fair order
         (its `round`), then refused — and taken back out — if it would start
         later than `latest_start_ms` from now (it would play after the night
-        ends). Answers where it landed and when it plays."""
+        ends). Answers where it landed and when it plays — honestly: a song
+        that still needs learning first reports no ETA (`starts_in_ms:
+        None`), never the as-if-ready time used only to judge last call."""
         async with self._get_lock():
             self._ensure_loaded()
             if not self.running:
@@ -1093,11 +1095,16 @@ class JukeboxRunner:
             # ever slides it back; the projection skips a song that isn't
             # ready, so it is asked as if it were)
             entry.ready = True
-            starts = self._starts_in(entry.id)
-            if latest_start_ms is not None and (starts is None or starts > latest_start_ms):
+            starts_if_ready = self._starts_in(entry.id)
+            if latest_start_ms is not None and (starts_if_ready is None
+                                                 or starts_if_ready > latest_start_ms):
                 self.night.line.remove(entry)
-                return {"status": "refused", "reason": "too_late", "starts_in_ms": starts}
+                return {"status": "refused", "reason": "too_late", "starts_in_ms": starts_if_ready}
             entry.ready = self._ready_at_add(entry)
+            # the ETA shown to him must match the song's own real state —
+            # one still waiting on the hidden player reports none, not the
+            # as-if-ready time above
+            starts = starts_if_ready if entry.ready else None
             self._log(f"{entry.added_by if entry.added_by == 'host' else 'a guest'} added "
                       f"{entry.title or entry.uri} (song {entry.round} of theirs tonight)")
             await self._persist()

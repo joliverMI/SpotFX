@@ -438,7 +438,11 @@ def test_a_new_song_is_judged_against_last_call_by_its_place_not_refused_for_wai
         e = LineEntry(id=uuid.uuid4().hex[:10], uri=jb_uri(3), title="J3", duration_ms=100_000,
                       added_by="phone-a")
         out = await r.w.runner.add_entry(e, latest_start_ms=3_600_000)
-        assert out["status"] == "added" and out["starts_in_ms"] is not None
+        # not refused for waiting — last call is judged as if it were ready —
+        # but the ETA handed back is honest about the song actually needing
+        # to be learned first: no fake "plays in..." number (spotfx-guest-
+        # known-songs-fix), since it isn't ready yet.
+        assert out["status"] == "added" and out["starts_in_ms"] is None
         assert r.entry(e.id).ready is False
     _run(go())
 

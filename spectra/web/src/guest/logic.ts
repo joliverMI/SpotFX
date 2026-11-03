@@ -217,9 +217,15 @@ export function addStatus(req: { open: boolean; detail: string; closes_at: strin
            text: `You can add ${left} more song${left === 1 ? '' : 's'} · requests close at ${req.closes_at}` };
 }
 
-/** After an add: "Added — plays in ~25 min (~9:46)". */
-export function addedText(startsInMs: number | null, nowMs: number, locale?: string): string {
-  if (startsInMs === null) return 'Added to the line.';
+/** After an add: "Added — plays in ~25 min (~9:46)". A song that still
+ *  needs learning first (the lights don't know it yet) has no honest ETA —
+ *  `startsInMs` is `null` for exactly that case (services/jukebox/night.py's
+ *  `add_entry`) — so it says so instead of a number that ignores the hold. */
+export function addedText(startsInMs: number | null, nowMs: number, known: boolean,
+                          locale?: string): string {
+  if (startsInMs === null) {
+    return known ? 'Added to the line.' : "Added — the lights learn it first, then it plays.";
+  }
   return `Added — plays ${inWords(startsInMs)} (~${clockAt(nowMs, startsInMs, locale)})`;
 }
 

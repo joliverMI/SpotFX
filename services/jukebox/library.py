@@ -1,9 +1,14 @@
 """
 SpotFX — the Jukebox's view of HIS LIBRARY (data/jukebox-plan/report.md §7.2,
 phase 2 PR 2.2): the songs SpotFX has played before, searchable by title and
-artist, so a guest's search shows "Ready: the lights already know these"
-before anything from Spotify; and whether a song is KNOWN — its audio shape
-is captured, so the lights follow it from the first beat.
+artist, so a guest's search shows them before anything from Spotify; and
+whether a song is KNOWN — its audio shape is captured, so the lights follow
+it from the first beat. The guest page's "Ready: the lights already know
+these" group is gated on KNOWN, never on library membership
+(spotfx-guest-known-songs-fix) — a library song with no captured shape still
+needs to be learned first, same as any Spotify one; a known song that never
+played through a profile (e.g. learned ahead of time) is Ready even though
+it isn't in the library at all.
 
 THE LIBRARY is his profile store, storage/profiles/*.json (every song SpotFX
 has played gets one, with its title, artist and `spotify_uri`), read as plain
