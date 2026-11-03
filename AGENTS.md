@@ -11091,12 +11091,17 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   start from Spotify's progress — proven on a real FIFO in
   `tests/test_capture_lane_timing.py` (a click at 2.0 s lands at 2008 ms,
   and moves by the hold when the hold is left out); (3) it pauses the hidden
-  player on every way out, and a moved governor `seq`, a stalled progress
+  player on every way out — at a song's natural end a pause Spotify refuses
+  because the track already stopped by itself (403 "Restriction violated",
+  the first live G5 trial's failure) is a let-go (`ended`, the capture is
+  saved), checked by a fresh read; still playing, the job fails and the
+  finally pauses it — and a moved governor `seq`, a stalled progress
   (`STALL_TOLERANCE_MS`) or missing samples (`pcm.drift_from`) fail the
   song with nothing written; (4) it decides nothing: SpotFX tells it what
   to learn (`POST /learn` with `storage/capture_lane_key`) and does the
-  main-account follow-ups itself. It has never driven the real hidden
-  player — that is a gate, not a test.
+  main-account follow-ups itself. Its first live run (G5, 2026-11-02)
+  played a song on the real hidden player inaudibly and lost it to (3)'s
+  end-of-song race; real-device timing is still unproven.
 - **ABSORB-THEN-QUEUE (phase 4, PR 4.2)** is `services/jukebox/learning.py`
   (its docstring is the binding statement), its own supervised task in
   main.py, talking to the lane through `services/jukebox/lane_client.py`

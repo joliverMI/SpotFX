@@ -189,6 +189,11 @@ class Account:
         self.on_request = None
         self.devices = [{"id": DEV, "name": "serenity-capture", "volume_percent": 100,
                          "is_restricted": False}]
+        # Spotify refusing the next N pauses with its 403 "Restriction
+        # violated"; `refusal_stops` = the track had already stopped by itself
+        # (the race lost at a song's natural end, first G5 trial, 2026-11-02)
+        self.refuse_pauses = 0
+        self.refusal_stops = True
 
     def writes(self) -> list[tuple[str, str]]:
         return [(m, p) for m, p, _ in self.requests if m not in ("GET", "HEAD", "OPTIONS")]
@@ -226,6 +231,12 @@ class Account:
                             "device_id": (params or {}).get("device_id"),
                             "is_playing": True, "at": self.clock()}
             status, body = 204, None
+        elif m == "PUT" and path.endswith("/me/player/pause") and self.refuse_pauses > 0:
+            self.refuse_pauses -= 1
+            if self.refusal_stops and self.playing:
+                self.playing["is_playing"] = False
+            status, body = 403, {"error": {"status": 403, "reason": "UNKNOWN",
+                                           "message": "Player command failed: Restriction violated"}}
         elif m == "PUT" and path.endswith("/me/player/pause"):
             if self.playing:
                 self.playing["is_playing"] = False
@@ -454,6 +465,45 @@ def test_the_end_of_the_systems_song_lets_go_of_its_continuation(account):
     assert account.writes() == [("PUT", "/v1/me/player/pause")]
 
 
+def test_a_refused_end_of_song_pause_on_a_song_that_already_stopped_is_a_let_go(account):
+    """The race lost at a song's natural end: the read says playing, the
+    track stops, Spotify refuses the pause (403 Restriction violated). A
+    fresh read shows nothing of the system's playing, so it has let go."""
+    c = _client()
+    _started_then_locked(account, c)
+    account.playing = {"uri": URI, "device_id": DEV, "is_playing": True, "at": time.monotonic()}
+    account.refuse_pauses = 1
+    assert c.release_system_playback(end_of_song=True) == {"paused": False, "why": "ended"}
+    assert account.writes() == [("PUT", "/v1/me/player/pause")]
+    assert sa.started() is None
+    with pytest.raises(sa.SecondAccountLocked):      # the permit is still single use
+        c.pause_playback(device_id=DEV)
+
+
+def test_a_refused_end_of_song_pause_on_a_song_still_playing_raises_and_keeps_the_record(account):
+    import spotipy
+    c = _client()
+    _started_then_locked(account, c)
+    account.playing = {"uri": URI, "device_id": DEV, "is_playing": True, "at": time.monotonic()}
+    account.refuse_pauses, account.refusal_stops = 1, False
+    with pytest.raises(spotipy.SpotifyException):
+        c.release_system_playback(end_of_song=True)
+    assert sa.started() is not None                # the next release can still stop it
+    assert c.release_system_playback() == {"paused": True, "why": "system_song"}
+    assert sa.started() is None and account.playing["is_playing"] is False
+
+
+def test_a_refused_pause_anywhere_but_a_songs_end_raises_as_before(account):
+    import spotipy
+    c = _client()
+    _started_then_locked(account, c)
+    account.playing = {"uri": URI, "device_id": DEV, "is_playing": True, "at": time.monotonic()}
+    account.refuse_pauses = 1                      # even though it stops by itself
+    with pytest.raises(spotipy.SpotifyException):
+        c.release_system_playback()
+    assert sa.started() is not None
+
+
 def test_a_context_started_play_is_recognised_and_released(account):
     """start_playback(context_uri=...) stores the context's own uri; Spotify
     then reports a TRACK playing inside that context, never the context uri
@@ -586,6 +636,37 @@ def test_the_lane_learns_a_song_while_the_lock_is_on(tmp_path, monkeypatch, acco
     assert out.status == "ok", (out.reason, out.detail)
     assert account.writes() == [("PUT", "/v1/me/player/play"), ("PUT", "/v1/me/player/pause")]
     assert out.released == "system_song" and sa.started() is None
+
+
+def test_a_refused_pause_at_the_songs_natural_end_still_saves_the_capture(
+        tmp_path, monkeypatch, account):
+    """The first live G5 trial (2026-11-02): the song played to its end, the
+    let-go's pause landed after the track had stopped and Spotify answered
+    403 "Restriction violated" — and the lane threw the whole capture away
+    as an error. The song had let go by itself; the capture is saved."""
+    sa.set_enabled(True, by="test")
+    lane, clock, rd, d = _lane(tmp_path, monkeypatch, account)
+    account.refuse_pauses = 1
+    out = _learn(lane)
+    assert out.status == "ok", (out.reason, out.detail)
+    assert out.released == "ended"
+    assert list(d.glob("*.npz")) and out.npz_file
+    assert account.writes() == [("PUT", "/v1/me/player/play"), ("PUT", "/v1/me/player/pause")]
+    assert account.playing["is_playing"] is False and sa.started() is None
+
+
+def test_a_refused_pause_at_the_songs_end_with_it_still_playing_fails_and_stops_it(
+        tmp_path, monkeypatch, account):
+    sa.set_enabled(True, by="test")
+    lane, clock, rd, d = _lane(tmp_path, monkeypatch, account)
+    account.refuse_pauses, account.refusal_stops = 1, False
+    out = _learn(lane)
+    assert out.status == "failed" and out.reason == "error"
+    assert not list(d.glob("*.npz"))
+    assert account.writes() == [("PUT", "/v1/me/player/play"), ("PUT", "/v1/me/player/pause"),
+                                ("PUT", "/v1/me/player/pause")]
+    assert out.released == "system_song"
+    assert account.playing["is_playing"] is False and sa.started() is None
 
 
 def test_off_the_lane_takes_no_song_and_touches_nothing(tmp_path, monkeypatch, account):

@@ -92,6 +92,9 @@ class CaptureGateway:
     def release(self, *, end_of_song: bool = False) -> dict:
         """Pause the song the system started — if it is still what's playing,
         on the device it started it on — and forget it. `{"paused", "why"}`
-        (second_account.is_system_playback's words)."""
+        (second_account.is_system_playback's words, plus "ended" for a
+        song's natural end that let go on its own — see
+        api.spotify_capture.SecondAccountSpotify.release_system_playback's
+        own docstring)."""
         self._spaced(MIN_CONTROL_SPACING_S)
         return self._client().release_system_playback(end_of_song=end_of_song)

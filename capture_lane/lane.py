@@ -32,6 +32,12 @@ fresh read shows the song playing there is still the one it started
 the system's song on, and never stops a song the second user chose. A lock
 turned off mid-song is noticed within one poll (`_check_cancel`, at most
 POLL_S) and ends the job as `account_locked`.
+At the song's NATURAL END the let-go's pause can land after the track has
+already stopped by itself; Spotify refuses it (403 "Restriction violated").
+That is a let-go, not a failure — the release re-reads and, with nothing of
+the system's playing, answers `ended` and the capture is saved
+(api/spotify_capture.SecondAccountSpotify.release_system_playback). Still
+playing after a refused pause, the job fails and the `finally` pauses it.
 
 THE SONG-TIME of each sample: `origin + n/rate` is when sample n arrived
 (capture_lane.pcm); minus the governor's own reported hold (`offset_ms`,
@@ -137,7 +143,8 @@ class Outcome:
     head_ms: Optional[int] = None
     latency_ms: Optional[int] = None
     npz_file: str = ""
-    released: str = ""          # how it let go: second_account.is_system_playback's words
+    released: str = ""          # how it let go: second_account.is_system_playback's words,
+                                 # plus "ended" (a refused end-of-song pause that let go)
 
 
 class JobFailed(Exception):
