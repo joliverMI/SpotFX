@@ -162,7 +162,19 @@ class SecondAccountSpotify(spotipy.Spotify):
         `end_of_song` lets a different song on the system's own device
         straight after its song ended (Spotify carrying on from the system's
         play) count as the system's — the capture lane passes it only on a
-        song's natural end."""
+        song's natural end.
+
+        AT A SONG'S NATURAL END THE PAUSE CAN LOSE A RACE with the track's
+        own stop: the read says it is still playing, the track ends, and
+        Spotify refuses the pause ("403 Player command failed: Restriction
+        violated" — what it answers for pausing a stopped player; seen live
+        on the first G5 trial, 2026-11-02, where it threw away a complete
+        capture). So on the end-of-song let-go ONLY, a failed pause is
+        followed by a fresh read: if the system's song is no longer playing
+        it has let go by itself (`why: "ended"`, record cleared); if it still
+        is, the pause's own error is raised and the record is KEPT, so the
+        caller's next release can still stop it. Every other release raises
+        a failed pause exactly as before."""
         record = second_account.started()
         if not record:
             return {"paused": False, "why": "nothing_started"}
@@ -175,11 +187,33 @@ class SecondAccountSpotify(spotipy.Spotify):
         self._release_permit.armed = True
         try:
             self.pause_playback(device_id=record["device_id"])
+        except Exception as exc:
+            self._release_permit.armed = False
+            if not end_of_song or isinstance(exc, second_account.SecondAccountLocked):
+                raise
+            if not self._stopped_by_itself(record):
+                raise
+            second_account.clear_started()
+            logger.info("Second account: the pause was refused (%s), but the system's song "
+                        "had already stopped by itself — let go (ended)", exc)
+            return {"paused": False, "why": "ended"}
         finally:
             self._release_permit.armed = False
         second_account.clear_started()
         logger.info("Second account: paused the system's own song (%s)", why)
         return {"paused": True, "why": why}
+
+    def _stopped_by_itself(self, record: dict) -> bool:
+        """After a refused end-of-song pause: does a fresh read show nothing
+        of the system's playing any more? An unreadable answer is "no" — the
+        pause's own error stands."""
+        try:
+            after = self.current_playback()
+        except Exception as exc:          # noqa: BLE001 — the pause's error is the one to raise
+            logger.warning("Second account: couldn't re-read after a refused pause: %s", exc)
+            return False
+        still, _why = second_account.is_system_playback(record, after, end_of_song=True)
+        return not still
 
 
 def _oauth(cache_handler) -> SpotifyOAuth:
