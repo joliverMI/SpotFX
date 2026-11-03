@@ -143,7 +143,8 @@ class Outcome:
     head_ms: Optional[int] = None
     latency_ms: Optional[int] = None
     npz_file: str = ""
-    released: str = ""          # how it let go: second_account.is_system_playback's words
+    released: str = ""          # how it let go: second_account.is_system_playback's words,
+                                 # plus "ended" (a refused end-of-song pause that let go)
 
 
 class JobFailed(Exception):
