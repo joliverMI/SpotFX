@@ -194,6 +194,11 @@ class Account:
         # (the race lost at a song's natural end, first G5 trial, 2026-11-02)
         self.refuse_pauses = 0
         self.refusal_stops = True
+        # how many player reads after such a refusal still report the song
+        # playing before Spotify's state catches up (second G5 trial: ~0.5 s)
+        self.stale_reads = 0
+        self._stale_left = 0
+        self.sleeps: list[float] = []
 
     def writes(self) -> list[tuple[str, str]]:
         return [(m, p) for m, p, _ in self.requests if m not in ("GET", "HEAD", "OPTIONS")]
@@ -212,6 +217,10 @@ class Account:
         body: Optional[dict] = {}
         status = 200
         if m == "GET" and path.endswith("/me/player"):
+            if self._stale_left > 0:
+                self._stale_left -= 1
+                if self._stale_left == 0 and self.playing:
+                    self._stop_after_this_read = True
             if not self.playing:
                 status, body = 204, None
             else:
@@ -234,7 +243,10 @@ class Account:
         elif m == "PUT" and path.endswith("/me/player/pause") and self.refuse_pauses > 0:
             self.refuse_pauses -= 1
             if self.refusal_stops and self.playing:
-                self.playing["is_playing"] = False
+                if self.stale_reads:
+                    self._stale_left = self.stale_reads   # it stops; reads lag behind
+                else:
+                    self.playing["is_playing"] = False
             status, body = 403, {"error": {"status": 403, "reason": "UNKNOWN",
                                            "message": "Player command failed: Restriction violated"}}
         elif m == "PUT" and path.endswith("/me/player/pause"):
@@ -243,6 +255,9 @@ class Account:
             status, body = 204, None
         elif m != "GET":
             status, body = 204, None
+        if getattr(self, "_stop_after_this_read", False):
+            self._stop_after_this_read = False
+            self.playing["is_playing"] = False                # the next read sees it stopped
         r = requests.Response()
         r.status_code = status
         r._content = b"" if body is None else json.dumps(body).encode()
@@ -253,7 +268,9 @@ class Account:
 
 @pytest.fixture
 def account(monkeypatch):
+    from api import spotify_capture as cap
     acct = Account()
+    monkeypatch.setattr(cap, "_reread_sleep", acct.sleeps.append, raising=False)
 
     def transport(self, method, url, params=None, data=None, **_kw):
         return acct.handle(method, url, params=params, data=data)
@@ -493,6 +510,32 @@ def test_a_refused_end_of_song_pause_on_a_song_still_playing_raises_and_keeps_th
     assert sa.started() is None and account.playing["is_playing"] is False
 
 
+@pytest.mark.parametrize("stale", [1, 2, 3])
+def test_a_lagging_player_inside_the_window_still_counts_as_let_go(account, stale):
+    """The second G5 trial: right after the 403 Spotify still reported the
+    song playing, and only ~0.5 s later stopped. Reads keep coming, 0.5 s
+    apart, up to the window; the first that shows it stopped is a let-go."""
+    c = _client()
+    _started_then_locked(account, c)
+    account.playing = {"uri": URI, "device_id": DEV, "is_playing": True, "at": time.monotonic()}
+    account.refuse_pauses, account.stale_reads = 1, stale
+    assert c.release_system_playback(end_of_song=True) == {"paused": False, "why": "ended"}
+    assert account.sleeps == [0.5] * (stale + 1)
+    assert account.writes() == [("PUT", "/v1/me/player/pause")] and sa.started() is None
+
+
+def test_a_player_still_playing_past_the_window_raises_and_keeps_the_record(account):
+    import spotipy
+    c = _client()
+    _started_then_locked(account, c)
+    account.playing = {"uri": URI, "device_id": DEV, "is_playing": True, "at": time.monotonic()}
+    account.refuse_pauses, account.stale_reads = 1, 4       # every read in the window says playing
+    with pytest.raises(spotipy.SpotifyException):
+        c.release_system_playback(end_of_song=True)
+    assert account.sleeps == [0.5] * 4                       # the window is bounded
+    assert sa.started() is not None
+
+
 def test_a_refused_pause_anywhere_but_a_songs_end_raises_as_before(account):
     import spotipy
     c = _client()
@@ -651,6 +694,21 @@ def test_a_refused_pause_at_the_songs_natural_end_still_saves_the_capture(
     assert out.status == "ok", (out.reason, out.detail)
     assert out.released == "ended"
     assert list(d.glob("*.npz")) and out.npz_file
+    assert account.writes() == [("PUT", "/v1/me/player/play"), ("PUT", "/v1/me/player/pause")]
+    assert account.playing["is_playing"] is False and sa.started() is None
+
+
+def test_a_lagging_player_at_the_songs_natural_end_still_saves_the_capture(
+        tmp_path, monkeypatch, account):
+    """The second live G5 trial (2026-11-02): the 403 again, and a read 115 ms
+    later still said playing; a read ~0.5 s after that said stopped. Inside
+    the re-read window, the capture is saved."""
+    sa.set_enabled(True, by="test")
+    lane, clock, rd, d = _lane(tmp_path, monkeypatch, account)
+    account.refuse_pauses, account.stale_reads = 1, 2
+    out = _learn(lane)
+    assert out.status == "ok", (out.reason, out.detail)
+    assert out.released == "ended" and list(d.glob("*.npz"))
     assert account.writes() == [("PUT", "/v1/me/player/play"), ("PUT", "/v1/me/player/pause")]
     assert account.playing["is_playing"] is False and sa.started() is None
 

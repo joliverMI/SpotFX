@@ -34,10 +34,12 @@ turned off mid-song is noticed within one poll (`_check_cancel`, at most
 POLL_S) and ends the job as `account_locked`.
 At the song's NATURAL END the let-go's pause can land after the track has
 already stopped by itself; Spotify refuses it (403 "Restriction violated").
-That is a let-go, not a failure — the release re-reads and, with nothing of
-the system's playing, answers `ended` and the capture is saved
+That is a let-go, not a failure — the release re-reads (Spotify's player
+state lags its own 403 by about half a second, so up to REREAD_TRIES reads,
+REREAD_GAP_S apart, ~2 s) and, on the first showing nothing of the system's
+playing, answers `ended` and the capture is saved
 (api/spotify_capture.SecondAccountSpotify.release_system_playback). Still
-playing after a refused pause, the job fails and the `finally` pauses it.
+playing after the window, the job fails and the `finally` pauses it.
 
 THE SONG-TIME of each sample: `origin + n/rate` is when sample n arrived
 (capture_lane.pcm); minus the governor's own reported hold (`offset_ms`,
