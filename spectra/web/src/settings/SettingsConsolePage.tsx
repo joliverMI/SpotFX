@@ -20,7 +20,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
-import { formatAppliedStatus, formatPreview, formatRejectedStatus } from '../lib/sonicPreview';
+import { formatAppliedStatus, formatPreview, formatRejectedStatus, sonicErrorDetail } from '../lib/sonicPreview';
 import { uuid } from '../lib/uid';
 import {
   useSendSettingsMessage, useSettingsLog, useSettingsRegistry,
@@ -106,12 +106,16 @@ export default function SettingsConsolePage() {
           setMessages((m) => [...m, { id: uuid(), role: 'preview', text: previewLines.join('\n\n') }]);
         }
       }
-    } catch {
+    } catch (err) {
       setMessages((m) => [...m, {
         id: uuid(), role: 'assistant',
         text: "Couldn't reach Sonic — see the toast for why.",
       }]);
-      toast('Sonic unavailable — is ANTHROPIC_API_KEY configured?', 'error');
+      // The server's own refusal sentence, not a hard-coded hint that's
+      // wrong for whichever backend ("api" vs "cli") actually refused —
+      // see sonicErrorDetail's own docstring for the 2026-11-02 incident
+      // this answers.
+      toast(`Sonic unavailable — ${sonicErrorDetail(err)}`, 'error');
     }
   }
 
@@ -199,6 +203,7 @@ export default function SettingsConsolePage() {
       <div className="card settings-console-chat">
         <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           Sonic — settings console <HelpLink topic="settings-console" />
+          <HelpLink topic="sonic-unavailable" title="If Sonic says it's unavailable" />
         </div>
         <div className="settings-console-messages" ref={scrollRef}>
           {messages.length === 0 ? (

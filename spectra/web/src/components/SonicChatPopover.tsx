@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useToast } from './Toast';
 import HelpLink from '../help/HelpLink';
-import { formatAppliedStatus, formatPreview, formatRejectedStatus } from '../lib/sonicPreview';
+import { formatAppliedStatus, formatPreview, formatRejectedStatus, sonicErrorDetail } from '../lib/sonicPreview';
 import { uuid } from '../lib/uid';
 import { useSendSettingsMessage, useTranscribeSettingsAudio, useUndoLastSceneChange } from '../queries';
 import type { SettingsChatMessage } from '../types';
@@ -72,12 +72,16 @@ export default function SonicChatPopover({ helpTopic = 'sonic-scenes' }: { helpT
           setMessages((m) => [...m, { id: uuid(), role: 'preview', text: previewLines.join('\n\n') }]);
         }
       }
-    } catch {
+    } catch (err) {
       setMessages((m) => [...m, {
         id: uuid(), role: 'assistant',
         text: "Couldn't reach Sonic — see the toast for why.",
       }]);
-      toast('Sonic unavailable — is ANTHROPIC_API_KEY configured?', 'error');
+      // The server's own refusal sentence, not a hard-coded hint that's
+      // wrong for whichever backend ("api" vs "cli") actually refused —
+      // see sonicErrorDetail's own docstring for the 2026-11-02 incident
+      // this answers.
+      toast(`Sonic unavailable — ${sonicErrorDetail(err)}`, 'error');
     }
   }
 
@@ -178,6 +182,7 @@ export default function SonicChatPopover({ helpTopic = 'sonic-scenes' }: { helpT
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
             flares · scene settings · new scenes · overwrite (backed up)
             {' '}<HelpLink topic="sonic-scene-backups" title="Backups, undo, and preview" />
+            {' '}<HelpLink topic="sonic-unavailable" title="If Sonic says it's unavailable" />
           </div>
           <div className="settings-console-messages" ref={scrollRef} style={{ flex: 1, minHeight: 0 }}>
             {messages.length === 0 ? (

@@ -59,3 +59,29 @@ export function formatAppliedStatus(change: SonicAppliedChange): string {
 export function formatRejectedStatus(change: SonicRejectedChange): string {
   return change.reason ?? 'That request was refused.';
 }
+
+/** The ONE place a thrown Sonic-message error (`apiPost`'s own
+ * `Error("POST ... → 503: <server detail>")` shape, api/client.ts's
+ * `call()`) is turned into something to show him — the server's OWN
+ * `detail`/`error` sentence, never a hard-coded hint that's wrong for
+ * whichever backend actually refused. Found live 2026-11-02 (data/
+ * sonic-jukebox-unresponsive/report.md): the chat's hard-coded "is
+ * ANTHROPIC_API_KEY configured?" toast is flatly wrong for the "cli"
+ * (subscription) backend, which refused for an entirely different,
+ * self-explanatory reason (a stale-restart tool-manifest mismatch) and
+ * had nothing to do with an API key. Every SettingsAgentUnavailable
+ * message in this codebase is already a single short, plain-language
+ * sentence (no raw stack trace, no dumped manifest — settings_agent_
+ * cli.py's own hardening caps even the manifest-mismatch case to a short
+ * line), so this only strips the leading "METHOD url → status: " prefix
+ * `call()` adds and caps length as a defensive backstop, never re-derives
+ * or guesses at a reason the server didn't say. */
+export function sonicErrorDetail(err: unknown, fallback = "Sonic didn't say why — see the console for the full error."): string {
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  const afterStatus = message.replace(/^\S+ \S+ → \d+:\s*/, '');
+  const detail = (afterStatus || message).trim();
+  if (!detail) return fallback;
+  const firstSentence = detail.split(/(?<=[.!?])\s/, 1)[0];
+  const MAX_LEN = 240;
+  return firstSentence.length > MAX_LEN ? `${firstSentence.slice(0, MAX_LEN - 1)}…` : firstSentence;
+}

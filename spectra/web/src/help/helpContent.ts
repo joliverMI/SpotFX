@@ -2709,6 +2709,16 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'sonic-unavailable',
+        title: 'If Sonic says it\'s unavailable',
+        keywords: 'sonic unavailable 503 error reduced mode degraded restart stale manifest anthropic api key cli backend not responding',
+        body: [
+          'A refusal always shows the real reason, read straight from the server — never a guess. On the subscription ("cli") backend the usual causes are: no subscription token configured yet, the CLI call timed out, or a stale-restart tool mismatch (below). On the default ("api") backend it usually means no ANTHROPIC_API_KEY is configured. The toast names which one actually happened, so don\'t assume it\'s the API key just because that used to be the only reason.',
+          'One specific case runs in REDUCED MODE instead of refusing: if SPECTRA was recently deployed (new code on disk) but the running process hasn\'t been restarted yet, Sonic\'s tool list and SPECTRA\'s own running code briefly disagree. When that happens and it\'s safe to — every tool SPECTRA already knows how to run is still there, just with a few newer ones it doesn\'t recognise yet — Sonic still answers, but says so plainly at the top of its reply and names the tool(s) it can\'t use yet. Nothing it actually did this turn is any less trustworthy; it just can\'t use anything added since the last restart. Restarting SPECTRA clears it.',
+          'If the mismatch goes the other way — SPECTRA\'s running code expects a tool that genuinely isn\'t there — Sonic refuses outright rather than guess at what changed, the same way it always has.',
+        ],
+      },
+      {
         id: 'settings-console-voice',
         title: 'Voice: the mic button',
         keywords: 'microphone record dictate speech transcribe',

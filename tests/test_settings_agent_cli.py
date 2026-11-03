@@ -627,3 +627,204 @@ def test_put_on_tv_widening_parses_from_its_structured_tool_result():
     assert result["changes"] == []
     assert [r["status"] for r in result["rejected"]] == ["needs_confirmation"]
     assert result["rejected"][0]["op"] == "put_on_tv"
+
+
+# ═══ 7. the 2026-11-02 stale-restart hardening (data/sonic-jukebox-
+# unresponsive/report.md): a manifest mismatch that is PURELY "the live
+# manifest reports some tool this running process doesn't expect yet, and
+# every tool this process DOES expect is still there" (the exact shape of
+# a deploy fast-forwarding /home/javi/SpotFX without restarting
+# spectra.service) now DEGRADES rather than refuses — every other
+# mismatch shape, including every real/synthetic fixture refused above,
+# is untouched and still refuses outright. Built with small, in-test
+# event lists rather than a new fixture file, since these are
+# hypothetical manifest shapes, not a real capture worth pinning as one. ═
+
+def _init_event(tools, servers_connected=True, session_id="synthetic-manifest-0001"):
+    return {
+        "type": "system", "subtype": "init", "session_id": session_id,
+        "tools": list(tools),
+        "mcp_servers": [{"name": "settings-console",
+                        "status": "connected" if servers_connected else "failed"}],
+    }
+
+
+def _result_event(text="All good.", is_error=False, usage=None,
+                  session_id="synthetic-manifest-0001"):
+    event = {
+        "type": "result", "subtype": "success" if not is_error else "error_during_execution",
+        "is_error": is_error, "session_id": session_id, "result": text,
+    }
+    if usage is not None:
+        event["usage"] = usage
+    return event
+
+
+def test_classify_manifest_degrades_on_a_single_extra_tool():
+    """The exact incident shape: every tool this process expects IS in
+    the live manifest (missing is empty), plus one the running process
+    doesn't recognise yet (extra, non-empty) -- safe, per module
+    docstring. The notice names the extra tool in plain words and is
+    short, never the two 128-element lists the pre-hardening message
+    dumped."""
+    from spectra.services import settings_agent_cli as sac
+
+    actual = list(sac.TOOL_NAMES) + ["mcp__settings-console__put_on_tv_newer"]
+    verdict = sac._classify_manifest([_init_event(actual)])
+    assert verdict.outcome == "degraded"
+    assert "reduced mode" in verdict.notice
+    assert "put_on_tv_newer" in verdict.notice
+    assert "restart" in verdict.notice.lower()
+    assert len(verdict.notice) < 400, "must be a short plain-language sentence, not a dumped manifest"
+
+
+def test_classify_manifest_refuses_when_a_known_tool_goes_missing():
+    """The OTHER direction -- the live manifest is missing a tool this
+    process actually expects -- stays a hard refusal: that is the shape
+    every historical-capture/fabrication fixture above exercises, and
+    nothing here loosens it, regardless of how many extra tools also
+    happen to be present alongside the missing one."""
+    from spectra.services import settings_agent_cli as sac
+
+    actual = [t for t in sac.TOOL_NAMES if t != sac.TOOL_NAMES[0]]
+    verdict = sac._classify_manifest([_init_event(actual)])
+    assert verdict.outcome == "refused"
+    assert "tool manifest" in verdict.notice
+    assert "missing" in verdict.notice
+    assert len(verdict.notice) < 400, "must be a short plain-language sentence, not a dumped manifest"
+
+
+def test_classify_manifest_refuses_on_a_stray_mcp_server_even_with_an_exact_tool_list():
+    """Tools match exactly but the one trusted server isn't reported
+    connected -- still a hard refusal; the degrade path only ever applies
+    to the extra-only tool-name shape, never to the server-identity
+    check."""
+    from spectra.services import settings_agent_cli as sac
+
+    verdict = sac._classify_manifest([_init_event(sac.TOOL_NAMES, servers_connected=False)])
+    assert verdict.outcome == "refused"
+    assert "mcp_servers" in verdict.notice
+
+
+def test_classify_manifest_refuses_extra_only_drift_if_the_server_is_not_connected():
+    """Belt-and-braces: even an extra-only (missing=empty) tool-name
+    mismatch must NOT degrade unless the one trusted server is actually
+    reporting itself connected -- the foundational assumption the whole
+    degrade path rests on."""
+    from spectra.services import settings_agent_cli as sac
+
+    actual = list(sac.TOOL_NAMES) + ["mcp__settings-console__put_on_tv_newer"]
+    verdict = sac._classify_manifest([_init_event(actual, servers_connected=False)])
+    assert verdict.outcome == "refused"
+
+
+def test_verify_tool_manifest_degrades_without_raising_and_logs_a_warning(caplog):
+    from spectra.services import settings_agent_cli as sac
+
+    actual = list(sac.TOOL_NAMES) + ["mcp__settings-console__put_on_tv_newer"]
+    with caplog.at_level("WARNING"):
+        notice = sac._verify_tool_manifest([_init_event(actual)])
+    assert notice is not None and "reduced mode" in notice
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings, "a manifest drift must be logged at WARNING"
+    assert "put_on_tv_newer" in warnings[0].getMessage()
+    assert len(warnings[0].getMessage()) < 500, \
+        "the journal line must carry the short set difference, not two full manifests"
+
+
+def test_verify_tool_manifest_still_raises_and_logs_on_a_missing_tool(caplog):
+    from spectra.services import settings_agent_cli as sac
+    from spectra.services.settings_agent import SettingsAgentUnavailable
+
+    actual = [t for t in sac.TOOL_NAMES if t != sac.TOOL_NAMES[0]]
+    with caplog.at_level("WARNING"):
+        with pytest.raises(SettingsAgentUnavailable, match="tool manifest"):
+            sac._verify_tool_manifest([_init_event(actual)])
+    assert any(r.levelname == "WARNING" for r in caplog.records), \
+        "the old incident shipped a bare 503 with NO journal line explaining it -- a refusal must now log"
+
+
+def test_parse_transcript_degrades_a_drifted_manifest_and_still_extracts_a_real_change():
+    """The turn completes: the structured tool_result is still trusted
+    (it went through the real dispatch table either way), `changes`
+    parses exactly as it would without any drift, and the degraded-mode
+    notice is PREPENDED to the reply -- "in the reply area," his own
+    words -- never hidden behind a separate field nothing renders."""
+    from spectra.services import settings_agent_cli as sac
+
+    actual = list(sac.TOOL_NAMES) + ["mcp__settings-console__put_on_tv_newer"]
+    events = [
+        _init_event(actual),
+        {
+            "type": "assistant",
+            "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "toolu_1", "name": "mcp__settings-console__set_setting"},
+            ]},
+        },
+        {
+            "type": "user",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_1", "content": [
+                    {"type": "text", "text": json.dumps({
+                        "status": "applied", "key": "brightness_multiplier",
+                        "old": 1.0, "new": 0.5, "summary": "brightness_multiplier: 1.0 → 0.5",
+                    })},
+                ]},
+            ]},
+        },
+        _result_event("Set it."),
+    ]
+    result = sac._parse_transcript(events)
+    assert result["degraded"] is not None and "reduced mode" in result["degraded"]
+    assert result["reply"].startswith(result["degraded"])
+    assert "Set it." in result["reply"]
+    assert len(result["changes"]) == 1
+    assert result["changes"][0]["key"] == "brightness_multiplier"
+
+
+def test_parse_transcript_has_no_degraded_field_on_an_exact_manifest_match():
+    """Every existing, exact-manifest fixture keeps answering `degraded:
+    None` -- additive, never a behaviour change for the common case."""
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(_load("cli_transcript_synthetic_overwrite_applied.json"))
+    assert result["degraded"] is None
+
+
+def test_record_usage_tags_the_manifest_outcome(tmp_path):
+    """The 'optional' recommendation: usage is still recorded on EVERY
+    outcome (tokens were genuinely spent regardless — _record_usage's own
+    docstring), but is now tagged with the real manifest verdict so a
+    refused/degraded turn is never silently counted the same as one that
+    actually answered him."""
+    import json as _json
+
+    from spectra import config as scfg
+    from spectra.services import settings_agent_cli as sac
+
+    def _entries():
+        return _json.loads(scfg.SONIC_USAGE_FILE.read_text())
+
+    ok_events = [_init_event(sac.TOOL_NAMES, session_id="s-ok"),
+                _result_event("ok.", usage={"input_tokens": 1, "output_tokens": 1}, session_id="s-ok")]
+    sac._record_usage(ok_events)
+    assert _entries()[-1]["outcome"] == "ok"
+
+    degraded_actual = list(sac.TOOL_NAMES) + ["mcp__settings-console__put_on_tv_newer"]
+    degraded_events = [_init_event(degraded_actual, session_id="s-degraded"),
+                       _result_event("ok.", usage={"input_tokens": 1, "output_tokens": 1}, session_id="s-degraded")]
+    sac._record_usage(degraded_events)
+    assert _entries()[-1]["outcome"] == "degraded"
+
+    refused_actual = [t for t in sac.TOOL_NAMES if t != sac.TOOL_NAMES[0]]
+    refused_events = [_init_event(refused_actual, session_id="s-refused"),
+                      _result_event("ok.", usage={"input_tokens": 1, "output_tokens": 1}, session_id="s-refused")]
+    sac._record_usage(refused_events)
+    assert _entries()[-1]["outcome"] == "refused"
+
+    # Real spend is still counted the same regardless of outcome -- his
+    # own ask was "how much usage," not "how much successful usage".
+    from spectra.services import sonic_usage as su
+    total = su.summary()
+    assert total["day"]["query_count"] == 3
+    assert total["day"]["total_tokens"] == 6
