@@ -41,7 +41,7 @@ class Player:
         return {"id": "user-b"}
 
     def devices(self):
-        return [{"id": DEV, "name": "Serenity Capture", "volume_percent": 100}]
+        return [{"id": DEV, "name": "serenity-capture", "volume_percent": 100}]
 
     def play(self, device_id, uri):
         self.calls.append(("play", device_id, uri))

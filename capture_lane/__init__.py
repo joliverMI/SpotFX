@@ -22,8 +22,10 @@ WHAT IT KEEPS TRUE (capture_lane/lane.py is the binding statement):
     switch turned off mid-song ends the song within one poll, pausing only
     the system's own song;
   * it plays only as account B, never the main account, and only on the one
-    device named "Serenity Capture" — checked before every song, from fresh
-    reads, or nothing plays;
+    device whose Spotify Connect name is exactly "serenity-capture" (the
+    desktop client takes its container's hostname; account B also sees
+    "Serenity Guest", the house speakers, which never matches) — checked
+    before every song, from fresh reads, or nothing plays;
   * it never captures over a song that is already learned;
   * one song at a time, and it lets go on every way out — pausing the
     hidden player only while it is still playing the song the lane started;

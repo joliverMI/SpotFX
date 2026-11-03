@@ -11079,7 +11079,10 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   `_save_wav_and_analyze`), sidecar `captured_by: "capture_lane"`. Four
   things: (1) NOTHING PLAYS until account B is confirmed from fresh reads
   and is NOT the main account, exactly one device carries
-  `capture_lane_device_name`, the song isn't already learned, and the FIFO
+  `capture_lane_device_name` — Spotify Connect's `serenity-capture` (the
+  desktop client takes its container's hostname; the container's
+  DEVICE_NAME is unused), matched exactly because account B also sees
+  "Serenity Guest", the house speakers — the song isn't already learned, and the FIFO
   is flowing steadily — every play/pause names the device id and the
   gateway refuses without one; (2) a sample's song-time is the reader's
   steady origin (`pcm.origin_from`, a low percentile past the opening

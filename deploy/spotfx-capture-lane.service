@@ -13,7 +13,8 @@
 #
 # Started, it does nothing until SpotFX asks it to learn a song (127.0.0.1
 # only, with the lane's key). It never plays as the main account and never
-# on any device but "Serenity Capture".
+# on any device but the hidden player (Spotify Connect name, exactly:
+# "serenity-capture" — config.capture_lane_device_name).
 
 [Unit]
 Description=SpotFX capture lane (learns songs on the hidden player)

@@ -187,7 +187,7 @@ class Account:
         self.requests: list[tuple[str, str, dict]] = []
         self.playing: Optional[dict] = None       # {"uri", "device_id", "is_playing", "at"}
         self.on_request = None
-        self.devices = [{"id": DEV, "name": "Serenity Capture", "volume_percent": 100,
+        self.devices = [{"id": DEV, "name": "serenity-capture", "volume_percent": 100,
                          "is_restricted": False}]
 
     def writes(self) -> list[tuple[str, str]]:
