@@ -52,7 +52,7 @@ class FakeSpotify:
         self.clock = clock
         self.me_id = me_id
         self._devices = devices if devices is not None else [
-            {"id": DEV, "name": "Serenity Capture", "volume_percent": 100, "is_restricted": False}]
+            {"id": DEV, "name": "serenity-capture", "volume_percent": 100, "is_restricted": False}]
         self.duration_ms = duration_ms
         self.calls: list[tuple] = []
         self.started_at = None
@@ -110,7 +110,7 @@ class FakeSpotify:
         progress = int(min(el, self.duration_ms / 1000) * 1000)
         return {"is_playing": playing, "progress_ms": progress,
                 "item": {"uri": uri, "duration_ms": self.duration_ms},
-                "device": {"id": DEV, "name": "Serenity Capture"}}
+                "device": {"id": DEV, "name": "serenity-capture"}}
 
     def control_calls(self):
         return [c for c in self.calls if c[0] in ("play", "pause", "full_volume", "release")]
@@ -319,9 +319,9 @@ def test_an_unchecked_sign_in_plays_once_the_main_account_reads_different(tmp_pa
 @pytest.mark.parametrize("devices,reason", [
     ([], "device_missing"),
     ([{"id": "phone", "name": "Javi's phone"}], "device_missing"),
-    ([{"id": "a", "name": "Serenity Capture"}, {"id": "b", "name": "serenity capture"}],
+    ([{"id": "a", "name": "serenity-capture"}, {"id": "b", "name": "SERENITY-CAPTURE"}],
      "device_ambiguous"),
-    ([{"id": DEV, "name": "Serenity Capture", "is_restricted": True}], "device_restricted"),
+    ([{"id": DEV, "name": "serenity-capture", "is_restricted": True}], "device_restricted"),
 ])
 def test_only_the_one_hidden_player_is_ever_used(tmp_path, monkeypatch, devices, reason):
     clock = Clock()
@@ -332,9 +332,50 @@ def test_only_the_one_hidden_player_is_ever_used(tmp_path, monkeypatch, devices,
     assert sp.control_calls() == []
 
 
+GUEST = {"id": "guest", "name": "Serenity Guest", "type": "Speaker", "volume_percent": 40,
+         "is_restricted": False}
+
+
+@pytest.mark.parametrize("name", ["Serenity Guest", "serenity guest", "Serenity Capture",
+                                  "serenity capture", "serenity-capture-2", "Serenity"])
+def test_no_other_name_is_ever_taken_for_the_hidden_player(tmp_path, monkeypatch, name):
+    """Account B's live device list holds the hidden player as
+    "serenity-capture" AND "Serenity Guest" — snapserver's librespot, the
+    house speakers. Only the exact name (case aside) is the hidden player:
+    anything near it plays nothing and writes no volume."""
+    clock = Clock()
+    sp = FakeSpotify(clock, devices=[{"id": "other", "name": name, "volume_percent": 40,
+                                      "is_restricted": False}])
+    lane, sp, *_ = make(tmp_path, monkeypatch, spotify=sp, clock=clock)
+    out = run(lane, job())
+    assert out.reason == "device_missing" and out.played is False
+    assert sp.control_calls() == []
+
+
+def test_beside_the_house_speakers_only_the_hidden_player_is_driven(tmp_path, monkeypatch):
+    clock = Clock()
+    sp = FakeSpotify(clock, devices=[
+        dict(GUEST),
+        {"id": DEV, "name": "serenity-capture", "volume_percent": 100, "is_restricted": False}])
+    lane, sp, *_ = make(tmp_path, monkeypatch, spotify=sp, clock=clock)
+    assert run(lane, job()).status == "ok"
+    named = [c for c in sp.control_calls() if c[0] in ("play", "full_volume", "pause")]
+    assert named and all(c[1] == DEV for c in named)
+    assert not any("guest" in c for c in sp.calls)
+
+
+def test_the_shipped_device_name_is_the_hidden_players_connect_name(monkeypatch):
+    import config
+    from capture_lane import lane as lane_mod
+    assert config.Settings.model_fields["capture_lane_device_name"].default == "serenity-capture"
+    assert LaneDeps.__dataclass_fields__["device_name"].default == "serenity-capture"
+    monkeypatch.setattr(config.settings, "capture_lane_device_name", "named-by-settings")
+    assert lane_mod.production_deps().device_name == "named-by-settings"
+
+
 def test_a_low_volume_on_the_hidden_player_is_raised_first(tmp_path, monkeypatch):
     clock = Clock()
-    sp = FakeSpotify(clock, devices=[{"id": DEV, "name": "Serenity Capture", "volume_percent": 40}])
+    sp = FakeSpotify(clock, devices=[{"id": DEV, "name": "serenity-capture", "volume_percent": 40}])
     lane, sp, *_ = make(tmp_path, monkeypatch, spotify=sp, clock=clock)
     assert run(lane, job()).status == "ok"
     names = [c[0] for c in sp.control_calls()]

@@ -739,7 +739,13 @@ class Settings(BaseSettings):
     # FIFO and turns one song at a time into the same shape files a normal
     # capture makes. See capture_lane/__init__.py.
     capture_lane_port: int = 8030
-    capture_lane_device_name: str = "Serenity Capture"
+    # The hidden player's Spotify Connect name, matched EXACTLY (case aside).
+    # Spotify's desktop client names itself after its container's hostname,
+    # so account B sees it as "serenity-capture" (the container's DEVICE_NAME
+    # is never used); "Serenity Capture" is only its name in prose. Account B
+    # also sees "Serenity Guest" — snapserver's librespot, the house speakers
+    # — so this must stay one exact name, never a looser match.
+    capture_lane_device_name: str = "serenity-capture"
     capture_lane_fifo: str = "/home/javi/spotify-stack/capture-audio/capturefifo"
     capture_lane_governor_path: str = (
         "/home/javi/spotify-stack/capture-config/parec-governor.json")

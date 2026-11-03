@@ -10,7 +10,10 @@ THE ORDER IS THE SAFETY (`Lane._run`):
      the main account (read fresh, read-only; a sign-in that was never
      checked and a main account that can't be read now is a refusal, not a
      guess). Playing as the main account would stop the house's music.
-  2. Where: exactly one device named `device_name` ("Serenity Capture").
+  2. Where: exactly one device named `device_name` (Spotify Connect's
+     "serenity-capture" — the desktop client takes its container's
+     hostname — compared exactly, case aside: account B also sees "Serenity
+     Guest", the house speakers, and must never match it).
      Every play and pause names its id (capture_lane.spotify refuses
      without one).
   3. Not already learned: a complete shape for the song is never captured
@@ -159,7 +162,7 @@ class LaneDeps:
     wav_and_analyze: Callable[[Any, Any, int], Awaitable[bool]]
     # the second account's lock, read fresh every time (fx/second_account.py)
     unlocked: Callable[[], bool] = _lock_on
-    device_name: str = "Serenity Capture"
+    device_name: str = "serenity-capture"      # config.capture_lane_device_name
     extra_latency_ms: int = 0
     max_gap_ms: int = 200
     min_capture_pct: float = 0.80
