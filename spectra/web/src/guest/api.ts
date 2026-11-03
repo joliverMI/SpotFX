@@ -15,7 +15,7 @@ export function storePhone(id: string): void {
 }
 
 export interface Found { results: SearchResult[]; more: boolean; next_offset: number; query: string }
-export interface Added { entry_id: string; title: string; starts_in_ms: number | null }
+export interface Added { entry_id: string; title: string; starts_in_ms: number | null; known?: boolean }
 export interface Bumped { place: number | null; starts_in_ms: number | null }
 
 /** The Board's answer, from a board call's data. */

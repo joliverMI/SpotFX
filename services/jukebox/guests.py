@@ -2278,7 +2278,7 @@ class Guests:
             gs = self.deps.state()
             return 200, {"status": "ok", "added": {"entry_id": entry.id, "title": entry.title,
                                                    "starts_in_ms": out.get("starts_in_ms"),
-                                                   "paid": cost},
+                                                   "known": bool(known), "paid": cost},
                          "view": self._view(book, phone, gs)}
 
     # ── the host's controls (the master's own routes) ───────────────────────

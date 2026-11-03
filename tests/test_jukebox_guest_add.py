@@ -258,6 +258,32 @@ def test_a_slow_track_lookup_does_not_let_a_too_late_song_through():
     _run(go())
 
 
+def test_a_song_that_still_needs_learning_reports_no_fake_eta():
+    """spotfx-guest-known-songs-fix: a song the lights don't know yet is
+    still accepted (last call judges it as if it were already ready — it
+    only slides back, it's never refused for waiting) but its own ETA must
+    be honest: `None`, never the as-if-ready time used solely to decide
+    last call. The real learning gate (services/jukebox/learning.py) makes
+    an unknown song NOT ready at add time; this models that directly."""
+    async def go():
+        w = await _night(set_s=300)
+        w.deps.ready_at_add = lambda entry: entry.known
+        g = _setup(w, Catalog(w), known=[jb_uri(1)])
+        ana = await _phone(g)
+        code, out = await g.add(ana, jb_uri(0))             # not known: needs learning
+        assert code == 200
+        assert out["added"]["known"] is False
+        assert out["added"]["starts_in_ms"] is None
+        assert w.runner._entry(out["added"]["entry_id"]).ready is False
+
+        code, out = await g.add(ana, jb_uri(1))              # already known: a real ETA
+        assert code == 200
+        assert out["added"]["known"] is True
+        assert out["added"]["starts_in_ms"] is not None
+        assert w.runner._entry(out["added"]["entry_id"]).ready is True
+    _run(go())
+
+
 def test_the_night_end_is_the_next_one_after_the_start():
     show = _free(night_ends="00:00", last_call_min=20)
     start = datetime(2026, 10, 31, 20, 0, tzinfo=G.HOUSE_TZ)

@@ -101,8 +101,11 @@ ok(L.addStatus(req({}), true).canAdd && L.addStatus(req({}), true).text === 'You
 ok(!L.addStatus(req({ waiting: 2 }), true).canAdd, 'two in line: no more until one plays');
 ok(L.addStatus(req({ open: false, detail: 'closed!' }), true).text === 'closed!', 'after last call: the server\'s own sentence');
 ok(!L.addStatus(req({}), false).canAdd, 'a phone waiting for approval can\'t add');
-ok(L.addedText(25 * 60_000, nine, 'en-US') === 'Added — plays in 25 min (~9:55)', `the confirmation: ${L.addedText(25 * 60_000, nine, 'en-US')}`);
-ok(L.addedText(null, nine) === 'Added to the line.', 'no start time: just added');
+ok(L.addedText(25 * 60_000, nine, true, 'en-US') === 'Added — plays in 25 min (~9:55)',
+   `the confirmation: ${L.addedText(25 * 60_000, nine, true, 'en-US')}`);
+ok(L.addedText(null, nine, true) === 'Added to the line.', 'no start time, already known: just added');
+ok(L.addedText(null, nine, false) === 'Added — the lights learn it first, then it plays.',
+   'no start time, not known: honest about the learning hold, never a wrong ETA');
 ok(L.SEARCH_DEBOUNCE_MS >= 300 && L.SEARCH_MIN === 2, 'searches wait for typing to stop, and need two letters');
 
 console.log('free play (PR 2.3)');

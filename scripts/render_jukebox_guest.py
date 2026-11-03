@@ -715,6 +715,21 @@ async def run() -> int:
                     && !!document.querySelector('.g-badge-explicit') && !!document.querySelector('.g-badge-long'); })()""")
                 if not ready:
                     failures.append(f"{name}: the Ready section, or the Ready/explicit/long badges, are missing")
+                # "Ready" is gated on known (the lights' own captured shape),
+                # never on library membership — spotfx-guest-known-songs-fix:
+                # "Dance Monkey" (known, NOT in his library) must be Ready;
+                # "Dancing in the Dark" (in his library, NOT known) must not.
+                grouping = await evaluate(ws, nid, """(() => {
+                  const titlesIn = (sel) => [...document.querySelectorAll(sel + ' .g-row-title')]
+                    .map((x) => x.textContent);
+                  return { ready: titlesIn('section[aria-label="Ready"]'),
+                           rest: titlesIn('section[aria-label="From Spotify"]') }; })()""")
+                if "Dance Monkey" not in grouping.get("ready", []):
+                    failures.append(f"{name}: a known-but-not-library song wasn't shown as Ready")
+                if "Dancing in the Dark" in grouping.get("ready", []):
+                    failures.append(f"{name}: a library-but-not-known song was wrongly shown as Ready")
+                if "Dancing in the Dark" not in grouping.get("rest", []):
+                    failures.append(f"{name}: a library-but-not-known song didn't show up at all")
                 await tap(".g-add-btn:not([disabled])")
                 if not await wait_for("!!document.querySelector('.g-toast')"):
                     failures.append(f"{name}: adding a song showed no confirmation")

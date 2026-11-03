@@ -239,15 +239,19 @@ export function AddScreen({ view, onAdded }: {
     setAdding('');
     if (r.ok) {
       setAdded((s) => new Set(s).add(uri));
-      onAdded(r.view, addedText(r.added?.starts_in_ms ?? null, Date.now()));
+      onAdded(r.view, addedText(r.added?.starts_in_ms ?? null, Date.now(), r.added?.known ?? true));
     } else {
       setError(r.refusal.detail);
     }
   };
 
   const results = found?.results ?? [];
-  const ready = results.filter((r) => r.library);
-  const rest = results.filter((r) => !r.library);
+  // "Ready" means the lights already know it — its audio shape is
+  // captured (`known`), never whether it merely happens to be in his
+  // profile library (`library`): a library song with no capture still
+  // needs to be learned first, same as any Spotify one.
+  const ready = results.filter((r) => r.known);
+  const rest = results.filter((r) => !r.known);
   const row = (r: SearchResult) => {
     const inLine = r.in_line || added.has(r.uri);
     const why = r.why_not;
