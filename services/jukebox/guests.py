@@ -105,15 +105,21 @@ fair; every number is a show setting (§4's Free play card).
   PLAY NEXT is the host's only (his "Play next" on the Guests tab), or off.
 
 ADDING A SONG (report §1.5, in free play). A guest finds a song — his own
-library first ("Ready: the lights already know these"), then Spotify — and
-adds it, if: requests are open (they close `last_call_min` before the night
+library first, then Spotify (services/jukebox/library.py decides which is
+Ready: KNOWN, never library membership — a library song the lights haven't
+captured still needs learning first, same as any Spotify one) — and adds
+it, if: requests are open (they close `last_call_min` before the night
 ends), explicit songs are allowed by the show (never / always / after a set
 time), the song isn't already waiting in line, and the guest has fewer than
 `max_waiting` songs waiting. It goes in by FAIR ORDER: it is its adder's
 Nth song tonight (played + waiting + 1), and it is placed ahead of the first
 waiting song with a higher N — 1st songs before 2nd songs — never ahead of a
 song already sent to Spotify. Nothing is accepted that would start after the
-night ends: the guest is told so, and nothing is added.
+night ends: the guest is told so, and nothing is added. An add that still
+needs learning (PR 4.2 below) is accepted, not refused — last call judges it
+as if it were already ready — but its own confirmation reports no ETA
+(`starts_in_ms: None`), never the as-if-ready time used only for that
+judgment (spotfx-guest-known-songs-fix).
 
 SEARCH never runs on the event loop: his library is a disk scan and Spotify
 is a network call, both through `to_thread`, on a gateway of their own (so a
@@ -2143,9 +2149,10 @@ class Guests:
 
     @_as_guest
     async def search(self, phone: Any, query: Any, offset: Any = 0) -> tuple[int, dict]:
-        """A guest's search: his library's songs first ("Ready"), then
-        Spotify, SEARCH_PAGE a page; each with its badges and whether it can
-        go in (and why not)."""
+        """A guest's search: his library's songs first, then Spotify,
+        SEARCH_PAGE a page; each with its badges (Ready is KNOWN, not
+        library membership — services/jukebox/library.py) and whether it
+        can go in (and why not)."""
         gate, gs, book = self._gate(phone)
         if gate:
             return gate
