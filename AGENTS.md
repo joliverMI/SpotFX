@@ -11095,9 +11095,9 @@ the engine only — no page, no guests. `services/jukebox/night.py`'s and
   because the track already stopped by itself (403 "Restriction violated",
   the first live G5 trial's failure) is a let-go (`ended`, the capture is
   saved), checked by fresh reads over ~2 s (Spotify's player state lags
-  its 403 by ~0.5 s, the second trial's failure); still playing, the job fails and the
-  finally pauses it — and a moved governor `seq`, a stalled progress
-  (`STALL_TOLERANCE_MS`) or missing samples (`pcm.drift_from`) fail the
+  its 403 by ~0.5 s, the second trial's failure); still playing, the job
+  fails and the finally pauses it — and a moved governor `seq`, a stalled
+  progress (`STALL_TOLERANCE_MS`) or missing samples (`pcm.drift_from`) fail the
   song with nothing written; (4) it decides nothing: SpotFX tells it what
   to learn (`POST /learn` with `storage/capture_lane_key`) and does the
   main-account follow-ups itself. Its first live run (G5, 2026-11-02)

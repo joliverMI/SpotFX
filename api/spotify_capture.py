@@ -183,9 +183,8 @@ class SecondAccountSpotify(spotipy.Spotify):
         apart: the first that shows nothing of the system's playing means it
         has let go by itself (`why: "ended"`, record cleared); still the
         system's after the last, the pause's own error is raised and the
-        record is KEPT, so the
-        caller's next release can still stop it. Every other release raises
-        a failed pause exactly as before."""
+        record is KEPT, so the caller's next release can still stop it.
+        Every other release raises a failed pause exactly as before."""
         record = second_account.started()
         if not record:
             return {"paused": False, "why": "nothing_started"}
