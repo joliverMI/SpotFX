@@ -3,7 +3,8 @@ the lights. spectra/services/sung_labels.py is the binding statement.
 
   GET  /api/sung-labels            every colour set's and effect's labels
   POST /api/sung-labels/edit       one word added or taken out
-  POST /api/sung-labels/draft      Claude drafts meanings for up to ten cards
+  POST /api/sung-labels/draft      Claude drafts meanings for a small batch of
+                                    cards (color_meanings.DRAFT_BATCH_SIZE)
   PUT  /api/sung-labels/settings   a true partial update: automatic reading
                                     on or off (off by default), and the
                                     weak-match threshold a reading uses
@@ -61,7 +62,7 @@ class DraftBody(BaseModel):
 
 @router.post("/draft")
 async def post_draft(body: DraftBody):
-    """Asks Claude once, for up to ten cards. Only the drafts change: his
+    """Asks Claude once, for up to DRAFT_BATCH_SIZE cards. Only the drafts change: his
     edits are kept apart from them."""
     try:
         return await color_meanings.draft(body.ids)
@@ -70,7 +71,7 @@ async def post_draft(body: DraftBody):
     except claude_text.ClaudeUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
     except claude_text.ClaudeReplyInvalid as exc:
-        raise HTTPException(502, str(exc)) from exc
+        raise HTTPException(500, str(exc)) from exc
     except sung_labels.StoreUnreadable as exc:
         raise HTTPException(500, str(exc)) from exc
 

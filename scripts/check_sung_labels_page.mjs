@@ -56,6 +56,33 @@ ok(labels.draftableIds([a, b, c]).join() === 'a,b', 'a re-draft leaves a card wi
 ok(JSON.stringify(labels.batches([1, 2, 3, 4, 5], 2)) === '[[1,2],[3,4],[5]]', 'drafting goes a batch at a time');
 ok(labels.draftButtonWords(1, 3) === 'Draft meanings for 1 colour set', 'the button says how many are waiting');
 ok(labels.draftButtonWords(0, 3) === 'Draft all 3 again', 'and offers a re-draft when none are');
+ok(labels.draftButtonWords(5, 10, 2) === 'Retry 2 colour sets that failed', 'a pending retry takes priority over either other wording');
+
+console.log('drafting through a failed batch');
+{
+  const calls = [];
+  const draftBatch = async (ids) => {
+    calls.push(ids);
+    if (ids.includes('c')) { const err = new Error('boom'); err.status = 502; throw err; }
+    return { drafted: ids.length, ids, skipped: [] };
+  };
+  const outcome = await labels.runDraftQueue(['a', 'b', 'c', 'd', 'e'], 2, draftBatch);
+  ok(calls.length === 3, 'a failed batch does not stop the ones after it');
+  ok(outcome.draftedIds.join() === 'a,b,e', 'the batches that succeeded are reported drafted');
+  ok(outcome.failedIds.join() === 'c,d', 'only the failed batch\'s ids are reported failed, not redrafted ones');
+  ok(labels.isDraftTimeoutError(outcome.errors[0]), 'a 502 is recognised as a timeout, not a rejection');
+  const msg = labels.draftOutcomeMessage(outcome, 5);
+  ok(/3 of 5/.test(msg) && /took too long/.test(msg) && !/spectra\.service/.test(msg),
+     `the summary is truthful and never blames the process (${msg})`);
+  ok(labels.draftOutcomeMessage({ draftedIds: ['a'], failedIds: [], errors: [] }, 1) === null,
+     'no failures means no message');
+}
+{
+  const draftBatch = async (ids) => ({ drafted: 0, ids: [], skipped: ids });
+  const outcome = await labels.runDraftQueue(['x'], 4, draftBatch);
+  ok(outcome.failedIds.join() === 'x' && outcome.errors.length === 0, 'a rejected (not errored) batch is still a failure');
+  ok(/some sets could not be drafted/.test(labels.draftOutcomeMessage(outcome, 1)), 'a plain rejection gets a plain reason');
+}
 
 console.log('the matches');
 const m = (over) => ({
