@@ -1538,7 +1538,9 @@ export function useSungLabelEdit() {
 }
 
 export function useSungLabelSettings() {
-  return useSungLabelsMutation((body: { auto_read: boolean }) =>
+  // A true partial update (spectra/api/sung_labels.py's own contract):
+  // an omitted field is left exactly as it was.
+  return useSungLabelsMutation((body: { auto_read?: boolean; weak_match_threshold?: number }) =>
     apiPut<SungLabelsPageData>('/sung-labels/settings', body));
 }
 

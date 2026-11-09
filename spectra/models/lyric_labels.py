@@ -52,6 +52,11 @@ class SungLabelSettings(_Model):
     # OFF by default: nothing is sent to Claude until he turns this on or
     # presses a read button himself.
     auto_read: bool = False
+    # Below this confidence a guess is no match at all (lyric_matches.py's
+    # own docstring). A first guess, his to tune — 0.6 to match that
+    # module's own default; the two are never cross-imported (models stay
+    # pure), so keep them in sync by hand if either changes.
+    weak_match_threshold: float = Field(0.6, ge=0.0, le=1.0)
 
 
 class SungLabelStore(_Model):

@@ -15,11 +15,13 @@ analysis_console.OPERATIONS, show_console.OPERATIONS (phase 3 of the
 Light Show, the Admiral's own ask for fire/arm/disarm/status/device
 hold-or-dim/create-set/move-High-Low/end-show), house_console.OPERATIONS
 (house lighting's modes — switch, create, edit one field; widened
-2026-10-06 to house-wide settings too) and drop_console.OPERATIONS (the
+2026-10-06 to house-wide settings too), drop_console.OPERATIONS (the
 playing song's drop sequences — confirm/dismiss/move/add/undo/redetect
 and more, phase 4 of drop detection; its own edit set widened the same
-day), each a dict of sonic_ops.SonicOperation — declared data, not code
-branches. TOOLS (the schema handed to the Anthropic API) and _dispatch()
+day) and lyric_console.OPERATIONS (sung labels, Claude's colour meanings
+and a song's word matches — the lyrics plan's own Sonic coverage
+follow-up), each a dict of sonic_ops.SonicOperation — declared data, not
+code branches. TOOLS (the schema handed to the Anthropic API) and _dispatch()
 (the tool-name -> handler lookup) are BOTH derived from that same merged
 dict, so a name not present in it is simultaneously impossible to
 discover (the "list operations" meta-tool only ever enumerates
@@ -71,8 +73,9 @@ from typing import Any, Optional
 
 from spectra import config
 from spectra.services import (absorb_console, analysis_console, device_console, drop_console,
-                              house_console, jukebox_console, lock_console, room_effect_console,
-                              scene_console, settings_console, show_console, sonic_usage)
+                              house_console, jukebox_console, lock_console, lyric_console,
+                              room_effect_console, scene_console, settings_console, show_console,
+                              sonic_usage)
 from spectra.services.sonic_ops import SonicOperation
 
 logger = logging.getLogger(__name__)
@@ -170,7 +173,7 @@ _DOMAIN_OP_DICTS = (
     settings_console.OPERATIONS, scene_console.OPERATIONS, device_console.OPERATIONS,
     room_effect_console.OPERATIONS, analysis_console.OPERATIONS, show_console.OPERATIONS,
     house_console.OPERATIONS, drop_console.OPERATIONS, lock_console.OPERATIONS,
-    absorb_console.OPERATIONS, jukebox_console.OPERATIONS,
+    absorb_console.OPERATIONS, jukebox_console.OPERATIONS, lyric_console.OPERATIONS,
 )
 
 _DOMAIN_NAMES = sorted({op.domain for ops in _DOMAIN_OP_DICTS for op in ops.values()} | {"meta"})
@@ -212,6 +215,7 @@ ALL_OPERATIONS: dict[str, SonicOperation] = {
     **lock_console.OPERATIONS,
     **absorb_console.OPERATIONS,
     **jukebox_console.OPERATIONS,
+    **lyric_console.OPERATIONS,
 }
 
 TOOLS = [op.tool_schema() for op in ALL_OPERATIONS.values()]

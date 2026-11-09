@@ -755,10 +755,12 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'sung-labels-reading',
         title: 'When songs get read',
-        keywords: 'automatic auto read re-read reading off default labels change claude allowance tokens',
+        keywords: 'automatic auto read re-read reading off default labels change claude allowance tokens weak match threshold confidence sonic voice',
         body: [
           'By default Claude reads a song only when you press Read on the Test Bed. Switch on reading songs automatically and it reads any song that has not been read, and reads songs again when the words on this list change, waiting until you have stopped editing for ten minutes.',
           'It goes one song a minute because every read spends your Claude allowance: a whole library takes hours. Moving a word from one colour set to another does not need a re-read, since which sets a word reaches is worked out when you look.',
+          'The weak-match threshold decides how confident a guess has to be before it is kept at all — below it, a guess is only counted, never stored or shown. It starts at 0.6; lower it to let more through, raise it to be stricter. Changing it only affects readings from then on, not ones already stored.',
+          'Sonic reaches all of this by voice too: read and change a colour set\'s or effect\'s sung labels and a colour set\'s drafted meanings, ask it to draft meanings for named colour sets or read a named song\'s lyrics now (both spend your Claude allowance and always ask first), show a song\'s word matches, and add, delete or restore one by naming the words it sits on. Turning automatic reading on asks first too; turning it off, or changing only the threshold, does not.',
         ],
       },
     ],

@@ -108,7 +108,8 @@ def reset() -> None:
     _read_lock = asyncio.Lock()
 
 
-def build_system_prompt(catalogue: sung_labels.Catalogue) -> str:
+def build_system_prompt(catalogue: sung_labels.Catalogue,
+                        weak_match_threshold: float = WEAK_MATCH_THRESHOLD) -> str:
     return (
         "You read song lyrics for a home light show. The show has a list of LABELS "
         "(colours, things, moods, places and effects) and can react when a sung word or "
@@ -127,7 +128,7 @@ def build_system_prompt(catalogue: sung_labels.Catalogue) -> str:
         "- A short common word is rarely worth reporting unless the line is really about "
         "it. Prefer saying nothing to stretching.\n\n"
         "Give each match a confidence from 0 to 1: 0.9 or more when the words clearly mean "
-        f"the label, about 0.7 for a good fit, and leave out anything below {WEAK_MATCH_THRESHOLD}. "
+        f"the label, about 0.7 for a good fit, and leave out anything below {weak_match_threshold}. "
         "When one phrase fits two labels, give the single best one unless they are really "
         "different meanings.\n\n"
         "For each match, give `line` (the number at the start of the line), `phrase` "
@@ -183,7 +184,9 @@ def _count(refused: dict[str, int], reason: str) -> None:
 
 
 def parse_reply(data: dict[str, Any], words: Sequence[lyrics_emphasis.ScoredWord],
-                catalogue: sung_labels.Catalogue) -> tuple[list[ClaudeGuess], int, dict[str, int]]:
+                catalogue: sung_labels.Catalogue,
+                weak_match_threshold: float = WEAK_MATCH_THRESHOLD
+                ) -> tuple[list[ClaudeGuess], int, dict[str, int]]:
     """Claude's rows, checked. Returns (matches, weak count, refused by reason)."""
     lines = _lines(words)
     keys = lyric_matches.word_keys(words)
@@ -207,7 +210,7 @@ def parse_reply(data: dict[str, Any], words: Sequence[lyrics_emphasis.ScoredWord
         if not 0.0 <= confidence <= 1.0:
             _count(refused, REFUSED_ROW)
             continue
-        if confidence < WEAK_MATCH_THRESHOLD:
+        if confidence < weak_match_threshold:
             n_weak += 1
             continue
         phrase = str(row.get("phrase") or "")
@@ -256,12 +259,13 @@ async def read_song(uri: str, *, ask: Optional[Ask] = None) -> dict[str, Any]:
         catalogue = await asyncio.to_thread(sung_labels.catalogue)
         if not catalogue.labels:
             raise NoLabels("There are no sung labels to read against yet.")
+        threshold = await asyncio.to_thread(sung_labels.weak_match_threshold)
         stem = await asyncio.to_thread(analysis_reader.stem_for_uri, uri)
         reply = await (ask or claude_text.ask_json)(
-            system=build_system_prompt(catalogue),
+            system=build_system_prompt(catalogue, threshold),
             user=build_user_prompt(stem or uri, timeline.scored),
             schema=SCHEMA, purpose="lyric-reading")
-        matches, n_weak, refused = parse_reply(reply.data, timeline.scored, catalogue)
+        matches, n_weak, refused = parse_reply(reply.data, timeline.scored, catalogue, threshold)
         reading = Reading(
             at_ms=int(time.time() * 1000), model=reply.model, backend=reply.backend,
             labels_hash=catalogue.labels_hash,

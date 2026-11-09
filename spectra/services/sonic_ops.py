@@ -48,7 +48,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
 OperationDomain = Literal["settings", "scene", "device", "room", "analysis", "show",
-                          "house", "drops", "lock", "absorb", "jukebox", "meta"]
+                          "house", "drops", "lock", "absorb", "jukebox", "lyrics", "meta"]
 OperationKind = Literal["read", "write"]
 
 

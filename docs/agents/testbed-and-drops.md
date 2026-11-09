@@ -306,7 +306,23 @@ are the Word matches row under the Sung words lane. Five things:
   file as "no edits" (`StoreUnreadable`).
 - **THE SEED IS COMPUTED ON READ, NOT WRITTEN.** Nothing is migrated to deploy
   this, and `storage/color_sets.json` is never written by it (SPECTRA does not
-  write that file). Sonic has no operation here yet: owed as a follow-up.
+  write that file).
+
+**SONIC'S FOLLOW-UP, BUILT** (the Admiral's standing Sonic coverage
+protocol, 2026-10-06): `spectra/services/lyric_console.py` (domain
+`lyrics`) reads and changes sung labels/meanings, shows and edits a
+song's word matches (a match is named by its PHRASE, never its opaque
+id), and reads/changes the auto-read switch and the weak-match
+threshold — `WEAK_MATCH_THRESHOLD` is no longer a bare module constant:
+`SungLabelSettings.weak_match_threshold` (default 0.6) is a real,
+persisted setting `read_song()` reads live, so he (or Sonic) can actually
+tune the "first guess, his to tune" the module docstring always promised.
+Turning `auto_read` ON, drafting colour meanings and reading a song's
+lyrics all ask first — the last two on EVERY call, since each one spends
+his Claude allowance regardless of whether it's the first. A song is
+resolved by a bounded search, not `name_resolve`'s own `known_names`
+fallback verbatim — his library can hold hundreds of analysed songs.
+See `.claude/skills/sung-labels/SKILL.md` for the cold-start map.
 
 ## Phase 2 of the music-analysis plan — snapping generated cues to a beat
 

@@ -400,3 +400,38 @@ def test_automatic_reading_ships_off_and_can_be_switched():
     assert sung_labels.auto_read_enabled() is True
     stored = json.loads(scfg.SUNG_LABELS_FILE.read_text())
     assert stored["settings"]["auto_read"] is True
+
+
+def test_the_settings_route_changes_the_weak_match_threshold():
+    client = _client()
+    body = client.put("/api/sung-labels/settings", json={"weak_match_threshold": 0.8}).json()
+    assert body["weak_match_threshold"] == pytest.approx(0.8)
+    assert sung_labels.weak_match_threshold() == pytest.approx(0.8)
+    stored = json.loads(scfg.SUNG_LABELS_FILE.read_text())
+    assert stored["settings"]["weak_match_threshold"] == pytest.approx(0.8)
+
+
+def test_the_settings_route_leaves_an_omitted_field_untouched():
+    client = _client()
+    client.put("/api/sung-labels/settings", json={"weak_match_threshold": 0.9})
+    body = client.put("/api/sung-labels/settings", json={"auto_read": True}).json()
+    assert body["auto_read"] is True
+    assert body["weak_match_threshold"] == pytest.approx(0.9)
+
+
+def test_the_settings_route_maps_a_refused_threshold_change_to_422(monkeypatch):
+    def refuse(value):
+        raise sung_labels.EditRefused("no good.")
+    monkeypatch.setattr(sung_labels, "set_weak_match_threshold", refuse)
+    response = _client().put("/api/sung-labels/settings", json={"weak_match_threshold": 0.5})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "no good."
+
+
+def test_the_settings_route_maps_a_refused_auto_read_change_to_422(monkeypatch):
+    def refuse(enabled):
+        raise sung_labels.EditRefused("no good.")
+    monkeypatch.setattr(sung_labels, "set_auto_read", refuse)
+    response = _client().put("/api/sung-labels/settings", json={"auto_read": True})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "no good."

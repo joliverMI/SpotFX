@@ -629,6 +629,23 @@ def test_put_on_tv_widening_parses_from_its_structured_tool_result():
     assert result["rejected"][0]["op"] == "put_on_tv"
 
 
+def test_the_lyrics_domain_widening_parses_from_its_structured_tool_result():
+    """The lyrics plan step 3's Sonic coverage follow-up (spectra/services/
+    lyric_console.py, PR #499's own missing Sonic operation) on the CURRENT
+    manifest. edit_sung_label applies at once; read_song_lyrics always asks
+    first — every call spends his Claude allowance, so an unconfirmed call
+    must be parsed as needs_confirmation, never as a change, whatever the
+    model's own reply prose claims it is about to do."""
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(
+        _load("cli_transcript_synthetic_lyrics_asks_first.json"))
+    assert [c["summary"] for c in result["changes"]] == [
+        "'passion' added to Blood Red's labels."]
+    assert [r["status"] for r in result["rejected"]] == ["needs_confirmation"]
+    assert result["rejected"][0]["op"] == "read_song_lyrics"
+
+
 # ═══ 7. the 2026-11-02 stale-restart hardening (data/sonic-jukebox-
 # unresponsive/report.md): a manifest mismatch that is PURELY "the live
 # manifest reports some tool this running process doesn't expect yet, and

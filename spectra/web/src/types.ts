@@ -2065,6 +2065,7 @@ export interface SungLabelsPageData {
   labels_hash: string;
   n_labels: number;
   auto_read: boolean;
+  weak_match_threshold: number;
   claude: ClaudeAvailability;
   draft_batch_size: number;
 }
