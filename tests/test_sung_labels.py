@@ -298,6 +298,74 @@ def test_too_many_cards_at_once_is_refused():
         asyncio.run(color_meanings.draft([f"c{i}" for i in range(11)], ask=ask))
 
 
+# ── telling sets apart ──────────────────────────────────────────────────────
+
+def _reds(n):
+    return [{"id": f"r{i}", "name": f"Red {i}", "kind": "set",
+             "entries": [{"color_value": "#ff0000"}]} for i in range(n)]
+
+
+def test_a_meaning_word_is_capped_across_sets():
+    write_color_sets(scfg, _reds(5))
+    for i in range(5):
+        sung_labels.apply_draft({f"r{i}": {"things": ["nightclub"], "moods": [], "places": []}}, "m")
+    page = sung_labels.page()
+    carriers = [r["id"] for r in page["color_sets"] if "nightclub" in _texts(r["meanings"]["things"])]
+    assert len(carriers) == sung_labels.MEANING_WORD_CAP == 3
+    assert carriers == ["r0", "r1", "r2"]  # kept where Claude ranked it earliest, tied, by id
+
+
+def test_a_genuine_colour_word_gets_a_wider_cap():
+    write_color_sets(scfg, _reds(8))
+    for i in range(8):
+        sung_labels.apply_draft({f"r{i}": {"things": ["crimson"], "moods": [], "places": []}}, "m")
+    page = sung_labels.page()
+    carriers = [r["id"] for r in page["color_sets"] if "crimson" in _texts(r["meanings"]["things"])]
+    assert len(carriers) == sung_labels.MEANING_WORD_CAP_COLOUR == 6
+
+
+def test_the_cap_never_touches_a_word_he_added_himself():
+    write_color_sets(scfg, _reds(4))
+    sung_labels.edit("color_set", "r3", "things", "add", "nightclub")
+    for i in range(3):
+        sung_labels.apply_draft({f"r{i}": {"things": ["nightclub"], "moods": [], "places": []}}, "m")
+    # a fourth draft call re-enforces the cap store-wide; r3's word is his, not drafted
+    sung_labels.apply_draft({"r0": {"things": ["volcano"], "moods": [], "places": []}}, "m")
+    row = _row(sung_labels.page(), "r3")
+    assert "nightclub" in _texts(row["meanings"]["things"])
+    assert _source(row["meanings"]["things"], "nightclub") == "his"
+
+
+def test_a_batch_is_told_which_words_are_already_common():
+    write_color_sets(scfg, [*_reds(2), {"id": "blue1", "name": "Mid - Ice", "kind": "set",
+                                        "entries": [{"color_value": "#0000ff"}]}])
+    sung_labels.apply_draft({"r0": {"things": ["nightclub"], "moods": [], "places": []},
+                             "r1": {"things": ["nightclub"], "moods": [], "places": []}}, "m")
+    ask, calls = _drafter([{"code": "c0", "things": ["tide"], "moods": [], "places": []}])
+    asyncio.run(color_meanings.draft(["blue1"], ask=ask))
+    assert "nightclub" in calls[0]["user"]
+    assert "Already common" in calls[0]["user"]
+
+
+def test_a_word_used_once_is_not_yet_called_out_as_common():
+    write_color_sets(scfg, [*_reds(1), {"id": "blue1", "name": "Mid - Ice", "kind": "set",
+                                        "entries": [{"color_value": "#0000ff"}]}])
+    sung_labels.apply_draft({"r0": {"things": ["nightclub"], "moods": [], "places": []}}, "m")
+    ask, calls = _drafter([{"code": "c0", "things": ["tide"], "moods": [], "places": []}])
+    asyncio.run(color_meanings.draft(["blue1"], ask=ask))
+    assert "nightclub" not in calls[0]["user"]
+
+
+def test_a_genuine_colour_word_is_never_named_as_overused():
+    write_color_sets(scfg, [*_reds(2), {"id": "blue1", "name": "Mid - Ice", "kind": "set",
+                                        "entries": [{"color_value": "#0000ff"}]}])
+    sung_labels.apply_draft({"r0": {"things": ["crimson"], "moods": [], "places": []},
+                             "r1": {"things": ["crimson"], "moods": [], "places": []}}, "m")
+    ask, calls = _drafter([{"code": "c0", "things": ["tide"], "moods": [], "places": []}])
+    asyncio.run(color_meanings.draft(["blue1"], ask=ask))
+    assert "crimson" not in calls[0]["user"]
+
+
 # ── the routes ──────────────────────────────────────────────────────────────
 
 def test_the_page_route_reports_the_list_and_that_nothing_reads_automatically():

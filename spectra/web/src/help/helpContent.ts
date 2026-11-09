@@ -748,6 +748,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         body: [
           'Every colour set starts with words worked out from its own colours and name: the colour in English and Spanish, its other names, and a few things it brings to mind. Each one has an × to take it off, and the box after the last word adds one of your own. Chips show where a word came from: plain from its colours and name, dashed drafted by Claude, solid yours.',
           'Draft meanings asks Claude for the things, moods and places each colour set brings to mind. Draft again replaces only Claude\'s words: anything you added stays, and anything you took off stays off even when Claude offers it again. A set with no colours of its own, like a brightness setting, has nothing to mean and is left out.',
+          'A word so generic it could belong anywhere (ocean, calm) is kept off most sets on purpose, so the words actually tell sets apart: at most a handful of sets share one, a bit more for a plain colour name like red or gold.',
           'Effects have sung labels too, so a word like fish or stars can point at an effect rather than a colour.',
         ],
       },
