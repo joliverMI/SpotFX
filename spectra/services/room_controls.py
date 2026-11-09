@@ -1183,7 +1183,7 @@ def resolve_authored_bg_color(bg_color: str, display_mode: str,
     colour instead of literal black. "default"/"dark": unchanged — an
     authored black keeps clearing a virtual's background exactly as it
     always has (the same black is what stops a PRIOR write's colour from
-    bleeding into the next fire — see AGENTS.md's "An authored black
+    bleeding into the next fire — see docs/agents/spectra-engine-core.md's "An authored black
     bg_color on a colour set is LOAD-BEARING in Hybrid mode" entry).
 
     A pure function, deliberately — every caller resolves display_mode/
@@ -1191,7 +1191,7 @@ def resolve_authored_bg_color(bg_color: str, display_mode: str,
     DriftConductor._room_controls()) and passes plain values in here.
     This module MUST stay a leaf its callers can import at any scope
     (see this module's own "room_controls -> scene_response" note above)
-    — the 2026-08-20 light-mode-fix crash (AGENTS.md) was two independent
+    — the 2026-08-20 light-mode-fix crash (docs/agents/spectra-engine-core.md) was two independent
     constructors each binding a `room_controls` name of their own that
     then shadowed the OTHER meaning of the same name; the fix there is to
     never touch this module eagerly, not anything about this function."""

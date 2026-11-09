@@ -21,7 +21,7 @@ SPECTRA's scenes were later migrated FROM by
 `storage/spectra/scenes.json`. Do not run it to "check" anything. For what
 this scene actually is today, read `GET /spectra/api/scenes` on the live
 process — a scene's stored data (and a legacy seeder's) is not proof he
-authored it (AGENTS.md).
+authored it (AGENTS.md's safety rule; full history in docs/agents/scenes-and-flares.md).
 `scripts/add_fireworks_burst_flare.py` (a genuine SPECTRA-store migration,
 dry-run by default) declares AND
 band-attaches the `firework_burst` flare kind on Fireworks V2 specifically
@@ -41,7 +41,7 @@ shaped fix will be visible.
 
 `scripts/set_scene_colorset_preference.py` set this scene to `"dark"`
 colour-set preference alongside Black Hole V2/UI and Dancers V2 — see the
-per-effect skill and AGENTS.md's "per-scene colour-set PREFERENCE" section
+per-effect skill and docs/agents/sonic-and-colour.md's "per-scene colour-set PREFERENCE" section
 for the additive-match rule (a declared preference matches its own mode
 plus every UNMARKED set, never leaves a scene with zero eligible sets).
 

@@ -16,7 +16,7 @@ description: >
 
 # The TV display plan
 
-AGENTS.md's own TV sections and each module's module docstring are the
+docs/agents/ui-timeline-and-tv.md's own TV sections and each module's module docstring are the
 binding statements. The Media Room Vizio is explicitly OUT OF SCOPE
 everywhere in this build (the Admiral's one note on approving the plan) —
 no targeting, discovery, or fallback to it anywhere.

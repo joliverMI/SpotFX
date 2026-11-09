@@ -1361,7 +1361,7 @@ against that commit.
     derived to keep the old MEAN speed. `DISPERSE_TAU` 0.07 -> 0.05 (a
     mitigation of #39's lull exit margin, not a structural fix). The
     binding statements are the module's BODY TRAIL / THRUST comment blocks
-    and AGENTS.md's Fish item 8. #39's "byte-identical ordinary swimming"
+    and docs/agents/fx-effects.md's Fish item 8. #39's "byte-identical ordinary swimming"
     proof no longer holds for rendered frames (the trail is always live):
     `scripts/check_fish_camera.py` §1b / `tests/test_fish_camera.py` now
     compare KINEMATICS at the neutral dial against `THRUST_BASELINE_REF`.
@@ -1585,7 +1585,7 @@ against that commit.
     DTLS socket setup moved into `_open_dtls()` unchanged. This is a
     GENERIC safety net, not a rule about the Loft/Ledge four specifically:
     carving them out of the allow-list was itself a wrong assumption,
-    corrected 2026-10-06 (AGENTS.md "THE FOUR BULBS ARE ORDINARY") — they
+    corrected 2026-10-06 (docs/agents/spectra-engine-core.md "THE FOUR BULBS ARE ORDINARY") — they
     are now allow-listed like every other bulb in the area, so this guard
     does not fire for his real Music Group. Proof:
     `tests/test_hue_stream_scope.py`.
@@ -2203,7 +2203,7 @@ against that commit.
     never reaches any of it; `drop_shock: 0` and no breath keys return
     before touching the frame. **Widened 2026-10-12** (the Admiral: a room
     switch, a per-scene switch and a minimum-energy floor, all SpotFX's —
-    AGENTS.md "THREE SWITCHES DECIDE WHETHER A DROP PAINTS IT"): each
+    docs/agents/fx-effects.md "THREE SWITCHES DECIDE WHETHER A DROP PAINTS IT"): each
     opted-in class also registers `phase_grammar.shock_on_schema_fields()`
     and `SHOCK_ON_KEY` in `ADVANCED_KEYS`, and `Twod.render` gained a third
     way to skip the painter entirely — `phase_grammar.shock_on(self._config)`

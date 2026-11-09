@@ -22,7 +22,7 @@ His legacy STAR scene authored `edges` as a bare static `6`; the SPECTRA
 rebuild silently replaced it with a random dice binding plus two "patch"
 flare kinds that exist nowhere in his legacy data — he never asked for
 any of it, and only noticed because his six-pointed star stopped being
-six-pointed (AGENTS.md, `docs/spectra-star-edges-freeze.md`). **The rule
+six-pointed (docs/agents/scenes-and-flares.md, `docs/spectra-star-edges-freeze.md`). **The rule
 this proves: an artifact's presence in stored scene data is NOT evidence
 he authored it.** Before touching any of this scene's fields, especially
 anything that looks like a dice/random binding, check his LEGACY data
@@ -117,5 +117,5 @@ entry's effect VALUES (incl. `lull_mode`, `shape_morph_s`) via
 `tests/test_star_strips_always_melt.py` (this scene's Strips migration).
 The radial-effect skill owns the effect's own instruments
 (`scripts/check_star_spin_motion.py`, `scripts/check_radial_base_rotation.py`).
-History: AGENTS.md's "STAR" scene and "A scene's stored data is not proof
-he authored it" sections — read both before a non-trivial change.
+History: docs/agents/fx-effects.md's "Radial (STAR)" section and docs/agents/scenes-and-flares.md's "A scene's stored data is not proof
+he authored it" section — read both before a non-trivial change.

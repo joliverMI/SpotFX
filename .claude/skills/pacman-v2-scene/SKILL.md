@@ -24,7 +24,7 @@ SPECTRA's scenes were later migrated FROM by
 `storage/spectra/scenes.json`. Do not run it to "check" anything. For what
 this scene actually is today, read `GET /spectra/api/scenes` on the live
 process — a scene's stored data (and a legacy seeder's) is not proof he
-authored it (AGENTS.md).
+authored it (AGENTS.md's safety rule; full history in docs/agents/scenes-and-flares.md).
 
 ## `reverse` on this scene's flare bands frightens the ghosts, it does not
    reverse motion

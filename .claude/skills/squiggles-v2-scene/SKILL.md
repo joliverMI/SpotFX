@@ -24,7 +24,7 @@ SPECTRA's scenes were later migrated FROM by
 `storage/spectra/scenes.json`. Do not run it to "check" anything. For what
 this scene actually is today, read `GET /spectra/api/scenes` on the live
 process — a scene's stored data (and a legacy seeder's) is not proof he
-authored it (AGENTS.md).
+authored it (AGENTS.md's safety rule; full history in docs/agents/scenes-and-flares.md).
 
 `scripts/widen_squiggles_colorset_accept.py` is different in kind: a
 genuine migration of SPECTRA's own scene store (dry-run by default,
@@ -39,7 +39,7 @@ reasoning about which sets this scene will draw from.
 
 `orbits1d` registers `reverse` but Squiggles V2's own Strips entry never
 sets it (same shape as Orbits V2/Squiggles V2 both having this on their
-Strips per AGENTS.md's "reverse flare's ~2x dwell overrun" entry) — a
+Strips per docs/agents/spectra-engine-core.md's "reverse flare's ~2x dwell overrun" entry) — a
 momentary spike on a param the scene entry never authored used to land
 and never release, stranded until an effect-TYPE switch rebuilt the
 instance. Fixed generically (`_resting_value` fallback to the effect's own

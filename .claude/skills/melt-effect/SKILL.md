@@ -100,6 +100,6 @@ the cycle, no white, the shared dark point, the punch, the house hold) and
 No dedicated `check_melt_*.py`/`test_melt_*.py` exists for Melt itself. The
 "always do melt" migration and its test (`scripts/star_strips_always_melt.py`,
 `tests/test_star_strips_always_melt.py`) prove STAR's scene data and belong
-to the star-scene skill. History: AGENTS.md's "SPECTRA app" section, "always
-do melt" ruling (search "star_strips_always_melt" in AGENTS.md for the full
+to the star-scene skill. History: docs/agents/spectra-engine-core.md's "SPECTRA app" section, "always
+do melt" ruling (search "star_strips_always_melt" in docs/agents/spectra-engine-core.md for the full
 quote and the superseded-seeder warning).

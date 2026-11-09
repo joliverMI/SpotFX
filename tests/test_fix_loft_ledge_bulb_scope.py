@@ -1,5 +1,5 @@
 """scripts/fix_loft_ledge_bulb_scope.py — the one-time catch-up this repo's
-own code-default fix (AGENTS.md's "THE FOUR BULBS ARE ORDINARY",
+own code-default fix (docs/agents/spectra-engine-core.md's "THE FOUR BULBS ARE ORDINARY",
 fx/hue_scope.py's module docstring) cannot itself apply to a room that
 already ran the OLD scripts/seed_hue_scope.py / scripts/
 seed_house_lighting.py defaults: the Loft Ceiling Uplight and the three

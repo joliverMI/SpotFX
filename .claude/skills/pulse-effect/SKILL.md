@@ -258,5 +258,5 @@ blocked on a camera pose that can see them). That script's `NEVER_STREAM`
 guard refuses `hue-lights` because its stream is the whole ten-bulb Music
 Group, far more than this protocol's two-fixture isolation needs — never
 because any of its bulbs (the Loft Ceiling Uplight and the three Ledge
-bulbs included) are treated differently; see AGENTS.md "THE FOUR BULBS ARE
+bulbs included) are treated differently; see docs/agents/spectra-engine-core.md "THE FOUR BULBS ARE
 ORDINARY" (2026-10-06).

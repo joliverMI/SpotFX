@@ -619,7 +619,7 @@ async def _hue_get(client: httpx.AsyncClient, endpoint: str) -> dict:
 async def _area_streaming(client: httpx.AsyncClient, cfg: dict) -> Optional[dict]:
     """Is this device's entertainment area STREAMING right now? Read from the
     bridge's own entertainment_configuration — the one resource that tells
-    the truth during a stream (AGENTS.md, "Reading real Hue bulb state": the
+    the truth during a stream (docs/agents/spectra-engine-core.md, "Reading real Hue bulb state": the
     light resource reads the held colour while the bulbs follow the music).
     Returns `{"ours": bool, "streamer": rid}` when the area is active, None
     when it is not — or when the bridge would not say (unknown is logged and
@@ -1407,7 +1407,7 @@ async def _reconcile_impl(enabled: bool, color: Optional[str],
 #
 # THE RAMP is the mode's own glide (90 s at a clock change), carried as
 # `dynamics.duration`: the bulbs fade on the mesh; the bridge's resource
-# reports the commanded target at once (AGENTS.md "a CLIP v2 light GET
+# reports the commanded target at once (docs/agents/spectra-engine-core.md "a CLIP v2 light GET
 # during an active dynamics-ramped transition reports the commanded/target
 # state"), which is exactly what the read-back confirms.
 

@@ -24,7 +24,7 @@ SPECTRA's scenes were later migrated FROM by
 `storage/spectra/scenes.json`. Do not run it to "check" anything. For what
 this scene actually is today, read `GET /spectra/api/scenes` on the live
 process — a scene's stored data (and a legacy seeder's) is not proof he
-authored it (AGENTS.md).
+authored it (AGENTS.md's safety rule; full history in docs/agents/scenes-and-flares.md).
 
 `scripts/seed_dancer_event.py` has NOTHING to do with this scene: it seeds
 the old keybeat2d GIF "Dancer" event, a different legacy scene
@@ -41,7 +41,7 @@ all.
 
 Set to `"dark"` by `scripts/set_scene_colorset_preference.py` alongside
 Black Hole V2/UI and Fireworks V2 — see the additive-match rule in
-AGENTS.md's "per-scene colour-set PREFERENCE" section before assuming a
+docs/agents/sonic-and-colour.md's "per-scene colour-set PREFERENCE" section before assuming a
 preference change could ever leave this scene with zero eligible sets.
 
 ## The saturating-threshold flame defect is FIXED for this scene's beat-

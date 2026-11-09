@@ -19,7 +19,7 @@ about how THIS scene wires it: bands, flare kinds, colour preference.
 live/gitignored `storage/spectra/scenes.json`. **Verify against the live
 process (`GET /spectra/api/scenes`), never a worktree's local copy** — a
 worktree's `storage/spectra/*.json` is whatever was copied in when it was
-created, not proof of current state (AGENTS.md's own warning, with a real
+created, not proof of current state (docs/agents/spectra-engine-core.md's own warning, with a real
 2026-08-17 incident where a stale copy made an already-shipped fix look
 regressed).
 
@@ -46,7 +46,7 @@ regressed).
   RAW JSON dict and mutate only the one key — never round-trip through
   `SceneV2`/`scene_store.save()`, which silently re-migrates
   `param_patch`/`gain`/`reroll_dice`/`color_set_jump` into the newer
-  `flare_kinds` shape on every scene it touches (AGENTS.md's "Editing an
+  `flare_kinds` shape on every scene it touches (docs/agents/sonic-and-colour.md's "Editing an
   existing SceneV2 by script" rule — this bit a real draft of that exact
   script).
 - **Accent param**: `blackhole.horizon_color` and `power.sparks_color`
@@ -77,7 +77,7 @@ including the hand-off table row for this effect.
 Sonic can create/rename/edit `FlareKind`s on this scene and its scalar
 scene settings (entry blend, colour-journey pace, colour-set acceptance)
 via the scene console — never the Matrix/Strips device entries themselves
-(out of scope by design). See AGENTS.md's "Sonic's scene/flare authority"
+(out of scope by design). See docs/agents/sonic-and-colour.md's "Sonic's scene/flare authority"
 section for the full boundary.
 
 ## Executable proofs

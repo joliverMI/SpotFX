@@ -191,7 +191,7 @@ the band forward, just dont add the 100ms pre-fire" — so it fires ON the
 trigger. That ruling is the reason it sits at 0, not a mechanical limit.
 
 The mechanical limit that motivated it is CLOSED: PER-FLARE TRIGGER MOMENT
-has shipped (`scene_response._band_anchor_ms`, `PendingKindBatch`; AGENTS.md
+has shipped (`scene_response._band_anchor_ms`, `PendingKindBatch`; docs/agents/sonic-and-colour.md
 "PER-FLARE TRIGGER MOMENT"). A band's anchor is the min over every
 declared, enabled kind's offset, zero included; on a trigger-relocated fire
 the whole band starts at that anchor and each kind then waits
@@ -770,7 +770,7 @@ behind the others, the lull dark, ordinary frames bit for bit against PR
 `test_fish_big_fish_avoid.py` (the other fish avoiding it, and nothing
 changed without one); `scripts/check_fish_big_fish_avoid.py` measures it
 before/after and `--gifs DIR` writes the before | avoiding GIFs.
-History: AGENTS.md's "Fish (fx/effects/fish.py) — Orbits' twin" section —
+History: docs/agents/fx-effects.md's "Fish (fx/effects/fish.py) — Orbits' twin" section —
 read that in full before a non-trivial change; it documents ~8 more
 PR-scoped fixes (lunge envelope, charge spread, camera window centring,
 wake replacement) each with its own measured-not-assumed proof.

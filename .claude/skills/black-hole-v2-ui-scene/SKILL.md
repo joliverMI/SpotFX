@@ -50,7 +50,7 @@ set to `"dark"` alongside Black Hole V2, Fireworks V2 and Dancers V2.
 
 The raw-JSON-dict rule for script edits still applies (load the raw dict,
 mutate one key, never round-trip through `SceneV2`/`scene_store.save()` —
-see the black-hole-v2-scene skill and AGENTS.md).
+see the black-hole-v2-scene skill, AGENTS.md's safety rule and docs/agents/sonic-and-colour.md).
 
 ## Sonic reach
 

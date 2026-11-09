@@ -106,7 +106,7 @@ Same code as Eye (eye-effect skill); proof
 
 No `no_background_color` flag: an authored set background reaches the wire
 and `get_pixels()` paints it once for unlit cells. The effect never paints
-`_bg_color` itself; the lids are literal black (AGENTS.md "A colour set's
+`_bg_color` itself; the lids are literal black (docs/agents/fx-effects.md "A colour set's
 background MODE lands in ONE place"). With `sky` > 0 almost no real cell
 inside the hex is unlit.
 

@@ -383,7 +383,7 @@ class SPAStaticFiles(StaticFiles):
     browsers apply heuristic caching and can reuse a stale index.html
     without revalidating, pinning a phone to an old bundle indefinitely
     even though the new build is deployed and served correctly (see
-    AGENTS.md's "SPA index.html must never be heuristically cached").
+    docs/agents/ui-infra-and-tests.md's "SPA index.html must never be heuristically cached").
     """
 
     async def get_response(self, path: str, scope):

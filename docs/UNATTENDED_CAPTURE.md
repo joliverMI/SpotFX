@@ -258,8 +258,9 @@ own measured shape and a re-clamping camera are each refused by name
   real ffmpeg pipe holds up to 19 whole frames, 3.8 s at 5 fps, and hands
   back the oldest. The client now drains to the newest frame and pays off a
   control change in frames, and the transport is MEASURED rather than
-  modelled (`scripts/check_stream_freshness.py`). See AGENTS.md,
-  "A STAMP IS NOT A PHOTON". **The PIXEL path has now been proven against
+  modelled (`scripts/check_stream_freshness.py`). See
+  `docs/agents/night-run-and-capture-client.md`, "A STAMP IS NOT A
+  PHOTON". **The PIXEL path has now been proven against
   a real OS pipe; the CONTROL path still has not met a webcam.**
 - **Nothing has run against his room.** By instruction.
 - **No night run has happened.** The seam, its refusals, the planned-end

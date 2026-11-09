@@ -372,7 +372,7 @@ def test_no_lock_state_call_can_influence_the_sweep():
     """Every `lock_state.*` call in the sweep is a bare statement whose value
     is discarded — never a condition, an assignment, an argument or a return
     — so nothing this feature reports can feed back into an offset, a
-    threshold or a lock decision. Read AGENTS.md "Timing and offset-direction
+    threshold or a lock decision. Read docs/agents/workflow-conventions.md "Timing and offset-direction
     conventions" before relaxing this."""
     src = (REPO / "services" / "auto_offset_service.py").read_text()
     tree = ast.parse(src)

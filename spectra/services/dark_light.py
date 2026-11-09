@@ -131,7 +131,7 @@ ambient_music_gate.py's own docstring found for the selection kernel. It
 only ever shows on devices LedFX is actually rendering (WLED etc., or a
 Hue device that isn't currently frozen).
 
-Measurement note (mirrors AGENTS.md's "Reading real Hue bulb state — don't
+Measurement note (mirrors docs/agents/spectra-engine-core.md's "Reading real Hue bulb state — don't
 trust a raw CLIP light GET during a live entertainment stream" entry):
 this module's own mechanism is LedFX-side — dark_lock + effect config on
 /api/virtuals, read via fx_seam.get_virtuals() — never the Hue CLIP light
@@ -334,7 +334,7 @@ def _house_driving() -> bool:
     and reasserts itself (dark_lock included) the instant house.py's own
     `_enter`/`_hand_in`/`_go_inactive` hooks call `reconcile()` again as
     its driving state flips. Lazy import, like every other cross-module
-    reference in this file (see AGENTS.md's light-mode-fix-import-crash
+    reference in this file (see docs/agents/spectra-engine-core.md's light-mode-fix-import-crash
     entry) — house.py has no reciprocal import of this module at module
     scope either. Never raises: an unreadable house state is read as "not
     driving", so Dark/Light simply applies as it always has."""

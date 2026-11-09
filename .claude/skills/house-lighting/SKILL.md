@@ -15,7 +15,7 @@ description: >
 
 # House lighting engine
 
-`spectra/services/house.py`'s module docstring (and AGENTS.md's "HOUSE
+`spectra/services/house.py`'s module docstring (and docs/agents/house-lighting.md's "HOUSE
 LIGHTING" sections, phases 1-4) are the binding statements. Five things
 worth knowing cold:
 

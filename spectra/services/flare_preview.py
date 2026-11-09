@@ -22,7 +22,7 @@ kinds his brief calls out honest: `animation_start_s`/`animation_end_s`
 are read directly off the real production constants (DICE_REROLL_GLIDE_MS,
 PULSE_HOLD_S/hold_ms, PULSE_RELEASE_S, GAIN_GLIDE_S, color_jump_ramp_ms) —
 never guessed, never a live capture that could itself lie about a fast
-glide (see AGENTS.md's "Reading real Hue bulb state" / "CLIP v2 dynamics"
+glide (see docs/agents/spectra-engine-core.md's "Reading real Hue bulb state" / "CLIP v2 dynamics"
 entries for why polling a live device is the wrong instrument for exactly
 this question).
 

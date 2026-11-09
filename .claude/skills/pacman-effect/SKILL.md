@@ -78,6 +78,6 @@ No direct param edit — reachable only through an already-attached
 No dedicated `check_pacman_*.py`/`test_pacman_*.py` exists yet — a named
 gap. The nearest shared-machinery proof is
 `tests/test_lead_time_alignment.py` (the transition-anchor system
-`particle_handoff` feeds) and AGENTS.md's own paragraph on `pacman`'s
-`no_background_color` flag (search "pacman" in AGENTS.md for the colour-
+`particle_handoff` feeds) and docs/agents/spectra-engine-core.md's own paragraph on `pacman`'s
+`no_background_color` flag (search "pacman" in docs/agents/spectra-engine-core.md for the colour-
 set accept-list caveat before assuming a narrow list is arbitrary).
