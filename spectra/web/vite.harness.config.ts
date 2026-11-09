@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
-// Five pages: index.html mounts the top strip, live.html the Live view,
+// The pages: index.html mounts the top strip, live.html the Live view,
 // songstrip.html the song-layout-plan's global SongStrip, hometimeline.html
 // Home's editable copy + its audio-shape canvas (mocked backend, no real
 // process — scripts/check_song_strip_fps.py / check_home_timeline_fps.py's
@@ -12,7 +12,8 @@ import { resolve } from 'node:path';
 // the Absorb Music page under the real chrome (scripts/render_absorb_page.py),
 // and homedrops.html Home's quick-run cards with the Drops panel (predrop
 // plan step 1 — scripts/check_home_drops_layout.py), and testbedlyrics.html
-// the test bed's Sung words lane (scripts/render_testbed_lyrics_lane.py).
+// the test bed's Sung words lane (scripts/render_testbed_lyrics_lane.py), and
+// sunglabels.html the Sung labels page (scripts/render_sung_labels.py).
 export default defineConfig({
   plugins: [react()], root: 'harness', base: '/spectra/',
   build: {
@@ -28,6 +29,7 @@ export default defineConfig({
       jukeboxcards: resolve(__dirname, 'harness/jukeboxcards.html'),
       homedrops: resolve(__dirname, 'harness/homedrops.html'),
       testbedlyrics: resolve(__dirname, 'harness/testbedlyrics.html'),
+      sunglabels: resolve(__dirname, 'harness/sunglabels.html'),
     } },
   },
 });

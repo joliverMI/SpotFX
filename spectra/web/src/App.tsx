@@ -4,6 +4,7 @@ import RoomOwnershipBar from './components/RoomOwnershipBar';
 import TestingBar from './components/TestingBar';
 import { ToastProvider } from './components/Toast';
 import ColorSetsPage from './colorsets/ColorSetsPage';
+import SungLabelsPage from './sunglabels/SungLabelsPage';
 import DevicesPage from './devices/DevicesPage';
 import LiveView from './live/LiveView';
 import FeedbackPage from './feedback/FeedbackPage';
@@ -140,6 +141,7 @@ export default function App() {
           <Route path="/scenes" element={<ScenesPage />} />
           <Route path="/scenes/:id" element={<ScenesPage />} />
           <Route path="/colorsets" element={<ColorSetsPage />} />
+          <Route path="/sung-labels" element={<SungLabelsPage />} />
           <Route path="/timeline" element={<BuilderPage />} />
           <Route path="/feedback" element={<FeedbackPage />} />
           <Route path="/review" element={<ReviewPage />} />

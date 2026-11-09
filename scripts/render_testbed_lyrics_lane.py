@@ -36,7 +36,8 @@ from check_ui_fidelity import (  # noqa: E402
 
 OUT_DIR = REPO / "docs" / "evidence" / "testbed-lyrics"
 WIDTHS = (1440, 1180, 390)
-KEEP_SHOTS = {"whole-song-1440", "zoomed-30s-1440", "zoomed-8s-1440", "flagged-1440", "zoomed-30s-390"}
+KEEP_SHOTS = {"whole-song-1440", "zoomed-30s-1440", "zoomed-8s-1440", "flagged-1440", "zoomed-30s-390",
+              "matches-1440", "matches-390"}
 
 ERROR_TRAP = """
 window.__pageErrors = [];
@@ -151,6 +152,58 @@ SAME_X = """(() => {
 })()"""
 
 
+MATCH_FACTS = """(() => {
+  const chips = [...document.querySelectorAll('.testbed-match:not(.tick)')];
+  const first = chips[0];
+  let offset = null;
+  if (first) {
+    const left = first.getBoundingClientRect().left;
+    const word = (first.querySelector('.testbed-match-text')?.textContent ?? '').split(' ')[0];
+    const ticks = [...document.querySelectorAll('.testbed-lyric-word')]
+      .filter((el) => el.title === word);
+    if (ticks.length) offset = Math.min(...ticks.map((t) => Math.abs(t.getBoundingClientRect().left - left)));
+  }
+  return {
+    chips: chips.length,
+    guesses: document.querySelectorAll('.testbed-match.claude:not(.tick)').length,
+    his: document.querySelectorAll('.testbed-match.his:not(.tick)').length,
+    offset,
+    status: document.querySelector('.testbed-match-status')?.textContent ?? null,
+  };
+})()"""
+
+PANEL_TEXT = "document.querySelector('.testbed-match-panel')?.textContent ?? ''"
+
+click_chip = "(() => { document.querySelector('.testbed-match:not(.tick)').click(); return true; })()"
+
+
+def press(label: str) -> str:
+    return f"""(() => {{
+  const b = [...document.querySelectorAll('.testbed-match-section button')].find((x) => x.textContent === {label!r});
+  if (b) b.click();
+  return !!b;
+}})()"""
+
+
+def pick_words(first: int, last: int) -> str:
+    return f"""(() => {{
+  const words = [...document.querySelectorAll('.testbed-match-words button')];
+  words[{first}].click();
+  return new Promise((done) => setTimeout(() => {{ document.querySelectorAll('.testbed-match-words button')[{last}].click(); done(true); }}, 100));
+}})()"""
+
+
+def pick_target(name: str) -> str:
+    return f"""(() => {{
+  document.querySelector('.testbed-match-add input').dispatchEvent(new FocusEvent('focusin', {{ bubbles: true }}));
+  return new Promise((done) => setTimeout(() => {{
+    const option = [...document.querySelectorAll('.testbed-match-add div')].find((d) => d.textContent === 'Effect' + {name!r});
+    if (option) option.dispatchEvent(new MouseEvent('mousedown', {{ bubbles: true, cancelable: true }}));
+    done(!!option);
+  }}, 150));
+}})()"""
+
+
 async def run() -> int:
     shots = "--no-shots" not in sys.argv
     if websockets is None:
@@ -246,6 +299,44 @@ async def run() -> int:
                       same["mark"] is not None and abs(same["mark"] - same["guide"]) <= 1.5,
                       f"mark {same['mark']} guide {same['guide']}")
                 await shot(f"zoomed-30s-{width}")
+
+                # The Word matches row (lyrics plan step 3).
+                await ev(set_position(0))
+                await settle()
+                row = await ev(MATCH_FACTS)
+                check("the Word matches row shows the guesses", row["chips"] >= 1, str(row))
+                check("guesses are drawn as guesses", row["guesses"] == row["chips"], str(row))
+                check("a chip sits under its first word", row["offset"] is not None and row["offset"] <= 1.5,
+                      f"{row['offset']} px")
+                check("a reading says what state it is in", "guess" in (row["status"] or ""), str(row["status"]))
+                check("it says it reaches nothing", "Nothing here reaches your lights" in (row["status"] or ""))
+                await ev(click_chip)
+                await settle()
+                panel = await ev(PANEL_TEXT)
+                check("selecting a match says what it is and why", "Claude" in panel and "names the colour" in panel, panel)
+                check("and who it would reach", "Blood Red" in panel, panel)
+                before_matches = row["chips"]
+                await ev(press("Delete this match"))
+                await settle()
+                after = await ev(MATCH_FACTS)
+                check("deleting takes it off the timeline", after["chips"] == before_matches - 1, str(after))
+                check("and it can be brought back", "Bring back 1 deleted" in (after["status"] or ""), str(after["status"]))
+
+                await ev(press("+ Add a match"))
+                await settle()
+                await ev(pick_words(0, 1))
+                await settle()
+                picked = await ev(PANEL_TEXT)
+                check("two taps pick a phrase", "means" in picked, picked)
+                await ev(pick_target("Fish"))
+                await settle()
+                await ev(press("Add"))
+                await settle()
+                added = await ev(MATCH_FACTS)
+                check("an added match is drawn as his", added["his"] == 1, str(added))
+                await shot(f"matches-{width}")
+                errs = await ev("window.__pageErrors")
+                check("no page errors in the matches", not errs, str(errs))
 
                 await ev(zoom("8 s"))
                 await settle()

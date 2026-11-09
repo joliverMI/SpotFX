@@ -41,6 +41,7 @@ import type {
 } from '../../types';
 import { inView, viewPct, wholeSong } from '../lyricsLane';
 import type { LaneView } from '../lyricsLane';
+import LyricMatchesSection from './LyricMatchesSection';
 import LyricsLane from './LyricsLane';
 
 /** A glyph-carrying mark's icon: the pre-drop kinds (the Drops panel's own). */
@@ -285,6 +286,8 @@ export interface LyricsLaneInput {
   data: TestbedLyrics | undefined;
   transitions: TestbedReferenceMark[];
   flares: TestbedReferenceMark[];
+  /** The page's emphasis sensitivity, which dims matches on quieter words. */
+  sensitivity: number;
 }
 
 export default function TestbedLaneBar({
@@ -345,6 +348,14 @@ export default function TestbedLaneBar({
               <HisMarksRow label="His flares" marks={lane.lyrics.flares}
                            durationMs={durationMs} view={shown} toleranceMs={toleranceMs} />
             </>
+          )}
+          {lane.lyrics.data?.status === 'ok' && (
+            <LyricMatchesSection
+              uri={lane.lyrics.data.uri}
+              words={lane.lyrics.data.words}
+              view={shown}
+              sensitivity={lane.lyrics.sensitivity}
+            />
           )}
         </div>
       ) : (

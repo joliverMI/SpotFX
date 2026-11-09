@@ -12,8 +12,9 @@
  * words but loses the guides, and the words go grey. A song with no usable
  * timeline says which of the reasons it is instead of showing an empty lane.
  *
- * `matched_label` on a mark is the chip's place: the label step of the plan
- * fills it, nothing does yet.
+ * `matched_label` on a mark is the chip: the label on that word, if it has
+ * one (spectra/services/lyric_matches.py). The matches themselves are drawn
+ * and edited in LyricMatchesSection.tsx, on their own row under this lane.
  *
  * The bar's width is measured with a state-backed callback ref rather than a
  * plain useRef (AGENTS.md: an element mounted conditionally can be null on the

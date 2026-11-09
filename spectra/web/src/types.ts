@@ -1863,7 +1863,7 @@ export interface TestbedWordDetail {
   end_ms: number;
   line: number;
   features: TestbedWordFeatures;
-  /** where a matched colour or effect label will go; nothing sets it yet */
+  /** the label on this word from the song's matches, if any */
   matched_label: string | null;
 }
 
@@ -2028,4 +2028,92 @@ export interface SecondAccountState {
   system_started: { device_id: string; uris: string[]; started_at_ms: number } | null;
   /** On a PUT that turned it off while the system was playing on it. */
   letting_go?: string;
+}
+
+// ── Sung labels and word matches (lyrics plan step 3) ──────────────────────
+
+export type SungChipSource = 'seed' | 'claude' | 'his';
+export interface SungChip { text: string; source: SungChipSource; }
+export type SungMeaningKind = 'things' | 'moods' | 'places';
+export type SungListName = 'labels' | SungMeaningKind;
+
+export interface SungColorSet {
+  id: string;
+  name: string;
+  kind: 'set' | 'group';
+  disabled: boolean;
+  swatch: string;
+  has_colours: boolean;
+  labels: SungChip[];
+  meanings: Record<SungMeaningKind, SungChip[]>;
+  drafted_ms: number | null;
+  draft_model: string | null;
+}
+
+export interface SungEffect { id: string; name: string; labels: SungChip[]; }
+
+export interface ClaudeAvailability {
+  available: boolean;
+  reason: string | null;
+  backend: string;
+  model: string;
+}
+
+export interface SungLabelsPageData {
+  color_sets: SungColorSet[];
+  effects: SungEffect[];
+  labels_hash: string;
+  n_labels: number;
+  auto_read: boolean;
+  claude: ClaudeAvailability;
+  draft_batch_size: number;
+}
+
+export interface SungLabelEdit {
+  kind: 'color_set' | 'effect';
+  id: string;
+  list: SungListName;
+  op: 'add' | 'remove';
+  text: string;
+}
+
+export interface LyricMatchTarget {
+  kind: 'color_set' | 'effect';
+  id: string;
+  name: string;
+  swatch: string | null;
+}
+
+export interface LyricMatch {
+  id: string;
+  source: 'claude' | 'his';
+  provenance: 'claude_guess' | 'his';
+  first_word: number;
+  last_word: number;
+  phrase: string;
+  label: string;
+  confidence: number | null;
+  why: string;
+  targets: LyricMatchTarget[];
+  n_targets: number;
+  targets_missing: number;
+  ms: number;
+  end_ms: number;
+  score: number;
+}
+
+export type LyricReadingState = 'none' | 'fresh' | 'labels_changed' | 'words_changed';
+
+export interface LyricMatches {
+  uri: string;
+  status: 'ok' | 'none' | 'invalid' | 'stale';
+  note: string | null;
+  state: LyricReadingState;
+  reading: { at_ms: number; model: string; n_weak: number; n_refused: number } | null;
+  matches: LyricMatch[];
+  unplaced: { id: string; phrase: string; label: string }[];
+  n_his: number;
+  n_deleted: number;
+  weak_match_threshold: number;
+  claude: ClaudeAvailability;
 }

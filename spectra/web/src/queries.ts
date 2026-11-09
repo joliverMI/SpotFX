@@ -19,6 +19,7 @@ import type {
   ReviewSession, ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult,
   SceneV2, SecondAccountState, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
   Liveness, SonicUsageSummary, SpectraTrigger, SpotColorSetCard, TestSessionStatus,
+  LyricMatches, SungLabelEdit, SungLabelsPageData,
   TestbedDropReferenceSet, TestbedEngineMarks, TestbedLyrics, TestbedMarks, TestbedPromoteRequest, TestbedPromoteResult,
   TestbedPromotionLogEntry, TestbedReferenceSet, TestbedSong, TestbedWaveform,
   TranscribeResult, UndoResult,
@@ -1507,6 +1508,94 @@ export function useTestbedLyrics(uri: string | null, enabled: boolean) {
     queryFn: () => apiGet<TestbedLyrics>(`/testbed/lyrics?uri=${enc(uri!)}`),
     enabled: !!uri && enabled,
   });
+}
+
+/** The sung labels (lyrics plan step 3): what each colour set and effect
+ * answers to when it is sung. spectra/services/sung_labels.py. */
+export function useSungLabels(enabled = true) {
+  return useQuery({
+    queryKey: ['sung-labels'],
+    queryFn: () => apiGet<SungLabelsPageData>('/sung-labels'),
+    enabled,
+  });
+}
+
+function useSungLabelsMutation<V>(fn: (v: V) => Promise<SungLabelsPageData>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (page) => {
+      qc.setQueryData(['sung-labels'], page);
+      // Readings are stale the moment the words on the list change.
+      void qc.invalidateQueries({ queryKey: ['lyric-matches'] });
+    },
+  });
+}
+
+export function useSungLabelEdit() {
+  return useSungLabelsMutation((body: SungLabelEdit) =>
+    apiPost<SungLabelsPageData>('/sung-labels/edit', body));
+}
+
+export function useSungLabelSettings() {
+  return useSungLabelsMutation((body: { auto_read: boolean }) =>
+    apiPut<SungLabelsPageData>('/sung-labels/settings', body));
+}
+
+export function useDraftMeanings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => apiPost<{ drafted: number; ids: string[]; skipped: string[] }>(
+      '/sung-labels/draft', { ids }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['sung-labels'] });
+      void qc.invalidateQueries({ queryKey: ['lyric-matches'] });
+    },
+  });
+}
+
+/** One song's matched words and how fresh the reading is
+ * (spectra/services/lyric_matches.py). */
+export function useLyricMatches(uri: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['lyric-matches', uri],
+    queryFn: () => apiGet<LyricMatches>(`/testbed/lyric-matches?uri=${enc(uri!)}`),
+    enabled: !!uri && enabled,
+  });
+}
+
+function useLyricMatchesMutation<V>(fn: (v: V) => Promise<LyricMatches>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (data) => {
+      qc.setQueryData(['lyric-matches', data.uri], data);
+      // A word's chip on the emphasized mark comes from these.
+      void qc.invalidateQueries({ queryKey: ['testbed-engine-marks'] });
+    },
+  });
+}
+
+export function useReadLyrics() {
+  return useLyricMatchesMutation((uri: string) =>
+    apiPost<LyricMatches>(`/testbed/lyric-matches/read?uri=${enc(uri)}`));
+}
+
+export function useAddLyricMatch() {
+  return useLyricMatchesMutation((body: {
+    uri: string; first_word: number; last_word: number;
+    target: { kind: 'color_set' | 'effect'; id: string };
+  }) => apiPost<LyricMatches>('/testbed/lyric-matches/add', body));
+}
+
+export function useDeleteLyricMatch() {
+  return useLyricMatchesMutation((body: { uri: string; id: string }) =>
+    apiPost<LyricMatches>('/testbed/lyric-matches/delete', body));
+}
+
+export function useRestoreDeletedLyricMatches() {
+  return useLyricMatchesMutation((uri: string) =>
+    apiPost<LyricMatches>(`/testbed/lyric-matches/restore-deleted?uri=${enc(uri)}`));
 }
 
 /** The drop-detection plan's own four-song table (Contra / Dopamine /

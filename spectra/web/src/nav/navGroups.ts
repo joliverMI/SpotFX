@@ -47,6 +47,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/scenes', label: 'Scenes', match: (p) => p.startsWith('/scenes'), icon: 'scene' },
       { to: '/colorsets', label: 'Colours', match: prefix('/colorsets'), icon: 'palette' },
+      { to: '/sung-labels', label: 'Sung labels', match: exact('/sung-labels'), icon: 'note' },
       { to: '/devices', label: 'Devices', match: exact('/devices'), icon: 'devices' },
       { to: '/rooms', label: 'Rooms', match: exact('/rooms'), icon: 'rooms' },
       { to: '/room-effects', label: 'Room FX', match: exact('/room-effects'), icon: 'roomfx' },
@@ -78,11 +79,13 @@ export const NAV_GROUPS: NavGroup[] = [
  * reachable" proof — `/live` is deliberately excluded (it's a pop-out with
  * no menu entry, unchanged) — plus every top-level route added since
  * (`/absorb`, Absorb Music, 2026-10-21, filed under Engine beside Test Bed,
- * Timing and Review: the other library-maintenance surfaces). */
+ * Timing and Review: the other library-maintenance surfaces; `/sung-labels`,
+ * lyrics plan step 3, filed under Artifacts beside Colours, since it describes
+ * the colour sets and effects). */
 export const ALL_NAV_ROUTES = [
   '/', '/scenes', '/colorsets', '/devices', '/rooms', '/room-effects', '/show',
   '/debug', '/status', '/timing', '/review', '/feedback', '/avsync', '/house',
-  '/testbed', '/timeline', '/settings', '/absorb', '/jukebox',
+  '/testbed', '/timeline', '/settings', '/absorb', '/jukebox', '/sung-labels',
 ];
 
 /** Which group (if any) contains the current route — for highlighting the

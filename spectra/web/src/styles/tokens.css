@@ -2395,6 +2395,74 @@ kbd {
 .testbed-lyrics-lane.flagged .testbed-lyric-word,
 .testbed-lyrics-lane.flagged .testbed-lyric-mark { background: var(--text-muted); }
 .testbed-lyrics-lane.flagged .testbed-lyric-label { color: var(--text-muted); }
+/* The matched words (lyrics plan step 3): a chip per match under the words it
+   sits on. Solid for his, dashed for Claude's guesses, dimmer when the words
+   are below the page's sensitivity. */
+.testbed-match-section { margin: 0; }
+.testbed-lane-bar.testbed-match-lane { height: 44px; overflow: hidden; }
+.testbed-match {
+  position: absolute; height: 17px; padding: 0 4px; display: inline-flex; align-items: center;
+  gap: 4px; font-size: 11px; line-height: 15px; white-space: nowrap; overflow: hidden;
+  color: var(--text); background: var(--surface2); border-radius: 3px; cursor: pointer;
+  border: 1px dashed var(--accent);
+}
+.testbed-match.his { border: 1px solid var(--ok); font-weight: 600; }
+.testbed-match.dim { opacity: 0.45; }
+.testbed-match.selected { outline: 2px solid var(--accent); outline-offset: 0; opacity: 1; }
+.testbed-match.tick {
+  top: 13px; bottom: auto; width: 6px; height: 16px; margin-left: -3px; padding: 0;
+  border-radius: 2px;
+}
+.testbed-match-swatch { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.testbed-match-text { overflow: hidden; text-overflow: ellipsis; }
+.testbed-match-status {
+  flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-muted); min-height: 24px;
+}
+.testbed-match-status button { font-size: 12px; padding: 2px 8px; }
+.testbed-match-link { background: none; border: none; color: var(--accent); text-decoration: underline; }
+.testbed-match-unavailable { color: var(--warning); }
+.testbed-match-note { flex: 0 1 auto; }
+.testbed-match-panel {
+  flex: 1; display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+  padding: 6px 8px; font-size: 13px; background: var(--surface2); border-radius: 4px;
+}
+.testbed-match-detail { font-size: 12px; color: var(--text-muted); }
+.testbed-match-words { display: flex; flex-wrap: wrap; gap: 4px; }
+.testbed-match-words button { padding: 2px 6px; font-size: 12px; }
+.testbed-match-words button.on { background: var(--accent); color: var(--surface2); border-color: var(--accent); }
+.testbed-match-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+/* The Sung labels page. */
+.sung-intro { margin: 0 0 10px; font-size: 13px; color: var(--text-muted); }
+.sung-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
+.sung-toolbar input[type=search], .sung-toolbar > input { min-width: 200px; }
+.sung-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.sung-count { font-size: 12px; color: var(--text-muted); }
+.sung-unavailable { margin: 0 0 8px; font-size: 12px; color: var(--warning); }
+.sung-auto { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.sung-legend { display: flex; flex-wrap: wrap; gap: 6px; }
+.sung-heading { font-size: 14px; margin: 16px 4px 8px; color: var(--text-muted); font-weight: 600; }
+.sung-card { margin-bottom: 8px; }
+.sung-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.sung-swatch { width: 14px; height: 14px; border-radius: 50%; flex: none; border: 1px solid var(--border); }
+.sung-tag { font-size: 10px; padding: 0 5px; border-radius: 7px; background: var(--surface2); color: var(--text-muted); }
+.sung-redraft { margin-left: auto; font-size: 12px; padding: 2px 8px; }
+.sung-list { display: flex; gap: 8px; align-items: baseline; margin: 4px 0; }
+.sung-list-title { flex: 0 0 74px; font-size: 11px; color: var(--text-muted); }
+.sung-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 0; }
+.sung-chip {
+  display: inline-flex; align-items: center; gap: 2px; padding: 0 6px; font-size: 12px; line-height: 20px;
+  border-radius: 10px; background: var(--surface2); color: var(--text); border: 1px solid transparent;
+}
+.sung-chip.claude { border: 1px dashed var(--accent); }
+.sung-chip.his { border: 1px solid var(--ok); font-weight: 600; }
+.sung-chip button { padding: 0 2px; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 12px; line-height: 1; }
+.sung-add { width: 70px; min-width: 0; padding: 0 6px; font-size: 12px; height: 22px; }
+@media (max-width: 520px) {
+  .sung-list { flex-direction: column; gap: 2px; }
+  .sung-list-title { flex: none; }
+  .sung-toolbar > input { width: 100%; }
+}
 .testbed-lane-empty-hint {
   position: absolute; left: 6px; bottom: 12px; font-size: 11px; color: var(--text-muted);
 }

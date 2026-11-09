@@ -4,7 +4,8 @@ words lane (data/lyrics-timing-plan, build step 2).
 THIS HAS NO EFFECT ON THE ROOM. Nothing in the show reads this module: no
 flare, colour change or scene comes from it, and the page cannot push one of
 its marks to his real triggers (spectra/services/testbed_promote.py refuses
-the engine). Labels, matching and colour events are later steps of the plan.
+the engine). Matching words to labels is spectra/services/lyric_matches.py;
+colour events are a later step of the plan.
 
 THE LANE'S CLOCK IS THE CAPTURE'S LABEL CLOCK, deliberately, and it is the
 one the show runs on. A word's `ms` is the capture label of that moment in
