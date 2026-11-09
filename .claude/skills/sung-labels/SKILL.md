@@ -86,7 +86,10 @@ Built as the coverage follow-up this skill exists to record. Load
 - **Writes that ASK FIRST, every single call** (not just the first — the
   absorb_console/drop_console in-process confirm/redeem shape, no HTTP hop
   since these modules live in SPECTRA's own process): `draft_colour_
-  meanings` (Claude spend, up to 10 named colour sets) and `read_song_
+  meanings` (Claude spend, up to `color_meanings.DRAFT_BATCH_SIZE` named
+  colour sets — sized to fit inside the spotfx reverse proxy's 60s read
+  timeout, `services/spectra_proxy.py`; do not hand-copy its current
+  number, it has already moved once) and `read_song_
   lyrics` (Claude spend, one song). Turning `auto_read` ON also asks first
   — it is the one write here that newly spends his Claude allowance
   continuously with nobody pressing anything, the same test
