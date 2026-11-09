@@ -63,6 +63,14 @@ FIELD_LABELS = "labels"
 
 MAX_LABEL_CHARS = 60
 
+# The deterministic cap a re-draft enforces on its own (no second Claude
+# call): a drafted meaning word may sit on at most this many sets before the
+# weakest-fitting occurrences are trimmed. A genuine colour word (colour_words.
+# is_colour_word) may honestly belong to a whole family of same-hued sets, so
+# it gets a wider cap instead of none at all.
+MEANING_WORD_CAP = 3
+MEANING_WORD_CAP_COLOUR = 6
+
 # What an effect answers to before he adds anything. The strip version of an
 # effect shares its Matrix sibling's words: to someone singing, they are the
 # same thing.
@@ -385,9 +393,41 @@ def edit(kind: str, target_id: str, field_name: str, op: str, text: str) -> None
         _save(store)
 
 
+def _enforce_meaning_word_cap(store: SungLabelStore) -> None:
+    """A drafted meaning word on more sets than its cap allows is trimmed back
+    to the cap, keeping it on the sets where Claude itself ranked it earliest
+    in that set's list (its best fit) and dropping it from the rest. Touches
+    only `draft`, never his `added`/`removed`, so this can never undo an edit
+    of his -- it just thins out what the next draft would otherwise pile up."""
+    best_rank: dict[str, dict[str, int]] = {}
+    for card_id, row in store.color_sets.items():
+        for kind in MEANING_KINDS:
+            for index, word in enumerate(getattr(row.meanings, kind).draft):
+                key = colour_words.word_key(word)
+                ranks = best_rank.setdefault(key, {})
+                if card_id not in ranks or index < ranks[card_id]:
+                    ranks[card_id] = index
+    for key, ranks in best_rank.items():
+        cap = MEANING_WORD_CAP_COLOUR if colour_words.is_colour_word(key) else MEANING_WORD_CAP
+        if len(ranks) <= cap:
+            continue
+        keep = {card_id for card_id, _ in
+                sorted(ranks.items(), key=lambda kv: (kv[1], kv[0]))[:cap]}
+        for card_id in ranks:
+            if card_id in keep:
+                continue
+            row = store.color_sets[card_id]
+            for kind in MEANING_KINDS:
+                meaning = getattr(row.meanings, kind)
+                if any(colour_words.word_key(w) == key for w in meaning.draft):
+                    meaning.draft = [w for w in meaning.draft if colour_words.word_key(w) != key]
+
+
 def apply_draft(drafts: dict[str, dict[str, list[str]]], model: str) -> None:
     """Claude's meanings for some cards. Writes each card's `draft` lists and
-    nothing else, which is why a re-draft cannot touch one of his edits."""
+    nothing else, which is why a re-draft cannot touch one of his edits. Then
+    re-enforces the word cap over every card's draft, not only the ones just
+    drafted, because the cap is a statement about the whole list."""
     with _lock:
         store = load()
         now = int(time.time() * 1000)
@@ -397,5 +437,6 @@ def apply_draft(drafts: dict[str, dict[str, list[str]]], model: str) -> None:
                 getattr(row.meanings, kind).draft = colour_words.dedupe(meanings.get(kind) or [])
             row.drafted_ms = now
             row.draft_model = model
+        _enforce_meaning_word_cap(store)
         store.labels_changed_ms = now
         _save(store)

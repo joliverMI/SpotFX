@@ -210,6 +210,13 @@ def _name_words(name: str) -> list[str]:
     return [*phrases, *colours]
 
 
+def is_colour_word(word: str) -> bool:
+    """A genuine colour/shade name (red, azul, sapphire, navy, rainbow...),
+    the one kind of word that may honestly belong to a whole family of sets
+    sharing that hue rather than telling them apart."""
+    return word_key(word) in _COLOUR_WORDS
+
+
 def dedupe(words: Iterable[str]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
