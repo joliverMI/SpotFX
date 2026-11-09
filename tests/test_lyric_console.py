@@ -7,6 +7,11 @@ HTTP, no light, Claude always a stub."""
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+import subprocess
+import sys
+import textwrap
 
 import pytest
 
@@ -362,17 +367,93 @@ def test_read_song_lyrics_refuses_when_claude_is_not_set_up(monkeypatch):
 
 # ── nothing here writes light ───────────────────────────────────────────
 
-def test_lyric_console_imports_nothing_that_can_write_light():
-    import ast
-    forbidden = {"fx_seam", "engine", "trigger_engine", "scene_response", "scene_compiler",
+#: Every handler called directly (never through settings_agent._dispatch,
+#: which merges in sibling domains — scene_console, show_console,
+#: device_console — that legitimately import several of these and would
+#: make the forbidden-module check below a false positive). A fresh
+#: interpreter, since this file's own tests may already have pulled some
+#: of these into THIS process's sys.modules for unrelated reasons.
+_NO_LIGHT_DRIVER = textwrap.dedent('''
+    import asyncio
+    import inspect
+    import json
+    import os
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    from spectra import config as scfg
+    from spectra.services import analysis_reader, claude_text, lyric_console, lyric_reading
+    from tests.lyric_song_world import STEM, color_sets, song
+
+    tmp = Path(tempfile.mkdtemp())
+    scfg.AUDIO_SHAPES_DIR = tmp / "audio_shapes"
+    scfg.COLOR_SETS_FILE = tmp / "color_sets.json"
+    scfg.TRIGGERS_FILE = tmp / "triggers.json"
+    scfg.PROFILES_DIR = tmp / "profiles"
+    scfg.SUNG_LABELS_FILE = tmp / "sung_labels.json"
+    scfg.LYRIC_MATCHES_DIR = tmp / "lyric_matches"
+    scfg.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    scfg.AUDIO_SHAPES_DIR.mkdir(parents=True, exist_ok=True)
+    analysis_reader._shape_index.clear()
+    analysis_reader._index_built = False
+    lyric_reading.reset()
+    color_sets(scfg)
+    song(scfg)
+
+    os.environ["ANTHROPIC_API_KEY"] = "test-key"
+    scfg.settings_agent_backend = lambda: "api"
+
+    async def stub_ask(*, system, user, schema, purpose):
+        return claude_text.ClaudeReply(
+            {"matches": [], "sets": [{"code": "c0", "things": ["volcano"], "moods": [],
+                                      "places": []}]},
+            "test-model", "api")
+    claude_text.ask_json = stub_ask
+
+    def run(op_name, **kw):
+        out = lyric_console.OPERATIONS[op_name].handler(**kw)
+        return asyncio.run(out) if inspect.isawaitable(out) else out
+
+    run("get_lyric_reading_settings")
+    run("list_sung_label_targets")
+    run("get_sung_labels", kind="color_set", name="Blood Red")
+    run("get_lyric_matches", song=STEM)
+    run("set_lyric_reading_settings", weak_match_threshold=0.6)
+    run("edit_sung_label", kind="color_set", name="Blood Red", list="labels", op="add",
+        text="scarlet")
+    run("add_lyric_match", target_kind="color_set", target_name="Blood Red",
+        phrase="red light", song=STEM)
+    run("delete_lyric_match", phrase="red light", song=STEM)
+    run("restore_lyric_matches", song=STEM)
+
+    first = run("set_lyric_reading_settings", auto_read=True)
+    run("set_lyric_reading_settings", auto_read=True, confirm_id=first["confirm_id"])
+
+    first = run("draft_colour_meanings", names=["Blood Red"])
+    run("draft_colour_meanings", names=["Blood Red"], confirm_id=first["confirm_id"])
+
+    first = run("read_song_lyrics", song=STEM)
+    run("read_song_lyrics", song=STEM, confirm_id=first["confirm_id"])
+
+    forbidden = ["fx_seam", "engine", "trigger_engine", "scene_response", "scene_compiler",
                 "scene_sequencer", "drift_conductor", "fx_executor", "live_host",
-                "show_actions"}
-    path = scfg.REPO_ROOT / "spectra" / "services" / "lyric_console.py"
-    imported: set[str] = set()
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if isinstance(node, ast.ImportFrom):
-            imported.update(a.name for a in node.names)
-            imported.add((node.module or "").rsplit(".", 1)[-1])
-        elif isinstance(node, ast.Import):
-            imported.update(a.name.rsplit(".", 1)[-1] for a in node.names)
-    assert not (imported & forbidden), f"lyric_console imports {sorted(imported & forbidden)}"
+                "show_actions"]
+    reached = {n: True for n in forbidden if f"spectra.services.{n}" in sys.modules}
+    print(json.dumps(reached))
+''')
+
+
+def test_lyric_console_operations_never_reach_a_light_writing_module():
+    """Every one of lyric_console's own operations, actually called — not a
+    grep of its import statements, which a transitive re-export or a
+    dynamic import could satisfy without proving anything. A fresh
+    interpreter calls every handler (driving the ask/confirm dance for the
+    ones that need it) and reports which, if any, light-writing module
+    ended up loaded as a side effect."""
+    proc = subprocess.run([sys.executable, "-c", _NO_LIGHT_DRIVER],
+                          cwd=os.fspath(scfg.REPO_ROOT), capture_output=True, text=True,
+                          timeout=90)
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    reached = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert reached == {}, f"running lyric_console's operations pulled in {sorted(reached)}"
