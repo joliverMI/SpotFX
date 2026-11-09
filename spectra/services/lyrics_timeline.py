@@ -87,6 +87,15 @@ class Timeline:
         return self.status == STATUS_OK
 
 
+# Punctuation a printed word sheds at its edges ("life," draws as "life",
+# "¿Qué?" as "Qué"); a word's own apostrophes and hyphens stay.
+_EDGE_PUNCTUATION = ".,;:!?¡¿\"“”()[]…—–-'’"
+
+
+def display_word(word: str) -> str:
+    return word.strip(_EDGE_PUNCTUATION) or word
+
+
 def measure_clock(words: Sequence[dict], capture_offset_ms: float) -> Clock:
     """How far the two ways of reaching song time disagree over this song's
     own words: a word's label against its naive position. Measured over the
@@ -165,6 +174,6 @@ def payload(timeline: Timeline) -> dict:
         "mode": timeline.mode,
         "clock": timeline.clock.as_dict(),
         "default_sensitivity": lyrics_emphasis.DEFAULT_SENSITIVITY,
-        "words": [{"word": w.word, "line": w.line, "ms": w.ms, "end_ms": w.end_ms,
-                   "score": w.score} for w in timeline.scored],
+        "words": [{"word": display_word(w.word), "line": w.line, "ms": w.ms,
+                   "end_ms": w.end_ms, "score": w.score} for w in timeline.scored],
     }

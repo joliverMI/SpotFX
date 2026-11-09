@@ -1488,6 +1488,12 @@ export function useTestbedEngineMarks(
       + (floorScore != null ? `&floor_score=${floorScore}` : '')
       + (emphasisSensitivity != null ? `&emphasis_sensitivity=${emphasisSensitivity}` : '')),
     enabled: !!uri && !!engine && !!markKind,
+    // A slider drag re-asks for the SAME song and engine: keep the marks
+    // on screen until the answer lands, rather than flashing the lane empty.
+    placeholderData: (previous, previousQuery) => {
+      const key = previousQuery?.queryKey;
+      return key && key[1] === uri && key[2] === engine && key[3] === markKind ? previous : undefined;
+    },
   });
 }
 

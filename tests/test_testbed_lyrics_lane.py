@@ -162,10 +162,18 @@ def test_emphasized_marks_carry_the_word_and_why_and_leave_room_for_a_label():
     assert body["available"] is True
     picked = body["estimate"]
     assert picked and all(m["label"] for m in picked)
-    assert "red," in {m["label"] for m in picked}
+    assert "red" in {m["label"] for m in picked}, "printed without its comma"
     detail = picked[0]["detail"]
     assert set(detail["features"]) == {"loud", "held", "beat", "line_end", "hook"}
     assert detail["matched_label"] is None
+
+
+@pytest.mark.parametrize("raw,shown", [
+    ("life,", "life"), ("¿Qué?", "Qué"), ("rock'n'roll", "rock'n'roll"), ("...", "..."),
+])
+def test_a_printed_word_sheds_only_the_punctuation_at_its_edges(raw, shown):
+    from spectra.services import lyrics_timeline
+    assert lyrics_timeline.display_word(raw) == shown
 
 
 def test_the_slider_changes_what_is_picked_and_nothing_is_stored():

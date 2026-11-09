@@ -368,7 +368,8 @@ def _lyrics_marks(uri: str, *, emphasis_sensitivity: Optional[float],
     if not timeline.usable:
         return None
     return [
-        EngineMark(time_ms=w.ms, kind=LYRICS_KIND_EMPHASIS, label=w.word, score=w.score,
+        EngineMark(time_ms=w.ms, kind=LYRICS_KIND_EMPHASIS,
+                   label=lyrics_timeline.display_word(w.word), score=w.score,
                    detail={"end_ms": w.end_ms, "line": w.line,
                            "features": w.features.as_dict(), "matched_label": None})
         for w in lyrics_timeline.emphasized_words(timeline, emphasis_sensitivity)

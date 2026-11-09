@@ -496,7 +496,12 @@ export default function TestbedPage() {
                   checked={onlyWithLyrics}
                   onChange={(e) => {
                     setOnlyWithLyrics(e.target.checked);
-                    if (e.target.checked) setEngineA({ engine: ENGINE_LYRICS, kind: 'emphasis' });
+                    if (!e.target.checked) return;
+                    setEngineA({ engine: ENGINE_LYRICS, kind: 'emphasis' });
+                    if (!song || !songHasLyrics(song)) {
+                      const first = songs.find(songHasLyrics);
+                      if (first) setUri(first.uri);
+                    }
                   }}
                 />
                 Only songs with sung words ({nWithLyrics})
