@@ -3,16 +3,17 @@ the one clock it draws on, the songs it must flag rather than draw as aligned,
 and that it reaches nothing in the show."""
 from __future__ import annotations
 
-import ast
 import hashlib
 import json
 import os
 import pathlib
+import subprocess
+import sys
+import textwrap
 
 import numpy as np
 import pytest
 
-REPO = pathlib.Path(__file__).resolve().parent.parent
 URI = "spotify:track:lyricslane1"
 STEM = "Artist - Song"
 
@@ -298,26 +299,39 @@ def test_reading_the_lane_writes_nothing():
     assert snapshot() == before
 
 
+_SHOW_BOUNDARY_DRIVER = textwrap.dedent('''
+    import json
+    import sys
+
+    import spectra.services.engine
+    import spectra.services.trigger_engine
+    import spectra.services.scene_response
+    import spectra.services.fx_seam
+
+    print(json.dumps({
+        "lyrics_timeline": "spectra.services.lyrics_timeline" in sys.modules,
+        "lyrics_emphasis": "spectra.services.lyrics_emphasis" in sys.modules,
+        "lyrics_sidecar": "spectra.services.lyrics_sidecar" in sys.modules,
+    }))
+''')
+
+
 def test_nothing_in_the_show_can_reach_the_lyrics_modules():
-    """The ruling: no flares, no colour changes, nothing in the show. Held by
-    who imports them: only the test bed's own read path may."""
-    allowed = {"spectra/services/testbed_engines.py", "spectra/api/testbed.py",
-               "spectra/services/lyrics_timeline.py"}
-    targets = {"lyrics_timeline", "lyrics_emphasis", "lyrics_sidecar"}
-    offenders = []
-    for path in (REPO / "spectra").rglob("*.py"):
-        rel = path.relative_to(REPO).as_posix()
-        if rel in allowed or "/web/" in rel:
-            continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            names = []
-            if isinstance(node, ast.ImportFrom):
-                names = [a.name for a in node.names] + [(node.module or "").rsplit(".", 1)[-1]]
-            elif isinstance(node, ast.Import):
-                names = [a.name.rsplit(".", 1)[-1] for a in node.names]
-            if targets & set(names):
-                offenders.append(rel)
-    assert offenders == []
+    """The ruling: no flares, no colour changes, nothing in the show. Proven
+    in a FRESH interpreter (the light-mode cold-start precedent): a warm
+    pytest process has already imported the lyrics modules via this file's
+    own earlier tests, so an in-process sys.modules check would pass
+    regardless of whether the show's own engine modules ever reach them."""
+    proc = subprocess.run([sys.executable, "-c", _SHOW_BOUNDARY_DRIVER],
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    out = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert not out["lyrics_timeline"], (
+        "importing the show's own engine modules pulled in lyrics_timeline")
+    assert not out["lyrics_emphasis"], (
+        "importing the show's own engine modules pulled in lyrics_emphasis")
+    assert not out["lyrics_sidecar"], (
+        "importing the show's own engine modules pulled in lyrics_sidecar")
 
 
 def test_the_sidecar_index_skips_a_word_timeline_without_parsing_it(monkeypatch):

@@ -3,15 +3,15 @@ things he ruled on, the combination, the sensitivity slider, and that the
 function stays pure."""
 from __future__ import annotations
 
-import ast
-import pathlib
+import json
+import subprocess
+import sys
+import textwrap
 
 import numpy as np
 import pytest
 
 from spectra.services import lyrics_emphasis as le
-
-REPO = pathlib.Path(__file__).resolve().parent.parent
 
 
 def _word(text, ms, end_ms, line=0, wav_ms=None, norm=None):
@@ -224,14 +224,60 @@ def test_it_is_deterministic():
     assert le.score_words(words, frames, _beats()) == le.score_words(words, frames, _beats())
 
 
+_PURITY_DRIVER = textwrap.dedent('''
+    import builtins
+    import json
+    import socket
+    import sys
+
+    import numpy as np
+    from spectra.services import lyrics_emphasis as le
+
+    before_import = {
+        name: name in sys.modules
+        for name in ("torch", "torchaudio", "soundfile", "sounddevice", "whisper")
+    }
+
+    def _blocked_open(*a, **k):
+        raise AssertionError("score_words touched the filesystem")
+
+    class _BlockedSocket:
+        def __init__(self, *a, **k):
+            raise AssertionError("score_words touched the network")
+
+    builtins.open = _blocked_open
+    socket.socket = _BlockedSocket
+
+    def word(text, ms, end_ms, line):
+        return {"w": text, "n": text.lower(), "line": line, "ms": float(ms),
+                "end_ms": float(end_ms), "wav_ms": float(ms), "conf": 0.5}
+
+    words = [word("w%d" % i, i * 400.0, i * 400.0 + 200.0, i) for i in range(6)]
+    stamps = np.arange(0.0, 6000.0, 10.0)
+    frames = le.Frames(stamps, np.full_like(stamps, 0.1))
+    beats = [{"ms": i * 500.0} for i in range(10)]
+
+    scored = le.score_words(words, frames, beats)
+
+    print(json.dumps({
+        "before_import": before_import,
+        "scored_count": len(scored),
+        "word_count": len(words),
+    }))
+''')
+
+
 def test_the_score_itself_imports_nothing_that_could_load_a_model_or_play_audio():
-    """The ruling: a pure function, no model, no audio playback. Held by what
-    the module can reach, so it cannot quietly grow one."""
-    tree = ast.parse((REPO / "spectra/services/lyrics_emphasis.py").read_text(encoding="utf-8"))
-    imported = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported |= {a.name.split(".")[0] for a in node.names}
-        elif isinstance(node, ast.ImportFrom):
-            imported.add((node.module or "").split(".")[0])
-    assert imported <= {"__future__", "math", "collections", "dataclasses", "statistics", "typing", "numpy"}
+    """The ruling: a pure function, no model, no audio playback, no file or
+    network I/O. Proven in a FRESH interpreter (a warm pytest process may
+    have already imported torch/soundfile/etc. via unrelated collected
+    tests, which would make an in-process sys.modules check meaningless)
+    by importing just this module and then calling score_words with
+    builtins.open and socket.socket patched to raise -- it still returns a
+    score for every word, so nothing in it reaches disk or the network."""
+    proc = subprocess.run([sys.executable, "-c", _PURITY_DRIVER],
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    out = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert not any(out["before_import"].values()), out["before_import"]
+    assert out["scored_count"] == out["word_count"] == 6
