@@ -2357,7 +2357,10 @@ kbd {
    the bottom, the emphasized ones as ticks with the word printed on them. */
 .testbed-lyrics-group { margin: 0; }
 .testbed-lane-bar.testbed-lane-note { display: flex; align-items: center; justify-content: center; }
-.testbed-lane-bar.testbed-lyrics-lane { height: 84px; overflow: hidden; }
+.testbed-lane-bar.testbed-lyrics-lane { height: 84px; }
+/* The clip is inside the bar so a mark's tooltip, which sits above it, is
+   not cut off with the words at the lane's edges. */
+.testbed-lyrics-clip { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; }
 .testbed-lyric-guide {
   position: absolute; top: 0; bottom: 0; width: 1px; pointer-events: none;
 }

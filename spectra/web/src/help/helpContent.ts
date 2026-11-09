@@ -2213,7 +2213,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Current (librosa) is the production pipeline\'s own already-computed analysis — always available once a song has been analysed, and it\'s exactly what generates today\'s automatic scene-change triggers.',
           'beat_this (CPJKU 2024) is a modern neural beat/downbeat tracker, measurably tighter on beat/downbeat timing than the current pipeline. It has to be precomputed offline first (scripts/testbed_precompute.py) — an engine lane reads "not computed" until that\'s been run for this song; nothing here ever runs a slow engine live while you\'re looking at the page.',
           'Every engine analyses the captured WAV, which usually starts a few seconds into the song — so an engine\'s marks are shifted by that same start-time correction before they are drawn or scored, and always agree with the waveform lane\'s own alignment. On a song where that start time is unknown, marks are left exactly as the engine reported them.',
-          'Three lanes are the exception, because they are already in song time: Generator (what the room fires), Drops and Pre-drops (both read the stored audio shape, which is kept in song time from the moment it is captured). None of them is shifted.',
+          'Four lanes are the exception, because they are already in song time: Generator (what the room fires), Drops and Pre-drops (both read the stored audio shape, which is kept in song time from the moment it is captured), and Sung words (the capture\'s own time labels, the clock your show runs on). None of them is shifted.',
         ],
       },
       {

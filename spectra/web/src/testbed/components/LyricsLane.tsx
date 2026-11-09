@@ -125,6 +125,7 @@ export default function LyricsLane({
         className={`testbed-lane-bar testbed-lyrics-lane${flagged ? ' flagged' : ''}`}
       >
         {hover && <div className="review-lane-tooltip" style={{ left: hover.leftPct }}>{hover.text}</div>}
+        <div className="testbed-lyrics-clip">
         {guides.map((g) => (
           <span key={g.id} className={`testbed-lyric-guide ${g.cls}`} style={{ left: pct(g.ms) }} data-ms={g.ms} />
         ))}
@@ -181,6 +182,7 @@ export default function LyricsLane({
         {!placements.length && !shownWords.length && (
           <span className="testbed-lane-empty-hint">No words sung here</span>
         )}
+        </div>
       </div>
     </div>
     </>
