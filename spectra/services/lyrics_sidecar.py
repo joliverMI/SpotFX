@@ -35,6 +35,10 @@ from typing import Mapping, Optional
 SCHEMA = "spotfx.lyrics.v2"
 SUFFIX = ".lyrics.json"
 
+# Word labels may step back a little: a pre-roll seam in the capture does
+# (the alignment job's own LabelMap says so). A real shuffle is seconds.
+OUT_OF_ORDER_TOLERANCE_MS = 500.0
+
 
 def path_for(shapes_dir: Path, stem: str) -> Path:
     return shapes_dir / f"{stem}{SUFFIX}"
@@ -97,10 +101,10 @@ def validate(doc: object, *, expected_stem: Optional[str] = None) -> list[str]:
         if float(word["end_ms"]) < float(word["ms"]):
             problems.append("word_ends_before_it_starts")
             break
-        if float(word["ms"]) < previous:
+        if float(word["ms"]) < previous - OUT_OF_ORDER_TOLERANCE_MS:
             problems.append("words_out_of_order")
             break
-        previous = float(word["ms"])
+        previous = max(previous, float(word["ms"]))
     return problems
 
 

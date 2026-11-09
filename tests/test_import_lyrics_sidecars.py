@@ -202,13 +202,22 @@ def test_unparseable_source_is_refused_by_name(world):
      "word_ends_before_it_starts"),
     ([{"w": "a", "n": "a", "line": 0, "ms": 5.0}], "word_missing_times"),
     ([{"n": "a", "line": 0, "ms": 5.0, "end_ms": 6.0, "wav_ms": 0.0, "end_wav_ms": 1.0}], "word_missing_text"),
-    ([{"w": "a", "n": "a", "line": 0, "ms": 9.0, "end_ms": 10.0, "wav_ms": 0.0, "end_wav_ms": 1.0},
+    ([{"w": "a", "n": "a", "line": 0, "ms": 9000.0, "end_ms": 9100.0, "wav_ms": 0.0, "end_wav_ms": 1.0},
       {"w": "b", "n": "b", "line": 0, "ms": 1.0, "end_ms": 2.0, "wav_ms": 0.0, "end_wav_ms": 1.0}],
      "words_out_of_order"),
 ])
 def test_malformed_words_are_refused_by_name(world, words, reason):
     world[4](words=words)
     assert reason in _one(world, apply=True).reasons
+
+
+def test_a_small_step_back_at_a_capture_seam_is_not_disorder(world):
+    """A pre-roll seam steps the labels back a little; that is not a shuffle."""
+    world[4](words=[
+        {"w": "a", "n": "a", "line": 0, "ms": 5000.0, "end_ms": 5100.0, "wav_ms": 0.0, "end_wav_ms": 1.0},
+        {"w": "b", "n": "b", "line": 0, "ms": 4900.0, "end_ms": 5000.0, "wav_ms": 1.0, "end_wav_ms": 2.0},
+    ])
+    assert _one(world, apply=False).outcome == importer.OUTCOME_WOULD_IMPORT
 
 
 def test_the_command_is_a_dry_run_unless_told_otherwise(world, capsys):
