@@ -54,6 +54,8 @@ async def drift_for_setlist(setlist_id: str):
     import json
     out = []
     for path in AUDIO_SHAPES_DIR.glob("*.json"):
+        if path.name.endswith(".lyrics.json"):
+            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:

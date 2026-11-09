@@ -180,7 +180,7 @@ def test_availability_listing_includes_every_engine():
     avail = testbed_engines.availability_for(
         URI, stem_index=analysis_reader.stem_index(), count_marks=False)
     assert set(avail.keys()) == {"librosa", "beat_this", "generator", "edges", "drops",
-                                 "predrops"}
+                                 "predrops", "lyrics"}
     assert avail["generator"]["available"] is True
     assert avail["edges"]["available"] is True
     assert avail["generator"]["mark_count"] is None  # fast path never counts

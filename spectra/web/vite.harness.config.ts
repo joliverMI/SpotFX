@@ -11,7 +11,8 @@ import { resolve } from 'node:path';
 // EMPTY state, which is what the live app used to unmount), and absorb.html
 // the Absorb Music page under the real chrome (scripts/render_absorb_page.py),
 // and homedrops.html Home's quick-run cards with the Drops panel (predrop
-// plan step 1 — scripts/check_home_drops_layout.py).
+// plan step 1 — scripts/check_home_drops_layout.py), and testbedlyrics.html
+// the test bed's Sung words lane (scripts/render_testbed_lyrics_lane.py).
 export default defineConfig({
   plugins: [react()], root: 'harness', base: '/spectra/',
   build: {
@@ -26,6 +27,7 @@ export default defineConfig({
       jukebox: resolve(__dirname, 'harness/jukebox.html'),
       jukeboxcards: resolve(__dirname, 'harness/jukeboxcards.html'),
       homedrops: resolve(__dirname, 'harness/homedrops.html'),
+      testbedlyrics: resolve(__dirname, 'harness/testbedlyrics.html'),
     } },
   },
 });

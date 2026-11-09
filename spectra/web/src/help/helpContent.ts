@@ -2213,7 +2213,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Current (librosa) is the production pipeline\'s own already-computed analysis — always available once a song has been analysed, and it\'s exactly what generates today\'s automatic scene-change triggers.',
           'beat_this (CPJKU 2024) is a modern neural beat/downbeat tracker, measurably tighter on beat/downbeat timing than the current pipeline. It has to be precomputed offline first (scripts/testbed_precompute.py) — an engine lane reads "not computed" until that\'s been run for this song; nothing here ever runs a slow engine live while you\'re looking at the page.',
           'Every engine analyses the captured WAV, which usually starts a few seconds into the song — so an engine\'s marks are shifted by that same start-time correction before they are drawn or scored, and always agree with the waveform lane\'s own alignment. On a song where that start time is unknown, marks are left exactly as the engine reported them.',
-          'Three lanes are the exception, because they are already in song time: Generator (what the room fires), Drops and Pre-drops (both read the stored audio shape, which is kept in song time from the moment it is captured). None of them is shifted.',
+          'Four lanes are the exception, because they are already in song time: Generator (what the room fires), Drops and Pre-drops (both read the stored audio shape, which is kept in song time from the moment it is captured), and Sung words (the capture\'s own time labels, the clock your show runs on). None of them is shifted.',
         ],
       },
       {
@@ -2254,6 +2254,18 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Two levels of trust, as for drops. A spike is CONFIDENT at a score of 1.07 and up; a vocal intro at 1.18 and up AND entering within 3.5 seconds of the drop; anything else found is SUGGESTED, drawn fainter. Each kind looks a little wider than any scene can play from (a spike 0.25 to 3 seconds out, a vocal intro 0.35 to 4.5); a scene\'s own window, on its Phase tab, decides which play there.',
           'This lane is there to look at: what a pre-drop does in the room is up to the showing scene (see "Pre-drops on this scene — the windows and the looks"). Your marks hold no pre-drops, so the lane\'s score is not a measure; picking it for Engine A shows your drops beside it instead.',
           'One drop was being found ON its own pre-drop: Eyes Cut Deeper\'s first drop, where a clap carrying bass came before the bass returned. When a drop\'s own hit passes the spike test against a sustained bass return half a second to two seconds later, the drop now moves to that return and the hit becomes its pre-drop — on your library that moves exactly that one drop, to exactly where you had moved it by hand. Its lull and charge stay where they were.',
+        ],
+      },
+      {
+        id: 'testbed-lyrics',
+        title: 'The Sung words lane: where the emphasized words land',
+        keywords: 'sung words lyrics lyric word emphasis emphasized sensitivity slider timeline hook beat loud held last word line colour color flares scene changes zoom flagged clock slip label',
+        body: [
+          'Pick "Sung words" for Engine A or B and every sung word appears on the song\'s timeline: faintly for all of them, and as a mark with the word printed on it for the ones that stand out. Your scene changes and flares run through the lane as guide lines and sit on their own two rows just below it, so you can see where they line up with what is being sung. This lane only shows; nothing here reaches your show, and unlike the other lanes its marks cannot be pushed to your real triggers.',
+          'A word stands out by a score made of five things: sung louder than the words around it, held long, landing on a strong beat, being the last word of its line, and being repeated in the hook. Hover a mark to see which of those it earned. The Sensitivity slider decides how much of that it takes to count: higher picks more words, and "N of M words" beside it tells you how many it is picking. Moving it changes only what this page shows.',
+          'Printed words need room, so use the Zoom buttons above the lanes: the whole song, then 60, 30, 15 or 8 seconds, with the slider beside them to move along the song. Every lane zooms together. When marks are crowded the weakest words lose their printed name first, keeping their mark; zooming in brings it back. The tick colour tells you whether an emphasized word landed near one of your marks in the selected reference set: green within the tolerance, purple not.',
+          'Only songs whose words have been aligned and imported have anything to show; the "Only songs with sung words" box above the song list narrows it to those.',
+          'All of it is on one clock: the labels stamped on the capture, which is the clock your show runs on, so a word and a flare at the same spot happen together in the room. A few captures slip against their own labels. Your marks were placed on the audio and fire on the labels, so on those songs a mark and a word can look apart when they are meant together, or together when they are not. Such a song says so across the lane, draws its words in grey, leaves out the guide lines and your two rows, and gives no score. A song captured again after its words were aligned shows no words at all and says why.',
         ],
       },
       {

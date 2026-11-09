@@ -15,8 +15,8 @@ import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
 import {
   useRoomControls, useSaveRoomControls, useTestbedAudioPin, useTestbedAudioUnpin,
-  useTestbedDropReferenceSet, useTestbedEngineMarks, useTestbedMarks, useTestbedPromotions,
-  useTestbedReferenceSet, useTestbedSongs, useTestbedWaveform,
+  useTestbedDropReferenceSet, useTestbedEngineMarks, useTestbedLyrics, useTestbedMarks,
+  useTestbedPromotions, useTestbedReferenceSet, useTestbedSongs, useTestbedWaveform,
 } from '../queries';
 import type {
   TestbedEngineMarks, TestbedEstimateMark, TestbedMetrics, TestbedReference, TestbedReferenceMark,
@@ -38,8 +38,13 @@ import {
   dropUseAsRoomDefaultConfirmMessage, isDropKind, oneBeatToleranceMs,
 } from './dropKnobs';
 import type { DropKnobValues } from './dropKnobs';
+import LyricsKnobs from './components/LyricsKnobs';
+import {
+  clampEmphasisSensitivity, DEFAULT_EMPHASIS_SENSITIVITY, ENGINE_LYRICS, laneView, lyricsRelevant,
+  ZOOM_CHOICES,
+} from './lyricsLane';
 import { matchMarks } from './metrics';
-import { filterAndSortSongs } from './songSearch';
+import { filterAndSortSongs, songHasLyrics } from './songSearch';
 
 /** Render cap for the song-picker list — a search narrows ~920 songs down
  * to a handful almost every time, but the box starts empty, so the
@@ -72,6 +77,7 @@ const MARK_KIND_LABEL: Record<string, string> = {
   pre_drop: 'Pre-drops (both kinds)',
   spike: 'Pre-drops: spikes',
   intro: 'Pre-drops: vocal intros',
+  emphasis: 'Emphasized words',
 };
 
 /** The reference sets, with what each is called in the picker. */
@@ -144,8 +150,9 @@ function localMetrics(
   engineMarks: TestbedEngineMarks | undefined,
   scoredMarks: TestbedReferenceMark[],
   toleranceMs: number,
+  comparable = true,
 ): TestbedMetrics | null {
-  if (!engineMarks?.available || scoredMarks.length === 0) return null;
+  if (!comparable || !engineMarks?.available || scoredMarks.length === 0) return null;
   return matchMarks(
     scoredMarks.map((m) => m.timestamp_ms),
     engineMarks.estimate.map((m) => m.time_ms),
@@ -157,6 +164,7 @@ export default function TestbedPage() {
   const { data: songs } = useTestbedSongs();
   // Page-local only, per his ask ("no server change") — resets on reload.
   const [songQuery, setSongQuery] = useState('');
+  const [onlyWithLyrics, setOnlyWithLyrics] = useState(false);
   const [uri, setUri] = useState<string | null>(null);
   const [reference, setReference] = useState<TestbedReference>('transitions');
   const [engineA, setEngineA] = useState<{ engine: string; kind: string }>({ engine: 'librosa', kind: 'section_boundary' });
@@ -181,6 +189,11 @@ export default function TestbedPage() {
   const [confidentScore, setConfidentScore] = useState(DEFAULT_CONFIDENT_SCORE);
   const [suggestedScore, setSuggestedScore] = useState(DEFAULT_SUGGESTED_SCORE);
   const [floorScore, setFloorScore] = useState(DEFAULT_DROP_FLOOR);
+  // The Sung words lane's one control (a page-local lens: moving it stores
+  // nothing) and the zoom window every lane shares.
+  const [emphasisSensitivity, setEmphasisSensitivity] = useState(DEFAULT_EMPHASIS_SENSITIVITY);
+  const [zoomSpanMs, setZoomSpanMs] = useState<number | null>(null);
+  const [zoomCenterMs, setZoomCenterMs] = useState(0);
   // True once he has touched the slider himself for the CURRENT song — the
   // default below stops re-asserting itself over his own choice, but a new
   // song (or a mark-kind change on either lane) still gets its own honest
@@ -209,21 +222,24 @@ export default function TestbedPage() {
 
   const song = songs?.find((s) => s.uri === uri) ?? null;
   const visibleSongs = useMemo(
-    () => filterAndSortSongs(songs ?? [], songQuery),
-    [songs, songQuery],
+    () => filterAndSortSongs(songs ?? [], songQuery, { onlyWithLyrics }),
+    [songs, songQuery, onlyWithLyrics],
   );
+  const nWithLyrics = useMemo(() => (songs ?? []).filter(songHasLyrics).length, [songs]);
   const shownSongs = useMemo(() => visibleSongs.slice(0, SONG_LIST_CAP), [visibleSongs]);
   const { data: marks } = useTestbedMarks(uri);
   const { data: waveform } = useTestbedWaveform(uri);
   const { data: engineMarksA } = useTestbedEngineMarks(
     uri, engineA.engine, engineA.kind, windowBeats, sensitivity, direction, transitionsPerMinute,
-    confidentScore, suggestedScore, floorScore,
+    confidentScore, suggestedScore, floorScore, emphasisSensitivity,
   );
   const { data: engineMarksB } = useTestbedEngineMarks(
     uri, engineB?.engine ?? null, engineB?.kind ?? null, windowBeats, sensitivity, direction, transitionsPerMinute,
-    confidentScore, suggestedScore, floorScore,
+    confidentScore, suggestedScore, floorScore, emphasisSensitivity,
   );
   const { data: promotions } = useTestbedPromotions(uri);
+  const lyricsActive = lyricsRelevant([engineA, engineB]);
+  const { data: lyrics } = useTestbedLyrics(uri, lyricsActive);
 
   const pin = useTestbedAudioPin();
   const unpin = useTestbedAudioUnpin();
@@ -316,6 +332,7 @@ export default function TestbedPage() {
     if (lastUriRef.current === uri) return;
     lastUriRef.current = uri;
     setToleranceTouched(false);
+    setZoomSpanMs(null);
   }, [uri]);
 
   const activeMarkKinds = useMemo(
@@ -381,16 +398,27 @@ export default function TestbedPage() {
       ...(engineMarksA?.estimate ?? []).map((m) => m.time_ms),
       ...(engineMarksB?.estimate ?? []).map((m) => m.time_ms),
     );
-    return Math.max(fromWaveform, fromNpz, fromMarks, fromEngines, 1);
-  }, [waveform, referenceMarks, flareMarks, engineMarksA, engineMarksB]);
+    const fromWords = lyricsActive && lyrics?.words.length
+      ? lyrics.words[lyrics.words.length - 1].end_ms : 0;
+    return Math.max(fromWaveform, fromNpz, fromMarks, fromEngines, fromWords, 1);
+  }, [waveform, referenceMarks, flareMarks, engineMarksA, engineMarksB, lyricsActive, lyrics]);
+  const view = useMemo(
+    () => laneView(durationMs, zoomSpanMs, zoomCenterMs),
+    [durationMs, zoomSpanMs, zoomCenterMs],
+  );
 
+  // On a song whose clock is flagged, a word and a mark cannot be compared
+  // (spectra/services/lyrics_timeline.py), so that lane earns no score.
+  const lyricsFlagged = !!lyrics?.clock.flagged;
   const metricsA = useMemo(
-    () => localMetrics(engineMarksA, scoredMarks, toleranceMs),
-    [engineMarksA, scoredMarks, toleranceMs],
+    () => localMetrics(engineMarksA, scoredMarks, toleranceMs,
+      !(engineA.engine === ENGINE_LYRICS && lyricsFlagged)),
+    [engineMarksA, scoredMarks, toleranceMs, engineA.engine, lyricsFlagged],
   );
   const metricsB = useMemo(
-    () => localMetrics(engineMarksB, scoredMarks, toleranceMs),
-    [engineMarksB, scoredMarks, toleranceMs],
+    () => localMetrics(engineMarksB, scoredMarks, toleranceMs,
+      !(engineB?.engine === ENGINE_LYRICS && lyricsFlagged)),
+    [engineMarksB, scoredMarks, toleranceMs, engineB?.engine, lyricsFlagged],
   );
 
   const engineLabel = (key: string) => song?.engines[key]?.label ?? key;
@@ -406,11 +434,15 @@ export default function TestbedPage() {
       key: 'a', label: laneLabel(engineA),
       estimate: (engineMarksA?.estimate ?? []) as TestbedEstimateMark[],
       metrics: metricsA,
+      lyrics: engineA.engine === ENGINE_LYRICS
+        ? { data: lyrics, transitions: referenceMarks, flares: flareMarks } : undefined,
     },
     ...(engineB ? [{
       key: 'b', label: laneLabel(engineB),
       estimate: (engineMarksB?.estimate ?? []) as TestbedEstimateMark[],
       metrics: metricsB,
+      lyrics: engineB.engine === ENGINE_LYRICS
+        ? { data: lyrics, transitions: referenceMarks, flares: flareMarks } : undefined,
     }] : []),
   ];
 
@@ -457,6 +489,24 @@ export default function TestbedPage() {
                 </button>
               )}
             </div>
+            {nWithLyrics > 0 && (
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={onlyWithLyrics}
+                  onChange={(e) => {
+                    setOnlyWithLyrics(e.target.checked);
+                    if (!e.target.checked) return;
+                    setEngineA({ engine: ENGINE_LYRICS, kind: 'emphasis' });
+                    if (!song || !songHasLyrics(song)) {
+                      const first = songs.find(songHasLyrics);
+                      if (first) setUri(first.uri);
+                    }
+                  }}
+                />
+                Only songs with sung words ({nWithLyrics})
+              </label>
+            )}
             <div className="testbed-song-search-count">
               {visibleSongs.length} of {songs.length}
               {shownSongs.length < visibleSongs.length
@@ -585,8 +635,43 @@ export default function TestbedPage() {
                 size={24}
               />
             </div>
+            <div className="testbed-zoom-row">
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Zoom</span>
+              {ZOOM_CHOICES.map((choice) => (
+                <button
+                  key={choice.label}
+                  type="button"
+                  className={zoomSpanMs === choice.spanMs ? 'primary' : ''}
+                  onClick={() => setZoomSpanMs(choice.spanMs)}
+                >
+                  {choice.label}
+                </button>
+              ))}
+              {zoomSpanMs != null && zoomSpanMs < durationMs && (
+                <input
+                  type="range"
+                  aria-label="Move along the song"
+                  className="testbed-zoom-position"
+                  min={0}
+                  max={durationMs - zoomSpanMs}
+                  step={500}
+                  value={view.startMs}
+                  onChange={(e) => setZoomCenterMs(Number(e.target.value) + zoomSpanMs / 2)}
+                />
+              )}
+            </div>
+            {lyricsActive && (
+              <LyricsKnobs
+                sensitivity={emphasisSensitivity}
+                onChange={(v) => setEmphasisSensitivity(clampEmphasisSensitivity(v))}
+                defaultSensitivity={lyrics?.default_sensitivity ?? DEFAULT_EMPHASIS_SENSITIVITY}
+                nEmphasized={(engineA.engine === ENGINE_LYRICS ? engineMarksA : engineMarksB)?.estimate.length ?? 0}
+                nWords={lyrics?.words.length ?? 0}
+              />
+            )}
             <TestbedLaneBar
               durationMs={durationMs}
+              view={view}
               waveform={showWaveform ? waveform : undefined}
               referenceMarks={activeReferenceMarks}
               scoredMarks={scoredMarks}

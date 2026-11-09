@@ -11,6 +11,10 @@ one-directional, read-only, no spot-effects imports):
       carry start_ms/end_ms/energy_rms (normalized 0–1 per song), beats
       carry ms + is_downbeat (beats_for_uri, read by the music-analysis
       test bed's librosa baseline engine)
+  storage/audio_shapes/<stem>.lyrics.json   — the word timeline, once
+      imported (spectra/services/lyrics_sidecar.py owns its format)
+  storage/audio_shapes/<stem>.npz           — the capture's frames; only
+      the loudness curve is read here (capture_loudness_for_stem)
   storage/training_profiles.json            — genre buckets
 
 Section and beat times are read RAW — the standing librosa_offset_ms
@@ -33,6 +37,8 @@ import logging
 import threading
 from contextlib import contextmanager
 from typing import Iterator, Optional
+
+import numpy as np
 
 from spectra import config
 
@@ -71,7 +77,11 @@ def _build_index() -> dict[str, str]:
     shapes_dir = config.AUDIO_SHAPES_DIR
     if shapes_dir.exists():
         for path in shapes_dir.glob("*.json"):
-            if path.name.endswith(".librosa.json"):
+            # Neither is a capture sidecar. .librosa.json carries the same
+            # uri field and must not shadow the sidecar; .lyrics.json would
+            # just be parsed for nothing, on a rebuild the event-loop thread
+            # can pay on any miss, ~100KB per file across the whole library.
+            if path.name.endswith((".librosa.json", ".lyrics.json")):
                 continue
             try:
                 uri = json.loads(path.read_text(encoding="utf-8")).get(
@@ -151,6 +161,49 @@ def librosa_analysis_for_stem(stem: Optional[str]) -> Optional[dict]:
             cache.pop(next(iter(cache)))
         cache[stem] = doc
     return doc
+
+
+def has_lyrics(stem: Optional[str]) -> bool:
+    """Whether <stem>.lyrics.json exists: a stat, for the whole-corpus song
+    listing (the has_librosa_analysis shape). Whether the words in it are
+    still usable is the single-song read's question (lyrics_timeline)."""
+    if stem is None:
+        return False
+    return (config.AUDIO_SHAPES_DIR / f"{stem}.lyrics.json").exists()
+
+
+def lyrics_for_stem(stem: Optional[str]) -> Optional[dict]:
+    """The parsed <stem>.lyrics.json as stored, or None when there is no
+    stem, no file, or it does not parse. Reads only; validating it is
+    spectra.services.lyrics_timeline's job."""
+    if stem is None:
+        return None
+    try:
+        doc = json.loads((config.AUDIO_SHAPES_DIR / f"{stem}.lyrics.json")
+                         .read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def capture_loudness_for_stem(stem: Optional[str]) -> Optional[tuple[np.ndarray, np.ndarray]]:
+    """(timestamps_ms, rms) from the capture's <stem>.npz, or None when it is
+    missing or unreadable. `rms` is the mid band, where a voice sits (the
+    capture's own band split, api/audio_capture.py), falling back to the
+    total level on a shape without it. Timestamps are the capture's labels;
+    a pre-roll seam can step them back a little, so they are returned made
+    non-decreasing and a caller can binary-search them."""
+    if stem is None:
+        return None
+    try:
+        with np.load(config.AUDIO_SHAPES_DIR / f"{stem}.npz") as data:
+            stamps = data["timestamps_ms"].astype(np.float64)
+            rms = (data["rms_mid"] if "rms_mid" in data.files else data["rms_total"])
+            rms = rms.astype(np.float64)
+    except Exception as exc:
+        logger.warning("could not read the capture frames of %s: %s", stem, exc)
+        return None
+    return np.maximum.accumulate(stamps), rms
 
 
 def capture_sidecar(uri: str) -> Optional[dict]:

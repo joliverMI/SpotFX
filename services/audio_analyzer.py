@@ -437,7 +437,8 @@ def _build_shape_index() -> None:
             # file and fail to parse as AudioShapeMeta (returning None and
             # spuriously triggering a fresh capture for songs that already have
             # complete shapes). Skip them.
-            if not name.endswith(".json") or name.endswith(".librosa.json"):
+            # A word timeline (`*.lyrics.json`) is not a capture sidecar either.
+            if not name.endswith(".json") or name.endswith((".librosa.json", ".lyrics.json")):
                 continue
             try:
                 st = entry.stat()

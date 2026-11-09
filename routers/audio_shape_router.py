@@ -344,6 +344,8 @@ async def backfill_genres():
 
     # Audio shape sidecars
     for path in AUDIO_SHAPES_DIR.glob("*.json"):
+        if path.name.endswith(".lyrics.json"):
+            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if data.get("genres"):

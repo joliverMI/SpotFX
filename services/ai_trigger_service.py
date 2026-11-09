@@ -19,6 +19,8 @@ def list_songs_with_shapes() -> list[dict]:
     """All songs with a complete audio shape capture."""
     result = []
     for path in AUDIO_SHAPES_DIR.glob("*.json"):
+        if path.name.endswith(".lyrics.json"):
+            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if not data.get("capture_complete"):

@@ -1,0 +1,316 @@
+#!/usr/bin/env python3
+"""Look at the test bed's Sung words lane in a real browser.
+
+Renders `spectra/web/harness/testbedlyrics.html` — the REAL /testbed page
+against a mocked backend — in a headless Chromium at 1440, 1180 and 390 px,
+writes screenshots to docs/evidence/testbed-lyrics/, and FAILS on what a
+screenshot can hide:
+
+  - a page that scrolls sideways, or a JavaScript error;
+  - printed words that overlap each other or run out of the lane;
+  - a word and a flare with the same time not sharing an x;
+  - a flagged song still drawing the guide lines or his two rows;
+  - a song with no words, or stale ones, not saying so.
+
+Never touches a live service: the harness is served from the built
+`harness-dist` by a plain static server on a spare port.
+
+    cd spectra/web && npx vite build --config vite.harness.config.ts
+    .venv/bin/python scripts/render_testbed_lyrics_lane.py [--no-shots]
+"""
+from __future__ import annotations
+
+import asyncio
+import os
+import shutil
+import signal
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from check_ui_fidelity import (  # noqa: E402
+    HARNESS_DIST, REPO, cdp, evaluate, find_chrome, free_port, goto, serve, shoot,
+    wait_for_devtools, websockets,
+)
+
+OUT_DIR = REPO / "docs" / "evidence" / "testbed-lyrics"
+WIDTHS = (1440, 1180, 390)
+KEEP_SHOTS = {"whole-song-1440", "zoomed-30s-1440", "zoomed-8s-1440", "flagged-1440", "zoomed-30s-390"}
+
+ERROR_TRAP = """
+window.__pageErrors = [];
+window.addEventListener('error', (e) => window.__pageErrors.push(String(e.message || e)));
+window.addEventListener('unhandledrejection', (e) => window.__pageErrors.push('rejection: ' + String(e.reason)));
+const _ce = console.error.bind(console);
+console.error = (...a) => { window.__pageErrors.push(a.map(String).join(' ')); _ce(...a); };
+"""
+
+READY = "!!document.querySelector('.testbed-song-search-row')"
+
+# Tick "Only songs with sung words" (which also picks the Sung words engine).
+PICK_ENGINE = """(() => {
+  const box = [...document.querySelectorAll('label')]
+    .find((l) => /Only songs with sung words/.test(l.textContent || ''))?.querySelector('input');
+  if (box && !box.checked) box.click();
+  return !!box;
+})()"""
+
+
+def pick_song(title: str) -> str:
+    return f"""(() => {{
+  const b = [...document.querySelectorAll('button')].find((x) => (x.textContent || '').startsWith({title!r}));
+  if (b) b.click();
+  return !!b;
+}})()"""
+
+
+def zoom(label: str) -> str:
+    return f"""(() => {{
+  const b = [...document.querySelectorAll('.testbed-zoom-row button')].find((x) => x.textContent === {label!r});
+  if (b) b.click();
+  return !!b;
+}})()"""
+
+
+def set_sensitivity(value: float) -> str:
+    return f"""(() => {{
+  const el = document.getElementById('testbed-emphasis-sensitivity');
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  setter.call(el, {value!r});
+  el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+  return true;
+}})()"""
+
+
+def set_position(ms: int) -> str:
+    return f"""(() => {{
+  const el = document.querySelector('.testbed-zoom-position');
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  setter.call(el, {ms!r});
+  el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+  return true;
+}})()"""
+
+
+LANE_FACTS = """(() => {
+  const lane = document.querySelector('.testbed-lyrics-lane');
+  const laneBox = lane ? lane.getBoundingClientRect() : null;
+  const labels = [...document.querySelectorAll('.testbed-lyric-label')].map((el) => {
+    const r = el.getBoundingClientRect();
+    return { text: el.textContent, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+  });
+  let overlaps = 0;
+  for (let i = 0; i < labels.length; i += 1) {
+    for (let j = i + 1; j < labels.length; j += 1) {
+      const a = labels[i]; const b = labels[j];
+      if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) overlaps += 1;
+    }
+  }
+  const outsideList = laneBox ? labels.filter((l) => l.left < laneBox.left - 1 || l.right > laneBox.right + 1) : [];
+  const outside = outsideList.length;
+  const rows = [...document.querySelectorAll('.testbed-lane-label')].map((el) => el.textContent);
+  const de = document.documentElement;
+  const notes = [...document.querySelectorAll('.testbed-lyrics-group .empty-note, .testbed-lane-note .empty-note')].map((e) => e.textContent);
+  return {
+    hasLane: !!lane,
+    marks: document.querySelectorAll('.testbed-lyric-mark').length,
+    words: document.querySelectorAll('.testbed-lyric-word').length,
+    guides: document.querySelectorAll('.testbed-lyric-guide').length,
+    labels: labels.length, overlaps, outside,
+    outsideList: outsideList.slice(0, 3).map((l) => [l.text, l.left, l.right, laneBox.left, laneBox.right]),
+    caption: document.querySelector('.testbed-lyrics-flag')?.textContent ?? null,
+    flagOverlapsLane: (() => {
+      const f = document.querySelector('.testbed-lyrics-flag');
+      if (!f || !laneBox) return false;
+      const r = f.getBoundingClientRect();
+      return r.bottom > laneBox.top + 0.5;
+    })(),
+    faintText: document.querySelectorAll('.testbed-lyric-word-text').length,
+    flagged: !!document.querySelector('.testbed-lyrics-lane.flagged'),
+    hisRows: rows.filter((r) => r === 'His scene changes' || r === 'His flares').length,
+    notes,
+    pageWide: de.scrollWidth > de.clientWidth + 1,
+    page: de.scrollWidth + 'x' + de.clientWidth,
+    count: [...document.querySelectorAll('span')].map((s) => s.textContent || '')
+      .find((t) => /^\\d+ of \\d+ words$/.test(t)) ?? null,
+  };
+})()"""
+
+# A flare and an emphasized word at the very same stored time.
+SAME_X = """(() => {
+  const marks = new Map([...document.querySelectorAll('.testbed-lyric-mark')]
+    .map((el) => [el.dataset.ms, el]));
+  for (const guide of document.querySelectorAll('.testbed-lyric-guide.flare')) {
+    const mark = marks.get(guide.dataset.ms);
+    if (!mark) continue;
+    const m = mark.getBoundingClientRect();
+    return { mark: m.left + m.width / 2, guide: guide.getBoundingClientRect().left, ms: guide.dataset.ms };
+  }
+  return { mark: null, guide: null, ms: null };
+})()"""
+
+
+async def run() -> int:
+    shots = "--no-shots" not in sys.argv
+    if websockets is None:
+        print("SKIP: the `websockets` package is not installed in this interpreter")
+        return 0
+    if not (HARNESS_DIST / "testbedlyrics.html").is_file():
+        print("SKIP: harness-dist/testbedlyrics.html is not built — run "
+              "`cd spectra/web && npx vite build --config vite.harness.config.ts`")
+        return 0
+    chrome = find_chrome()
+    if chrome is None:
+        print("SKIP: no Chromium found")
+        return 0
+    if shots:
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+    httpd = serve(HARNESS_DIST, free_port())
+    base = f"http://127.0.0.1:{httpd.server_address[1]}/spectra/testbedlyrics.html"
+    port = free_port()
+    profile = f"/tmp/spectra-lyrics-render-{port}"
+    proc = subprocess.Popen(  # noqa: S603
+        [chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
+         "--force-device-scale-factor=1", f"--remote-debugging-port={port}",
+         f"--user-data-dir={profile}", "--window-size=1440,900"],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    failures: list[str] = []
+    try:
+        ws_url = await wait_for_devtools(port)
+        async with websockets.connect(ws_url, max_size=64 * 1024 * 1024) as ws:
+            mid = [0]
+
+            def nid() -> int:
+                mid[0] += 1
+                return mid[0]
+
+            async def ev(js: str):
+                return await evaluate(ws, nid, js)
+
+            async def settle() -> None:
+                await asyncio.sleep(0.5)
+
+            def check(name: str, cond: bool, detail: str = "") -> None:
+                print(f"  {'✓' if cond else '✗'} {name}{(' — ' + detail) if detail else ''}")
+                if not cond:
+                    failures.append(f"{name} {detail}".strip())
+
+            await cdp(ws, nid, "Page.enable")
+            await cdp(ws, nid, "Runtime.enable")
+            await cdp(ws, nid, "Page.addScriptToEvaluateOnNewDocument", {"source": ERROR_TRAP})
+
+            async def shot(name: str) -> None:
+                if shots and name in KEEP_SHOTS:
+                    await shoot(ws, nid, OUT_DIR / f"{name}.png")
+
+            for width in WIDTHS:
+                print(f"\n{width}px")
+                await cdp(ws, nid, "Emulation.setDeviceMetricsOverride", {
+                    "width": width, "height": 1000, "deviceScaleFactor": 1, "mobile": width < 600})
+                if not await goto(ws, nid, base, READY):
+                    failures.append(f"{width}: the page never loaded")
+                    continue
+                await settle()
+                check("the song list has the sung-words filter", await ev(PICK_ENGINE))
+                await settle()
+                await ev(pick_song("A clean capture"))
+                await settle()
+
+                whole = await ev(LANE_FACTS)
+                check("the lane is drawn", whole["hasLane"])
+                check("every word is drawn faintly", whole["words"] > 100, f"{whole['words']} words")
+                check("emphasized words are marked", whole["marks"] > 0, f"{whole['marks']} marks")
+                check("his marks are guide lines through the lane", whole["guides"] == 5,
+                      f"{whole['guides']} guides")
+                check("his two rows sit under it", whole["hisRows"] == 2)
+                check("no printed word overlaps another", whole["overlaps"] == 0)
+                check("no printed word leaves the lane", whole["outside"] == 0, str(whole.get("outsideList")))
+                check("it does not scroll sideways", not whole["pageWide"], whole["page"])
+                check("it says how many words it picked", bool(whole["count"]), str(whole["count"]))
+                await shot(f"whole-song-{width}")
+
+                await ev(zoom("30 s"))
+                await settle()
+                zoomed = await ev(LANE_FACTS)
+                check("zooming prints a larger share of the marks it shows",
+                      zoomed["marks"] > 0
+                      and zoomed["labels"] / zoomed["marks"] >= whole["labels"] / whole["marks"],
+                      f"{zoomed['labels']} of {zoomed['marks']}, was {whole['labels']} of {whole['marks']}")
+                check("still no overlap when zoomed", zoomed["overlaps"] == 0)
+                check("still inside the lane when zoomed", zoomed["outside"] == 0)
+                same = await ev(SAME_X)
+                check("a word and a flare at the same time share an x",
+                      same["mark"] is not None and abs(same["mark"] - same["guide"]) <= 1.5,
+                      f"mark {same['mark']} guide {same['guide']}")
+                await shot(f"zoomed-30s-{width}")
+
+                await ev(zoom("8 s"))
+                await settle()
+                await ev(set_position(20000))
+                await settle()
+                close = await ev(LANE_FACTS)
+                await shot(f"zoomed-8s-{width}")
+                check("zoomed right in, the faint words are readable", close["faintText"] > 0,
+                      f"{close['faintText']} of {close['words']} words printed")
+                await ev(zoom("30 s"))
+                await settle()
+
+                before = zoomed["marks"]
+                await ev(set_sensitivity(0.45))
+                await settle()
+                fewer = await ev(LANE_FACTS)
+                check("lowering the sensitivity picks fewer words",
+                      fewer["marks"] < before, f"{before} -> {fewer['marks']}")
+                await ev(set_sensitivity(0.6))
+                await settle()
+
+                await ev(zoom("Whole song"))
+                await settle()
+                await ev(pick_song("A capture that slips"))
+                await settle()
+                flagged = await ev(LANE_FACTS)
+                check("a slipping capture is flagged across the lane",
+                      flagged["flagged"] and "cannot be compared" in (flagged["caption"] or ""))
+                check("the warning sits clear of the printed words", not flagged["flagOverlapsLane"])
+                check("its words are still drawn", flagged["words"] > 100)
+                check("no guide lines on a flagged song", flagged["guides"] == 0)
+                check("his two rows are withheld", flagged["hisRows"] == 0)
+                await shot(f"flagged-{width}")
+
+                await ev(pick_song("Captured again since"))
+                await settle()
+                stale = await ev(LANE_FACTS)
+                check("a stale song says why and draws nothing",
+                      not stale["hasLane"] and any("captured again" in n for n in stale["notes"]),
+                      str(stale["notes"]))
+
+                errs = await ev("window.__pageErrors")
+                check("no page errors", not errs, str(errs))
+    finally:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        shutil.rmtree(profile, ignore_errors=True)
+        httpd.shutdown()
+    if failures:
+        print("\nFAIL")
+        for f in failures:
+            print(f"  ✗ {f}")
+        return 1
+    print("\nPASS")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(run()))

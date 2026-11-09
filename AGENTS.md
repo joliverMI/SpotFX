@@ -11803,6 +11803,36 @@ extra `.librosa.json` read the page already pays for via `/engine-marks`.
 Help: `analysis-testbed` §`testbed-lanes-and-tolerance` and
 §`testbed-engines`, updated in the same change (both already linked).
 
+## Sung words on the test bed (lyrics plan, step 2 — no effect on the room)
+
+`spectra/services/lyrics_timeline.py` is the binding statement for the clock
+and what gets flagged, `lyrics_emphasis.py` for the pure score, `lyrics_sidecar.py`
+for the file and its freshness; `scripts/import_lyrics_sidecars.py` is the
+only way a timeline gets in (dry run by default). Four things:
+
+- **ONE CLOCK: THE CAPTURE'S LABELS.** A word's `ms` and a trigger's
+  `timestamp_ms` are both on it, so a word and a flare at the same number
+  coincide in the room; nothing converts either. `wav_ms` is only for
+  comparing a word with librosa's beats. Not `wav_ms + capture_offset_ms`:
+  that naive sum is where his marks were placed (the Timeline's beat grid) and
+  parts from the labels on about a third of the library, so a song slipping by
+  more than `SLIP_FLAG_MS` is flagged, keeps its words, and loses its guide
+  lines and scores. Timing row: `docs/SPECTRA_TIMING_CONVENTIONS.md`.
+- **A `.lyrics.json` IS IN THE CAPTURE-SIDECAR DIRECTORY.** Every `*.json` scan
+  of `storage/audio_shapes` must skip it by name, or it parses each timeline
+  (~100 KB) — `analysis_reader._build_index` does that on the event-loop thread
+  on any miss. A new scan of that directory owes the same skip.
+- **A RECAPTURE MAKES EVERY WORD TIME WRONG**, so reads compare the stamped
+  `.npz` hash and WAV stat and a mismatch reports `stale` and draws nothing. A
+  missing WAV alone is not stale (the retention cap deletes them; the labels
+  are in the `.npz`).
+- **NOTHING IN THE SHOW READS THIS.** Held by `tests/test_testbed_lyrics_lane.py`
+  (who may import these modules) and by `testbed_promote.READ_ONLY_ENGINES`, so
+  the lane cannot reach his real triggers. The score, slider and word lists are
+  recomputed on every read and stored nowhere. Labels, matching, colour and
+  imprints are later steps of the plan; `matched_label` on a mark is the chip's
+  place and nothing sets it yet.
+
 ## Phase 2 of the music-analysis plan — snapping generated cues to a beat
 
 2026-09-22, the Admiral's decision on `data/music-analysis-octave-scout/

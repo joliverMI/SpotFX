@@ -2353,6 +2353,53 @@ kbd {
 .testbed-lane-marker.est-glyph.matched-tight { color: var(--ok); }
 .testbed-lane-marker.est-glyph.extra { color: var(--text); opacity: 0.8; }
 .testbed-lane-marker.est-glyph.est-suggested { top: 6px; bottom: auto; opacity: 0.5; }
+/* The Sung words lane: guide lines for his marks, every word faintly along
+   the bottom, the emphasized ones as ticks with the word printed on them. */
+.testbed-lyrics-group { margin: 0; }
+.testbed-lane-bar.testbed-lane-note { display: flex; align-items: center; justify-content: center; }
+.testbed-lane-bar.testbed-lyrics-lane { height: 84px; }
+/* The clip is inside the bar so a mark's tooltip, which sits above it, is
+   not cut off with the words at the lane's edges. */
+.testbed-lyrics-clip { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; }
+.testbed-lyric-guide {
+  position: absolute; top: 0; bottom: 0; width: 1px; pointer-events: none;
+}
+.testbed-lyric-guide.scene { background: var(--accent); opacity: 0.7; }
+.testbed-lyric-guide.flare { background: var(--warning); opacity: 0.55; }
+.testbed-lyric-word {
+  position: absolute; bottom: 3px; height: 5px; border-radius: 1px;
+  background: var(--text-muted); opacity: 0.3;
+}
+.testbed-lyric-word-text {
+  position: absolute; font-size: 10px; line-height: 12px;
+  color: var(--text-muted); opacity: 0.75; white-space: nowrap; pointer-events: none;
+}
+.testbed-lyric-word-text.row-0 { bottom: 9px; }
+.testbed-lyric-word-text.row-1 { bottom: 21px; }
+.testbed-lyrics-flag { margin: 0; flex: 1; font-size: 12px; line-height: 1.35; color: var(--warning); }
+.testbed-lyric-mark {
+  position: absolute; top: 0; bottom: 3px; width: 2px; margin-left: -1px;
+  background: var(--accent);
+}
+.testbed-lyric-mark.matched { background: var(--ok); }
+.testbed-lyric-label {
+  position: absolute; font-size: 11px; font-weight: 600; line-height: 14px;
+  padding: 0 3px; white-space: nowrap; color: var(--text);
+  background: var(--surface2); border-radius: 2px;
+}
+.testbed-lyric-mark.matched .testbed-lyric-label { color: var(--ok); }
+.testbed-lyric-chip {
+  margin-left: 4px; padding: 0 4px; border-radius: 7px; font-size: 10px; font-weight: 500;
+  background: var(--accent); color: var(--surface2);
+}
+.testbed-lyrics-lane.flagged .testbed-lyric-word,
+.testbed-lyrics-lane.flagged .testbed-lyric-mark { background: var(--text-muted); }
+.testbed-lyrics-lane.flagged .testbed-lyric-label { color: var(--text-muted); }
+.testbed-lane-empty-hint {
+  position: absolute; left: 6px; bottom: 12px; font-size: 11px; color: var(--text-muted);
+}
+.testbed-zoom-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.testbed-zoom-position { flex: 1; min-width: 120px; max-width: 420px; }
 .testbed-waveform-svg { width: 100%; height: 100%; display: block; }
 .testbed-waveform-caption {
   position: absolute; left: 6px; top: 3px; right: 6px; z-index: 1;
