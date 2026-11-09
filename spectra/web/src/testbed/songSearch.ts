@@ -64,8 +64,17 @@ export function compareSongsDefault(a: TestbedSong, b: TestbedSong): number {
  * everything), then apply the same default ordering to whatever is
  * showing — filtered or not — so a search never surfaces an
  * un-comparable song ahead of a comparable one either. */
-export function filterAndSortSongs(songs: TestbedSong[], query: string): TestbedSong[] {
+export function filterAndSortSongs(
+  songs: TestbedSong[], query: string, options: { onlyWithLyrics?: boolean } = {},
+): TestbedSong[] {
   const q = normalizeSearchText(query);
-  const matched = q ? songs.filter((s) => songSearchHaystack(s).includes(q)) : songs.slice();
+  const matched = songs.filter((s) => (!q || songSearchHaystack(s).includes(q))
+    && (!options.onlyWithLyrics || songHasLyrics(s)));
   return matched.sort(compareSongsDefault);
+}
+
+/** A song with a word timeline imported — what the "only songs with sung
+ * words" box keeps. Reads the /songs listing's own availability. */
+export function songHasLyrics(song: TestbedSong): boolean {
+  return !!song.engines?.lyrics?.available;
 }

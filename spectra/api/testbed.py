@@ -7,10 +7,13 @@ reviewed push-to-real button.
   GET    /api/testbed/marks?uri=                      his real marks (split)
   GET    /api/testbed/waveform?uri=                    waveform/energy lane
   GET    /api/testbed/engines?uri=                    per-engine availability
-  GET    /api/testbed/engine-marks?uri=&engine=&mark_kind=&window_beats=&sensitivity=&direction=&transitions_per_minute=&confident_score=&suggested_score=&floor_score=
+  GET    /api/testbed/engine-marks?uri=&engine=&mark_kind=&window_beats=&sensitivity=&direction=&transitions_per_minute=&confident_score=&suggested_score=&floor_score=&emphasis_sensitivity=
                                                        one engine's marks, nothing else
-  GET    /api/testbed/compare?uri=&engine=&mark_kind=&reference=&tolerance_ms=&window_beats=&sensitivity=&direction=&transitions_per_minute=&confident_score=&suggested_score=&floor_score=
+  GET    /api/testbed/compare?uri=&engine=&mark_kind=&reference=&tolerance_ms=&window_beats=&sensitivity=&direction=&transitions_per_minute=&confident_score=&suggested_score=&floor_score=&emphasis_sensitivity=
                                                        one engine's marks + P/R/F1
+  GET    /api/testbed/lyrics?uri=                      the Sung words lane: every word
+                                                       with its score, the lane's clock
+                                                       and whether the song is flagged
   GET    /api/testbed/reference-set?window_beats=&sensitivity=&direction=&transitions_per_minute=
                                                        generator:preview one-beat recall/F1 for the
                                                        four pinned reference songs, at these knobs
@@ -41,8 +44,8 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from spectra.models.trigger import TriggerAction
-from spectra.services import (analysis_reader, rhythmic_edges, room_controls,
-                              testbed_audio, testbed_drop_reference, testbed_engines,
+from spectra.services import (analysis_reader, lyrics_emphasis, lyrics_timeline,
+                              rhythmic_edges, room_controls, testbed_audio, testbed_drop_reference, testbed_engines,
                               testbed_marks, testbed_metrics, testbed_promote,
                               testbed_reference_set, trigger_store)
 
@@ -182,6 +185,7 @@ def _estimate_for(
     confident_score: Optional[float] = None,
     suggested_score: Optional[float] = None,
     floor_score: Optional[float] = None,
+    emphasis_sensitivity: Optional[float] = None,
 ):
     """One engine's marks of one kind, or None when the engine has nothing
     for this song — the ONLY read the page's per-lane fetch needs. Never
@@ -210,12 +214,14 @@ def _estimate_for(
     own Finding 1 (see spectra/services/testbed_engines.py's module
     docstring, "generator" entry). The `drops` and `predrops` engines are
     the others: they read the stored audio shape, which is already in song
-    time."""
+    time, and `lyrics`, whose words are on the capture's label clock, the
+    clock a trigger's timestamp_ms fires on (spectra/services/
+    lyrics_timeline.py)."""
     engine_marks = testbed_engines.marks_for(
         engine, uri, window_beats=window_beats, sensitivity=sensitivity,
         direction=direction, transitions_per_minute=transitions_per_minute,
         confident_score=confident_score, suggested_score=suggested_score,
-        floor_score=floor_score)
+        floor_score=floor_score, emphasis_sensitivity=emphasis_sensitivity)
     if engine_marks is None:
         return None
     if engine not in testbed_engines.SONG_TIME_ENGINES:
@@ -237,6 +243,8 @@ def _estimate_payload(estimate) -> list[dict]:
             d["glyph"] = m.glyph
         if m.tier is not None:
             d["tier"] = m.tier
+        if m.detail is not None:
+            d["detail"] = m.detail
         out.append(d)
     return out
 
@@ -258,6 +266,8 @@ async def engine_marks(
     confident_score: Optional[float] = Query(None, ge=_DROP_GE, le=_DROP_LE),
     suggested_score: Optional[float] = Query(None, ge=_DROP_GE, le=_DROP_LE),
     floor_score: Optional[float] = Query(None, ge=_FLOOR_GE, le=_FLOOR_LE),
+    emphasis_sensitivity: Optional[float] = Query(
+        None, ge=lyrics_emphasis.MIN_SENSITIVITY, le=lyrics_emphasis.MAX_SENSITIVITY),
 ):
     """The page's per-lane fetch: it recomputes P/R/F1 locally against the
     marks it already holds (spectra/web/src/testbed/metrics.ts), so the
@@ -282,7 +292,7 @@ async def engine_marks(
         window_beats=window_beats, sensitivity=sensitivity, direction=direction,
         transitions_per_minute=transitions_per_minute,
         confident_score=confident_score, suggested_score=suggested_score,
-        floor_score=floor_score)
+        floor_score=floor_score, emphasis_sensitivity=emphasis_sensitivity)
     return {
         "uri": uri, "engine": engine, "mark_kind": mark_kind,
         "available": estimate is not None,
@@ -309,6 +319,8 @@ async def compare(
     confident_score: Optional[float] = Query(None, ge=_DROP_GE, le=_DROP_LE),
     suggested_score: Optional[float] = Query(None, ge=_DROP_GE, le=_DROP_LE),
     floor_score: Optional[float] = Query(None, ge=_FLOOR_GE, le=_FLOOR_LE),
+    emphasis_sensitivity: Optional[float] = Query(
+        None, ge=lyrics_emphasis.MIN_SENSITIVITY, le=lyrics_emphasis.MAX_SENSITIVITY),
 ):
     """Server-computed P/R/F1 at a fixed tolerance — for any caller that
     wants the number from the reference matcher itself rather than the
@@ -323,12 +335,22 @@ async def compare(
                                  window_beats=window_beats, sensitivity=sensitivity,
                                  direction=direction, transitions_per_minute=transitions_per_minute,
                                  confident_score=confident_score, suggested_score=suggested_score,
-                                 floor_score=floor_score)
+                                 floor_score=floor_score, emphasis_sensitivity=emphasis_sensitivity)
         if estimate is None:
             return {"uri": uri, "engine": engine, "mark_kind": mark_kind,
                     "reference": reference, "tolerance_ms": tolerance_ms,
                     "available": False, "estimate": [], "reference_marks": [],
                     "metrics": None}
+
+        # A flagged song's words and marks cannot be compared (see
+        # lyrics_timeline's module docstring), so there is no honest number.
+        if engine == testbed_engines.ENGINE_LYRICS:
+            clock = lyrics_timeline.timeline_for_uri(uri).clock
+            if clock.flagged:
+                return {"uri": uri, "engine": engine, "mark_kind": mark_kind,
+                        "reference": reference, "tolerance_ms": tolerance_ms,
+                        "available": True, "estimate": _estimate_payload(estimate),
+                        "reference_marks": [], "metrics": None, "clock": clock.as_dict()}
 
         # SCORING marks only — reference_marks_for_song has already
         # dropped every test-bed-promoted row (see testbed_marks.py's
@@ -354,6 +376,15 @@ async def compare(
             "metrics": testbed_metrics.match_result_dict(result),
         }
     return await asyncio.to_thread(_read)
+
+
+@router.get("/lyrics")
+async def lyrics(uri: str = Query(...)):
+    """The Sung words lane's own read: every word with its score, the clock
+    it is on, and whether it is flagged. Reads three files, so off the loop.
+    Scores are recomputed here on every call; nothing is stored."""
+    return lyrics_timeline.payload(
+        await asyncio.to_thread(lyrics_timeline.timeline_for_uri, uri))
 
 
 @router.get("/reference-set")
@@ -454,7 +485,8 @@ async def promote(body: PromoteRequest):
         )
     try:
         return await asyncio.to_thread(_run)
-    except testbed_promote.PromotionNotConfirmed as exc:
+    except (testbed_promote.PromotionNotConfirmed,
+            testbed_promote.PromotionReadOnlyEngine) as exc:
         raise HTTPException(422, str(exc)) from exc
     except testbed_promote.PromotionDuplicate as exc:
         raise HTTPException(409, str(exc)) from exc

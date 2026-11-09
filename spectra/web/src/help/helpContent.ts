@@ -2257,6 +2257,18 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'testbed-lyrics',
+        title: 'The Sung words lane: where the emphasized words land',
+        keywords: 'sung words lyrics lyric word emphasis emphasized sensitivity slider timeline hook beat loud held last word line colour color flares scene changes zoom flagged clock slip label',
+        body: [
+          'Pick "Sung words" for Engine A or B and every sung word appears on the song\'s timeline: faintly for all of them, and as a mark with the word printed on it for the ones that stand out. Your scene changes and flares run through the lane as guide lines and sit on their own two rows just below it, so you can see where they line up with what is being sung. This lane only shows; nothing here reaches your show, and unlike the other lanes its marks cannot be pushed to your real triggers.',
+          'A word stands out by a score made of five things: sung louder than the words around it, held long, landing on a strong beat, being the last word of its line, and being repeated in the hook. Hover a mark to see which of those it earned. The Sensitivity slider decides how much of that it takes to count: higher picks more words, and "N of M words" beside it tells you how many it is picking. Moving it changes only what this page shows.',
+          'Printed words need room, so use the Zoom buttons above the lanes: the whole song, then 60, 30 or 15 seconds, with the slider beside them to move along the song. Every lane zooms together. When marks are crowded the weakest words lose their printed name first, keeping their mark; zooming in brings it back. The tick colour tells you whether an emphasized word landed near one of your marks in the selected reference set: green within the tolerance, purple not.',
+          'Only songs whose words have been aligned and imported have anything to show; the "Only songs with sung words" box above the song list narrows it to those.',
+          'All of it is on one clock: the labels stamped on the capture, which is the clock your show runs on, so a word and a flare at the same spot happen together in the room. A few captures slip against their own labels. Your marks were placed on the audio and fire on the labels, so on those songs a mark and a word can look apart when they are meant together, or together when they are not. Such a song says so across the lane, draws its words in grey, leaves out the guide lines and your two rows, and gives no score. A song captured again after its words were aligned shows no words at all and says why.',
+        ],
+      },
+      {
         id: 'testbed-promotion',
         title: 'Push to real',
         keywords: 'promote push real trigger confirm review gate safety authored source engine offset',

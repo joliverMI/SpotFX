@@ -19,7 +19,7 @@ import type {
   ReviewSession, ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult,
   SceneV2, SecondAccountState, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
   Liveness, SonicUsageSummary, SpectraTrigger, SpotColorSetCard, TestSessionStatus,
-  TestbedDropReferenceSet, TestbedEngineMarks, TestbedMarks, TestbedPromoteRequest, TestbedPromoteResult,
+  TestbedDropReferenceSet, TestbedEngineMarks, TestbedLyrics, TestbedMarks, TestbedPromoteRequest, TestbedPromoteResult,
   TestbedPromotionLogEntry, TestbedReferenceSet, TestbedSong, TestbedWaveform,
   TranscribeResult, UndoResult,
 } from './types';
@@ -1473,18 +1473,33 @@ export function useTestbedEngineMarks(
   uri: string | null, engine: string | null, markKind: string | null,
   windowBeats = 8, sensitivity = 0.5, direction = 'both', transitionsPerMinute?: number | null,
   confidentScore?: number | null, suggestedScore?: number | null, floorScore?: number | null,
+  emphasisSensitivity?: number | null,
 ) {
   return useQuery({
     queryKey: ['testbed-engine-marks', uri, engine, markKind, windowBeats, sensitivity, direction,
-      transitionsPerMinute ?? null, confidentScore ?? null, suggestedScore ?? null, floorScore ?? null],
+      transitionsPerMinute ?? null, confidentScore ?? null, suggestedScore ?? null, floorScore ?? null,
+      emphasisSensitivity ?? null],
     queryFn: () => apiGet<TestbedEngineMarks>(
       `/testbed/engine-marks?uri=${enc(uri!)}&engine=${enc(engine!)}&mark_kind=${enc(markKind!)}`
       + `&window_beats=${windowBeats}&sensitivity=${sensitivity}&direction=${enc(direction)}`
       + (transitionsPerMinute != null ? `&transitions_per_minute=${transitionsPerMinute}` : '')
       + (confidentScore != null ? `&confident_score=${confidentScore}` : '')
       + (suggestedScore != null ? `&suggested_score=${suggestedScore}` : '')
-      + (floorScore != null ? `&floor_score=${floorScore}` : '')),
+      + (floorScore != null ? `&floor_score=${floorScore}` : '')
+      + (emphasisSensitivity != null ? `&emphasis_sensitivity=${emphasisSensitivity}` : '')),
     enabled: !!uri && !!engine && !!markKind,
+  });
+}
+
+/** The Sung words lane's words, once per song: every word with its score,
+ * the clock it is on and whether the song is flagged. Which words are
+ * emphasized at the slider is /engine-marks' answer, so the slider never
+ * refetches this. */
+export function useTestbedLyrics(uri: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['testbed-lyrics', uri],
+    queryFn: () => apiGet<TestbedLyrics>(`/testbed/lyrics?uri=${enc(uri!)}`),
+    enabled: !!uri && enabled,
   });
 }
 

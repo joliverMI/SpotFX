@@ -36,7 +36,12 @@
 import { useState } from 'react';
 import Icon, { type IconName } from '../../components/Icon';
 import { fmtMs } from '../../lib/time';
-import type { TestbedEstimateMark, TestbedMetrics, TestbedReferenceMark, TestbedWaveform } from '../../types';
+import type {
+  TestbedEstimateMark, TestbedLyrics, TestbedMetrics, TestbedReferenceMark, TestbedWaveform,
+} from '../../types';
+import { inView, viewPct, wholeSong } from '../lyricsLane';
+import type { LaneView } from '../lyricsLane';
+import LyricsLane from './LyricsLane';
 
 /** A glyph-carrying mark's icon: the pre-drop kinds (the Drops panel's own). */
 export const MARK_GLYPH: Record<string, IconName> = { spike: 'preDrop', intro: 'preDropVoice' };
@@ -47,24 +52,24 @@ function tintFor(offsetMs: number | undefined, toleranceMs: number): string {
 }
 
 /** Where the pinned WAV sits on the SONG's timebase: bucket i covers
- * `offset + (i / (n-1)) * waveDur` ms, the same ms -> % mapping every mark
- * lane uses. `offset` is the capture's own start in song time; `spanPct` is
- * the WAV's own length as a share of the lane (an engine's beats can run
- * past a capture that was trimmed, so `dur` is often the longer one).
- * A missing duration falls back to the full width rather than collapsing
- * the lane to nothing, and is reported as unpositioned. */
+ * `offset + (i / (n-1)) * spanMs` ms, the same ms -> % mapping every mark
+ * lane uses. `offset` is the capture's own start in song time; `spanMs` is
+ * the WAV's own length (an engine's beats can run past a capture that was
+ * trimmed, so `dur` is often the longer one). A missing duration falls back
+ * to the rest of the lane rather than collapsing it to nothing, and is
+ * reported as unpositioned. */
 function waveformPlacement(waveform: TestbedWaveform, dur: number) {
   const waveDur = waveform.duration_ms ?? 0;
   const offsetMs = waveform.capture_offset_ms;
   const offsetKnown = offsetMs != null && Number.isFinite(offsetMs);
-  const startPct = offsetKnown ? Math.max(0, Math.min(100, (offsetMs! / dur) * 100)) : 0;
-  const spanPct = waveDur > 0
-    ? Math.max(0, Math.min(100 - startPct, (waveDur / dur) * 100))
-    : 100 - startPct;
-  return { startPct, spanPct, offsetKnown, offsetMs: offsetKnown ? offsetMs! : 0 };
+  const startMs = offsetKnown ? Math.max(0, Math.min(dur, offsetMs!)) : 0;
+  const spanMs = waveDur > 0 ? Math.max(0, Math.min(dur - startMs, waveDur)) : dur - startMs;
+  return { startMs, spanMs, offsetKnown, offsetMs: offsetKnown ? offsetMs! : 0 };
 }
 
-function WaveformLane({ waveform, durationMs }: { waveform: TestbedWaveform | undefined; durationMs: number }) {
+function WaveformLane({ waveform, durationMs, view }: {
+  waveform: TestbedWaveform | undefined; durationMs: number; view?: LaneView;
+}) {
   if (!waveform || waveform.source === 'none') {
     return (
       <div className="testbed-lane-row">
@@ -78,13 +83,14 @@ function WaveformLane({ waveform, durationMs }: { waveform: TestbedWaveform | un
     );
   }
   const dur = Math.max(1, durationMs);
+  const shown = view ?? wholeSong(dur);
   if (waveform.source === 'wav_peaks' && waveform.mins && waveform.maxs) {
     const n = waveform.mins.length;
-    const { startPct, spanPct, offsetKnown, offsetMs } = waveformPlacement(waveform, dur);
-    const points = waveform.mins.map((min, i) => {
-      const max = waveform.maxs![i];
-      const x = startPct + (i / Math.max(1, n - 1)) * spanPct;
-      return { x, min, max };
+    const { startMs, spanMs, offsetKnown, offsetMs } = waveformPlacement(waveform, dur);
+    const points = waveform.mins.flatMap((min, i) => {
+      const ms = startMs + (i / Math.max(1, n - 1)) * spanMs;
+      if (!inView(shown, ms)) return [];
+      return [{ x: viewPct(shown, ms), min, max: waveform.maxs![i] }];
     });
     return (
       <div className="testbed-lane-row">
@@ -120,7 +126,8 @@ function WaveformLane({ waveform, durationMs }: { waveform: TestbedWaveform | un
   // npz RMS-envelope fallback — the report's own Methodology-named case.
   const ts = waveform.timestamps_ms ?? [];
   const rms = waveform.rms_total ?? [];
-  const points = ts.map((t, i) => `${(t / dur) * 100},${100 - Math.min(1, rms[i] ?? 0) * 100}`).join(' ');
+  const points = ts.flatMap((t, i) => (inView(shown, t)
+    ? [`${viewPct(shown, t)},${100 - Math.min(1, rms[i] ?? 0) * 100}`] : [])).join(' ');
   return (
     <div className="testbed-lane-row">
       <span className="testbed-lane-label">Energy (coarse — no WAV)</span>
@@ -134,7 +141,7 @@ function WaveformLane({ waveform, durationMs }: { waveform: TestbedWaveform | un
 }
 
 function ReferenceMarksLane({
-  label, marks, scoredMarks, durationMs, metrics, toleranceMs, hover, setHover, emptyNote,
+  label, marks, scoredMarks, durationMs, view, metrics, toleranceMs, hover, setHover, emptyNote,
 }: {
   label: string;
   marks: TestbedReferenceMark[];
@@ -143,14 +150,15 @@ function ReferenceMarksLane({
    * `marks`, so a tint is resolved by mark id rather than by position. */
   scoredMarks: TestbedReferenceMark[];
   durationMs: number;
+  view?: LaneView;
   metrics: TestbedMetrics | null | undefined;
   toleranceMs: number;
   hover: { text: string; leftPct: string } | null;
   setHover: (h: { text: string; leftPct: string } | null) => void;
   emptyNote?: string;
 }) {
-  const dur = Math.max(1, durationMs);
-  const pct = (ms: number) => `${Math.max(0, Math.min(100, (ms / dur) * 100))}%`;
+  const shown = view ?? wholeSong(durationMs);
+  const pct = (ms: number) => `${viewPct(shown, ms)}%`;
   const offsetById = new Map<string, number>();
   metrics?.matches.forEach((m) => {
     const scored = scoredMarks[m.ref_index];
@@ -171,7 +179,7 @@ function ReferenceMarksLane({
       <span className="testbed-lane-label">{label}</span>
       <div className="testbed-lane-bar">
         {hover && <div className="review-lane-tooltip" style={{ left: hover.leftPct }}>{hover.text}</div>}
-        {marks.map((m) => {
+        {marks.filter((m) => inView(shown, m.timestamp_ms)).map((m) => {
           const offset = offsetById.get(m.id);
           // 'unscored', never 'extra': the legend defines the dim/grey
           // swatch as an ENGINE mark with no match to any of his. With no
@@ -199,19 +207,42 @@ function ReferenceMarksLane({
   );
 }
 
+/** One of his two mark sets, on its own compact row under the Sung words
+ * lane (the guide lines through that lane are the same marks). */
+function HisMarksRow({ label, marks, durationMs, view, toleranceMs }: {
+  label: string; marks: TestbedReferenceMark[]; durationMs: number; view: LaneView; toleranceMs: number;
+}) {
+  const [hover, setHover] = useState<{ text: string; leftPct: string } | null>(null);
+  return (
+    <ReferenceMarksLane
+      label={label}
+      marks={marks}
+      scoredMarks={marks}
+      durationMs={durationMs}
+      view={view}
+      metrics={undefined}
+      toleranceMs={toleranceMs}
+      hover={hover}
+      setHover={setHover}
+      emptyNote={`no ${label.toLowerCase().replace('his ', '')} of yours on this song`}
+    />
+  );
+}
+
 export function EngineLane({
-  label, estimate, durationMs, metrics, onMarkClick,
+  label, estimate, durationMs, view, metrics, onMarkClick,
 }: {
   label: string;
   estimate: TestbedEstimateMark[];
   durationMs: number;
+  view?: LaneView;
   metrics: TestbedMetrics | null | undefined;
   toleranceMs: number;
   onMarkClick?: (mark: TestbedEstimateMark) => void;
 }) {
   const [hover, setHover] = useState<{ text: string; leftPct: string } | null>(null);
-  const dur = Math.max(1, durationMs);
-  const pct = (ms: number) => `${Math.max(0, Math.min(100, (ms / dur) * 100))}%`;
+  const shown = view ?? wholeSong(durationMs);
+  const pct = (ms: number) => `${viewPct(shown, ms)}%`;
   const matchedEstIndices = new Set(metrics?.matches.map((m) => m.est_index) ?? []);
   return (
     <div className="testbed-lane-row">
@@ -219,6 +250,7 @@ export function EngineLane({
       <div className="testbed-lane-bar">
         {hover && <div className="review-lane-tooltip" style={{ left: hover.leftPct }}>{hover.text}</div>}
         {estimate.map((m, i) => {
+          if (!inView(shown, m.time_ms)) return null;
           const matched = matchedEstIndices.has(i);
           // An engine's own label (a section name, a drop's tier) rides in
           // the tooltip; a drops-lane suggestion is drawn fainter.
@@ -249,11 +281,19 @@ export function EngineLane({
   );
 }
 
+export interface LyricsLaneInput {
+  data: TestbedLyrics | undefined;
+  transitions: TestbedReferenceMark[];
+  flares: TestbedReferenceMark[];
+}
+
 export default function TestbedLaneBar({
-  durationMs, waveform, referenceMarks, scoredMarks, referenceLabel,
+  durationMs, view, waveform, referenceMarks, scoredMarks, referenceLabel,
   referenceEmptyNote, engineLanes, toleranceMs, onEstimateMarkClick,
 }: {
   durationMs: number;
+  /** The window every lane shows (the page's zoom); absent = the whole song. */
+  view?: LaneView;
   waveform: TestbedWaveform | undefined;
   /** His marks of the ACTIVE reference set (transitions, flares, or his
    * drops / lulls / charges) — the page picks, this lane draws. */
@@ -263,40 +303,65 @@ export default function TestbedLaneBar({
   referenceLabel: string;
   referenceEmptyNote?: string;
   engineLanes: { key: string; label: string; estimate: TestbedEstimateMark[];
-                metrics: TestbedMetrics | null | undefined }[];
+                metrics: TestbedMetrics | null | undefined;
+                /** Set on a Sung words slot: it draws LyricsLane instead. */
+                lyrics?: LyricsLaneInput }[];
   toleranceMs: number;
   onEstimateMarkClick?: (engineKey: string, mark: TestbedEstimateMark) => void;
 }) {
   const [hover, setHover] = useState<{ text: string; leftPct: string } | null>(null);
   const activeMetrics = engineLanes[0]?.metrics; // the primary engine's own compare tints his marks
+  const shown = view ?? wholeSong(durationMs);
   return (
     <div className="testbed-lane-stack">
-      <WaveformLane waveform={waveform} durationMs={durationMs} />
+      <WaveformLane waveform={waveform} durationMs={durationMs} view={shown} />
       <ReferenceMarksLane
         label={`His ${referenceLabel}`}
         marks={referenceMarks}
         scoredMarks={scoredMarks}
         durationMs={durationMs}
+        view={shown}
         metrics={activeMetrics}
         toleranceMs={toleranceMs}
         hover={hover}
         setHover={setHover}
         emptyNote={referenceEmptyNote}
       />
-      {engineLanes.map((lane) => (
+      {engineLanes.map((lane) => (lane.lyrics ? (
+        <div key={lane.key} className="testbed-lane-stack testbed-lyrics-group">
+          <LyricsLane
+            label={lane.label}
+            data={lane.lyrics.data}
+            estimate={lane.estimate}
+            view={shown}
+            metrics={lane.metrics}
+            transitions={lane.lyrics.transitions}
+            flares={lane.lyrics.flares}
+          />
+          {!lane.lyrics.data?.clock.flagged && lane.lyrics.data?.status === 'ok' && (
+            <>
+              <HisMarksRow label="His scene changes" marks={lane.lyrics.transitions}
+                           durationMs={durationMs} view={shown} toleranceMs={toleranceMs} />
+              <HisMarksRow label="His flares" marks={lane.lyrics.flares}
+                           durationMs={durationMs} view={shown} toleranceMs={toleranceMs} />
+            </>
+          )}
+        </div>
+      ) : (
         <EngineLane
           key={lane.key}
           label={lane.label}
           estimate={lane.estimate}
           durationMs={durationMs}
+          view={shown}
           metrics={lane.metrics}
           toleranceMs={toleranceMs}
           onMarkClick={onEstimateMarkClick ? (mark) => onEstimateMarkClick(lane.key, mark) : undefined}
         />
-      ))}
+      )))}
       <div className="testbed-lane-times">
-        <span>{fmtMs(0)}</span>
-        <span>{fmtMs(durationMs)}</span>
+        <span>{fmtMs(shown.startMs)}</span>
+        <span>{fmtMs(shown.endMs)}</span>
       </div>
     </div>
   );

@@ -1,0 +1,15 @@
+{
+  "why": "The first songs for the Sung words lane (lyrics plan, build step 2): about ten, English and Spanish, chosen for colour words, and only captures whose audio does not slip against its labels, so his marks and the words can be compared. Songs he has placed triggers on come first in each language.",
+  "songs": [
+    {"stem": "Adventure Club, Yuna - Gold (feat. Yuna)", "lang": "eng", "colour_words": "gold x4", "his_marks": true},
+    {"stem": "Jimmy Eat World, Davey Vonbohlen - A Praise Chorus", "lang": "eng", "colour_words": "crimson x2", "his_marks": true},
+    {"stem": "The Rolling Stones - Paint It, Black", "lang": "eng", "colour_words": "black x12, red x3, green, blue", "his_marks": false},
+    {"stem": "ACDC - Back In Black", "lang": "eng", "colour_words": "black x9", "his_marks": false},
+    {"stem": "Chris Stapleton - White Horse", "lang": "eng", "colour_words": "white x7", "his_marks": false},
+    {"stem": "Bizarrap, Young Miko - Young Miko Bzrp Music Sessions, Vol. 5866", "lang": "spa", "colour_words": "blanco x3, negro x3", "his_marks": true},
+    {"stem": "Bad Bunny, Sech - Ignorantes", "lang": "spa", "colour_words": "negro", "his_marks": true},
+    {"stem": "Bad Bunny, Héctor El Father - Vamos Pa' la Calle", "lang": "spa", "colour_words": "azules", "his_marks": true},
+    {"stem": "Bad Bunny, Diplo - 200 Mph", "lang": "spa", "colour_words": "blanco", "his_marks": true},
+    {"stem": "Tainy, Bad Bunny, Julieta Venegas - Lo Siento BB", "lang": "spa", "colour_words": "oro x3", "his_marks": false}
+  ]
+}

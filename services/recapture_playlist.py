@@ -126,7 +126,7 @@ def _needs_recapture_uris() -> list[tuple[str, int]]:
     """
     results: list[tuple[str, int]] = []
     for path in AUDIO_SHAPES_DIR.glob("*.json"):
-        if ".bak." in path.name or ".librosa." in path.name:
+        if ".bak." in path.name or ".librosa." in path.name or ".lyrics." in path.name:
             continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))

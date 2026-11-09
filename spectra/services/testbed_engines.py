@@ -4,11 +4,11 @@ engine normalizes to the SAME mark shape
 (`{"time_ms", "kind", "label", "score"}`) so the comparison/metrics/render
 code never branches on which engine produced a mark.
 
-Six engines ship with this build (report Phase 0 + Phase 1 item 1, the
+Seven engines ship with this build (report Phase 0 + Phase 1 item 1, the
 Admiral's 2026-09-08 generation-alignment sharpening,
 data/transition-alignment-plan/report.md section 4's tuning-loop lanes,
-the drop-detection plan's phase 2 Drops lane, and the predrop plan's step
-3 Pre-drops lane):
+the drop-detection plan's phase 2 Drops lane, the predrop plan's step 3
+Pre-drops lane, and the lyrics plan's step 2 Sung words lane):
 
   librosa   — "current" / the production baseline. Derived LIVE from the
               already-computed `.librosa.json` (spectra.services.
@@ -76,6 +76,15 @@ the drop-detection plan's phase 2 Drops lane, and the predrop plan's step
               shifted by _estimate_for; it reads his triggers (one parse,
               like the generator's stored kind).
 
+  lyrics    — the sung words (spectra.services.lyrics_timeline, the lyrics
+              plan's step 2). kind emphasis: the words whose combined
+              emphasis score reaches the page's own sensitivity, each
+              carrying the word as its label and its five feature values
+              in `detail`. On the capture's label clock, the one a
+              trigger's timestamp_ms fires on, so NOT shifted by
+              _estimate_for. NOT PUSHABLE: the lane has no effect on the
+              room (spectra/services/testbed_promote.py refuses it).
+
 `librosa`'s "interior boundaries" (report's own Part 1.2 term) are every
 section's start_ms EXCEPT the first section's (the song's own opening
 boundary is not a "transition" — nothing precedes it), matching the
@@ -87,9 +96,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 from spectra import config
-from spectra.services import (analysis_reader, drop_detector, midsong_generator,
-                              predrop_detector, rhythmic_edges, testbed_cache,
-                              trigger_store)
+from spectra.services import (analysis_reader, drop_detector, lyrics_timeline,
+                              midsong_generator, predrop_detector, rhythmic_edges,
+                              testbed_cache, trigger_store)
 
 ENGINE_LIBROSA = "librosa"
 ENGINE_BEAT_THIS = "beat_this"
@@ -97,6 +106,9 @@ ENGINE_GENERATOR = "generator"
 ENGINE_EDGES = "edges"
 ENGINE_DROPS = "drops"
 ENGINE_PREDROPS = "predrops"
+ENGINE_LYRICS = "lyrics"
+
+LYRICS_KIND_EMPHASIS = "emphasis"
 
 DROPS_KIND_DROP = "drop"
 DROPS_KIND_CONFIDENT = "drop_confident"
@@ -140,12 +152,17 @@ ENGINES: dict[str, dict] = {
         "kinds": PREDROPS_KINDS,
         "live": True,
     },
+    ENGINE_LYRICS: {
+        "label": "Sung words",
+        "kinds": [LYRICS_KIND_EMPHASIS],
+        "live": True,
+    },
 }
 
 # Engines whose marks are already in SONG time — spectra/api/testbed.py's
 # _estimate_for shifts every other engine's WAV-time marks by the capture
 # offset and must leave these alone.
-SONG_TIME_ENGINES = frozenset({ENGINE_GENERATOR, ENGINE_DROPS, ENGINE_PREDROPS})
+SONG_TIME_ENGINES = frozenset({ENGINE_GENERATOR, ENGINE_DROPS, ENGINE_PREDROPS, ENGINE_LYRICS})
 
 
 @dataclass(frozen=True)
@@ -156,6 +173,7 @@ class EngineMark:
     score: Optional[float] = None
     glyph: Optional[str] = None     # draw this mark as that kind's glyph (pre-drops)
     tier: Optional[str] = None      # "confident" | "suggested", where an engine has tiers
+    detail: Optional[dict] = None   # engine-specific extras for the page (sung words)
 
 
 def librosa_marks_for_stem(stem: Optional[str]) -> Optional[list[EngineMark]]:
@@ -341,6 +359,22 @@ def _predrops_marks(uri: str, *, confident_score: Optional[float],
     return sorted(out, key=lambda m: m.time_ms)
 
 
+def _lyrics_marks(uri: str, *, emphasis_sensitivity: Optional[float],
+                  stem_index: Optional[dict[str, str]] = None) -> Optional[list[EngineMark]]:
+    """The emphasized words at this sensitivity, recomputed on every read;
+    None unless the song has a usable word timeline. `matched_label` is the
+    place the label step will fill: nothing sets it yet."""
+    timeline = lyrics_timeline.timeline_for_uri(uri, stem_index=stem_index)
+    if not timeline.usable:
+        return None
+    return [
+        EngineMark(time_ms=w.ms, kind=LYRICS_KIND_EMPHASIS, label=w.word, score=w.score,
+                   detail={"end_ms": w.end_ms, "line": w.line,
+                           "features": w.features.as_dict(), "matched_label": None})
+        for w in lyrics_timeline.emphasized_words(timeline, emphasis_sensitivity)
+    ]
+
+
 def _drops_available(stem: Optional[str]) -> bool:
     """A stat, never a detection: the shape and the beat analysis exist."""
     return (stem is not None and analysis_reader.has_librosa_analysis(stem)
@@ -356,6 +390,7 @@ def marks_for(
     confident_score: Optional[float] = None,
     suggested_score: Optional[float] = None,
     floor_score: Optional[float] = None,
+    emphasis_sensitivity: Optional[float] = None,
 ) -> Optional[list[EngineMark]]:
     """None = not available for this song (either the engine hasn't been
     precomputed for it, or — for librosa/generator/edges — no analysis
@@ -365,8 +400,9 @@ def marks_for(
     only by the `generator` engine's preview kind (the density rate has
     no meaning for `edges`, which only detects edges, never ranks
     candidates); `confident_score`/`suggested_score`/`floor_score` only by
-    `drops` and `predrops` (None = the room's own setting). Every engine
-    ignores the knobs it does not use."""
+    `drops` and `predrops` (None = the room's own setting);
+    `emphasis_sensitivity` only by `lyrics`. Every engine ignores the knobs
+    it does not use."""
     if engine == ENGINE_LIBROSA:
         return _librosa_marks(uri)
     if engine == ENGINE_GENERATOR:
@@ -382,6 +418,8 @@ def marks_for(
     if engine == ENGINE_PREDROPS:
         return _predrops_marks(uri, confident_score=confident_score,
                                suggested_score=suggested_score, floor_score=floor_score)
+    if engine == ENGINE_LYRICS:
+        return _lyrics_marks(uri, emphasis_sensitivity=emphasis_sensitivity)
     cached = testbed_cache.load(engine, uri)
     if cached is None:
         return None
@@ -475,6 +513,23 @@ def availability_for(uri: str, *,
             marks = (_edges_marks(uri, window_beats=rhythmic_edges.DEFAULT_WINDOW_BEATS,
                                  sensitivity=rhythmic_edges.DEFAULT_SENSITIVITY)
                     if stem is not None else None)
+            out[key] = {
+                "label": meta["label"], "kinds": meta["kinds"],
+                "available": marks is not None,
+                "computed_at": None,
+                "mark_count": len(marks) if marks else 0,
+            }
+        elif key == ENGINE_LYRICS:
+            if not count_marks:
+                out[key] = {
+                    "label": meta["label"], "kinds": meta["kinds"],
+                    "available": analysis_reader.has_lyrics(stem),
+                    "computed_at": None,
+                    "mark_count": None,
+                }
+                continue
+            marks = (_lyrics_marks(uri, emphasis_sensitivity=None, stem_index=stem_index)
+                     if analysis_reader.has_lyrics(stem) else None)
             out[key] = {
                 "label": meta["label"], "kinds": meta["kinds"],
                 "available": marks is not None,

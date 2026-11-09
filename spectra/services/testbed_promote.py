@@ -102,12 +102,19 @@ logger = logging.getLogger(__name__)
 
 _LOG_MAX_ENTRIES = 500
 DUPLICATE_WINDOW_MS = 250
+# Lanes that can be looked at and scored but never reach his real triggers.
+# The sung words lane is the one so far: it has no effect on the room.
+READ_ONLY_ENGINES = frozenset({"lyrics"})
 _log_lock = threading.Lock()
 
 
 class PromotionNotConfirmed(ValueError):
     """confirmed=True didn't arrive on the call — the structural half of
     the review gate. Never caught and silently ignored by any caller."""
+
+
+class PromotionReadOnlyEngine(ValueError):
+    """The mark came from a lane that must never reach his real triggers."""
 
 
 class PromotionDuplicate(ValueError):
@@ -229,6 +236,14 @@ def promote(uri: str, timestamp_ms: int, action: TriggerAction,
     trigger of this kind already sits within DUPLICATE_WINDOW_MS of the
     moment. Returns {"status": "promoted", "trigger_id": ...} on success."""
     at = time.time()
+    if source_engine in READ_ONLY_ENGINES:
+        _record({
+            "at": at, "uri": uri, "timestamp_ms": timestamp_ms,
+            "source_engine": source_engine, "source_mark_kind": source_mark_kind,
+            "status": "refused", "reason": "read_only_engine",
+        })
+        raise PromotionReadOnlyEngine(
+            f"the {source_engine} lane is read-only: it has no effect on the room")
     if not confirmed:
         _record({
             "at": at, "uri": uri, "timestamp_ms": timestamp_ms,

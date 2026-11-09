@@ -1847,6 +1847,53 @@ export interface TestbedEstimateMark {
   glyph?: string;
   /** 'confident' | 'suggested', where the engine has tiers */
   tier?: string;
+  /** the Sung words lane only: why this word was picked */
+  detail?: TestbedWordDetail;
+}
+
+export interface TestbedWordFeatures {
+  loud: number;
+  held: number;
+  beat: number;
+  line_end: number;
+  hook: number;
+}
+
+export interface TestbedWordDetail {
+  end_ms: number;
+  line: number;
+  features: TestbedWordFeatures;
+  /** where a matched colour or effect label will go; nothing sets it yet */
+  matched_label: string | null;
+}
+
+export interface TestbedLyricWord {
+  word: string;
+  line: number;
+  ms: number;
+  end_ms: number;
+  score: number;
+}
+
+/** spectra/services/lyrics_timeline.py's Clock: the lane's one clock, and
+ * whether this song's marks and words can honestly be compared on it. */
+export interface TestbedLyricsClock {
+  lane_clock: string;
+  max_slip_ms: number | null;
+  flagged: boolean;
+  note: string | null;
+}
+
+export interface TestbedLyrics {
+  uri: string;
+  status: 'ok' | 'none' | 'invalid' | 'stale';
+  note: string | null;
+  lang: string | null;
+  provenance: string | null;
+  mode: string | null;
+  clock: TestbedLyricsClock;
+  default_sensitivity: number;
+  words: TestbedLyricWord[];
 }
 
 export interface TestbedMatch {
