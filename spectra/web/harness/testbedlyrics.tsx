@@ -128,10 +128,65 @@ function engineMarks(uri: string, engine: string, kind: string, sensitivity: num
   };
 }
 
-window.fetch = (async (input: RequestInfo | URL) => {
+// The Word matches row (lyrics plan step 3): an in-memory store, so a press on
+// the page really changes what the next read returns.
+const CLAUDE = { available: true, reason: null, backend: 'api', model: 'harness-model' };
+const TARGETS = {
+  red: { kind: 'color_set', id: 'red1', name: 'Blood Red', swatch: '#ff0000' },
+  blue: { kind: 'color_set', id: 'blue1', name: 'Mid - Ice', swatch: '#00aaff' },
+  fish: { kind: 'effect', id: 'fish', name: 'Fish', swatch: null },
+};
+interface M { id: string; source: 'claude' | 'his'; first_word: number; last_word: number; phrase: string; label: string; confidence: number | null; why: string; target: typeof TARGETS.red }
+const matchWords = FIXTURE?.words ?? WORDS;
+const redAt = matchWords.findIndex((w) => w.word === 'red');
+const azulAt = matchWords.findIndex((w) => w.word === 'azul');
+let matchRows: M[] = [
+  { id: 'g1', source: 'claude', first_word: redAt, last_word: redAt + 1, phrase: 'red light', label: 'red', confidence: 0.91, why: 'names the colour', target: TARGETS.red },
+  { id: 'g2', source: 'claude', first_word: azulAt, last_word: azulAt, phrase: 'azul', label: 'blue', confidence: 0.84, why: 'blue, in Spanish', target: TARGETS.blue },
+];
+let deleted = 0;
+let nextHis = 1;
+const matchPayload = (uri: string) => ({
+  uri, status: 'ok', note: null, state: 'fresh', weak_match_threshold: 0.6, claude: CLAUDE,
+  reading: { at_ms: Date.now() - 180_000, model: 'harness-model', n_weak: 2, n_refused: 0 },
+  n_his: matchRows.filter((m) => m.source === 'his').length, n_deleted: deleted, unplaced: [],
+  matches: uri === CLEAN ? matchRows.map((m) => ({
+    id: m.id, source: m.source, provenance: m.source === 'his' ? 'his' : 'claude_guess',
+    first_word: m.first_word, last_word: m.last_word, phrase: m.phrase, label: m.label,
+    confidence: m.confidence, why: m.why, targets: [m.target], n_targets: 1, targets_missing: 0,
+    ms: matchWords[m.first_word].ms, end_ms: matchWords[m.last_word].end_ms,
+    score: Math.max(...matchWords.slice(m.first_word, m.last_word + 1).map((w) => w.score)),
+  })) : [],
+});
+const labelsPage = {
+  color_sets: [
+    { id: 'red1', name: 'Blood Red', kind: 'set', disabled: false, swatch: '#ff0000', has_colours: true, labels: [{ text: 'red', source: 'seed' }], meanings: { things: [], moods: [], places: [] }, drafted_ms: null, draft_model: null },
+    { id: 'blue1', name: 'Mid - Ice', kind: 'set', disabled: false, swatch: '#00aaff', has_colours: true, labels: [{ text: 'blue', source: 'seed' }], meanings: { things: [], moods: [], places: [] }, drafted_ms: null, draft_model: null },
+  ],
+  effects: [{ id: 'fish', name: 'Fish', labels: [{ text: 'fish', source: 'seed' }] }],
+  labels_hash: 'h', n_labels: 3, auto_read: false, claude: CLAUDE, draft_batch_size: 10,
+};
+
+const realFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(typeof input === 'string' ? input : (input as Request).url ?? input);
   const q = new URL(url, 'http://x').searchParams;
   const uri = q.get('uri') ?? '';
+  const body = init?.body ? JSON.parse(String(init.body)) : {};
+  if (url.includes('/sung-labels')) return json(labelsPage);
+  if (url.includes('/lyric-matches/delete')) {
+    matchRows = matchRows.filter((m) => m.id !== body.id);
+    deleted += 1;
+    return json(matchPayload(body.uri));
+  }
+  if (url.includes('/lyric-matches/add')) {
+    const span = matchWords.slice(body.first_word, body.last_word + 1);
+    const target = body.target.kind === 'effect' ? TARGETS.fish
+      : body.target.id === 'red1' ? TARGETS.red : TARGETS.blue;
+    matchRows.push({ id: `h${nextHis++}`, source: 'his', first_word: body.first_word, last_word: body.last_word,
+                     phrase: span.map((w) => w.word).join(' '), label: target.name, confidence: null, why: '', target });
+    return json(matchPayload(body.uri));
+  }
+  if (url.includes('/lyric-matches')) return json(matchPayload(uri));
   if (url.includes('/testbed/songs')) return json(SONGS);
   if (url.includes('/testbed/marks')) return json(marks(uri));
   if (url.includes('/testbed/waveform')) {
@@ -152,7 +207,8 @@ window.fetch = (async (input: RequestInfo | URL) => {
                   drop_confident_score: 1.2, drop_suggested_score: 0.9, drop_floor: 0.5 });
   }
   return json({});
-}) as typeof fetch;
+};
+window.fetch = realFetch as typeof fetch;
 
 createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>

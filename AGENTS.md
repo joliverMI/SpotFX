@@ -8563,6 +8563,14 @@ No DI seam (same class as `fire_history.py`) — `tests/conftest.py`'s
 autouse `_isolated_sonic_usage` repoints `config.SONIC_USAGE_FILE`; a new
 script reaching `record()`/`summary()` for real needs the same repoint.
 
+**Since the lyrics plan's step 3, this is no longer only Sonic's record**:
+`spectra/services/claude_text.py` (the one Claude call behind lyric reading
+and colour-meaning drafting, see "Sung labels and word matches" below)
+records every call here too, `session_id="lyric-reading"`/`"colour-
+meanings"` — same account, same backend switch, so the Review page's
+"how much of his allowance is gone" figures include those calls, not only
+Sonic's.
+
 ## SPECTRA S3 light ownership + handover (BUILT AND PROVEN, GATED OFF)
 
 Exactly one process owns the lights. The durable record is
@@ -11829,9 +11837,40 @@ only way a timeline gets in (dry run by default). Four things:
 - **NOTHING IN THE SHOW READS THIS.** Held by `tests/test_testbed_lyrics_lane.py`
   (who may import these modules) and by `testbed_promote.READ_ONLY_ENGINES`, so
   the lane cannot reach his real triggers. The score, slider and word lists are
-  recomputed on every read and stored nowhere. Labels, matching, colour and
-  imprints are later steps of the plan; `matched_label` on a mark is the chip's
-  place and nothing sets it yet.
+  recomputed on every read and stored nowhere. **Labels and matching are built
+  (step 3, "Sung labels and word matches" below) — `matched_label` on a mark is
+  now read from `lyric_matches.labels_by_word`, not unset.** Colour and imprints
+  are still step 4.
+
+## Sung labels and word matches (lyrics plan, step 3 — no effect on the room)
+
+`spectra/services/sung_labels.py` is the binding statement for the list,
+`lyric_reading.py` for how Claude reads a song against it, `lyric_matches.py`
+for what a match is, `colour_words.py` for the seed and `claude_text.py` for
+the one Claude call (Sonic's account and switch, `SPECTRA_LYRIC_AGENT_MODEL`
+to point it elsewhere). `/sung-labels` is the one correction page; the matches
+are the Word matches row under the Sung words lane. Five things:
+
+- **NOTHING IN THE SHOW READS ANY OF THIS.** Firing from a match is step 4 and
+  off by default. `tests/test_lyric_reading.py` holds that in a fresh
+  interpreter, and automatic reading (`SungLabelSettings.auto_read`) ships off:
+  until he switches it on, only a press reaches Claude.
+- **HIS EDITS ARE STORED APART FROM WHAT IS COMPUTED.** A label edit is a delta
+  over the seed (`LabelEdits`), a meaning edit a delta over Claude's `draft`,
+  and a match's reading is separate from his `his` and `deleted` lists. Only
+  the computed half is ever replaced, which is the whole of why a re-draft, a
+  re-read or a recapture cannot touch them. A new thing he can edit needs the
+  same split.
+- **A MATCH SITS ON WORDS, NOT TIMES.** It stores word positions and what they
+  said; its `ms`/`end_ms` come from the current word timeline at read time, so
+  a recapture cannot leave a stale time behind.
+- **CLAUDE READS ONE LIST OF DISTINCT LABELS, AND WHO CARRIES A LABEL IS ANSWERED
+  AT READ TIME.** So `labels_hash` covers only the words: moving a word from one
+  card to another needs no re-read. Both stores raise rather than read a torn
+  file as "no edits" (`StoreUnreadable`).
+- **THE SEED IS COMPUTED ON READ, NOT WRITTEN.** Nothing is migrated to deploy
+  this, and `storage/color_sets.json` is never written by it (SPECTRA does not
+  write that file). Sonic has no operation here yet: owed as a follow-up.
 
 ## Phase 2 of the music-analysis plan — snapping generated cues to a beat
 

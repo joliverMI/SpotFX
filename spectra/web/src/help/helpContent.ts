@@ -735,6 +735,34 @@ export const HELP_SECTIONS: HelpSection[] = [
     ],
   },
   {
+    id: 'sung-labels',
+    title: 'Sung Labels',
+    keywords: 'sung labels words lyrics lyric colour color set effect meaning meanings things moods places claude draft correct edit seed spanish',
+    intro:
+      'What each colour set and effect answers to when someone sings it. Claude reads a song\'s lyrics against this list and guesses which words are about what, and you correct the guesses on the Test Bed. Nothing on this page reaches your lights yet.',
+    entries: [
+      {
+        id: 'sung-labels-page',
+        title: 'Correcting the words',
+        keywords: 'chip add remove delete label meaning things moods places edit kept draft seed search',
+        body: [
+          'Every colour set starts with words worked out from its own colours and name: the colour in English and Spanish, its other names, and a few things it brings to mind. Each one has an × to take it off, and the box after the last word adds one of your own. Chips show where a word came from: plain from its colours and name, dashed drafted by Claude, solid yours.',
+          'Draft meanings asks Claude for the things, moods and places each colour set brings to mind. Draft again replaces only Claude\'s words: anything you added stays, and anything you took off stays off even when Claude offers it again. A set with no colours of its own, like a brightness setting, has nothing to mean and is left out.',
+          'Effects have sung labels too, so a word like fish or stars can point at an effect rather than a colour.',
+        ],
+      },
+      {
+        id: 'sung-labels-reading',
+        title: 'When songs get read',
+        keywords: 'automatic auto read re-read reading off default labels change claude allowance tokens',
+        body: [
+          'By default Claude reads a song only when you press Read on the Test Bed. Switch on reading songs automatically and it reads any song that has not been read, and reads songs again when the words on this list change, waiting until you have stopped editing for ten minutes.',
+          'It goes one song a minute because every read spends your Claude allowance: a whole library takes hours. Moving a word from one colour set to another does not need a re-read, since which sets a word reaches is worked out when you look.',
+        ],
+      },
+    ],
+  },
+  {
     id: 'colorsets-groups',
     title: 'Colour Sets & Groups page',
     keywords: 'palette library author create edit delete swatch entries members rotate synced pool tier tiered nested bulk edit',
@@ -2155,6 +2183,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Three real numbers, at the top of this page: the last Sonic query, this fixed day, and this fixed week. Every figure is captured directly off the model runtime\'s own response for that call — never estimated from word/character counts. A call the runtime genuinely didn\'t report usage for contributes nothing (no fabricated zero); "No Sonic calls recorded yet" means exactly that, not "zero tokens used."',
           'Day and week are FIXED periods anchored to Monday 10:00 p.m. Eastern (America/New_York, DST-aware) — not a rolling last-24h/last-7d window. That boundary is almost certainly aligned to his subscription\'s own quota reset, so "what this period has used" doubles as a rough read on how much is left before the next reset — the number that matters after a quota exhausted without warning. A rolling window would only ever show how much has been spent, and resets on the clock rather than the quota, which can hide a heavy session that just happened.',
           'The "subscription"/"API credits" badge on the last query shows which backend answered it — Sonic can run on either (spectra/services/settings_agent.py or settings_agent_cli.py), and both are tracked in the same totals.',
+          'The day/week totals also include Claude reading your lyrics and drafting colour meanings (the Sung Labels page and the Test Bed\'s "Read this song") — one shared allowance, so "the last Sonic query" may actually be one of those instead.',
         ],
       },
     ],
@@ -2266,6 +2295,17 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Printed words need room, so use the Zoom buttons above the lanes: the whole song, then 60, 30, 15 or 8 seconds, with the slider beside them to move along the song. Every lane zooms together. When marks are crowded the weakest words lose their printed name first, keeping their mark; zooming in brings it back. The tick colour tells you whether an emphasized word landed near one of your marks in the selected reference set: green within the tolerance, purple not.',
           'Only songs whose words have been aligned and imported have anything to show; the "Only songs with sung words" box above the song list narrows it to those.',
           'All of it is on one clock: the labels stamped on the capture, which is the clock your show runs on, so a word and a flare at the same spot happen together in the room. A few captures slip against their own labels. Your marks were placed on the audio and fire on the labels, so on those songs a mark and a word can look apart when they are meant together, or together when they are not. Such a song says so across the lane, draws its words in grey, leaves out the guide lines and your two rows, and gives no score. A song captured again after its words were aligned shows no words at all and says why.',
+        ],
+      },
+      {
+        id: 'testbed-lyric-matches',
+        title: 'Word matches: which sung words are about what',
+        keywords: 'word match matches lyric lyrics claude guess confidence delete add edit label colour color effect read re-read recapture sung words chip',
+        body: [
+          'Under the Sung words lane, the Word matches row shows which words Claude thinks are about something on your Sung labels list. Each chip sits under the words it is on, at any zoom. Dashed chips are Claude\'s guesses, solid ones are yours, and a dimmer chip is on words below the Sensitivity slider. Nothing here reaches your lights: this is only where you see and correct them.',
+          'Press Read this song and Claude reads the lyrics, as text only, against the list of labels. A guess it is not confident about is dropped, and one that names a word or label that is not really there is thrown out. Press a chip to see why it was guessed and which colour sets or effects it would reach.',
+          'Every match is a guess you can correct. Delete this match takes one away, and it stays away the next time the song is read; Bring back undoes that for the song. To add one, press + Add a match, tap the first and last word of a phrase from what the lanes are showing, and pick the colour set or effect it means. Your match wins over any guess on the same words.',
+          'Your edits live apart from the reading. Reading again replaces only Claude\'s guesses. Capturing the song again moves its words to their new times and your edits go with them; if the words themselves change and one of yours can no longer be placed, the row says so and keeps it.',
         ],
       },
       {

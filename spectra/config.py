@@ -65,6 +65,16 @@ SETTINGS_LOG_FILE = SPECTRA_STORAGE / "settings_log.json"
 # sonic_usage.py) — the review page's "how much has Sonic used" figures.
 # Real reported usage only, never estimated; see that module's docstring.
 SONIC_USAGE_FILE = SPECTRA_STORAGE / "sonic_usage.json"
+# Sung labels (lyrics plan step 3): the words a colour set or effect answers
+# to when it is sung, and Claude's drafted meanings beside his corrections.
+# spectra/services/sung_labels.py. Deliberately NOT a field on the colour-set
+# file: SPECTRA never writes storage/color_sets.json (color_sets.py) and this
+# holds his edits, so it is ours to keep.
+SUNG_LABELS_FILE = SPECTRA_STORAGE / "sung_labels.json"
+# One small file per song: Claude's latest reading of its lyrics, and his own
+# edits kept apart from it so a re-read or a recapture can never touch them.
+# spectra/services/lyric_matches.py.
+LYRIC_MATCHES_DIR = SPECTRA_STORAGE / "lyric_matches"
 # Sonic's scene/flare change log (spectra/services/scene_console.py) — kept
 # separate from SETTINGS_LOG_FILE so the two domains' audit trails never mix,
 # matching scene_console.py never importing settings_console.py.
@@ -412,6 +422,14 @@ def window_wait_ms() -> int:
     except ValueError:
         return WINDOW_WAIT_MS_DEFAULT
     return max(0, min(WINDOW_WAIT_MS_MAX, value))
+
+
+def lyric_agent_model() -> str:
+    """The model that reads lyrics and drafts colour meanings
+    (spectra/services/claude_text.py). The same account, key and backend as
+    Sonic; its own env var only so reading a whole library can be pointed at
+    a cheaper model without changing Sonic's."""
+    return os.getenv("SPECTRA_LYRIC_AGENT_MODEL", "") or settings_agent_model()
 
 
 def settings_agent_backend() -> str:

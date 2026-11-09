@@ -17,8 +17,11 @@ the CLI's own internal tool-loop is opaque to us, but its final summary
 isn't). Neither path estimates from character/word counts. If a call
 completes with no usage data reported (a test double, a future backend
 variant), record() is simply never called for it — no zero-value entry is
-fabricated to stand in for a real measurement. See the two call sites for
-the "usage_reported" guard that enforces this.
+fabricated to stand in for a real measurement. See each call site's own
+no-usage-reported guard that enforces this (Sonic's two, plus
+claude_text.py's single shared Claude call behind lyric reading and
+colour-meaning drafting, which records into this SAME store — the review
+page's figures are no longer only Sonic's).
 
 FIXED WINDOWS, NOT ROLLING — his own explicit ruling, overruling this
 module's original rolling-24h/rolling-7d design: "choose Monday at 10:00

@@ -96,7 +96,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from spectra import config
-from spectra.services import (analysis_reader, drop_detector, lyrics_timeline,
+from spectra.services import (analysis_reader, drop_detector, lyric_matches, lyrics_timeline,
                               midsong_generator, predrop_detector, rhythmic_edges,
                               testbed_cache, trigger_store)
 
@@ -363,15 +363,17 @@ def _lyrics_marks(uri: str, *, emphasis_sensitivity: Optional[float],
                   stem_index: Optional[dict[str, str]] = None) -> Optional[list[EngineMark]]:
     """The emphasized words at this sensitivity, recomputed on every read;
     None unless the song has a usable word timeline. `matched_label` is the
-    place the label step will fill: nothing sets it yet."""
+    label on this word from spectra/services/lyric_matches.py, if any."""
     timeline = lyrics_timeline.timeline_for_uri(uri, stem_index=stem_index)
     if not timeline.usable:
         return None
+    matched = lyric_matches.labels_by_word(uri, timeline)
     return [
         EngineMark(time_ms=w.ms, kind=LYRICS_KIND_EMPHASIS,
                    label=lyrics_timeline.display_word(w.word), score=w.score,
                    detail={"end_ms": w.end_ms, "line": w.line,
-                           "features": w.features.as_dict(), "matched_label": None})
+                           "features": w.features.as_dict(),
+                           "matched_label": matched.get(w.index)})
         for w in lyrics_timeline.emphasized_words(timeline, emphasis_sensitivity)
     ]
 

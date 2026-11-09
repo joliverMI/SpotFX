@@ -15,6 +15,7 @@
 const ROUTE_TOPICS: [prefix: string, topic: string][] = [
   ['/scenes', 'scenes-page'],
   ['/colorsets', 'colorsets-groups'],
+  ['/sung-labels', 'sung-labels'],
   ['/timeline', 'builder'],
   ['/feedback', 'feedback-page'],
   ['/review', 'review-page'],

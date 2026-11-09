@@ -31,6 +31,8 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from spectra import config
+from spectra.api import lyric_matches as lyric_matches_api
+from spectra.api import sung_labels as sung_labels_api
 from spectra.api import analysed_plan as analysed_plan_api
 from spectra.api import upcoming as upcoming_api
 from spectra.api import energy as energy_api
@@ -136,6 +138,8 @@ def create_app() -> FastAPI:
     app.include_router(test_session.router)
     app.include_router(timing_api.router)
     app.include_router(testbed.router)
+    app.include_router(sung_labels_api.router)
+    app.include_router(lyric_matches_api.router)
     # TV display plan phase 0 (data/tv-display-plan/plan.html PR 0.1): the
     # probe page at /tv/probe. Registered BEFORE any future static mount a
     # later phase might add at "/tv" (the TV app shell, PR 1.1) — an
@@ -398,6 +402,11 @@ async def _standalone_lifespan(app):
     from spectra.services import tv_launch
     tv_auto_open_task = asyncio.create_task(
         tv_launch.run_auto_open_supervised(), name="spectra-tv-auto-open")
+    # Lyrics plan step 3: re-reads songs against the sung labels, one at a
+    # time. Inert until he turns automatic reading on (off by default).
+    from spectra.services import lyric_reading
+    lyric_reading_task = asyncio.create_task(
+        lyric_reading.run_supervised(), name="spectra-lyric-reading")
     logger.info("SPECTRA started — own process, pid %d", os.getpid())
     yield
     all_tasks = (watchdog_task, reconciler_task, ambient_verify_task,
@@ -405,7 +414,7 @@ async def _standalone_lifespan(app):
                 activation_recheck_task, dark_fixture_task,
                 known_buffer_poll_task, known_buffer_sse_task,
                 light_show_task, house_task, house_fixtures_task,
-                clock_push_task, tv_auto_open_task)
+                clock_push_task, tv_auto_open_task, lyric_reading_task)
     for task in all_tasks:
         task.cancel()
     for task in all_tasks:

@@ -739,6 +739,19 @@ def _isolated_sonic_usage(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_lyric_labels(tmp_path, monkeypatch):
+    """The sung-label store and each song's word matches (lyrics plan step 3):
+    written with no DI seam, like fire_history above, and the automatic
+    reader's pacing is module state. Autouse so no test can write his labels
+    or edits."""
+    from spectra import config as scfg
+    monkeypatch.setattr(scfg, "SUNG_LABELS_FILE", tmp_path / "sung_labels.json")
+    monkeypatch.setattr(scfg, "LYRIC_MATCHES_DIR", tmp_path / "lyric_matches")
+    from spectra.services import lyric_reading
+    lyric_reading.reset()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_room_light_field(tmp_path, monkeypatch):
     """The room light-field map store, the room-effects spec store, AND the
     room-effects layer's process-global running state.
