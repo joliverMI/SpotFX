@@ -14,6 +14,7 @@ import textwrap
 import numpy as np
 import pytest
 
+REPO = pathlib.Path(__file__).resolve().parent.parent
 URI = "spotify:track:lyricslane1"
 STEM = "Artist - Song"
 
@@ -323,7 +324,7 @@ def test_nothing_in_the_show_can_reach_the_lyrics_modules():
     own earlier tests, so an in-process sys.modules check would pass
     regardless of whether the show's own engine modules ever reach them."""
     proc = subprocess.run([sys.executable, "-c", _SHOW_BOUNDARY_DRIVER],
-                          capture_output=True, text=True, timeout=60)
+                          cwd=REPO, capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stderr[-3000:]
     out = json.loads(proc.stdout.strip().splitlines()[-1])
     assert not out["lyrics_timeline"], (

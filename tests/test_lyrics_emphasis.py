@@ -4,6 +4,7 @@ function stays pure."""
 from __future__ import annotations
 
 import json
+import pathlib
 import subprocess
 import sys
 import textwrap
@@ -12,6 +13,8 @@ import numpy as np
 import pytest
 
 from spectra.services import lyrics_emphasis as le
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
 
 
 def _word(text, ms, end_ms, line=0, wav_ms=None, norm=None):
@@ -276,7 +279,7 @@ def test_the_score_itself_imports_nothing_that_could_load_a_model_or_play_audio(
     builtins.open and socket.socket patched to raise -- it still returns a
     score for every word, so nothing in it reaches disk or the network."""
     proc = subprocess.run([sys.executable, "-c", _PURITY_DRIVER],
-                          capture_output=True, text=True, timeout=60)
+                          cwd=REPO, capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stderr[-3000:]
     out = json.loads(proc.stdout.strip().splitlines()[-1])
     assert not any(out["before_import"].values()), out["before_import"]
