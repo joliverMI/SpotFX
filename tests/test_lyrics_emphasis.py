@@ -40,12 +40,22 @@ def _by_index(scored, i):
     return next(s for s in scored if s.index == i)
 
 
-def test_a_word_sung_six_db_over_its_neighbours_earns_full_loudness():
+def test_a_word_sung_well_over_its_neighbours_earns_full_loudness():
     words = _row(13)
-    frames = _with_loud_region(_flat_frames(), words[6]["ms"], words[6]["end_ms"], 0.1 * (10 ** (6 / 20)))
+    level = 0.1 * (10 ** (le.LOUD_FULL_DB / 20))
+    frames = _with_loud_region(_flat_frames(), words[6]["ms"], words[6]["end_ms"], level)
     scored = le.score_words(words, frames, [])
     assert _by_index(scored, 6).features.loud == pytest.approx(1.0, abs=0.02)
     assert _by_index(scored, 2).features.loud == 0.0
+
+
+def test_a_long_notes_fading_tail_does_not_count_against_it():
+    """The first three quarters of this word are loud and the end has faded."""
+    words = _row(13, gap=1000.0, dur=800.0)
+    start, end = words[6]["ms"], words[6]["end_ms"]
+    loud = 0.1 * (10 ** (le.LOUD_FULL_DB / 20))
+    frames = _with_loud_region(_flat_frames(), start, start + 0.76 * (end - start), loud)
+    assert _by_index(le.score_words(words, frames, []), 6).features.loud == pytest.approx(1.0, abs=0.02)
 
 
 def test_a_quieter_word_earns_nothing_for_loudness():

@@ -198,7 +198,7 @@ def test_unparseable_source_is_refused_by_name(world):
 
 @pytest.mark.parametrize("words,reason", [
     ([], "no_words"),
-    ([{"w": "a", "n": "a", "line": 0, "ms": 5.0, "end_ms": 1.0, "wav_ms": 0.0, "end_wav_ms": 1.0}],
+    ([{"w": "a", "n": "a", "line": 0, "ms": 500.0, "end_ms": 1.0, "wav_ms": 0.0, "end_wav_ms": 1.0}],
      "word_ends_before_it_starts"),
     ([{"w": "a", "n": "a", "line": 0, "ms": 5.0}], "word_missing_times"),
     ([{"n": "a", "line": 0, "ms": 5.0, "end_ms": 6.0, "wav_ms": 0.0, "end_wav_ms": 1.0}], "word_missing_text"),
@@ -209,6 +209,15 @@ def test_unparseable_source_is_refused_by_name(world):
 def test_malformed_words_are_refused_by_name(world, words, reason):
     world[4](words=words)
     assert reason in _one(world, apply=True).reasons
+
+
+def test_a_one_letter_word_a_few_ms_backwards_is_not_refused(world):
+    """Measured on the backfill: six songs had a one-letter word ending up to
+    10 ms before it started, a rounding quirk of the frame lookup."""
+    world[4](words=[
+        {"w": "I", "n": "i", "line": 0, "ms": 5000.0, "end_ms": 4990.0, "wav_ms": 0.0, "end_wav_ms": 1.0},
+    ])
+    assert _one(world, apply=False).outcome == importer.OUTCOME_WOULD_IMPORT
 
 
 def test_a_small_step_back_at_a_capture_seam_is_not_disorder(world):

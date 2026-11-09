@@ -58,7 +58,14 @@ WEIGHT_HOOK = 0.15
 NEIGHBOURS = 6
 
 # Loud: full marks at this many dB above the neighbouring words' median.
-LOUD_FULL_DB = 6.0
+# Masters are heavily limited (about 10 dB between a song's quietest and
+# loudest sections), so a few dB is already a clear step up. Measured across
+# 290 aligned songs: at 4 dB a loud word is about a third of what gets picked,
+# at 6 dB about a seventh.
+LOUD_FULL_DB = 4.0
+# A word's level is this percentile of its frames, so a long note's fading
+# tail does not count against it.
+LOUD_PERCENTILE = 75.0
 # Below this a frame is silence, and a level in dB would run off to -inf.
 _RMS_FLOOR = 1e-5
 
@@ -87,9 +94,9 @@ HOOK_FULL_REPEATS = 4
 
 MIN_SENSITIVITY = 0.0
 MAX_SENSITIVITY = 1.0
-# 0.6 means a word has to reach 0.40, roughly one word in twelve on the songs
-# this was tuned against. The page's slider starts here; moving it stores
-# nothing.
+# 0.6 means a word has to reach 0.40: about one word in ten across the 290
+# aligned songs (the middle four fifths of songs fall between 5% and 19%). The
+# page's slider starts here; moving it stores nothing.
 DEFAULT_SENSITIVITY = 0.6
 
 
@@ -133,13 +140,12 @@ def _clamp01(x: float) -> float:
 
 
 def _word_levels_db(words: Sequence[Mapping], frames: Optional[Frames]) -> list[Optional[float]]:
-    """Each word's mean level in dB over its own label span; None where the
+    """Each word's level in dB over its own label span; None where the
     capture holds no frame inside it (nothing was measured, so nothing is
     claimed)."""
     if frames is None or len(frames.timestamps_ms) == 0:
         return [None] * len(words)
     stamps = frames.timestamps_ms
-    running = np.concatenate([[0.0], np.cumsum(frames.rms.astype(np.float64))])
     out: list[Optional[float]] = []
     for w in words:
         lo = int(np.searchsorted(stamps, float(w["ms"]), side="left"))
@@ -147,8 +153,8 @@ def _word_levels_db(words: Sequence[Mapping], frames: Optional[Frames]) -> list[
         if hi <= lo:
             out.append(None)
             continue
-        mean_rms = (running[hi] - running[lo]) / (hi - lo)
-        out.append(20.0 * math.log10(max(float(mean_rms), _RMS_FLOOR)))
+        level = float(np.percentile(frames.rms[lo:hi], LOUD_PERCENTILE))
+        out.append(20.0 * math.log10(max(level, _RMS_FLOOR)))
     return out
 
 

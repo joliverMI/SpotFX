@@ -61,7 +61,13 @@ function buildWords(): W[] {
   return out;
 }
 
-const WORDS = buildWords();
+// A local run can inject a real song's words (window.__LYRICS_FIXTURE__) to
+// look at real density. Real lyrics are never committed: the repo's own
+// render uses the invented words above.
+const FIXTURE = (window as unknown as {
+  __LYRICS_FIXTURE__?: { words: W[]; transitions: unknown[]; flares: unknown[] };
+}).__LYRICS_FIXTURE__;
+const WORDS = FIXTURE?.words ?? buildWords();
 const lastMs = WORDS[WORDS.length - 1].end_ms;
 
 const engines = (lyrics: boolean) => ({
@@ -82,12 +88,12 @@ const SONGS = [song(CLEAN, 'A clean capture', true), song(SLIP, 'A capture that 
 
 // A flare exactly on an emphasized word, so a test can read that a word and
 // a flare with the same time share an x.
-const alignedWord = WORDS.filter((w) => w.score >= 0.4)[1];
+const alignedWord = WORDS.filter((w) => w.score >= 0.4)[1] ?? WORDS[0];
 const marks = (uri: string) => ({
   uri, title: 'x', artist: 'Harness',
-  transitions: [{ id: 't1', timestamp_ms: 8000, kind: 'fire_scene', enabled: true, promoted: false, event_class: null },
+  transitions: FIXTURE?.transitions ?? [{ id: 't1', timestamp_ms: 8000, kind: 'fire_scene', enabled: true, promoted: false, event_class: null },
                 { id: 't2', timestamp_ms: 41_000, kind: 'fire_scene', enabled: true, promoted: false, event_class: null }],
-  flares: [{ id: 'f1', timestamp_ms: alignedWord.ms, kind: 'fire_response', enabled: true, promoted: false, event_class: 'flare' },
+  flares: FIXTURE?.flares ?? [{ id: 'f1', timestamp_ms: alignedWord.ms, kind: 'fire_response', enabled: true, promoted: false, event_class: 'flare' },
            { id: 'f2', timestamp_ms: 17_000, kind: 'fire_response', enabled: true, promoted: false, event_class: 'flare' },
            { id: 'f3', timestamp_ms: 33_000, kind: 'fire_response', enabled: true, promoted: false, event_class: 'drop' }],
   n_generated: 0, n_promoted: 0, n_snapped: 0, n_unsnapped_generated: 0, snap_grid_counts: {},

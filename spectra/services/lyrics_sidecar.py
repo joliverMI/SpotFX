@@ -38,6 +38,9 @@ SUFFIX = ".lyrics.json"
 # Word labels may step back a little: a pre-roll seam in the capture does
 # (the alignment job's own LabelMap says so). A real shuffle is seconds.
 OUT_OF_ORDER_TOLERANCE_MS = 500.0
+# A one-letter word can come out a few milliseconds backwards from the frame
+# lookup (-10 ms at worst across the backfill). A rounding quirk, not a fault.
+INVERTED_WORD_TOLERANCE_MS = 50.0
 
 
 def path_for(shapes_dir: Path, stem: str) -> Path:
@@ -98,7 +101,7 @@ def validate(doc: object, *, expected_stem: Optional[str] = None) -> list[str]:
         if not all(_is_number(n) for n in numbers):
             problems.append("word_missing_times")
             break
-        if float(word["end_ms"]) < float(word["ms"]):
+        if float(word["end_ms"]) < float(word["ms"]) - INVERTED_WORD_TOLERANCE_MS:
             problems.append("word_ends_before_it_starts")
             break
         if float(word["ms"]) < previous - OUT_OF_ORDER_TOLERANCE_MS:
