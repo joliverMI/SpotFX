@@ -98,8 +98,10 @@ His **legacy** STAR authored `edges` as a bare static `6` — no signal binding,
 **neither** `"Flare patch 0.7–1"` nor `"Drop patch 0.7–1"` exists anywhere in the legacy
 per-band `param_patch` data. The 6/3/5 dice binding and both patches were introduced during the
 SPECTRA rebuild by an agent, not by him — he never asked for any of it, and noticed only because
-his six-pointed star stopped being six-pointed. See `AGENTS.md` ("A scene's stored data is not
-proof he authored it") for the general rule this instance is evidence for.
+his six-pointed star stopped being six-pointed. See `docs/agents/scenes-and-flares.md`
+("A scene's stored data is not proof he authored it") for the general rule this instance is
+evidence for — also stated as a safety rule in `AGENTS.md`'s own "His data is not yours to
+silently change" entry.
 
 **This did not decide the frozen value.** An earlier pass argued "6" because both patches and
 the old binding's fallback all pointed at six — reasonable evidence, but for the wrong question:

@@ -62,7 +62,7 @@ downstream of that geometry, not independent tuning.
   black `bg_color` on a colour set is LOAD-BEARING here in Hybrid mode —
   it's what resets the background to black on every fire. Never strip it
   as "redundant" (`docs/SPECTRA_SPEC.md` §72, also referenced in
-  AGENTS.md's own prose, has the full colour-bleed proof). The event-horizon
+  docs/agents/house-lighting.md's own prose, has the full colour-bleed proof). The event-horizon
   disc (`Blackhole2d.draw()`'s `out[inside] = ...`) paints literal BLACK,
   not `_bg_color` — painting the background colour there would double it
   against `get_pixels()`'s own overwrite blend (`fx/VENDOR.md` #61).
@@ -91,7 +91,7 @@ fresh infall to zero for seconds — worst right after a scene transition
 INTO Black Hole, which lands the whole outgoing cloud onto the ring as
 captives in one frame. The ring runs denser under busy music as a result
 (accepted trade-off, his own call — no captive budget was built). `CAP`
-(1024) is unchanged as the hard buffer bound. AGENTS.md's Black Hole
+(1024) is unchanged as the hard buffer bound. docs/agents/fx-effects.md's Black Hole
 section item 5 is the binding note; spec is
 `tests/test_blackhole_infall_through_transition.py`.
 
@@ -302,7 +302,7 @@ The layer calls `_strip_phase_enter(phase, prev, released)` on each edge
 rendered frame, "none" puts `reverse` back; a watchdog release is the old
 silent sweep back) and resets the key after `STRIP_PHASE_DROP_S`
 (`DROP_RESET_S`). The phase is `self._sp_phase` — there is no `_phase`.
-`config_updated` must not call `super()` (AGENTS.md's strip phase
+`config_updated` must not call `super()` (docs/agents/fx-effects.md's strip phase
 section). At strength 0 the strip renders the same bytes as before the
 fold, watchdog included (`scripts/check_particle_strip_phase.py`). The
 2-D Matrix module is untouched by all of this.
@@ -333,7 +333,7 @@ frames: `scripts/check_drop_visible_onset.py`; the plumbing fold:
 `check_blackhole_hex_spawn.py`, `check_blackhole_reverse_fallback.py` +
 matching `tests/test_blackhole_*.py`. The disc's single-application
 background is proven in `tests/test_matrix_overwrite_background_double_apply.py`
-(`test_blackhole_disc_*`). Full history: `AGENTS.md`'s "Black
+(`test_blackhole_disc_*`). Full history: `docs/agents/fx-effects.md`'s "Black
 Hole" section and `fx/VENDOR.md` deviations #12, #14, #18, #19, #20, #38, #61, #70, #73.
 
 ## Lensing / Fountain / Flame Lick / Ignition (2026-10-11, phase 4)

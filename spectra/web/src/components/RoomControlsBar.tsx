@@ -31,7 +31,8 @@
  * Brightness, the drift gradient (DriftGradientBar.tsx, now
  * components/DriftGradientPanel.tsx) and the preview Favourites picker
  * ALSO moved out of this bar into Settings → "Room"
- * (settings/RoomCard.tsx) in the same change — see AGENTS.md's "THE
+ * (settings/RoomCard.tsx) in the same change — see
+ * docs/agents/ui-timeline-and-tv.md's "THE
  * GROUPED MENU, ONE BAR, AND HOME" section for the whole layout.
  *
  * THE ONE-SECOND APPLY DELAY (Mode only, his words: "don't apply change

@@ -353,7 +353,8 @@ async def _op_set_house_mode_pool(mode: str, pool: str, names: list[str],
 # all of HouseSettings, and change the cutover switch, the energy knobs,
 # and Serenity's voice-state colours. Deliberately NOT here, by name,
 # same reasoning as force_scene_*/force_color_* staying out of the room
-# settings registry plus its own safety note (AGENTS.md's "What should
+# settings registry plus its own safety note (docs/agents/house-lighting.md's
+# "SONIC REACH WIDENED TO HOUSE-WIDE SETTINGS" section, "What should
 # stay off-limits to Sonic" table): hue_excluded_lights — the Hue bulbs a
 # mode never touches — a dropped name here could light or switch off a
 # bulb nobody meant to touch; the list is empty by default (every bulb,

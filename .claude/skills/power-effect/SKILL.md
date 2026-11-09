@@ -27,7 +27,7 @@ runs Power here.
    scene entry authored it
 
 `config/effect_params.json` marks `sparks_color: {"accent": true}`. Per
-AGENTS.md's accent-param rule, `scene_compiler._entry_config` writes this
+docs/agents/spectra-engine-core.md's accent-param rule, `scene_compiler._entry_config` writes this
 param black on every compile UNLESS the scene's own entry authored a real
 value — ported from spot-effects' `accent_param_for` rule. This was the
 un-ported gap that showed white sparks on STAR/Singles/power for a while
@@ -35,8 +35,8 @@ un-ported gap that showed white sparks on STAR/Singles/power for a while
 `"accent": true` on its param in the registry — no compiler change
 required — but a scene's CURRENT stored `sparks_color` is not proof he
 tuned it; check whether the entry actually authors it before treating the
-value as intentional (same caution as AGENTS.md's "a scene's stored data
-is not proof he authored it" rule).
+value as intentional (same caution as docs/agents/scenes-and-flares.md's "a scene's stored data
+is not proof he authored it" rule, and AGENTS.md's own safety rule).
 
 ## Charge, lull and drop come from the shared STRIP PHASE LAYER (2026-10-11)
 
@@ -100,5 +100,5 @@ the cycle, no white, the shared dark point, the punch, the house hold) and
 No dedicated `check_power_*.py`/`test_power_*.py` exists for Power itself;
 this effect is close to stock LedFX behaviour. Its documented invariant
 (the accent param) is proven by `scripts/check_spectra.py`'s "STAR power/
-Singles accent" section, not by any pytest test. History: AGENTS.md's "SPECTRA app" section,
+Singles accent" section, not by any pytest test. History: docs/agents/spectra-engine-core.md's "SPECTRA app" section,
 "accent" param paragraph.

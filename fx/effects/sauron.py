@@ -23,7 +23,7 @@ INHERITED, not new Sauron choreography — that is a later phase.
 
 ONE DELIBERATE DEPARTURE IN THE COPY: Eye's `snap_threshold` saturating
 `>=` (a clipped impulse reaches exactly 1.0, so "1.0 = never" fires
-anyway — AGENTS.md "A SATURATING SIGNAL MEETING >=") is fixed here the way
+anyway — docs/agents/fx-effects.md "A SATURATING SIGNAL MEETING >=") is fixed here the way
 dancer.py's burst_threshold is: `thr < 1.0 and imp >= thr`. Eye keeps its
 own defect (captain's call, eye-effect skill).
 
@@ -105,7 +105,7 @@ constant SURGE_TAU (~0.55 s). No lead: it erupts ON the mark.
 
 BACKGROUND: like Eye — no `no_background_color` flag, an authored
 background reaches the wire and `get_pixels()` paints it once for every
-unlit cell. This effect NEVER paints `_bg_color` itself (AGENTS.md "A
+unlit cell. This effect NEVER paints `_bg_color` itself (docs/agents/fx-effects.md "A
 colour set's background MODE lands in ONE place"); the lids are literal
 black. With the sky on there are almost no unlit cells inside the hex.
 

@@ -40,7 +40,7 @@ WHAT THIS READS, per fixture, over the fixture's OWN transport:
 
 THE ONE INSTRUMENT CAVEAT worth repeating here because it is easy to
 misread: while a Hue entertainment stream is live, the CLIP light resource
-does not reflect the streamed COLOUR (AGENTS.md, "Reading real Hue bulb
+does not reflect the streamed COLOUR (docs/agents/spectra-engine-core.md, "Reading real Hue bulb
 state"). It does honestly report on/off, which is the only thing asked. Do
 not extend this to read a colour back and believe it.
 

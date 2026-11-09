@@ -141,6 +141,7 @@ LedFX crossfades handle the switch.
 3. **Help page** (definition of done): add the effect + scene to
    `web/src/help/helpContent.ts`, `cd web && npx vite build`.
 4. **Effect and scene skills** (definition of done, see AGENTS.md's
+   help-content safety rule and `docs/agents/workflow-conventions.md`'s
    effect/scene-skill rule): write `.claude/skills/<name>-effect/SKILL.md`
    and `.claude/skills/<scene>-scene/SKILL.md`, and register both in
    `.claude/skills/EFFECT_SCENE_MAP.json` — the effect module and its

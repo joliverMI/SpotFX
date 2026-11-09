@@ -19,7 +19,7 @@ dart to a random ring position" snap, and `imp` is one of this pipeline's
 clipped-to-1.0 audio signals that converges to exactly 1.0 in float within
 ~150ms of a loud passage. With `snap_threshold` at its Range max (1.0,
 meaning "never snap"), it fires anyway. Left unfixed on purpose (captain's
-call, not an oversight) — see the dancer-effect skill and AGENTS.md's "A
+call, not an oversight) — see the dancer-effect skill and docs/agents/fx-effects.md's "A
 saturating signal meeting >=" section for the general shape and the one
 instance that IS fixed (`dancer.py:1149`), which is the model to follow if
 this one is ever picked up.
@@ -31,7 +31,7 @@ this one is ever picked up.
 `particle_handoff.transition_progress(virtual)` /
 `particle_handoff.BLOOM_START` / `PACMAN_MORPH_START` (both 0.45, the same
 fork constants `spectra/services/transition_phases.py` mirrors for scene-
-transition anchor timing — AGENTS.md's "SPECTRA transition-timing
+transition anchor timing — docs/agents/scenes-and-flares.md's "SPECTRA transition-timing
 alignment" section). A blink/erupt hold on this effect is gated on how far
 a scene transition INTO or OUT OF Eye V2 has progressed — touching either
 side of a transition into/out of this scene without checking
@@ -42,7 +42,7 @@ hold (`_erupt_hold`/`_blink_in`, each carrying its own `t0` +
 ## The charge/lull/drop orphan-crash pattern applies here — and this
    module is cited as the GOOD example
 
-AGENTS.md names `eye.py`'s watchdog path as the one that got the
+docs/agents/fx-effects.md names `eye.py`'s watchdog path as the one that got the
 `_phase_step`-sentinel-before-`return` rule right FROM THE START (it sets
 a concrete `t: 0.0` directly rather than a `None` sentinel later code must
 resolve) — the pattern to copy in any NEW charge/lull/drop state machine,
@@ -148,7 +148,7 @@ No direct param edit — reachable only through an already-attached
 
 No dedicated `check_eye_*.py`/`test_eye_*.py` covering this effect's own
 behaviour (snap/blink/gaze) exists yet — a named gap, not an oversight
-(see AGENTS.md's rule for adding one when this effect's behaviour is next
+(see docs/agents/workflow-conventions.md's effect/scene-skill rule for adding one when this effect's behaviour is next
 touched with enough weight to warrant it). The one exception is the
 eyelid's single-application background, proven in
 `tests/test_matrix_overwrite_background_double_apply.py`

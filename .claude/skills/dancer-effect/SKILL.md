@@ -59,6 +59,6 @@ No direct param edit — reachable only through an already-attached
 ## Executable proofs
 
 `scripts/check_dancer_flames_off.py`, `scripts/smoke_dancer_params.py`,
-`tests/test_dancer_flames_off.py`. History: AGENTS.md's "A saturating
+`tests/test_dancer_flames_off.py`. History: docs/agents/fx-effects.md's "A saturating
 signal meeting >= makes a 'never' threshold fire" section, `fx/VENDOR.md`
 #31.

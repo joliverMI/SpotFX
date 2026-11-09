@@ -14,7 +14,7 @@ review step never reaches this function at all (see that component: the
 mutation it fires is only wired to its own "Confirm & push" button, never
 the initial "Push to real" button that opens it).
 
-Respecting the two-trigger-store reality (AGENTS.md's "TWO trigger
+Respecting the two-trigger-store reality (docs/agents/scenes-and-flares.md's "TWO trigger
 copies"): this writes ONLY the fired copy (storage/spectra/triggers.json,
 via trigger_store.upsert), the SAME store spectra/api/triggers.py's own
 human-authoring POST writes, through the SAME validated write —

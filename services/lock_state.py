@@ -6,7 +6,7 @@ lock thresholds or sweep behaviour — it records what the sweep in
 `services/auto_offset_service.py` ALREADY decided and publishes it. Every
 value it holds is copied from a decision that module had already made and
 logged; no `note_*()` call may ever feed a value back into that sweep.
-Read `AGENTS.md` "Timing and offset-direction conventions" and
+Read `docs/agents/workflow-conventions.md` "Timing and offset-direction conventions" and
 `docs/SPECTRA_TIMING_CONVENTIONS.md` before adding a caller — this module
 must stay on the reporting side of that line. It holds no offset the
 engine reads and no threshold; `offset_ms`/`quality` are carried for the

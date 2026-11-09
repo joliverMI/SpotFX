@@ -354,7 +354,7 @@ th { color: var(--muted); font-weight: 600; }
     });
   }
 
-  // Approximates the Live view's own renderer (AGENTS.md: "ONE instanced
+  // Approximates the Live view's own renderer (docs/agents/spectra-engine-core.md: "ONE instanced
   // WebGL2 call ... MAX blend") with many instanced points, MAX-blended.
   function instancedPointsTier() {
     var c = freshCanvas(320, 180);

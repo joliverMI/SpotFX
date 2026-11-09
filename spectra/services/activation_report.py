@@ -34,7 +34,7 @@ here, and from here it reaches every surface he actually looks at:
     a restart.
 
 STATUS HONESTY (the codebase's standing rule — ambient_music_gate.py's
-"Status honesty", AGENTS.md "A write-time confirmation is a snapshot"):
+"Status honesty", docs/agents/spectra-engine-core.md "A write-time confirmation is a snapshot"):
 the verdict taken at activation is a SNAPSHOT. Two of the three real
 failure kinds this covers are transient — a slow WLED (valid address, no
 answer inside the probe window) usually flips live=true on its own a few

@@ -172,7 +172,7 @@ separately at all.
 
 Full mechanism (the keeper's search, several keepers riding together for a
 drop that lands on another effect, the hand-off hook's resolver contract):
-AGENTS.md's Fish section (item 10) and the `fish-effect`/`drop-detection`
+docs/agents/fx-effects.md's Fish section (item 10) and the `fish-effect`/`drop-detection`
 skills — not restated here.
 
 A fish leaving for any reason — the lull, the settle, the population
@@ -218,7 +218,7 @@ clears the tag on the keepers and departs the rest, the drop and a return to
   same as Black Hole.
 
 Out of Star, a scene change runs a thematic transition program instead
-of this drop (`AGENTS.md`'s "TRANSITION PROGRAMS" section, "OUT OF STAR");
+of this drop (`docs/agents/scenes-and-flares.md`'s "TRANSITION PROGRAMS" section, "OUT OF STAR");
 into Star is still the choreographed bloom. The radial-effect skill is
 the full mechanism detail for all of the above.
 
@@ -419,7 +419,7 @@ launches and burst speed, never the density cap.
 
 Full mechanism (the output-stage order, the white guard, the punch
 envelope, how a future effect joins): the module's own docstring and
-AGENTS.md's "THE STRIP PHASE LAYER" section — not restated here.
+docs/agents/fx-effects.md's "THE STRIP PHASE LAYER" section — not restated here.
 
 Fish answers one flare kind of its own (2026-10-08): **big_fish** — one
 really large fish (an ordinary fish's own body, scaled up and dimmer, laying

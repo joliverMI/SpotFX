@@ -7,7 +7,7 @@ description: >
   Load BEFORE writing a new SonicOperation, before wiring a new domain
   module into settings_agent.py, or when a feature PR adds a user-facing
   setting/action and needs to decide whether Sonic owes it a follow-up.
-  This is the "steps spread across six paragraphs of AGENTS.md" this
+  This is the "steps spread across six paragraphs of docs/agents/sonic-and-colour.md" this
   skill exists to collect into one place.
 ---
 
@@ -20,7 +20,7 @@ second place for a capability's guard and its documentation to drift
 apart. `settings_agent.ALL_OPERATIONS` merges every domain module's
 `OPERATIONS` dict; a name not in it cannot be discovered OR dispatched.
 
-## The rule this skill exists to enforce (AGENTS.md)
+## The rule this skill exists to enforce (AGENTS.md's help-content safety rule; detail in docs/agents/sonic-and-colour.md)
 
 > Any change that adds or changes a user-facing setting or action owes a
 > Sonic follow-up — an operation, or a named entry on an exclusion list

@@ -7,7 +7,7 @@ ones").
 WHY THE PROFILE, NOT THE FIRED COPY. Every one of his triggers lives in his
 song profile (storage/profiles/*.json, the Timeline's editor copy) as well
 as in the copy SPECTRA fires from, and an explicit profile save wins
-(AGENTS.md, "TWO trigger copies"). A deletion made only in the fired copy
+(docs/agents/scenes-and-flares.md, "TWO trigger copies"). A deletion made only in the fired copy
 would come back with his next Timeline save. So the panel's Remove writes
 HERE, and the route runs the whole-song sync so the fired copy follows.
 

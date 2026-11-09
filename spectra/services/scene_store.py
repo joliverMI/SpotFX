@@ -142,7 +142,7 @@ def set_disabled(scene_id: str, disabled: bool) -> Optional[bool]:
     """Flip ONE scene's `disabled` flag by patching the raw JSON, and return
     the value it had (None = no such scene). Deliberately NOT a load-model-
     save round trip: that re-serialises every field and runs the legacy
-    flare migration (AGENTS.md: "Editing an existing SceneV2 by script").
+    flare migration (docs/agents/sonic-and-colour.md: "Editing an existing SceneV2 by script").
     The Light Show's Scene on/off action and its End-show restore use it."""
     raw = _load_raw()
     entry = raw.get(scene_id)

@@ -212,7 +212,7 @@ GIFs, committed under `docs/evidence/fireworks-melds/`). The scene
 migration that attaches the kind, `scripts/add_fireworks_burst_flare.py`
 (dry-run default), belongs to the fireworks-v2-scene skill. History:
 `docs/SPECTRA_SPEC.md` §89 (also
-referenced in AGENTS.md's own prose), `fx/VENDOR.md` #15, #17.
+referenced in docs/agents/fx-effects.md's own prose), `fx/VENDOR.md` #15, #17.
 
 ## Lensing / Fountain / Flame Lick into Fireworks (2026-10-11, phase 4)
 

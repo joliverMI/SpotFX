@@ -1,5 +1,5 @@
 {
-  "_comment": "Hand-maintained manifest for scripts/check_effect_scene_skills_current.py. Do not auto-generate. The rule this backs is the effect/scene-skill paragraph in AGENTS.md's 'In-app Help page (KEEP IT CURRENT)' section. MAPPING RULE: an effect's own code (fx/effects/<name>.py) and its instrument/measurement scripts/tests trigger ONLY that effect's skill; a scene's own authored data/configuration (its seed script, a flare-kind migration naming that scene, a test asserting that scene's stored config) triggers ONLY that scene's skill. No file is listed under both.",
+  "_comment": "Hand-maintained manifest for scripts/check_effect_scene_skills_current.py. Do not auto-generate. The rule this backs is the effect/scene-skill paragraph in docs/agents/workflow-conventions.md's 'In-app Help page (KEEP IT CURRENT)' section (moved there from AGENTS.md 2026-11-09; AGENTS.md's help-content rule still names it as part of the definition of done). MAPPING RULE: an effect's own code (fx/effects/<name>.py) and its instrument/measurement scripts/tests trigger ONLY that effect's skill; a scene's own authored data/configuration (its seed script, a flare-kind migration naming that scene, a test asserting that scene's stored config) triggers ONLY that scene's skill. No file is listed under both.",
   "effects": {
     "blackhole-effect": {
       "skill": ".claude/skills/blackhole-effect/SKILL.md",
@@ -174,7 +174,7 @@
     }
   },
   "acknowledged_effect_gaps": {
-    "_reason": "Registered effects (a NAME = class attribute in fx/effects/*.py) that are NOT bound by any of his 10 live SPECTRA scenes today. Named here on purpose so the checker does not silently require skills nobody asked for; move an entry out of this list into 'effects' above (with a real skill) the day it gets bound into a live scene, per AGENTS.md's rule.",
+    "_reason": "Registered effects (a NAME = class attribute in fx/effects/*.py) that are NOT bound by any of his 10 live SPECTRA scenes today. Named here on purpose so the checker does not silently require skills nobody asked for; move an entry out of this list into 'effects' above (with a real skill) the day it gets bound into a live scene, per docs/agents/workflow-conventions.md's rule (see AGENTS.md's help-content safety rule).",
     "files": [
       "fx/effects/blender.py",
       "fx/effects/concentric.py",

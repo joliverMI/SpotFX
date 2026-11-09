@@ -89,7 +89,7 @@ never be allowed to continue smoothly through zero regardless of `spin`'s
 own `smooth: true` tag; that's the whole point of the control (see
 `scene_response._compute_param_moves`'s `sign_control` branch,
 `config/effect_params.json`'s own notes on `spin`/`spin_sign`,
-AGENTS.md's "STAR reverse-flare-use-flip" entry).
+docs/agents/spectra-engine-core.md's "STAR reverse-flare-use-flip" entry).
 
 ## A `"sauron"` hand-off snapshot is treated exactly like `"eye"`
 
@@ -264,6 +264,6 @@ cells every 0.1 s, D3's lit/white cells after the drop, and every program
 out of Star's largest frame-to-frame change and white-cell count). The warp background fix is proven in
 `tests/test_matrix_overwrite_background_double_apply.py`
 (`test_radial_warp_background_applies_once_not_twice`,
-`test_radial_background_recovers_after_a_warp_ends`). History: AGENTS.md's
+`test_radial_background_recovers_after_a_warp_ends`). History: docs/agents/fx-effects.md's
 "Radial (STAR) rotation is audio-lows-driven" section, `fx/VENDOR.md`
 #22, #62.

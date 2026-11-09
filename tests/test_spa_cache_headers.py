@@ -1,6 +1,6 @@
 """SPA index.html must revalidate every request; hashed /assets/ files may be
 cached forever. Regression coverage for the no-Cache-Control-at-all defect
-that let a phone pin an old bundle indefinitely (AGENTS.md: "SPA index.html
+that let a phone pin an old bundle indefinitely (docs/agents/ui-infra-and-tests.md: "SPA index.html
 must never be heuristically cached").
 
 Both spot-effects' /app mount (main.py) and SPECTRA's own mount

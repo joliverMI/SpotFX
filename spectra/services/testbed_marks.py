@@ -2,7 +2,7 @@
 (data/spotfx-music-analysis-plan/report.md, Part 3) — read-only, and read
 from the FIRED copy (storage/spectra/triggers.json via trigger_store), the
 same choice the report itself makes ("what actually reaches the room" —
-Part 3's own "What it reads" section), not the legacy editor copy. AGENTS.md's
+Part 3's own "What it reads" section), not the legacy editor copy. docs/agents/scenes-and-flares.md's
 "TWO trigger copies" section is why this is a deliberate pick, not an
 oversight: the two stores can genuinely disagree (Part 3's Methodology
 note), and a full dual-store picker is future work (report §Part 2.5 gap
@@ -20,7 +20,7 @@ ONLY source=="authored" rows are reference marks. midsong_generator seeds a
 source=="generated" fire_scene at every librosa section boundary — the
 exact times testbed_engines emits as the librosa engine's own
 section_boundary marks — and 63% of his stored songs hold nothing else
-(AGENTS.md's own count), so admitting them would grade librosa against
+(docs/agents/testbed-and-drops.md's own count), so admitting them would grade librosa against
 itself and every other engine against librosa. The excluded rows are
 COUNTED (`SongMarks.n_generated`) so a song with no authored marks reads
 as "nothing to compare against yet", never as an empty comparison.
@@ -43,7 +43,7 @@ the SCORING set — `scoring_marks()`, which is the one definition both
 local matcher apply.
 
 Provenance (ai_generated / verified) comes from the legacy editor-copy
-SongProfile (storage/profiles/*.json, read-only, same file AGENTS.md's own
+SongProfile (storage/profiles/*.json, read-only, same file docs/agents/scenes-and-flares.md's own
 "A scene's stored data is not proof he authored it" caution applies to) —
 surfaced so the test bed can show the caveat on the page itself (the
 report's own Methodology section insists on this), not bury it in a report
@@ -208,7 +208,7 @@ def _summarize(profile: dict) -> _ProfileSummary:
 
 def _find_profile(uri: str) -> Optional[dict]:
     """Read-only scan of storage/profiles/*.json for the matching
-    spotify_uri — same read-only spot-effects storage AGENTS.md's own
+    spotify_uri — same read-only spot-effects storage docs/agents/scenes-and-flares.md's own
     "TWO trigger copies" section names, never imported as a model (the S3
     import-discipline rule: nothing under spectra/ imports spot-effects
     runtime internals) — a plain dict read is enough for the two provenance

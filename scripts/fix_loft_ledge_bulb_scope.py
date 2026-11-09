@@ -8,7 +8,7 @@ His order, 2026-10-06 ~20:15 EDT, relayed by the main firstmate, verbatim:
 should be part of the spectra home. they shouldnt be treated differently.
 that was an incorrect assumption yall made."
 
-The code fix (fx/hue_scope.py's module docstring, AGENTS.md's "THE FOUR
+The code fix (fx/hue_scope.py's module docstring, docs/agents/spectra-engine-core.md's "THE FOUR
 BULBS ARE ORDINARY") changed only what a FRESH seeder run would write
 going forward — scripts/seed_hue_scope.py's DEFAULT_EXCLUDE is now empty,
 and scripts/seed_house_lighting.py no longer seeds HUE_LEFT_ALONE. Neither

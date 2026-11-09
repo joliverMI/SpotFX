@@ -6,7 +6,7 @@ ceiling uplight, the living-room corner, under-spiral — ON at stop+5 s, OFF
 at stop+28 s, with no Home Assistant context, while Away held every one of
 them off. Loft and ledge (outside fx/hue_scope's allow-list at the time —
 since corrected, 2026-10-06: they are ordinary Spectra bulbs, allow-listed
-like the rest, see AGENTS.md "THE FOUR BULBS ARE ORDINARY") stayed dark;
+like the rest, see docs/agents/spectra-engine-core.md "THE FOUR BULBS ARE ORDINARY") stayed dark;
 so did every WLED (withheld by house_restart).
 
 THE CAUSE, from the journal (09:30, 07:55, 18:47 — identical each time):

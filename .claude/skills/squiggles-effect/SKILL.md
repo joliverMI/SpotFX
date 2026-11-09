@@ -32,7 +32,7 @@ to prevent.
 ## `no_background_color` was set, then explicitly REMOVED — his call, not
    a defect fix
 
-`docs/SPECTRA_SPEC.md` §85 (also referenced in AGENTS.md's own prose)
+`docs/SPECTRA_SPEC.md` §85 (also referenced in docs/agents/fx-effects.md's own prose)
 added `no_background_color` to squiggles after measuring a bright authored
 background flooding ~100% of a real headless render. §87 reversed it on his
 own ruling: "keep the backgrounds, i want to control
@@ -64,7 +64,7 @@ where to return to.
 
 Same shape as blackhole's watchdog crash: any `return` inside
 `_phase_step` must happen AFTER a sentinel it just set is resolved to a
-real value, not before. `squiggles.py` is named in AGENTS.md's list of
+real value, not before. `squiggles.py` is named in docs/agents/scenes-and-flares.md's list of
 modules sharing this state-machine shape (alongside `eye.py`).
 
 ## The lull THINS OUT (2026-10-11) — the CRT switch-off is gone
@@ -212,7 +212,7 @@ lull, the drop after it on real cells, bit-for-bit outside the lull),
 `tests/test_squiggles_colorset_widen.py`. The accept-list migration,
 `scripts/widen_squiggles_colorset_accept.py`, is scene data and belongs to
 the squiggles-v2-scene skill. History: `docs/SPECTRA_SPEC.md` §85, §86, §87
-(also referenced in AGENTS.md's own prose), and AGENTS.md's "A saturating
+(also referenced in docs/agents/fx-effects.md's own prose), and docs/agents/fx-effects.md's "A saturating
 signal meeting >=" section (check `min_volume`/
 `burst_threshold`-shaped gates on this effect against that pattern before
 adding one).

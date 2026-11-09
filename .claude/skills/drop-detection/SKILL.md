@@ -144,7 +144,7 @@ holds against being picked as an ordinary scene-change candidate. Editing
 a sequence here (confirming it, moving it, switching off its lull) is
 what makes it count as "his" for that gate — it does not, by itself, make
 anything fire differently without going through `drop_firing`'s own
-rules. See AGENTS.md's "DROP DETECTION — the detector and its file" and
+rules. See docs/agents/testbed-and-drops.md's "DROP DETECTION — the detector and its file" and
 "PHASE 5 — FIRING" sections for the full mechanism.
 
 **A `matches_yours` sequence stands down only when his own trigger

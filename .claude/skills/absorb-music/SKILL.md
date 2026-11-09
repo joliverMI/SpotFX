@@ -13,7 +13,7 @@ description: >
 
 # Absorb Music
 
-AGENTS.md's "ABSORB MUSIC" section and each module's own docstring are the
+docs/agents/absorb-and-jukebox.md's "ABSORB MUSIC" section and each module's own docstring are the
 binding statements (`services/absorb.py` for the runner, `absorb_silence.py`
 for the house guard, `absorb_schedule.py` for the schedule). His five plan
 answers, verbatim: "yes, yes, nothing, resume, yes" — head required; skipped

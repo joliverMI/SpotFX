@@ -256,7 +256,7 @@ storyboards `scripts/render_predrop_storyboards.py`. The strip on the strip phas
 layer: `scripts/check_particle_strip_phase.py` (before/after on his own
 Orbits V2 strip entry, the pinned pre-change module as red control) +
 `tests/test_particle_strip_phase.py`, `scripts/check_strip_phase.py`.
-History: AGENTS.md's "Fish (`fx/effects/fish.py`) — Orbits' twin,
+History: docs/agents/fx-effects.md's "Fish (`fx/effects/fish.py`) — Orbits' twin,
 different kinematics" section (how Fish reuses Orbits' patterns but not its
 motion) and the drop-timing-reference withdrawal note
 (`data/drops-still-fire-early-star-does-not-explode/`).

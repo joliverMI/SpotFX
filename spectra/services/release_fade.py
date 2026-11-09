@@ -408,7 +408,7 @@ async def read_hue_light_states(host: Any) -> list[dict]:
 
     ONE INSTRUMENT CAVEAT, and it is load-bearing for how the exit report is
     read: while an entertainment stream is live, `GET .../resource/light`
-    does NOT reflect the streamed colour (AGENTS.md, "Reading real Hue bulb
+    does NOT reflect the streamed colour (docs/agents/spectra-engine-core.md, "Reading real Hue bulb
     state"). It DOES honestly report on/off, which is the only question
     asked here — but do not extend this to read a colour back and believe
     it.
