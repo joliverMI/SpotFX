@@ -14,12 +14,13 @@ description: >
 
 # Sung labels, colour meanings and word matches
 
-AGENTS.md's own lyrics-step-3 sections ("Sung words on the test bed", "Sung
-labels and word matches") and each module's own docstring are the binding
-statements — read those before this file for the mechanism. This skill is
-the cold-start map plus the Sonic-coverage follow-up (the Admiral's standing
-protocol, 2026-10-06: every feature change owes Sonic a follow-up, filed
-when it ships rather than gating the feature's own deploy).
+`docs/agents/testbed-and-drops.md`'s own lyrics-step-3 sections ("Sung words
+on the test bed", "Sung labels and word matches") and each module's own
+docstring are the binding statements — read those before this file for the
+mechanism. This skill is the cold-start map plus the Sonic-coverage
+follow-up (the Admiral's standing protocol, 2026-10-06: every feature
+change owes Sonic a follow-up, filed when it ships rather than gating the
+feature's own deploy).
 
 **THIS HAS NO EFFECT ON THE ROOM.** Every module here is read-only toward
 the show — proven structurally in `tests/test_lyric_reading.py` (a fresh
