@@ -8563,6 +8563,14 @@ No DI seam (same class as `fire_history.py`) — `tests/conftest.py`'s
 autouse `_isolated_sonic_usage` repoints `config.SONIC_USAGE_FILE`; a new
 script reaching `record()`/`summary()` for real needs the same repoint.
 
+**Since the lyrics plan's step 3, this is no longer only Sonic's record**:
+`spectra/services/claude_text.py` (the one Claude call behind lyric reading
+and colour-meaning drafting, see "Sung labels and word matches" below)
+records every call here too, `session_id="lyric-reading"`/`"colour-
+meanings"` — same account, same backend switch, so the Review page's
+"how much of his allowance is gone" figures include those calls, not only
+Sonic's.
+
 ## SPECTRA S3 light ownership + handover (BUILT AND PROVEN, GATED OFF)
 
 Exactly one process owns the lights. The durable record is
@@ -11829,9 +11837,10 @@ only way a timeline gets in (dry run by default). Four things:
 - **NOTHING IN THE SHOW READS THIS.** Held by `tests/test_testbed_lyrics_lane.py`
   (who may import these modules) and by `testbed_promote.READ_ONLY_ENGINES`, so
   the lane cannot reach his real triggers. The score, slider and word lists are
-  recomputed on every read and stored nowhere. Labels, matching, colour and
-  imprints are later steps of the plan; `matched_label` on a mark is the chip's
-  place and nothing sets it yet.
+  recomputed on every read and stored nowhere. **Labels and matching are built
+  (step 3, "Sung labels and word matches" below) — `matched_label` on a mark is
+  now read from `lyric_matches.labels_by_word`, not unset.** Colour and imprints
+  are still step 4.
 
 ## Sung labels and word matches (lyrics plan, step 3 — no effect on the room)
 
