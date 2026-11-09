@@ -60,8 +60,11 @@ STATE_WORDS_CHANGED = "words_changed"
 PROVENANCE_GUESS = "claude_guess"
 PROVENANCE_HIS = "his"
 
-# Below this confidence Claude's guess is not a match, and is not stored. A
-# first guess, his to tune.
+# Below this confidence Claude's guess is not a match, and is not stored.
+# A first guess, his to tune — the model field's default
+# (SungLabelSettings.weak_match_threshold) and read_song()'s own fallback
+# when nothing in particular is asked. sung_labels.weak_match_threshold()
+# is the LIVE value a reading actually uses once he changes it.
 WEAK_MATCH_THRESHOLD = 0.6
 
 MAX_PHRASE_WORDS = 12
@@ -256,7 +259,7 @@ def payload(uri: str) -> dict[str, Any]:
     doc = load(uri)
     base: dict[str, Any] = {
         "uri": uri, "status": timeline.status, "note": timeline.note,
-        "weak_match_threshold": WEAK_MATCH_THRESHOLD,
+        "weak_match_threshold": sung_labels.weak_match_threshold(),
         "n_deleted": len(doc.deleted),
     }
     if not timeline.usable:

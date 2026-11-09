@@ -123,7 +123,8 @@ time-related.
   (cold-start knowledge an agent needs before touching that effect/scene —
   param meanings, Sonic reach, non-obvious invariants) plus a handful of
   cross-cutting skills (`sonic-ops`, `house-lighting`, `house-scenes`,
-  `absorb-music`, `drop-detection`, `tv-display`, `led-gif-assets`).
+  `absorb-music`, `drop-detection`, `tv-display`, `led-gif-assets`,
+  `sung-labels`).
   `.claude/skills/EFFECT_SCENE_MAP.json` maps which files trigger which
   skill, and `scripts/check_effect_scene_skills_current.py` (run by
   `tests/test_effect_scene_skills_current.py`) FAILS a branch that changed
@@ -157,7 +158,7 @@ time-related.
 | The root xcorr/lock engine's song identity, the whole-song check, `librosa_offset_ms`, backfilling trigger intensity from section energy | `docs/agents/audio-analysis.md` |
 | Absorb Music | `docs/agents/absorb-and-jukebox.md`, `.claude/skills/absorb-music` |
 | The Jukebox (sets, credits, guests, the capture lane, the TV relay) | `docs/agents/absorb-and-jukebox.md` |
-| The music-analysis test bed (`/testbed`), lyrics, beat-snap, rhythmic edges, the scene-change planner, drop detection | `docs/agents/testbed-and-drops.md`, `.claude/skills/drop-detection` |
+| The music-analysis test bed (`/testbed`), lyrics, beat-snap, rhythmic edges, the scene-change planner, drop detection | `docs/agents/testbed-and-drops.md`, `.claude/skills/drop-detection`, `.claude/skills/sung-labels` |
 | Touch panning, the global song timeline / `show_clock_ms`, Home, the grouped nav/one-bar layout, the design-fidelity gate, the TV display plan | `docs/agents/ui-timeline-and-tv.md`, `.claude/skills/tv-display` |
 
 ## Maintaining this file and `docs/agents/`

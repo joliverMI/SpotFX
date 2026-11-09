@@ -97,6 +97,7 @@ from spectra.services import (  # noqa: E402
     house_console,
     jukebox_console,
     lock_console,
+    lyric_console,
     room_effect_console,
     scene_console,
     settings_agent,
@@ -137,6 +138,8 @@ _LockKeyEnum = Literal[tuple(lock_console.KEYS)]
 _AbsorbKeyEnum = Literal[tuple(absorb_console.SETTING_KEYS)]
 _JukeboxPresetEnum = Literal[tuple(jukebox_console.PRESETS)]
 _JukeboxSimProgramEnum = Literal[tuple(jukebox_console.SIM_PROGRAMS)]
+_LyricTargetKindEnum = Literal[tuple(lyric_console.TARGET_KINDS)]
+_LyricListEnum = Literal[tuple(lyric_console.LIST_KINDS)]
 
 mcp = MCPServer("settings-console")
 
@@ -1259,6 +1262,85 @@ async def give_jukebox_credits(to: str, amount: int = 2, confirm_id: Optional[st
 async def put_on_tv(script_entity: Optional[str] = None, confirm_id: Optional[str] = None) -> dict:
     """Open the TV app via Home Assistant — "put it on the TV" (always asks first)."""
     return await _call("put_on_tv", script_entity=script_entity, confirm_id=confirm_id)
+
+
+@mcp.tool()
+async def get_lyric_reading_settings() -> dict:
+    """Read whether songs are read automatically and the weak-match threshold a reading uses."""
+    return await _call("get_lyric_reading_settings")
+
+
+@mcp.tool()
+async def set_lyric_reading_settings(auto_read: Optional[bool] = None,
+                                     weak_match_threshold: Optional[float] = None,
+                                     confirm_id: Optional[str] = None) -> dict:
+    """Turn reading songs automatically on or off, and/or change the weak-match threshold
+    (turning auto_read ON asks first)."""
+    return await _call("set_lyric_reading_settings", auto_read=auto_read,
+                       weak_match_threshold=weak_match_threshold, confirm_id=confirm_id)
+
+
+@mcp.tool()
+async def list_sung_label_targets(kind: Optional[_LyricTargetKindEnum] = None) -> dict:
+    """List every colour set's and effect's name, with how many sung labels each carries."""
+    return await _call("list_sung_label_targets", kind=kind)
+
+
+@mcp.tool()
+async def get_sung_labels(kind: _LyricTargetKindEnum, name: str) -> dict:
+    """Read one colour set's or effect's sung labels (and, for a colour set, its drafted
+    meanings: things, moods, places)."""
+    return await _call("get_sung_labels", kind=kind, name=name)
+
+
+@mcp.tool()
+async def edit_sung_label(kind: _LyricTargetKindEnum, name: str, list: _LyricListEnum,
+                          op: Literal["add", "remove"], text: str) -> dict:
+    """Add or take off one word from a colour set's or effect's sung labels, or from a
+    colour set's drafted meanings (things/moods/places)."""
+    return await _call("edit_sung_label", kind=kind, name=name, list=list, op=op, text=text)
+
+
+@mcp.tool()
+async def draft_colour_meanings(names: list[str], confirm_id: Optional[str] = None) -> dict:
+    """Ask Claude to draft things/moods/places for up to ten named colour sets — spends his
+    Claude allowance, every call, and always asks first."""
+    return await _call("draft_colour_meanings", names=names, confirm_id=confirm_id)
+
+
+@mcp.tool()
+async def get_lyric_matches(song: Optional[str] = None) -> dict:
+    """Show one song's matched words: Claude's latest reading and his own corrections."""
+    return await _call("get_lyric_matches", song=song)
+
+
+@mcp.tool()
+async def add_lyric_match(target_kind: _LyricTargetKindEnum, target_name: str, phrase: str,
+                          song: Optional[str] = None, occurrence: int = 1) -> dict:
+    """Match a sung word or phrase to a colour set or effect, himself."""
+    return await _call("add_lyric_match", target_kind=target_kind, target_name=target_name,
+                       phrase=phrase, song=song, occurrence=occurrence)
+
+
+@mcp.tool()
+async def delete_lyric_match(phrase: str, song: Optional[str] = None,
+                             label: Optional[str] = None) -> dict:
+    """Take a match off a song's timeline — his own, or one of Claude's guesses (which stays
+    deleted through every later reading)."""
+    return await _call("delete_lyric_match", phrase=phrase, song=song, label=label)
+
+
+@mcp.tool()
+async def restore_lyric_matches(song: Optional[str] = None) -> dict:
+    """Bring back every one of Claude's guesses he deleted on a song."""
+    return await _call("restore_lyric_matches", song=song)
+
+
+@mcp.tool()
+async def read_song_lyrics(song: Optional[str] = None, confirm_id: Optional[str] = None) -> dict:
+    """Ask Claude to read one song's lyrics against the sung-label list, now — spends his
+    Claude allowance, every call, and always asks first."""
+    return await _call("read_song_lyrics", song=song, confirm_id=confirm_id)
 
 
 if __name__ == "__main__":

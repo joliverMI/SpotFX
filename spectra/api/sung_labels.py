@@ -4,12 +4,14 @@ the lights. spectra/services/sung_labels.py is the binding statement.
   GET  /api/sung-labels            every colour set's and effect's labels
   POST /api/sung-labels/edit       one word added or taken out
   POST /api/sung-labels/draft      Claude drafts meanings for up to ten cards
-  PUT  /api/sung-labels/settings   automatic reading on or off (off by default)
+  PUT  /api/sung-labels/settings   a true partial update: automatic reading
+                                    on or off (off by default), and the
+                                    weak-match threshold a reading uses
 """
 from __future__ import annotations
 
 import asyncio
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -74,13 +76,23 @@ async def post_draft(body: DraftBody):
 
 
 class SettingsBody(BaseModel):
-    auto_read: bool
+    # A true partial update: an omitted field is left exactly as it was,
+    # the same contract room_controls' own PUT holds (AGENTS.md).
+    auto_read: Optional[bool] = None
+    weak_match_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 
 @router.put("/settings")
 async def put_settings(body: SettingsBody):
+    def _run() -> dict:
+        if body.auto_read is not None:
+            sung_labels.set_auto_read(body.auto_read)
+        if body.weak_match_threshold is not None:
+            sung_labels.set_weak_match_threshold(body.weak_match_threshold)
+        return _page()
     try:
-        await asyncio.to_thread(sung_labels.set_auto_read, body.auto_read)
-        return await asyncio.to_thread(_page)
+        return await asyncio.to_thread(_run)
+    except sung_labels.EditRefused as exc:
+        raise HTTPException(422, str(exc)) from exc
     except sung_labels.StoreUnreadable as exc:
         raise HTTPException(500, str(exc)) from exc
