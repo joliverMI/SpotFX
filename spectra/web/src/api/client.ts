@@ -12,9 +12,21 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
   const res = await fetch(url, opts);
   if (!res.ok) {
     const detail = await errorDetail(res);
-    throw new Error(`${method} ${url} → ${res.status}${detail ? `: ${detail}` : ''}`);
+    throw new ApiError(`${method} ${url} → ${res.status}${detail ? `: ${detail}` : ''}`, res.status);
   }
   return res.json() as Promise<T>;
+}
+
+/** An HTTP error with its status attached, so a caller can branch on the
+ * status (a proxy 502/504) without parsing the message text, which is the
+ * backend's own wording and not a contract. */
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
 }
 
 async function errorDetail(res: Response): Promise<string> {
@@ -47,7 +59,7 @@ export async function apiPostForm<T = unknown>(path: string, form: FormData): Pr
   const res = await fetch(url, { method: 'POST', body: form });
   if (!res.ok) {
     const detail = await errorDetail(res);
-    throw new Error(`POST ${url} → ${res.status}${detail ? `: ${detail}` : ''}`);
+    throw new ApiError(`POST ${url} → ${res.status}${detail ? `: ${detail}` : ''}`, res.status);
   }
   return res.json() as Promise<T>;
 }

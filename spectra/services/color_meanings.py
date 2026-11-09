@@ -33,9 +33,13 @@ from spectra.services import claude_text, color_sets, colour_words, sung_labels
 
 Ask = Callable[..., Awaitable[claude_text.ClaudeReply]]
 
-DRAFT_BATCH_SIZE = 10
-# Enough to be useful on the page, few enough that he can actually correct 62
-# cards of them.
+DRAFT_BATCH_SIZE = 4
+# Must finish inside the spotfx reverse proxy's 60s read timeout
+# (services/spectra_proxy.py's READ_TIMEOUT_S), which a 10-set batch did not:
+# a live batch of 10 took 66s, about 6.6s/set. At that rate 4 sets take about
+# 26s, comfortably under a 30s target (half the proxy's budget, so normal
+# per-set variance doesn't reopen the timeout). Raising this constant back
+# toward 10 reintroduces the 502 the Admiral hit on 2026-11-09.
 MAX_WORDS_PER_KIND = 6
 MAX_WORD_CHARS = 40
 

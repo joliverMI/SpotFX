@@ -9,7 +9,8 @@ import HelpLink from '../help/HelpLink';
 import { useDraftMeanings, useSungLabelEdit, useSungLabelSettings, useSungLabels } from '../queries';
 import type { SungChip, SungColorSet, SungEffect, SungListName, SungMeaningKind } from '../types';
 import {
-  SOURCE_WORDS, batches, draftButtonWords, draftableIds, filterCards, filterEffects, undraftedIds,
+  SOURCE_WORDS, draftButtonWords, draftOutcomeMessage, draftableIds, filterCards, filterEffects,
+  runDraftQueue, undraftedIds,
 } from './sungLabels';
 
 const MEANINGS: { key: SungMeaningKind; title: string }[] = [
@@ -112,6 +113,7 @@ export default function SungLabelsPage() {
   const [query, setQuery] = useState('');
   const [onlyUndrafted, setOnlyUndrafted] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [retryIds, setRetryIds] = useState<string[]>([]);
 
   const cards = useMemo(() => filterCards(data?.color_sets ?? [], query, onlyUndrafted),
     [data, query, onlyUndrafted]);
@@ -125,17 +127,15 @@ export default function SungLabelsPage() {
     editLabel.mutate({ kind, id, list, op, text }, { onError: report });
 
   const draftIds = async (ids: string[]) => {
-    const rounds = batches(ids, data.draft_batch_size);
     setProgress({ done: 0, total: ids.length });
+    setRetryIds([]);
     try {
-      let done = 0;
-      for (const ids_ of rounds) {
-        await draft.mutateAsync(ids_);
-        done += ids_.length;
-        setProgress({ done, total: ids.length });
-      }
-    } catch (err) {
-      report(err);
+      const outcome = await runDraftQueue(
+        ids, data.draft_batch_size, (batch) => draft.mutateAsync(batch),
+        (done, total) => setProgress({ done, total }));
+      setRetryIds(outcome.failedIds);
+      const message = draftOutcomeMessage(outcome, ids.length);
+      if (message) toast(message, 'error');
     } finally {
       setProgress(null);
     }
@@ -144,6 +144,7 @@ export default function SungLabelsPage() {
   const undrafted = undraftedIds(data.color_sets);
   const draftable = draftableIds(data.color_sets);
   const pressDraft = () => {
+    if (retryIds.length) { void draftIds(retryIds); return; }
     if (undrafted.length) { void draftIds(undrafted); return; }
     if (window.confirm(`Ask Claude to draft all ${draftable.length} colour sets again? Your own edits are kept.`)) {
       void draftIds(draftable);
@@ -174,7 +175,8 @@ export default function SungLabelsPage() {
             Only sets waiting for a draft
           </label>
           <button type="button" onClick={pressDraft} disabled={!data.claude.available || drafting || !draftable.length}>
-            {progress ? `Drafting… ${progress.done} of ${progress.total}` : draftButtonWords(undrafted.length, draftable.length)}
+            {progress ? `Drafting… ${progress.done} of ${progress.total}`
+              : draftButtonWords(undrafted.length, draftable.length, retryIds.length)}
           </button>
           <span className="sung-count">{data.n_labels} distinct words</span>
         </div>

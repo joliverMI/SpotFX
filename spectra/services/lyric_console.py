@@ -638,10 +638,12 @@ OPERATIONS: dict[str, SonicOperation] = {
     ),
     "draft_colour_meanings": SonicOperation(
         name="draft_colour_meanings", domain="lyrics", kind="write",
-        summary="Ask Claude to draft things/moods/places for up to ten named colour sets "
+        summary="Ask Claude to draft things/moods/places for up to "
+                f"{color_meanings.DRAFT_BATCH_SIZE} named colour sets "
                 "— SPENDS HIS CLAUDE ALLOWANCE, every call.",
         instructions=(
-            "names: a list of up to ten colour set names. This always needs his yes first, "
+            f"names: a list of up to {color_meanings.DRAFT_BATCH_SIZE} colour set names. "
+            "This always needs his yes first, "
             "every single call, because every call asks Claude." + _INSTR_CONFIRM + " A word "
             "he already added or removed on any of these sets is never touched by the "
             "draft — only the draft's own words move."),
