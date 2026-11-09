@@ -71,7 +71,7 @@ async def post_draft(body: DraftBody):
     except claude_text.ClaudeUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
     except claude_text.ClaudeReplyInvalid as exc:
-        raise HTTPException(502, str(exc)) from exc
+        raise HTTPException(500, str(exc)) from exc
     except sung_labels.StoreUnreadable as exc:
         raise HTTPException(500, str(exc)) from exc
 

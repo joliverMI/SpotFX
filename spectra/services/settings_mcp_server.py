@@ -92,6 +92,7 @@ from mcp.server import MCPServer  # noqa: E402
 from spectra.services import (  # noqa: E402
     absorb_console,
     analysis_console,  # noqa: F401 — its operation is wrapped below
+    color_meanings,
     device_console,
     drop_console,  # noqa: F401 — its operations are wrapped below
     house_console,
@@ -1301,10 +1302,11 @@ async def edit_sung_label(kind: _LyricTargetKindEnum, name: str, list: _LyricLis
     return await _call("edit_sung_label", kind=kind, name=name, list=list, op=op, text=text)
 
 
-@mcp.tool()
+@mcp.tool(description=(
+    "Ask Claude to draft things/moods/places for up to "
+    f"{color_meanings.DRAFT_BATCH_SIZE} named colour sets — spends his "
+    "Claude allowance, every call, and always asks first."))
 async def draft_colour_meanings(names: list[str], confirm_id: Optional[str] = None) -> dict:
-    """Ask Claude to draft things/moods/places for up to ten named colour sets — spends his
-    Claude allowance, every call, and always asks first."""
     return await _call("draft_colour_meanings", names=names, confirm_id=confirm_id)
 
 
