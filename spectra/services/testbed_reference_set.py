@@ -22,8 +22,10 @@ complaint is in beats") — deliberately NOT the page's own tolerance
 slider, which scores a different lane at a possibly non-beat tolerance.
 
 `available=False` only when there is genuinely nothing to measure (no
-tempo, i.e. no analysis at all) — a song with zero authored transitions or
-zero preview candidates still reports (recall/precision naturally read 0),
+tempo, i.e. no analysis at all) — a song with zero reference transitions
+(`testbed_marks.reference_marks_for_song`: analysed-cache-sourced when the
+song has one, else authored — see that function's own docstring) or zero
+preview candidates still reports (recall/precision naturally read 0),
 since that is itself informative, not an error to hide."""
 from __future__ import annotations
 
