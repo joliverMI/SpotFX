@@ -1769,10 +1769,13 @@ export interface TestbedSong {
   artist: string | null;
   n_transitions: number;
   n_flares: number;
-  /** His own flares of one event_class — the Drops lane's reference sets. */
-  n_drops: number;
-  n_lulls: number;
-  n_charges: number;
+  /** His own marks of one event_class — the Drops lane's reference sets.
+   * null when the song's analyzed cache has no resolvable training
+   * profile, so drop/lull/charge can't be told apart from a plain flare
+   * at all — distinct from a confident 0. */
+  n_drops: number | null;
+  n_lulls: number | null;
+  n_charges: number | null;
   n_generated: number;
   n_promoted: number;
   /** Phase 2 beat-snap (spectra/services/beat_snap.py) over this song's

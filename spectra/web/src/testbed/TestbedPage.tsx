@@ -355,7 +355,7 @@ export default function TestbedPage() {
     if (reference === 'transitions') return referenceMarks;
     if (reference === 'flares') return flareMarks;
     const cls = reference === 'drops' ? 'drop' : reference === 'lulls' ? 'lull' : 'charge';
-    return flareMarks.filter((m) => m.event_class === cls);
+    return [...referenceMarks, ...flareMarks].filter((m) => m.event_class === cls);
   }, [reference, referenceMarks, flareMarks]);
   /** The scoring set: his own marks minus every one this page pushed. Same
    * rule the server applies (spectra/services/testbed_marks.scoring_marks) —
@@ -573,9 +573,9 @@ export default function TestbedPage() {
                 <select value={reference} onChange={(e) => setReference(e.target.value as TestbedReference)}>
                   <option value="transitions">Transitions ({song.n_transitions})</option>
                   <option value="flares">Flares ({song.n_flares})</option>
-                  <option value="drops">Drops ({song.n_drops})</option>
-                  <option value="lulls">Lulls ({song.n_lulls})</option>
-                  <option value="charges">Charges ({song.n_charges})</option>
+                  <option value="drops">Drops ({song.n_drops ?? 'n/a'})</option>
+                  <option value="lulls">Lulls ({song.n_lulls ?? 'n/a'})</option>
+                  <option value="charges">Charges ({song.n_charges ?? 'n/a'})</option>
                 </select>
               </div>
               {song.n_generated > 0 && (

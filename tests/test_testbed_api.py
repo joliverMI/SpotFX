@@ -462,6 +462,83 @@ def test_generated_only_song_is_listed_with_no_reference_marks():
     assert compare["reference_marks"] == []
 
 
+def _write_analyzed(scfg, track_id, training_profile_id, triggers):
+    scfg.ANALYZED_TRIGGERS_DIR.mkdir(parents=True, exist_ok=True)
+    data = {"track_id": track_id, "training_profile_id": training_profile_id,
+           "training_profile_hash": "deadbeef",
+           "generated_at": "2026-11-10T00:00:00+00:00", "triggers": triggers}
+    (scfg.ANALYZED_TRIGGERS_DIR / f"{track_id}.json").write_text(
+        json.dumps(data), encoding="utf-8")
+
+
+def _write_training_profile(scfg, profile_id, **event_ids):
+    path = scfg.TRAINING_PROFILES_FILE
+    raw = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    raw[profile_id] = {"id": profile_id, "name": "TP", **event_ids}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+
+def test_songs_listing_reports_drop_lull_charge_counts_for_an_analyzed_song():
+    """The song list's n_drops/n_lulls/n_charges must actually count an
+    analyzed song's own drop/lull/charge events, not read as permanently
+    0 for every analyzed-sourced song."""
+    from spectra import config as scfg
+    track_id = "apianalyzedphases1"
+    uri = f"spotify:track:{track_id}"
+    _write_training_profile(scfg, "tp1", drop_event_id="drop", lull_event_id="lull",
+                            charge_event_id="charge")
+    _write_analyzed(scfg, track_id, "tp1", [
+        {"id": "a1", "timestamp_ms": 1000, "event_id": "drop", "labels": [], "intensity": None},
+        {"id": "a2", "timestamp_ms": 2000, "event_id": "lull", "labels": [], "intensity": None},
+    ])
+
+    client = _client()
+    rows = {s["uri"]: s for s in client.get("/api/testbed/songs").json()}
+    assert rows[uri]["n_drops"] == 1
+    assert rows[uri]["n_lulls"] == 1
+    assert rows[uri]["n_charges"] == 0
+
+
+def test_compare_drops_reference_finds_an_analyzed_songs_drop_mark():
+    """/compare?reference=drops must find an analyzed song's own drop
+    event — not read as permanently empty because the mark's event_class
+    was never set."""
+    from spectra import config as scfg
+    track_id = URI.split(":")[-1]
+    _seed_librosa(scfg)
+    _write_training_profile(scfg, "tp1", drop_event_id="drop")
+    _write_analyzed(scfg, track_id, "tp1", [
+        {"id": "a1", "timestamp_ms": 10000, "event_id": "drop", "labels": [], "intensity": None},
+    ])
+
+    client = _client()
+    resp = client.get(
+        f"/api/testbed/compare?uri={URI}&engine=librosa&mark_kind=section_boundary"
+        "&reference=drops&tolerance_ms=500",
+    ).json()
+    assert [m["timestamp_ms"] for m in resp["reference_marks"]] == [10000]
+    assert resp["reference_marks"][0]["event_class"] == "drop"
+
+
+def test_songs_listing_reports_phase_counts_unavailable_for_an_orphaned_analyzed_cache():
+    """A cache whose training profile was deleted can't be told apart into
+    drop/lull/charge/flare at all — the listing must say so (null) rather
+    than claim a confident 0 drops."""
+    from spectra import config as scfg
+    track_id = "apianalyzedorphan1"
+    uri = f"spotify:track:{track_id}"
+    _write_analyzed(scfg, track_id, "nonexistent-profile", [
+        {"id": "a1", "timestamp_ms": 1000, "event_id": "drop", "labels": [], "intensity": None},
+    ])
+
+    client = _client()
+    rows = {s["uri"]: s for s in client.get("/api/testbed/songs").json()}
+    assert rows[uri]["n_drops"] is None
+    assert rows[uri]["n_lulls"] is None
+    assert rows[uri]["n_charges"] is None
+
+
 def test_promote_refuses_a_second_push_at_the_same_moment_with_409():
     client = _client()
     body = {

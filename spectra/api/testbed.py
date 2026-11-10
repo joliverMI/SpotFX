@@ -89,7 +89,9 @@ def _song_list() -> list[dict]:
             "artist": marks.artist,
             "n_transitions": len(marks.transitions),
             "n_flares": len(marks.flares),
-            **{f"n_{ref}": len(testbed_marks.phase_marks(marks.flares, ref))
+            **{f"n_{ref}": (len(testbed_marks.phase_marks(
+                                marks.transitions + marks.flares, ref))
+                            if marks.phase_classes_available else None)
                for ref in testbed_marks.PHASE_REFERENCES},
             "n_generated": marks.n_generated,
             "n_promoted": marks.n_promoted,
@@ -359,7 +361,7 @@ async def compare(
         transitions, flares = testbed_marks.reference_marks_for_song(uri)
         ref_marks = (transitions if reference == "transitions"
                      else flares if reference == "flares"
-                     else testbed_marks.phase_marks(flares, reference))
+                     else testbed_marks.phase_marks(transitions + flares, reference))
         result = testbed_metrics.match_marks(
             [m.timestamp_ms for m in ref_marks],
             [m.time_ms for m in estimate],

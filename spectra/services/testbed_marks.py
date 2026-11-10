@@ -103,6 +103,19 @@ _ANALYZED_ROLE_ATTRS = {
     "flare_scene_event_id": "flare",
 }
 
+# The same training-profile attrs, mapped onto the Drops lane's own
+# event_class vocabulary (drop/lull/charge/flare — see ReferenceMark.
+# event_class) rather than the coarse scene/flare role above, so an
+# analyzed drop/lull/charge/flare mark can be found by phase_marks() the
+# same way an authored fire_response's event_class already is.
+_ANALYZED_EVENT_CLASS_ATTRS = {
+    "drop_event_id": "drop", "lull_event_id": "lull",
+    "charge_event_id": "charge",
+    "flare_event_id": "flare", "flare_low_event_id": "flare",
+    "flare_mid_event_id": "flare", "flare_high_event_id": "flare",
+    "flare_scene_event_id": "flare",
+}
+
 
 @dataclass(frozen=True)
 class ReferenceMark:
@@ -151,6 +164,13 @@ class SongMarks:
     n_snapped: int = 0
     n_unsnapped_generated: int = 0
     snap_grid_counts: dict = field(default_factory=dict)
+    # False only for an analyzed-sourced song whose cached training_profile_id
+    # no longer resolves to a stored profile (deleted/renamed since the cache
+    # was written) — there is then no basis at all for classifying any of its
+    # marks as drop/lull/charge/flare, so n_drops/n_lulls/n_charges must read
+    # as unavailable rather than a confident 0. True everywhere else
+    # (authored songs always know their own event_class).
+    phase_classes_available: bool = True
 
 
 @dataclass(frozen=True)
@@ -162,6 +182,7 @@ class _SplitMarks:
     n_snapped: int
     n_unsnapped_generated: int
     snap_grid_counts: dict
+    phase_classes_available: bool = True
 
 
 def _split(triggers: list[SpectraTrigger],
@@ -203,13 +224,16 @@ PHASE_REFERENCES = {"drops": "drop", "lulls": "lull", "charges": "charge"}
 """The Drops lane's reference sets: his own flares of one event_class."""
 
 
-def phase_marks(flares: list[ReferenceMark], reference: str) -> list[ReferenceMark]:
-    """His drops / lulls / charges — the flares whose event_class the
-    reference set names. The /compare route and the song list's counts
-    both use this; spectra/web/src/testbed/TestbedPage.tsx mirrors it
-    (the same event_class filter) for its local matcher."""
+def phase_marks(marks: list[ReferenceMark], reference: str) -> list[ReferenceMark]:
+    """His drops / lulls / charges — the marks whose event_class the
+    reference set names, out of transitions+flares combined (an authored
+    drop/lull/charge is always a flare, but an analyzed one can land in
+    transitions per its own role split — see _split_analyzed). The
+    /compare route and the song list's counts both use this;
+    spectra/web/src/testbed/TestbedPage.tsx mirrors it (the same
+    event_class filter) for its local matcher."""
     cls = PHASE_REFERENCES[reference]
-    return [m for m in flares if m.event_class == cls]
+    return [m for m in marks if m.event_class == cls]
 
 
 def scoring_marks(marks: list[ReferenceMark]) -> list[ReferenceMark]:
@@ -376,26 +400,51 @@ def _event_role_map(profile_id: str, training_profiles: dict) -> dict[str, str]:
     return out
 
 
+def _event_class_map(profile_id: str, training_profiles: dict) -> dict[str, str]:
+    """{event_id: "drop"|"lull"|"charge"|"flare"} for one training profile
+    — _ANALYZED_EVENT_CLASS_ATTRS applied the same way _event_role_map
+    applies _ANALYZED_ROLE_ATTRS. Empty when the profile itself is
+    missing (nothing to derive a class from)."""
+    profile = training_profiles.get(profile_id)
+    if not isinstance(profile, dict):
+        return {}
+    out: dict[str, str] = {}
+    for attr, cls in _ANALYZED_EVENT_CLASS_ATTRS.items():
+        eid = profile.get(attr) or ""
+        if eid:
+            out[eid] = cls
+    return out
+
+
 def _split_analyzed(cached: dict, training_profiles: dict) -> _SplitMarks:
     """transitions/flares for one song's cached analyzed triggers — the
-    role split above. An event_id the owning training profile no longer
+    role split above, each mark also carrying the event_class its event_id
+    maps to (if any). An event_id the owning training profile no longer
     names (profile edited/deleted since the cache was written) falls back
-    to a flare rather than vanishing silently."""
-    role_map = _event_role_map(cached.get("training_profile_id", ""), training_profiles)
+    to a flare with no event_class rather than vanishing silently — and
+    marks the whole song's phase classes (drop/lull/charge) unavailable,
+    since there is then no profile to derive ANY of them from."""
+    profile_id = cached.get("training_profile_id", "")
+    phase_classes_available = isinstance(training_profiles.get(profile_id), dict)
+    role_map = _event_role_map(profile_id, training_profiles)
+    class_map = _event_class_map(profile_id, training_profiles)
     transitions: list[ReferenceMark] = []
     flares: list[ReferenceMark] = []
     for t in cached.get("triggers") or []:
         if not isinstance(t, dict):
             continue
+        event_id = t.get("event_id", "")
         mark = ReferenceMark(id=str(t.get("id", "")),
                              timestamp_ms=int(t.get("timestamp_ms", 0) or 0),
-                             kind="analyzed", enabled=True)
-        if role_map.get(t.get("event_id", "")) == "scene":
+                             kind="analyzed", enabled=True,
+                             event_class=class_map.get(event_id))
+        if role_map.get(event_id) == "scene":
             transitions.append(mark)
         else:
             flares.append(mark)
     return _SplitMarks(transitions, flares, n_generated=0, n_promoted=0,
-                       n_snapped=0, n_unsnapped_generated=0, snap_grid_counts={})
+                       n_snapped=0, n_unsnapped_generated=0, snap_grid_counts={},
+                       phase_classes_available=phase_classes_available)
 
 
 def _song_marks_for_analyzed(uri: str, cached: dict, summary: _ProfileSummary,
@@ -403,7 +452,8 @@ def _song_marks_for_analyzed(uri: str, cached: dict, summary: _ProfileSummary,
     split = _split_analyzed(cached, training_profiles)
     return SongMarks(uri=uri, transitions=split.transitions, flares=split.flares,
                      provenance=summary.provenance,
-                     title=summary.title, artist=summary.artist)
+                     title=summary.title, artist=summary.artist,
+                     phase_classes_available=split.phase_classes_available)
 
 
 def reference_marks_for_song(uri: str) -> tuple[list[ReferenceMark], list[ReferenceMark]]:

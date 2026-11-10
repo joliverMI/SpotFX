@@ -311,6 +311,54 @@ def test_an_analyzed_only_song_is_listed_and_scored_from_its_analyzed_triggers()
     assert [m.timestamp_ms for m in flares] == [2000]
 
 
+def test_analyzed_drop_lull_charge_marks_carry_event_class_and_are_found_by_phase_marks():
+    """An analyzed drop/lull/charge event_id (the song's own training
+    profile names it) must be findable by phase_marks()'s event_class
+    filter — the Drops lane's reference set — exactly like an authored
+    fire_response carrying that event_class already is."""
+    from spectra import config as scfg
+    from spectra.services import testbed_marks
+    track_id = "analyzedphases1"
+    uri = f"spotify:track:{track_id}"
+    _write_training_profile(scfg, "tp1", drop_event_id="drop", lull_event_id="lull",
+                            charge_event_id="charge", flare_event_id="spark")
+    _write_analyzed(scfg, track_id, "tp1", [
+        {"id": "a1", "timestamp_ms": 1000, "event_id": "drop", "labels": [], "intensity": None},
+        {"id": "a2", "timestamp_ms": 2000, "event_id": "lull", "labels": [], "intensity": None},
+        {"id": "a3", "timestamp_ms": 3000, "event_id": "charge", "labels": [], "intensity": None},
+        {"id": "a4", "timestamp_ms": 4000, "event_id": "spark", "labels": [], "intensity": 0.5},
+    ])
+
+    marks = testbed_marks.marks_for_song(uri)
+    assert marks.phase_classes_available is True
+    all_marks = marks.transitions + marks.flares
+    assert [m.timestamp_ms for m in testbed_marks.phase_marks(all_marks, "drops")] == [1000]
+    assert [m.timestamp_ms for m in testbed_marks.phase_marks(all_marks, "lulls")] == [2000]
+    assert [m.timestamp_ms for m in testbed_marks.phase_marks(all_marks, "charges")] == [3000]
+    assert testbed_marks.phase_marks(all_marks, "drops")[0].event_class == "drop"
+
+
+def test_analyzed_song_with_missing_training_profile_has_phase_classes_unavailable():
+    """A cache whose training_profile_id no longer resolves to a stored
+    profile (deleted/renamed since the cache was written) cannot be
+    classified into drop/lull/charge/flare at all — every mark falls back
+    to a flare with no event_class, and the song is flagged as
+    phase_classes_available=False rather than reading as a confident
+    'no drops here'."""
+    from spectra import config as scfg
+    from spectra.services import testbed_marks
+    track_id = "analyzedorphan1"
+    uri = f"spotify:track:{track_id}"
+    _write_analyzed(scfg, track_id, "nonexistent-profile", [
+        {"id": "a1", "timestamp_ms": 1000, "event_id": "drop", "labels": [], "intensity": None},
+    ])
+
+    marks = testbed_marks.marks_for_song(uri)
+    assert marks.phase_classes_available is False
+    assert [m.timestamp_ms for m in marks.flares] == [1000]
+    assert marks.flares[0].event_class is None
+
+
 def test_analyzed_triggers_win_over_old_triggers_for_the_same_song():
     """A song carrying BOTH an old authored trigger and a cached analyzed
     set is listed from the analyzed set only — his old placement is no
