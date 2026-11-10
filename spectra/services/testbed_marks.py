@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -295,6 +296,9 @@ def _song_marks(uri: str, triggers: list[SpectraTrigger],
                      snap_grid_counts=split.snap_grid_counts)
 
 
+_TRACK_ID_RE = re.compile(r"^[A-Za-z0-9]+$")
+
+
 def _track_id(uri: str) -> str:
     return uri.split(":")[-1]
 
@@ -305,8 +309,14 @@ def _load_analyzed(uri: str) -> Optional[dict]:
     never through that module's own pydantic models (the S3 import-
     discipline rule: nothing under spectra/ imports spot-effects runtime
     internals — the same reason _find_profile reads storage/profiles/ as a
-    plain dict). None when the song has no cached analyzed triggers."""
-    path = config.ANALYZED_TRIGGERS_DIR / f"{_track_id(uri)}.json"
+    plain dict). None when the song has no cached analyzed triggers, OR
+    when `uri` (an unconstrained public query param) doesn't carry a
+    Spotify base62 track id — never join an unvalidated id into this
+    path."""
+    track_id = _track_id(uri)
+    if not _TRACK_ID_RE.match(track_id):
+        return None
+    path = config.ANALYZED_TRIGGERS_DIR / f"{track_id}.json"
     if not path.exists():
         return None
     try:

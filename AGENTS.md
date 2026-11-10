@@ -172,10 +172,3 @@ shows — point to the authoritative file, command, or doc instead. Prefer
 rewriting or pruning an existing `docs/agents/` entry over appending a new
 one in a different place. When a path or anchor in the routing table or in
 a `docs/agents/` file moves, update the reference in the same change.
-
-## Maintaining this file
-
-Keep this file for knowledge useful to almost every future agent session in this project.
-Do not repeat what the codebase already shows; point to the authoritative file or command instead.
-Prefer rewriting or pruning existing entries over appending new ones.
-When updating this file, preserve this bar for all agents and keep entries concise.
