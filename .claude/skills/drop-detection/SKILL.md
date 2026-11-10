@@ -326,7 +326,13 @@ gate first, then `house.scene_deferral`). Five things:
 Holds, each named: the setting off, a room hold (`conductor._deferral`),
 Force Colour (a set pin stays; a group pin rolls its next member), a 2D
 gradient (its own `on_drop_event` kick is the drop's change), a house mode
-that keeps its look, and every gate the drop's own response has. Star's
+that keeps its look, and every gate the drop's own response has. Below
+those holds but ahead of this pick, a word imprinting on the drop (lyrics
+plan step 4, `spectra/services/lyric_events.py`,
+`docs/agents/testbed-and-drops.md`'s "Word colours and imprints") takes
+the drop with the word's colour instead, the 180 rule set aside for that
+one drop — see `ResponseEngine.drop_color_change`'s own docstring for the
+full precedence order. Star's
 drop pieces: after a pre-drop that played they wear the set as it is at the
 drop (predrop step 8, the radial-effect skill); on a drop with NO pre-drop
 they still keep the colours they fell in with for their half-second flight

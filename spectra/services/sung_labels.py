@@ -8,8 +8,8 @@ emphasized phrase or word relates to something like a color or some other
 thing from a list we can build. That list should take from the effects, where
 we can add 'labels' similar to like how we did in spotfx."
 
-THIS HAS NO EFFECT ON THE ROOM. Nothing in the show reads this module; firing
-anything from a match is a later step, and off by default.
+Only word colours on a show he has switched on reads this module for the show
+(spectra/services/lyric_events.py, off for every show otherwise).
 
 ONE LIST PER CARD, BUILT FROM FOUR PLACES, ONLY ONE OF WHICH IS COMPUTED:
   seed     — the card's colours and name (colour_words.seed_labels), worked out

@@ -747,6 +747,7 @@ def _isolated_lyric_labels(tmp_path, monkeypatch):
     from spectra import config as scfg
     monkeypatch.setattr(scfg, "SUNG_LABELS_FILE", tmp_path / "sung_labels.json")
     monkeypatch.setattr(scfg, "LYRIC_MATCHES_DIR", tmp_path / "lyric_matches")
+    monkeypatch.setattr(scfg, "LYRIC_EVENTS_FILE", tmp_path / "lyric_events.json")
     from spectra.services import lyric_reading
     lyric_reading.reset()
 

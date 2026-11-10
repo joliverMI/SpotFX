@@ -41,6 +41,7 @@ import type {
 } from '../../types';
 import { inView, viewPct, wholeSong } from '../lyricsLane';
 import type { LaneView } from '../lyricsLane';
+import LyricEventsSection from './LyricEventsSection';
 import LyricMatchesSection from './LyricMatchesSection';
 import LyricsLane from './LyricsLane';
 
@@ -356,6 +357,9 @@ export default function TestbedLaneBar({
               view={shown}
               sensitivity={lane.lyrics.sensitivity}
             />
+          )}
+          {lane.lyrics.data?.status === 'ok' && (
+            <LyricEventsSection uri={lane.lyrics.data.uri} view={shown} />
           )}
         </div>
       ) : (

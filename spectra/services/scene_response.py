@@ -416,10 +416,10 @@ from fx.effects import pre_drop as fx_pre_drop
 from spectra.models.binding import ValueBinding
 from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
                                   ResponseClass, SceneV2)
-from spectra.models.sequencer import CurvePoint
+from spectra.models.sequencer import CurvePoint, SelectorEntry
 from spectra.services import binding_resolver, color_journey, color_rotate
 from spectra.services import selection_kernel as kernel
-from spectra.services import drop_colour, pre_drop_play
+from spectra.services import drop_colour, lyric_events, pre_drop_play
 from spectra.services.binding_resolver import FireContext
 
 logger = logging.getLogger(__name__)
@@ -494,6 +494,9 @@ class PendingKindBatch:
     # THE DROP COLOUR CHANGE: True for a batch a drop queued after its
     # colour already moved (_DROP_COLOUR_DONE) — its colour jump skips.
     drop_colour_done: bool = False
+    # WORD COLOURS (spectra/services/lyric_events.py): the word imprinting on
+    # this fire, when its colour jump sits in a staggered batch.
+    lyric: Optional[lyric_events.Imprint] = None
 
 # A dice re-roll's own eased landing (registry "smooth": true params only —
 # see _reroll). Live-measured ordinary flare cadence during active music is
@@ -865,6 +868,26 @@ _PUNCH_OK: ContextVar[bool] = ContextVar("spectra_flare_punch_ok",
 _DROP_COLOUR_DONE: ContextVar[bool] = ContextVar("spectra_drop_colour_done",
                                                  default=False)
 
+# WORD COLOURS (spectra/services/lyric_events.py): how a word's colour is named
+# on its jump, and what a momentary word's release needs. `virtuals` is the
+# conductor's own dict at the landing, which a scene fire replaces.
+LYRIC_WORD_RUNG = "lyric_word"
+LYRIC_IMPRINT_RUNG = "lyric_imprint"
+
+
+@dataclass(frozen=True)
+class LyricMoment:
+    virtuals: dict
+    originals: list
+    active_set_id: Optional[str]
+    fade_ms: int
+    release_after_s: float
+
+
+def _is_colour_jump(kind: FlareKind) -> bool:
+    return kind.type == "drift_jump" and kind.jump == "color_set"
+
+
 # How long a drop colour change's claim waits for its drop's own response
 # (on_event), past the change's own ramp: the drop follows its colour
 # change in the same trigger-clock call (or, after a fade across a
@@ -1226,6 +1249,8 @@ class ResponseEngine:
         self._set_wheel = set_wheel or self._default_set_wheel
         self._group_ids_by_set = group_ids_by_set or self._default_group_ids_by_set
         self._drop_colour_claim_until: Optional[float] = None
+        # WORD COLOURS: the last set a word used, which the chooser avoids.
+        self._last_lyric_set_id: Optional[str] = None
         # THE PULSE-FLASH AND SHOCKWAVE FLOORS read Energy right now
         # (spectra/services/energy.py; engine.py wires bridge.intensity()):
         # the flash the present, the Shockwave — decided at a drop — with
@@ -1495,6 +1520,10 @@ class ResponseEngine:
         record.update(await self._run_kinds(scene, now_kinds, intensity,
                                             fire_seq))
 
+        lyric = lyric_events.active()
+        if lyric is not None and lyric.result is None and any(
+                _is_colour_jump(kind) for kinds in deferred.values() for kind, _s in kinds):
+            lyric.result = lyric_events.RESULT_STAGGERED
         if deferred:
             record["deferred_kinds"] = [
                 {"name": kind.name, "type": kind.type, "delay_ms": delay_ms}
@@ -1506,7 +1535,8 @@ class ResponseEngine:
                 due_at=started_at + delay_ms / 1000.0,
                 fire_seq=fire_seq, delay_ms=delay_ms,
                 punch=_PUNCH_OK.get(),
-                drop_colour_done=_DROP_COLOUR_DONE.get()))
+                drop_colour_done=_DROP_COLOUR_DONE.get(),
+                lyric=lyric_events.active()))
 
     async def _jump(self, vid: str, effect_type: str, params: dict):
         """Every write this engine makes goes through here (or _glide): the
@@ -1691,8 +1721,14 @@ class ResponseEngine:
         elif colours:   # one selector roll per batch — a jump is a jump
             kind, scale = colours[0]
             sel_intensity = max(0.0, min(1.0, intensity * scale))
+            # WORD COLOURS: a word imprinting on this flare or update gives
+            # the jump its colour; nothing allowed leaves the jump as it was.
+            picked = self._lyric_pick_active(scene, sel_intensity)
             result["color_jump"] = await self._color_jump(
-                scene, sel_intensity, carry)
+                scene, sel_intensity, carry,
+                **({} if picked is None
+                   else {"picked_id": picked, "rung": LYRIC_IMPRINT_RUNG}))
+            self._lyric_note_jump(picked, result["color_jump"])
             kind_records.append({
                 "name": kind.name, "type": kind.type, "jump": "color_set",
                 "scale": scale, **result["color_jump"]})
@@ -1792,6 +1828,7 @@ class ResponseEngine:
         fire_seq = self._begin_fire()
         punch_token = _PUNCH_OK.set(batch.punch)
         colour_token = _DROP_COLOUR_DONE.set(batch.drop_colour_done)
+        lyric_token = lyric_events.ACTIVE.set(batch.lyric)
         try:
             result = await self._run_kinds(batch.scene, batch.kinds,
                                            batch.intensity, fire_seq)
@@ -1803,6 +1840,7 @@ class ResponseEngine:
             return self.note_kind_batch(
                 batch, "error", error=f"{type(exc).__name__}: {exc}")
         finally:
+            lyric_events.ACTIVE.reset(lyric_token)
             _DROP_COLOUR_DONE.reset(colour_token)
             _PUNCH_OK.reset(punch_token)
             self._end_fire(fire_seq)
@@ -3478,7 +3516,11 @@ class ResponseEngine:
           4. an ACTIVE 2D GRADIENT — held: the gradient's own drop kick
              (DriftConductor.on_drop_event, fired with the drop's response)
              IS the drop's colour change;
-          5. otherwise the pick (drop_colour.pick over the automatic pool,
+          5. a WORD IMPRINTING on this drop (lyrics plan step 4; spectra/
+             services/lyric_events.py, docs/agents/testbed-and-drops.md's
+             "Word colours and imprints") — the pick is the word's colour,
+             the 180 rule set aside for this one drop only;
+          6. otherwise the pick (drop_colour.pick over the automatic pool,
              weighted by his selector) lands through _color_jump's picked_id
              path with flare=False (a colour change, not a flare: a Light
              Show "flares off" target changes colour too), the room's active
@@ -3529,6 +3571,23 @@ class ResponseEngine:
             record["result"] = "selector_unconfigured"
             return record
         pool = self._drop_colour_pool(pool_scene, intensity)
+        # WORD COLOURS (spectra/services/lyric_events.py): a word imprinting
+        # on this drop gives it the word's colour, and the 180 rule stands
+        # aside. Nothing allowed: no imprint, and the 180 rule below.
+        lyric_pick = self._lyric_pick_active(pool_scene, intensity, pool=pool,
+                                             config=config)
+        if lyric_pick is not None:
+            carry = {}
+            record["color_jump"] = await self._color_jump(
+                scene, intensity, carry, ramp_ms=int(ramp_ms),
+                picked_id=lyric_pick, flare=False, rung=LYRIC_IMPRINT_RUNG)
+            self.conductor.on_surge(carry)
+            record.update(result=record["color_jump"].get("result"),
+                          rung=LYRIC_IMPRINT_RUNG, lyric_imprint=True)
+            self._lyric_note_jump(lyric_pick, record["color_jump"])
+            if record["result"] == "jumped":
+                self._claim_drop_colour(ramp_ms)
+            return record
         options = self._drop_colour_options(config, pool, intensity)
         room = self._room_load()
         current_id = room.active_set_id
@@ -3588,6 +3647,173 @@ class ResponseEngine:
                 rainbow=bool(w.rainbow), weight=weight))
         return options
 
+    # ── word colours (spectra/services/lyric_events.py) ──────────────────────
+
+    def lyric_pick(self, set_ids, scene: Optional[SceneV2], intensity: float,
+                   *, pool: Optional[dict] = None, config=None) -> dict:
+        """THE EXISTING CHOOSER over one word's strongest matches: the sets
+        they reach that the scene's automatic pool allows, by the same
+        selector every colour pick uses (curve x genre x wheel-travel x
+        group, the colour ladder, the current set excluded), avoiding the
+        last set a word used while another is allowed. {"set_id"...} or
+        {"result": why not}: "scene_disallows" when nothing is allowed."""
+        if scene is None:
+            return {"result": "no_active_scene"}
+        if config is None:
+            config = self._sequencer_config()
+        if pool is None:
+            pool = self._drop_colour_pool(scene, intensity)
+        allowed: dict[str, Any] = {}
+        for sid in self._lyric_member_ids(set_ids):
+            if sid in pool:
+                allowed[sid] = pool[sid]
+        if not allowed:
+            return {"result": lyric_events.RESULT_SCENE_DISALLOWS}
+        if len(allowed) > 1:
+            allowed.pop(self._last_lyric_set_id, None)
+        positions = {sid: w.position_deg for sid, w in allowed.items()}
+        entries = {sid: e for sid, e in config.color_set_entries.items() if sid in positions}
+        if not config.color_set_entries:
+            entries = {sid: SelectorEntry() for sid in positions}
+        if not entries:
+            return {"result": lyric_events.RESULT_NOT_IN_SELECTOR}
+        room = self._room_load()
+        curves = self._curve_profiles()
+        wheel_profile = (curves.get(config.wheel_travel_curve)
+                         if config.wheel_travel_curve else None)
+        candidates = kernel.build_color_set_candidates(
+            entries, curves, genre_bucket=self._genre_bucket(),
+            room_deg=room.wheel_position_deg, set_positions=positions,
+            wheel_points=(wheel_profile.points if wheel_profile
+                          else [CurvePoint(x=0.0, y=1.0)]),
+            group_ids_by_set=self._group_ids_by_set())
+        pick = kernel.select_color_set(candidates, intensity=intensity, rng=self._rng,
+                                       current_id=room.active_set_id)
+        if pick.picked_id is None:
+            return {"result": "kept_current", "rung": pick.rung}
+        return {"set_id": pick.picked_id, "rung": pick.rung}
+
+    def _lyric_member_ids(self, set_ids) -> list[str]:
+        """A colour GROUP on a match stands for its member sets."""
+        out: list[str] = []
+        for sid in set_ids:
+            card = self._set_card(sid)
+            if getattr(card, "kind", "set") == "group":
+                out.extend(m.color_set_id for m in getattr(card, "members", ()))
+            else:
+                out.append(sid)
+        return list(dict.fromkeys(out))
+
+    def _lyric_pick_active(self, scene: Optional[SceneV2], intensity: float,
+                           *, pool: Optional[dict] = None,
+                           config=None) -> Optional[str]:
+        """The set the word imprinting on the event firing now would give
+        it, or None: nothing is imprinting, or it said why not (the event's
+        own colour then stands)."""
+        lyric = lyric_events.active()
+        if lyric is None:
+            return None
+        got = self.lyric_pick(lyric.set_ids, scene, intensity, pool=pool, config=config)
+        if "set_id" in got:
+            return got["set_id"]
+        lyric.result = got.get("result")
+        return None
+
+    def _lyric_note_jump(self, picked: Optional[str], jump: dict) -> None:
+        """A colour jump given by a word: tell the word how it went."""
+        lyric = lyric_events.active()
+        if lyric is None or picked is None:
+            return
+        if jump.get("result") == "jumped" and not jump.get("forced_color"):
+            self._last_lyric_set_id = picked
+            lyric.note_landed(picked, jump.get("set_name"), jump.get("rung"))
+        else:
+            lyric.result = lyric_events.RESULT_CANNOT_CARRY
+
+    def note_lyric_set(self, set_id: Optional[str]) -> None:
+        """A scene fire wore a word's colour: the chooser avoids it next."""
+        if set_id is not None:
+            self._last_lyric_set_id = set_id
+
+    async def lyric_color_change(self, set_ids, *, intensity: float, ramp_ms: int,
+                                 momentary: bool, dwell_ms: int = 0,
+                                 fade_ms: int = 0) -> dict:
+        """A WORD FIRING ON ITS OWN (lyric_events.py): the colour lands over
+        `ramp_ms`. Precedence, first match wins, each NAMED in the record:
+          1. a conductor deferral (preview / pause / dinner party / Hue Hold
+             / Absorb) — nothing moves, the holds that stop the drift;
+          2. FORCE COLOUR — a pin holds; a word never rolls a pinned group;
+          3. an ACTIVE 2D GRADIENT — held, a different colour source owns the
+             room (the same hold the journey takes);
+          4. the pick (lyric_pick) over the scene showing — nothing allowed,
+             nothing fires;
+          5. the jump through _color_jump, flare=False (a colour change, not
+             a flare).
+        A momentary change leaves the room's story alone (no active set, no
+        wheel) and returns `moment`, which engine.fire_lyric_colour_event
+        releases through release_lyric_moment."""
+        from spectra.services import force_color
+        record: dict[str, Any] = {"at": self._clock(), "kind": "lyric_word",
+                                  "intensity": round(intensity, 4),
+                                  "ramp_ms": int(ramp_ms), "momentary": bool(momentary)}
+        deferred_by = self.conductor._deferral()
+        if deferred_by is not None:
+            record.update(result="held", held_for=deferred_by)
+            return record
+        controls = self._room_controls()
+        if force_color.active(controls):
+            record.update(result="held", held_for=force_color.HELD_FOR)
+            return record
+        if self.conductor.effective_gradient_id(controls) is not None:
+            record.update(result="held", held_for="gradient_drift")
+            return record
+        scene = self.conductor.scene
+        if scene is None:
+            record["result"] = "no_active_scene"
+            return record
+        got = self.lyric_pick(set_ids, scene, intensity)
+        if "set_id" not in got:
+            record.update(result=got.get("result"), rung=got.get("rung"))
+            return record
+        carry: dict[tuple[str, str], Any] = {}
+        jump = await self._color_jump(scene, intensity, carry, ramp_ms=int(ramp_ms),
+                                      picked_id=got["set_id"], flare=False,
+                                      rung=LYRIC_WORD_RUNG, momentary=momentary)
+        record["color_jump"] = jump
+        record["result"] = jump.get("result")
+        record["rung"] = got.get("rung")
+        if jump.get("result") != "jumped":
+            return record
+        self._last_lyric_set_id = got["set_id"]
+        if momentary:
+            record["moment"] = LyricMoment(
+                virtuals=self.conductor.virtuals, originals=jump["originals"],
+                active_set_id=self._room_load().active_set_id, fade_ms=int(fade_ms),
+                release_after_s=(int(ramp_ms) + int(dwell_ms)) / 1000.0)
+        else:
+            self.conductor.on_surge(carry)
+        return record
+
+    async def release_lyric_moment(self, moment: "LyricMoment") -> dict:
+        """The fade back from a momentary word. A scene fire or a colour
+        change since it landed took over and its colours stay; a hold on the
+        room stands. Each named."""
+        if self.conductor.virtuals is not moment.virtuals:
+            return {"result": "stale", "why": "scene_changed"}
+        deferred_by = self.conductor._deferral()
+        if deferred_by is not None:
+            return {"result": "held", "held_for": deferred_by}
+        if self._room_load().active_set_id != moment.active_set_id:
+            return {"result": "stale", "why": "colour_changed"}
+        count = 0
+        for vid, back in moment.originals:
+            state = self.conductor.virtuals.get(vid)
+            if state is None:
+                continue
+            await self._glide(vid, state.effect_type, dict(back), moment.fade_ms)
+            count += 1
+        return {"result": "released", "virtuals": count, "fade_ms": moment.fade_ms}
+
     def _claim_drop_colour(self, ramp_ms: int) -> None:
         """This drop's colour has changed: its own response, when it fires
         within the change's ramp plus DROP_COLOUR_CLAIM_S, takes the claim
@@ -3613,7 +3839,8 @@ class ResponseEngine:
                           ramp_ms: Optional[int] = None,
                           picked_id: Optional[str] = None,
                           flare: bool = True,
-                          rung: Optional[str] = None) -> dict:
+                          rung: Optional[str] = None,
+                          momentary: bool = False) -> dict:
         """The flare colour jump: the shipped selector picks (curve × genre
         × wheel-travel, terminal KEEP), the pick lands on set-mode virtuals
         with the intensity-scaled RAMP-IN (color_jump_ramp_ms — a hue-arc
@@ -3630,7 +3857,10 @@ class ResponseEngine:
         own rung); None keeps "journey_destination". A ramp of 0 lands
         each virtual's entry with a JUMP (the executor's own 1 ms jump,
         which also retargets any glide still in flight), never a
-        zero-length glide — the drop colour change's instant switch."""
+        zero-length glide — the drop colour change's instant switch.
+        momentary (a high-energy word, lyric_color_change) lands the set's
+        colours only and leaves the room's story alone: no active set, no
+        wheel, and the result's `originals` are what to glide back to."""
         config = self._sequencer_config()
         room = self._room_load()
         # FORCE COLOUR (owner ask 2026-08-27, spectra/services/
@@ -3697,6 +3927,7 @@ class ResponseEngine:
         if ramp_ms is None:
             ramp_ms = color_jump_ramp_ms(intensity)
         landed = 0
+        originals: list[tuple[str, dict[str, str]]] = []
         # A flare's jump skips virtuals the Light Show has flares off on;
         # the analysed scene-cue colour moment (flare=False) is no flare.
         states = self._flare_states() if flare else self.conductor.virtuals
@@ -3724,6 +3955,16 @@ class ResponseEngine:
                 carry[(vid, "brightness")] = entry.brightness
             if entry.background_brightness is not None:
                 params["background_brightness"] = entry.background_brightness
+            if momentary:
+                # Only what can be put back: the colours this virtual is
+                # showing now, nothing with no known original.
+                back = {name: value for name, value in
+                        (("gradient", state.gradient),
+                         ("background_color", state.background_color))
+                        if name in params and value}
+                params = {name: params[name] for name in back}
+                if back:
+                    originals.append((vid, back))
             if params:
                 if ramp_ms > 0:
                     await self._glide(vid, state.effect_type, params,
@@ -3731,6 +3972,11 @@ class ResponseEngine:
                 else:
                     await self._jump(vid, state.effect_type, params)
                 landed += 1
+        if momentary:
+            return {"result": "jumped", "picked_id": picked_id,
+                    "set_name": getattr(card, "name", picked_id),
+                    "rung": rung, "virtuals": landed, "ramp_ms": ramp_ms,
+                    "momentary": True, "originals": originals}
         position = eligible.get(picked_id)
         update: dict[str, Any] = {"active_set_id": picked_id}
         if position is not None:   # rainbow/achromatic never move the wheel

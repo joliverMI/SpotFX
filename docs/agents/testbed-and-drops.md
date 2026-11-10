@@ -278,7 +278,46 @@ only way a timeline gets in (dry run by default). Four things:
   now read from `lyric_matches.labels_by_word`, not unset.** Colour and imprints
   are still step 4.
 
-## Sung labels and word matches (lyrics plan, step 3 — no effect on the room)
+## Word colours and imprints (lyrics plan, step 4 — off for every show)
+
+`spectra/services/lyric_events.py`'s docstring is the binding statement; this
+section is what is not obvious from it. His rulings are in
+`/home/javi/fleet-spotfx/data/lyrics-timing-plan/grilling-notes.md`.
+
+- **One show = one song, by URI.** `LyricEventStore.shows` in
+  `storage/spectra/lyric_events.json`; absent means off, and an unreadable file
+  reads as off. The switch and the three settings are on the Test Bed; the Word
+  actions row is that same `plan_words`, built for any song by
+  `TriggerEngine.preview_lyric_events`.
+- **Off means off, and is proven.** `tests/test_lyric_events.py::
+  test_with_the_switch_off_the_output_is_exactly_an_engine_without_the_feature`
+  drives a real engine with a word beside every event against a control engine
+  built without the feature, and proves the words are never even read.
+- **An imprint is NOT a second colour path.** It rides `lyric_events.ACTIVE`
+  through the event's own fire and the existing paths read it where they would
+  otherwise pick a colour: `drop_color_change`, a scene fire's explicit colour
+  set, a flare's or update's colour jump. A staggered colour jump carries it on
+  `PendingKindBatch.lyric`, the way it carries the drop-colour-done flag.
+- **The chooser is the shipped one** (`ResponseEngine.lyric_pick`, the colour
+  ladder over `automatic_pool_cards`), so a set with no selector entry is not a
+  candidate unless the selector has no entries at all, exactly like every other
+  colour pick.
+- **What a word cannot know ahead of the song** (which scene will show, so whether
+  it allows the colour or its band can carry it) is decided at fire time and
+  named on the show log (`triggers` bucket, keys `lyric:fire` / `lyric:imprint`,
+  drawn by `describeEvent.ts`). The Word actions row says so rather than guessing.
+- **Conservative calls beyond the rulings, flagged for his tuning:** a scene
+  change naming its own colour and a `select_color_set` trigger both count as
+  events that cannot carry colour (his authored colour stands, and no word fires
+  on top of it). The gap is applied strongest-first, like everything else here.
+- **Held colour** pauses the journey only (`DriftConductor.hold_for_lyric`,
+  `held_for: "lyric_word"`), and ends on the next scene fire, the next word that
+  lands, a song change, or the switch going off. Flares and drops still change
+  colour during it, as they would without one.
+- **Sonic coverage is a separate follow-up.** Nothing in `lyric_console.py` reads
+  or changes these settings yet.
+
+## Sung labels and word matches (lyrics plan, step 3 — off the room unless word colours are on)
 
 `spectra/services/sung_labels.py` is the binding statement for the list,
 `lyric_reading.py` for how Claude reads a song against it, `lyric_matches.py`
@@ -287,10 +326,11 @@ the one Claude call (Sonic's account and switch, `SPECTRA_LYRIC_AGENT_MODEL`
 to point it elsewhere). `/sung-labels` is the one correction page; the matches
 are the Word matches row under the Sung words lane. Five things:
 
-- **NOTHING IN THE SHOW READS ANY OF THIS.** Firing from a match is step 4 and
-  off by default. `tests/test_lyric_reading.py` holds that in a fresh
-  interpreter, and automatic reading (`SungLabelSettings.auto_read`) ships off:
-  until he switches it on, only a press reaches Claude.
+- **THE ONLY THING IN THE SHOW THAT READS THIS IS WORD COLOURS, ON A SHOW HE
+  HAS SWITCHED ON** (the section above), lazily and off the event loop.
+  `tests/test_lyric_reading.py` holds that starting the show pulls none of it
+  in, and automatic reading (`SungLabelSettings.auto_read`) ships off: until he
+  switches it on, only a press reaches Claude.
 - **HIS EDITS ARE STORED APART FROM WHAT IS COMPUTED.** A label edit is a delta
   over the seed (`LabelEdits`), a meaning edit a delta over Claude's `draft`,
   and a match's reading is separate from his `his` and `deleted` lists. Only
@@ -1196,7 +1236,10 @@ precedence; `engine.fire_drop_colour_event` the choke point. Four things:
   drop louder than 0.9 lands a rainbow. Holds, each named: the room
   setting (`drop_colour_change`), a room hold, Force Colour (a set pin
   stays, a group pin rolls), a 2D gradient (its own drop kick), a house
-  mode that keeps its look.
+  mode that keeps its look. Below those holds but ahead of this pick, a
+  word imprinting on the drop (lyrics plan step 4, "Word colours and
+  imprints" above) takes the drop instead — the full precedence order is
+  `ResponseEngine.drop_color_change`'s own docstring.
 - **ONE CHANGE PER DROP**: a landed change claims the drop; the drop band's
   own colour-jump kind then skips, named (`_DROP_COLOUR_DONE`, carried on a
   `PendingKindBatch`). `_color_jump` with a ramp of 0 now lands as a JUMP.

@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from spectra import config
+from spectra.api import lyric_events as lyric_events_api
 from spectra.api import lyric_matches as lyric_matches_api
 from spectra.api import sung_labels as sung_labels_api
 from spectra.api import analysed_plan as analysed_plan_api
@@ -140,6 +141,7 @@ def create_app() -> FastAPI:
     app.include_router(testbed.router)
     app.include_router(sung_labels_api.router)
     app.include_router(lyric_matches_api.router)
+    app.include_router(lyric_events_api.router)
     # TV display plan phase 0 (data/tv-display-plan/plan.html PR 0.1): the
     # probe page at /tv/probe. Registered BEFORE any future static mount a
     # later phase might add at "/tv" (the TV app shell, PR 1.1) — an

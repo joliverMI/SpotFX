@@ -360,9 +360,9 @@ from typing import Any, Awaitable, Callable, Optional
 from spectra.models.trigger import FireResponseAction, FireSceneAction, SpectraTrigger
 from spectra.services import energy as energy_mod
 from spectra.services import (analysed_flares, drop_firing, drop_sequences,
-                               drop_switch, drop_timing, phase_partner,
-                               pre_drop_play, transition_phases,
-                               trigger_store)
+                               drop_switch, drop_timing, lyric_events,
+                               phase_partner, pre_drop_play,
+                               transition_phases, trigger_store)
 
 logger = logging.getLogger(__name__)
 
@@ -470,6 +470,17 @@ _generation_lock: Optional[asyncio.Lock] = None
 
 
 SHOW_CUE_SEEK_SKIP_MS = 3_000
+
+# WORD COLOURS (spectra/services/lyric_events.py). A word crossed by more than
+# this much is not landed: a forward seek jumped over it. How often the plan is
+# worked out again against the events the clock would fire now (a scene
+# change moves a band's offset), and how often a switched-on show's words and
+# matches are re-read in case he has just edited them. Modes that react to
+# music: the tiers an analysed flare fires in.
+LYRIC_SEEK_SKIP_MS = 1_000
+LYRIC_REPLAN_S = 1.0
+LYRIC_RELOAD_S = 5.0
+LYRIC_MODES = ("full", "triggers_only", "analysed")
 """A Light Show High/Low cue crossed this far in the past (a forward seek
 over it) is skipped, never fired late."""
 
@@ -584,6 +595,13 @@ class TriggerEngine:
         clock: Callable[[], float] | None = None,
         rng: Random | None = None,
         energy_for: Callable[[str, SpectraTrigger], Optional[float]] | None = None,
+        lyric_enabled: Callable[[Optional[str]], bool] | None = None,
+        lyric_settings: Callable[[], Any] | None = None,
+        lyric_words: Callable[[str], Any] | None = None,
+        lyric_colour: Callable[..., Awaitable[Any]] | None = None,
+        lyric_pick: Callable[..., dict] | None = None,
+        lyric_note_set: Callable[[Optional[str]], None] | None = None,
+        lyric_release_hold: Callable[[], None] | None = None,
     ) -> None:
         self._list_triggers = list_triggers or trigger_store.list_for_song
         # ENERGY AT A TRIGGER'S OWN MOMENT (spectra/services/energy.py, the
@@ -820,6 +838,32 @@ class TriggerEngine:
         self._show_cue_plan: Callable[[str], list] = lambda _uri: []
         self._show_cue: Callable[[str, int, int], Awaitable[Any]] = _no_show_cue
 
+        # WORD COLOURS AND IMPRINTS (spectra/services/lyric_events.py is the
+        # binding statement). OFF unless he turns a show on: `_lyric_on` is
+        # the only thing the clock reads with the switch off. `_lyric_words`
+        # reads a song's words and matches off the loop, cached per song;
+        # `_lyric_plan` is plan_words' answer, worked out here against the
+        # events this tick would fire. `_lyric_imprints` maps an event's
+        # trigger id to the word giving it its colour. Hooks are no-ops until
+        # services/engine.py wires them (the _analysed_color reasoning).
+        self._lyric_on = lyric_enabled or lyric_events.enabled
+        self._lyric_tuning = lyric_settings or lyric_events.settings
+        self._lyric_load = lyric_words or lyric_events.load_words
+        self._lyric_colour = lyric_colour or self._no_lyric_colour
+        self._lyric_pick = lyric_pick or (lambda *_a, **_k: {"result": "unwired"})
+        self._lyric_note_set = lyric_note_set or (lambda _set_id: None)
+        self._lyric_release_hold = lyric_release_hold or (lambda: None)
+        self._lyric_words: Optional[lyric_events.SongWords] = None
+        self._lyric_words_at: Optional[float] = None
+        self._lyric_loading: Optional[str] = None
+        self._lyric_plan: list[lyric_events.WordAction] = []
+        self._lyric_imprints: dict[str, lyric_events.WordAction] = {}
+        self._lyric_planned: Optional[tuple] = None
+        self._lyric_planned_at: Optional[float] = None
+        # Drops whose imprint landed at their pre-drop's fade, so the drop
+        # itself does not take it again.
+        self._lyric_spent: set[str] = set()
+
         # LOOKAHEAD (2026-08-19): trigger_id -> _PinnedPick, or trigger_id ->
         # None for "already attempted once, the draw came back empty" (the
         # STAY rung / an empty scene_pool) — a bare-None cache entry so that
@@ -911,6 +955,7 @@ class TriggerEngine:
             self._his_pre_drops = {}
             self._forget_switches()
             self._drop_history = drop_switch.DropHistory()
+            self._forget_lyric_plan(release_hold=True)
         if uri is None or uri == self._last_transition_uri:
             return
         armed = self._last_transition_uri is not None
@@ -1079,6 +1124,7 @@ class TriggerEngine:
             self._fired.clear()
             self._drop_colour_faded.clear()
             self._pre_drop_told.clear()
+            self._lyric_spent.clear()
             # a sequence approached again is decided again
             self._forget_switches()
             return []  # rewind/seek back: silently rearmed via the line above
@@ -1121,9 +1167,13 @@ class TriggerEngine:
         # crosses cuts before anything else fires on it
         if self._late_pending:
             await self._tick_late_switches(last, position_ms)
+        # WORD COLOURS: worked out first, so a pre-drop's fade below can wear
+        # a word's colour. A no-op unless this show is switched on.
+        self._refresh_lyric_plan(candidates, triggers, mode, windows)
         # THE DROP COLOUR CHANGE across a pre-drop that plays: a fade whose
         # pre-drop this tick reaches (one tick early) starts now.
         await self._tick_drop_colour_fades(last, position_ms)
+        await self._tick_lyric_words(last, position_ms)
         fired: list[SpectraTrigger] = []
         for trig in candidates:
             if not trig.enabled:
@@ -1389,11 +1439,17 @@ class TriggerEngine:
         scene change landing inside a window, or an analysed flare in a
         lull or on a drop, is held back. His own triggers and the
         sequences' own members are never held."""
-        if not windows or trig.id in self._seq_meta:
+        return self._window_for(trig, target_ms, windows, self._seq_meta,
+                                self._flare_ids)
+
+    @staticmethod
+    def _window_for(trig: SpectraTrigger, target_ms: int, windows: list,
+                    seq_meta, flare_ids) -> Optional[drop_firing.Window]:
+        if not windows or trig.id in seq_meta:
             return None
         if trig.source == "generated" and trig.action.kind == "fire_scene":
             return drop_firing.holding_window(windows, target_ms)
-        if trig.id in self._flare_ids:
+        if trig.id in flare_ids:
             return drop_firing.silencing_window(windows, target_ms)
         return None
 
@@ -1528,23 +1584,10 @@ class TriggerEngine:
                 self._flare_planning = None
         if uri != self._uri or epoch != self._flare_epoch:
             return
-        self._flare_triggers = [
-            SpectraTrigger(
-                id=m.trigger_id, timestamp_ms=m.timestamp_ms, source="generated",
-                generator_key=m.generator_key, snap_grid=m.snap_grid,
-                snap_moved_ms=m.snap_moved_ms,
-                action=FireResponseAction(event_class="flare", intensity=m.intensity))
-            for m in flares]
+        self._flare_triggers = self._flare_plan_triggers(flares)
         self._flare_ids = {t.id for t in self._flare_triggers}
         self._scene_cue_plan = scene_cues
-        self._scene_cue_triggers = [
-            SpectraTrigger(
-                id=analysed_flares.SCENE_CUE_ID_PREFIX + m.generator_key,
-                timestamp_ms=m.timestamp_ms, source="generated",
-                generator_key=m.generator_key, snap_grid=m.snap_grid,
-                snap_moved_ms=m.snap_moved_ms,
-                action=FireSceneAction(intensity=m.intensity))
-            for m in scene_cues]
+        self._scene_cue_triggers = self._scene_plan_triggers(scene_cues)
         self._scene_cue_ids = {t.id for t in self._scene_cue_triggers}
         self._plan_ranks = {
             m.generator_key: (getattr(m, "rank", None), getattr(m, "rank_of", None))
@@ -1552,6 +1595,25 @@ class TriggerEngine:
         self._flare_plan_uri = uri
         logger.info("analysed flares: %d planned for %s (and %d scene "
                     "changes)", len(flares), uri, len(scene_cues))
+
+    @staticmethod
+    def _flare_plan_triggers(flares: list) -> list[SpectraTrigger]:
+        return [SpectraTrigger(
+                id=m.trigger_id, timestamp_ms=m.timestamp_ms, source="generated",
+                generator_key=m.generator_key, snap_grid=m.snap_grid,
+                snap_moved_ms=m.snap_moved_ms,
+                action=FireResponseAction(event_class="flare", intensity=m.intensity))
+                for m in flares]
+
+    @staticmethod
+    def _scene_plan_triggers(scene_cues: list) -> list[SpectraTrigger]:
+        return [SpectraTrigger(
+                id=analysed_flares.SCENE_CUE_ID_PREFIX + m.generator_key,
+                timestamp_ms=m.timestamp_ms, source="generated",
+                generator_key=m.generator_key, snap_grid=m.snap_grid,
+                snap_moved_ms=m.snap_moved_ms,
+                action=FireSceneAction(intensity=m.intensity))
+                for m in scene_cues]
 
     @staticmethod
     def _trigger_allowed(trig: SpectraTrigger, mode: str) -> bool:
@@ -1679,6 +1741,21 @@ class TriggerEngine:
             logger.exception("gradient drift: on_intensity_event failed")
 
     async def _fire(self, trig: SpectraTrigger) -> None:
+        """Fire one trigger. A word giving this event its colour rides on
+        lyric_events.ACTIVE for the length of the fire; with no word nothing
+        about the fire changes."""
+        imprint = self._lyric_imprint_for(trig.id)
+        if imprint is None:
+            await self._fire_event(trig)
+            return
+        token = lyric_events.ACTIVE.set(imprint)
+        try:
+            await self._fire_event(trig)
+        finally:
+            lyric_events.ACTIVE.reset(token)
+        self._note_lyric_imprint(imprint, trig)
+
+    async def _fire_event(self, trig: SpectraTrigger) -> None:
         a = trig.action
         drop_colour: Optional[dict] = None
         pre_drop_note: Optional[dict] = None
@@ -1740,9 +1817,18 @@ class TriggerEngine:
                         return
                 fire = (self._fire_planned_scene if trig.source == "generated"
                         else self._fire_scene)
-                await fire(scene_id, a.color_set_id,
-                           self._render_intensity(a.intensity))
-                await self._fire_analysed_color(trig, scene_id)
+                # WORD COLOURS: a word imprinting on this scene change makes
+                # its colour the scene's, when the scene allows it.
+                imprint = lyric_events.active()
+                colour_set_id = a.color_set_id
+                if imprint is not None:
+                    colour_set_id = self._imprint_scene_colour(imprint, scene_id, a)
+                result = await fire(scene_id, colour_set_id,
+                                    self._render_intensity(a.intensity))
+                if imprint is not None:
+                    self._note_imprint_scene(imprint, colour_set_id, result)
+                if imprint is None or not imprint.landed:
+                    await self._fire_analysed_color(trig, scene_id)
                 self._notify_colour_cue()
             elif a.kind == "fire_response" and trig.id in self._flare_ids:
                 await self._fire_analysed_flare(self._render_intensity(a.intensity))
@@ -1877,6 +1963,343 @@ class TriggerEngine:
         fire_history.record_fire(
             "triggers", key, detail,
             uri=self._uri, position_ms=self._last_position_ms)
+
+    # ── word colours and imprints (lyric_events.py) ──────────────────────
+
+    def _forget_lyric_plan(self, release_hold: bool = False) -> None:
+        self._lyric_plan = []
+        self._lyric_imprints = {}
+        self._lyric_planned = None
+        self._lyric_planned_at = None
+        self._lyric_spent.clear()
+        if release_hold:
+            self._lyric_words = None
+            self._lyric_words_at = None
+            self._release_lyric_hold()
+
+    def _release_lyric_hold(self) -> None:
+        try:
+            self._lyric_release_hold()
+        except Exception:
+            logger.exception("word colours: could not release the held colour")
+
+    def _lyric_mode_open(self, uri: Optional[str], mode: str) -> bool:
+        """Is this show switched on, in a mode that reacts to music? Only
+        the tiers an analysed flare fires in: the "transitions" tier reacts
+        to song changes only. (A held room is the fire's own gate.)"""
+        return mode in LYRIC_MODES and bool(self._lyric_on(uri))
+
+    async def load_lyric_words(self, uri: str) -> None:
+        """Read this song's words and matches off the loop (tick() schedules
+        this itself; a spec awaits it directly). A result for a song no longer
+        playing is discarded; a failure keeps what was held and is logged."""
+        try:
+            words = await asyncio.to_thread(self._lyric_load, uri)
+        except Exception:
+            logger.exception("word colours: could not read the words for %s", uri)
+            words = None
+        finally:
+            if self._lyric_loading == uri:
+                self._lyric_loading = None
+        self._lyric_words_at = self._clock()
+        if words is not None and uri == self._uri:
+            self._lyric_words = words
+
+    def _refresh_lyric_plan(self, candidates: list[SpectraTrigger],
+                            triggers: list[SpectraTrigger], mode: str,
+                            windows: list) -> None:
+        uri = self._uri
+        if not self._lyric_mode_open(uri, mode):
+            if self._lyric_planned is not None or self._lyric_plan:
+                # He turned it off, or the mode closed: stop, and let any
+                # held colour go.
+                self._forget_lyric_plan(release_hold=True)
+            return
+        now = self._clock()
+        if (self._lyric_loading is None
+                and (self._lyric_words_at is None
+                     or now - self._lyric_words_at >= LYRIC_RELOAD_S
+                     or self._lyric_words is None or self._lyric_words.uri != uri)):
+            self._lyric_loading = uri
+            self._lyric_words_at = now
+            try:
+                asyncio.create_task(self.load_lyric_words(uri))
+            except RuntimeError:      # no running loop: a spec driving tick() by hand
+                self._lyric_loading = None
+        words = self._lyric_words
+        if words is None or words.uri != uri:
+            return
+        tuning = self._lyric_tuning()
+        key = (uri, id(words), tuning.energy_cutoff, tuning.min_gap_s,
+               tuning.imprint_window_s)
+        if (key == self._lyric_planned and self._lyric_planned_at is not None
+                and now - self._lyric_planned_at < LYRIC_REPLAN_S):
+            return
+        self._lyric_planned, self._lyric_planned_at = key, now
+        events = self._lyric_event_moments(candidates, triggers, mode, windows,
+                                           self._seq_meta, self._flare_ids)
+        self._lyric_plan = lyric_events.plan_words(words.hits, events, tuning)
+        self._lyric_imprints = {
+            a.event.id: a for a in self._lyric_plan
+            if a.verdict == lyric_events.VERDICT_IMPRINT and a.event is not None}
+
+    def _lyric_event_moments(self, candidates: list[SpectraTrigger],
+                             triggers: list[SpectraTrigger], mode: str, windows: list,
+                             seq_meta, flare_ids) -> list[lyric_events.EventMoment]:
+        """Every drop, scene change or update, and flare the clock would
+        fire, each at its own target the way tick() computes it: the same
+        candidates, the same mode gate, the same protected windows, the same
+        offsets. Charges and lulls are not events a word can imprint on."""
+        out: list[lyric_events.EventMoment] = []
+        for trig in candidates:
+            if not trig.enabled:
+                continue
+            if (trig.id not in flare_ids and trig.id not in seq_meta
+                    and not self._trigger_allowed(trig, mode)):
+                continue
+            target = self._lyric_target_ms(trig, triggers, seq_meta)
+            if self._window_for(trig, target, windows, seq_meta, flare_ids) is not None:
+                continue
+            moment = self._lyric_moment(trig, target, trig.id in seq_meta)
+            if moment is not None:
+                out.append(moment)
+        return out
+
+    def _lyric_target_ms(self, trig: SpectraTrigger, triggers: list[SpectraTrigger],
+                         seq_meta) -> int:
+        """tick()'s own offset stack for this trigger (without its one-tick
+        memo of the applied drop offset)."""
+        target = trig.timestamp_ms + trig.trigger_offset_ms
+        a = trig.action
+        try:
+            if a.kind == "fire_response":
+                target += int(self._response_offset_ms(a))
+                if a.event_class == "drop":
+                    target += self._lyric_drop_shift(trig, triggers, seq_meta)
+            elif a.kind == "fire_scene":
+                target += self._scene_offset_ms(trig)
+        except Exception:
+            logger.exception("word colours: an offset is unreadable for %s", trig.id)
+        return int(target)
+
+    def _lyric_drop_shift(self, trig: SpectraTrigger, triggers: list[SpectraTrigger],
+                          seq_meta) -> int:
+        offset = self._live_drop_offset_ms()
+        meta = seq_meta.get(trig.id)
+        if meta is not None:
+            seq, _cls, fire_mode = meta
+            start = seq.build_start_ms(fire_mode)
+        else:
+            builds = [t.timestamp_ms for t in triggers
+                      if t.enabled and t.id != trig.id
+                      and _phase_class(t) in phase_partner.BUILD_CLASSES
+                      and t.timestamp_ms < trig.timestamp_ms]
+            start = max(builds) if builds else None
+        return drop_timing.applied_offset_ms(trig.timestamp_ms, offset, start)
+
+    def _lyric_moment(self, trig: SpectraTrigger, target: int,
+                      from_sequence: bool) -> Optional[lyric_events.EventMoment]:
+        a = trig.action
+        make = lyric_events.EventMoment
+        if a.kind == "fire_response":
+            if a.event_class == "drop":
+                label = "drop" if from_sequence else "your drop"
+                if not self._drop_colour_on():
+                    return make(trig.id, lyric_events.KIND_DROP, target, label, False,
+                                lyric_events.CANNOT_DROP_COLOUR_OFF)
+                return make(trig.id, lyric_events.KIND_DROP, target, label)
+            if a.event_class == "flare":
+                return make(trig.id, lyric_events.KIND_FLARE, target, "flare")
+            return None
+        if a.kind == "fire_scene":
+            if a.color_set_id:
+                return make(trig.id, lyric_events.KIND_SCENE, target, "your scene change",
+                            False, lyric_events.CANNOT_OWN_COLOUR)
+            return make(trig.id, lyric_events.KIND_SCENE, target, "scene change")
+        if a.kind == "fire_scene_update":
+            return make(trig.id, lyric_events.KIND_SCENE, target, "scene update")
+        if a.kind == "select_color_set":
+            return make(trig.id, lyric_events.KIND_SCENE, target, "your colour change",
+                        False, lyric_events.CANNOT_OWN_COLOUR)
+        return None
+
+    @staticmethod
+    def _drop_colour_on() -> bool:
+        from spectra.services.room_controls import load_room_controls
+        try:
+            return bool(getattr(load_room_controls(), "drop_colour_change", True))
+        except Exception:
+            logger.exception("word colours: room controls unreadable")
+            return True
+
+    @staticmethod
+    def _lyric_imprint_key(hit: lyric_events.WordHit) -> tuple[str, int]:
+        return (f"lyric-imprint:{hit.key}", int(hit.ms))
+
+    def _lyric_imprint_for(self, event_id: str,
+                           claim: bool = True) -> Optional[lyric_events.Imprint]:
+        """The word giving this event its colour, once. None when there is
+        none: the common path, one dict lookup on an empty dict."""
+        action = self._lyric_imprints.get(event_id)
+        if action is None or action.event is None or event_id in self._lyric_spent:
+            return None
+        key = self._lyric_imprint_key(action.hit)
+        if key in self._fired:
+            return None
+        if claim:
+            self._fired.add(key)
+        return lyric_events.Imprint(hit=action.hit, event=action.event)
+
+    def _imprint_scene_colour(self, imprint: lyric_events.Imprint, scene_id: str,
+                              a) -> Optional[str]:
+        """The set a word gives this scene change, or the scene's own when
+        the scene allows none of the word's sets."""
+        got = self._lyric_pick(imprint.set_ids, scene_id, float(a.intensity))
+        set_id = got.get("set_id")
+        if set_id is None:
+            imprint.result = got.get("result") or lyric_events.RESULT_CANNOT_CARRY
+            return a.color_set_id
+        imprint.rung = got.get("rung")
+        return set_id
+
+    def _note_imprint_scene(self, imprint: lyric_events.Imprint,
+                            colour_set_id: Optional[str], result: Any) -> None:
+        """Did this scene fire really wear the word's colour? A fire deferred
+        by minimum dwell ran the update's flare band instead, which reports
+        through the imprint itself."""
+        if imprint.result is not None or colour_set_id is None:
+            return
+        skipped = result.get("skipped") if isinstance(result, dict) else None
+        forced = result.get("forced_color") if isinstance(result, dict) else None
+        if forced is not None:
+            # Force Colour replaced the word's colour on the way in.
+            imprint.result = lyric_events.RESULT_CANNOT_CARRY
+        elif skipped is None:
+            imprint.note_landed(colour_set_id, rung=imprint.rung)
+            self._lyric_note_set(colour_set_id)
+        elif skipped != "dwell":
+            imprint.result = lyric_events.RESULT_CANNOT_CARRY
+
+    async def _tick_lyric_words(self, last: int, position_ms: int) -> None:
+        """The words firing on their own, each started its transition early
+        so the colour arrives on the word (LEAD family, positive = earlier:
+        `fire_at = word - transition`, the drop-colour fade's shape). Exactly
+        once per approach, by the fired-keys memory. The ramp is the time left
+        from the tick that fires it, so a late tick still lands on the word."""
+        for action in self._lyric_plan:
+            if action.verdict != lyric_events.VERDICT_FIRE:
+                continue
+            word_ms = int(action.hit.ms)
+            key = (f"lyric:{action.hit.key}", word_ms)
+            if key in self._fired:
+                continue
+            fire_at = word_ms - action.transition_ms
+            if not (last < fire_at <= position_ms or last < word_ms <= position_ms):
+                continue
+            self._fired.add(key)
+            if position_ms - word_ms > LYRIC_SEEK_SKIP_MS:
+                continue
+            await self._fire_lyric_word(action, max(0, word_ms - position_ms), position_ms)
+
+    async def _fire_lyric_word(self, action: lyric_events.WordAction, ramp_ms: int,
+                               position_ms: int) -> None:
+        try:
+            record = await self._lyric_colour(action, ramp_ms)
+        except Exception:
+            logger.exception("word colours: the word '%s' failed", action.hit.phrase)
+            record = {"result": "error"}
+        record = record if isinstance(record, dict) else {"result": "unwired"}
+        logger.info("word colour: '%s' -> %s", action.hit.phrase, record.get("result"))
+        self._log_lyric("lyric:fire", action.hit, position_ms, {
+            "verdict": lyric_events.VERDICT_FIRE, "energy": round(action.energy, 4),
+            "momentary": action.momentary, "transition_ms": action.transition_ms,
+            "ramp_ms": ramp_ms, "result": record.get("result"),
+            "held_for": record.get("held_for"),
+            "set_id": (record.get("color_jump") or {}).get("picked_id"),
+            "set_name": (record.get("color_jump") or {}).get("set_name")})
+
+    def _note_lyric_imprint(self, imprint: lyric_events.Imprint,
+                            trig: Optional[SpectraTrigger],
+                            *, position_ms: Optional[int] = None) -> None:
+        """Say what became of a word imprinting on an event, and end any held
+        colour: a word that gave its colour is the next matched word."""
+        if imprint.result is None:
+            imprint.result = lyric_events.RESULT_CANNOT_CARRY
+        if imprint.landed:
+            self._release_lyric_hold()
+        self._log_lyric("lyric:imprint", imprint.hit, position_ms, {
+            "verdict": lyric_events.VERDICT_IMPRINT,
+            "event_id": imprint.event.id, "event_kind": imprint.event.kind,
+            "event_label": imprint.event.label, "event_ms": imprint.event.ms,
+            "at_pre_drop": trig is None, "result": imprint.result,
+            "set_id": imprint.set_id, "set_name": imprint.set_name, "rung": imprint.rung})
+
+    def _log_lyric(self, key: str, hit: lyric_events.WordHit,
+                   position_ms: Optional[int], detail: dict) -> None:
+        """Every word's outcome on the show log, whether or not it landed
+        (spectra/web/src/review/describeEvent.ts draws these)."""
+        from spectra.services import fire_history
+        try:
+            fire_history.record_fire(
+                "triggers", key,
+                {"lyric": True, "phrase": hit.phrase, "label": hit.label,
+                 "word_ms": hit.ms, "first_word": hit.first_word,
+                 "last_word": hit.last_word, "source": "his" if hit.his else "claude",
+                 "strength": round(hit.strength, 3), **detail},
+                uri=self._uri,
+                position_ms=(self._last_position_ms if position_ms is None else position_ms))
+        except Exception:
+            logger.exception("word colours: could not write the show log")
+
+    def preview_lyric_events(self, uri: str) -> lyric_events.Preview:
+        """What each word of this song would do, for the Test Bed. Runs on a
+        worker thread: it reads the song's words and analysis, and touches no
+        state of the song playing now."""
+        words = self._lyric_load(uri)
+        events = self.song_event_moments(uri) if words.hits else []
+        return lyric_events.Preview(
+            enabled=bool(self._lyric_on(uri)), words=words,
+            actions=lyric_events.plan_words(words.hits, events, self._lyric_tuning()),
+            n_events=len(events))
+
+    def song_event_moments(self, uri: str) -> list[lyric_events.EventMoment]:
+        """The events a song would fire, built for any song. tick()'s own
+        candidate list and gates, read fresh rather than from the song
+        playing, so the page never disturbs what is playing."""
+        triggers = self._list_triggers(uri)
+        has_authored = any(t.source == "authored" for t in triggers)
+        mode = self._effective_mode_for_song(self._scene_change_mode(), triggers)
+        candidates = list(triggers)
+        flare_ids: set[str] = set()
+        if analysed_flares.analysed_flares_allowed(mode, has_authored):
+            plan = self._analysed_plan(uri, list(triggers))
+            flares = self._flare_plan_triggers(list(plan.flares))
+            flare_ids = {t.id for t in flares}
+            candidates += flares
+            if not analysed_flares.has_stored_scene_cues(triggers):
+                candidates += self._scene_plan_triggers(list(plan.scene_cues))
+        try:
+            testing = bool(self._drop_testing())
+        except Exception:                                # noqa: BLE001
+            testing = False
+        seq_meta: dict = {}
+        windows: list = []
+        try:
+            view = self._drop_view(uri, triggers)
+            windows = drop_firing.windows_from_view(view, testing)
+            for seq in drop_firing.firing_sequences(view, testing):
+                if not drop_firing.fires_here(seq, mode, has_authored):
+                    continue
+                for cls, ms in seq.members(mode):
+                    tid = seq.trigger_id(cls)
+                    seq_meta[tid] = (seq, cls, mode)
+                    candidates.append(SpectraTrigger(
+                        id=tid, timestamp_ms=ms,
+                        source="authored" if seq.his else "generated",
+                        action=FireResponseAction(event_class=cls, intensity=seq.intensity)))
+        except Exception:
+            logger.exception("word colours: the drops are unreadable for %s", uri)
+        return self._lyric_event_moments(candidates, triggers, mode, windows, seq_meta, flare_ids)
 
     # ── the drop-led scene switch (drop_switch.py) ───────────────────────
 
@@ -2187,9 +2610,24 @@ class TriggerEngine:
                     plan = await self._ensure_switch_plan(told.seq, "drop",
                                                           told.fire_mode)
                     pool_scene = self._incoming_scene_id(told.seq, plan)
-                record = await self._run_drop_colour(
-                    told.intensity, pool_scene, ramp_ms, "pre_drop",
-                    analysed=told.seq is not None)
+                drop_id = (told.seq.trigger_id("drop") if told.seq is not None
+                           else told.key.removeprefix("his:"))
+                # A word imprinting on this drop lands here, when the fade
+                # does. Claimed only then: a fade that was held leaves the
+                # drop its own instant try, and the word with it.
+                imprint = self._lyric_imprint_for(drop_id, claim=False)
+                token = lyric_events.ACTIVE.set(imprint)
+                try:
+                    record = await self._run_drop_colour(
+                        told.intensity, pool_scene, ramp_ms, "pre_drop",
+                        analysed=told.seq is not None)
+                finally:
+                    lyric_events.ACTIVE.reset(token)
+                if imprint is not None:
+                    self._note_lyric_imprint(imprint, None, position_ms=position_ms)
+                    if imprint.landed:
+                        self._lyric_spent.add(drop_id)
+                        self._fired.add(self._lyric_imprint_key(imprint.hit))
             except Exception:
                 logger.exception("pre-drop %s: the colour fade failed — its "
                                  "drop changes colour instead", told.key)
@@ -2538,6 +2976,10 @@ class TriggerEngine:
     async def _no_analysed_color(selection_intensity: float,
                                  render_intensity: float,
                                  scene_id: Optional[str]) -> None:
+        return None
+
+    @staticmethod
+    async def _no_lyric_colour(action, ramp_ms: int) -> None:
         return None
 
     @staticmethod

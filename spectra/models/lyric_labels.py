@@ -59,6 +59,32 @@ class SungLabelSettings(_Model):
     weak_match_threshold: float = Field(0.6, ge=0.0, le=1.0)
 
 
+class LyricEventSettings(_Model):
+    """The tuning for word colours (spectra/services/lyric_events.py). Every
+    default is a first guess of his to tune. Only these three are settings;
+    the transition-time range is a pair of named constants in that module."""
+    # At or above this Energy a word's colour is momentary; below it the colour
+    # holds. Starts at the midpoint.
+    energy_cutoff: float = Field(0.5, ge=0.0, le=1.0)
+    # The shortest distance between two lyric events, fired or imprinted.
+    min_gap_s: float = Field(8.0, ge=0.0, le=120.0)
+    # How close a word must be, either way, to a drop, scene change or update,
+    # or flare to give it its colour instead of firing on its own.
+    imprint_window_s: float = Field(2.0, ge=0.0, le=10.0)
+
+
+class LyricShowState(_Model):
+    enabled: bool = False
+    changed_ms: int = 0
+
+
+class LyricEventStore(_Model):
+    """A show (one song's show, by URI) not listed here is OFF."""
+    schema_version: int = 1
+    settings: LyricEventSettings = Field(default_factory=LyricEventSettings)
+    shows: dict[str, LyricShowState] = Field(default_factory=dict)
+
+
 class SungLabelStore(_Model):
     schema_version: int = 1
     settings: SungLabelSettings = Field(default_factory=SungLabelSettings)

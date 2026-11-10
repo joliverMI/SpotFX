@@ -272,6 +272,72 @@ async def fire_drop_colour_event(selection_intensity: float,
 trigger_engine._drop_colour = fire_drop_colour_event
 
 
+async def fire_lyric_colour_event(action: Any, ramp_ms: int) -> dict:
+    """WORD COLOURS (spectra/services/lyric_events.py): a word firing on its
+    own, reached only from trigger_engine._tick_lyric_words, only on a show
+    switched on. The gates any colour change takes: the response gate at the
+    analysed tier (a preview, Absorb, a house mode that ignores music, a
+    closed tier), a house mode that owns the room's colours, then
+    responses.lyric_color_change's own precedence. A landed word counts in
+    fire_history's colour sets, and sets or lifts the held colour: every word
+    that lands ends the last one's hold, and a low-energy word starts its
+    own. A momentary word schedules its own fade back."""
+    from spectra.services import absorb_hold, fire_history, house, lyric_events
+    hit = action.hit
+    gate = _response_gate(True, True)
+    if gate is not None:
+        if gate == absorb_hold.REASON:
+            absorb_hold.record_deferral("lyric_word", {"phrase": hit.phrase})
+        return {"result": "held", "held_for": gate}
+    house_reason = house.scene_deferral()
+    if house_reason is not None:
+        return {"result": "held", "held_for": "house_mode", "reason": house_reason}
+    energy = float(action.energy)
+    record = await responses.lyric_color_change(
+        hit.set_ids, intensity=energy, ramp_ms=int(ramp_ms), momentary=action.momentary,
+        dwell_ms=lyric_events.moment_dwell_ms(hit),
+        fade_ms=lyric_events.moment_fade_ms(action.transition_ms))
+    jump = record.get("color_jump") or {}
+    if jump.get("result") == "jumped":
+        if action.momentary:
+            conductor.release_lyric_hold()
+            _schedule_lyric_release(record.pop("moment"))
+        else:
+            conductor.hold_for_lyric()
+        status = trigger_engine.status()
+        fire_history.record_fire("color_sets", jump["picked_id"], {
+            "set_name": jump.get("set_name"), "via": "lyric_word",
+            "phrase": hit.phrase, "momentary": action.momentary, "ramp_ms": int(ramp_ms)},
+            uri=status.get("track_uri"), position_ms=status.get("position_ms"))
+    return record
+
+
+def _schedule_lyric_release(moment) -> None:
+    """A momentary word's fade back, once its time is up. Best-effort: a
+    failure leaves the word's colour on until the room's next change."""
+    async def release() -> None:
+        await asyncio.sleep(moment.release_after_s)
+        try:
+            await responses.release_lyric_moment(moment)
+        except Exception:
+            logger.exception("word colours: the momentary release failed")
+    asyncio.ensure_future(release())
+
+
+def pick_lyric_colour(set_ids, scene_id: Optional[str], intensity: float) -> dict:
+    """A word imprinting on a scene change: the chooser, against that scene's
+    own allowed list. Named `scene_disallows` when it allows none of them."""
+    from spectra.services import scene_store
+    scene = scene_store.get_by_id(scene_id) if scene_id is not None else conductor.scene
+    return responses.lyric_pick(set_ids, scene, intensity)
+
+
+trigger_engine._lyric_colour = fire_lyric_colour_event
+trigger_engine._lyric_pick = pick_lyric_colour
+trigger_engine._lyric_note_set = responses.note_lyric_set
+trigger_engine._lyric_release_hold = conductor.release_lyric_hold
+
+
 async def fire_response_event(event_class: str, intensity: float,
                               gap_ms: int | None = None,
                               via_trigger: bool = False,
