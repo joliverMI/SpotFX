@@ -162,11 +162,17 @@ def test_compare_scores_the_drops_lane_against_his_drops_only():
 
 
 def test_song_listing_counts_his_drops_lulls_and_charges():
+    """His old authored rows are no longer "work to review" in the song
+    LIST once a song has no analyzed triggers to show instead (the
+    Admiral: old triggers "shouldn't be part of any future work") — the
+    listing's own phase-mark counts now read 0 for this song, even though
+    /compare (test_compare_scores_the_drops_lane_against_his_drops_only,
+    above) still scores against them via marks_for_song, unchanged."""
     _his(44_100, "drop")
     _his(40_000, "lull")
     _his(30_000, "flare")
     row = next(s for s in _client().get("/api/testbed/songs").json() if s["uri"] == URI)
-    assert (row["n_drops"], row["n_lulls"], row["n_charges"], row["n_flares"]) == (1, 1, 0, 3)
+    assert (row["n_drops"], row["n_lulls"], row["n_charges"], row["n_flares"]) == (0, 0, 0, 0)
     assert "drops" in row["engines"]
 
 

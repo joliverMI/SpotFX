@@ -2207,6 +2207,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'The box above the song list filters as you type, matching against both artist and title — case doesn\'t matter, and neither do accents (typing "apagon" finds "El Apagón"). The ✕ button clears it. The count line below the box ("N of M") always shows how many of your songs currently match.',
           'With the box empty, songs you can actually compare right now — a pinned WAV, or at least one precomputed engine — are listed first, then everything else alphabetically by title. The same ordering applies to a filtered list. Your search is remembered only while the page stays open; it resets on reload.',
           'For speed with 900+ songs, the list only ever renders the first 150 matches — narrow your search further if what you\'re after isn\'t showing.',
+          'The list and its counts now come from a song\'s analyzed triggers when it has any — that cache is scored against, not your old hand-placed triggers. A song with only old hand-placed triggers and no analyzed cache still appears (its audio/pin/engine status is still useful) but shows nothing to review in the list; open the song itself to see those old triggers, which are unchanged there.',
         ],
       },
       {

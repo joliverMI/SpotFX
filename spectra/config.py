@@ -523,6 +523,11 @@ COLOR_SETS_FILE = REPO_ROOT / "storage" / "color_sets.json"
 PROFILES_DIR = REPO_ROOT / "storage" / "profiles"
 AUDIO_SHAPES_DIR = REPO_ROOT / "storage" / "audio_shapes"
 TRAINING_PROFILES_FILE = REPO_ROOT / "storage" / "training_profiles.json"
+# services/analyzed_trigger_store.py's cache, one file per track_id — the
+# Test Bed song list reads this read-only (spectra/services/testbed_marks.py)
+# to surface a song that has analyzed triggers but no SPECTRA trigger_store
+# row at all.
+ANALYZED_TRIGGERS_DIR = REPO_ROOT / "storage" / "analyzed_triggers"
 
 WEB_DIST = Path(__file__).parent / "web" / "dist"
 

@@ -60,6 +60,10 @@ def _seed_librosa(scfg):
 
 
 def test_songs_and_marks_roundtrip():
+    """The song LIST no longer counts his old authored triggers as "work
+    to review" (the Admiral: only analysed triggers are future work), so
+    n_transitions/n_flares read 0 here — but /marks (the per-song page)
+    is unchanged and still shows them."""
     from spectra import config as scfg
     _write_trigger(URI, 10000, "fire_scene")
     _write_trigger(URI, 5000, "fire_response", event_class="flare")
@@ -68,8 +72,8 @@ def test_songs_and_marks_roundtrip():
     songs = client.get("/api/testbed/songs").json()
     assert any(s["uri"] == URI for s in songs)
     row = next(s for s in songs if s["uri"] == URI)
-    assert row["n_transitions"] == 1
-    assert row["n_flares"] == 1
+    assert row["n_transitions"] == 0
+    assert row["n_flares"] == 0
 
     marks = client.get(f"/api/testbed/marks?uri={URI}").json()
     assert [m["timestamp_ms"] for m in marks["transitions"]] == [10000]
@@ -443,7 +447,9 @@ def test_generated_only_song_is_listed_with_no_reference_marks():
     assert rows[generated_only]["n_transitions"] == 0
     assert rows[generated_only]["n_flares"] == 0
     assert rows[generated_only]["n_generated"] == 2
-    assert rows[URI]["n_transitions"] == 1
+    # URI's one trigger is an old authored row with no analyzed cache — the
+    # listing no longer counts it as work to review either.
+    assert rows[URI]["n_transitions"] == 0
     assert rows[URI]["n_generated"] == 0
 
     marks = client.get(f"/api/testbed/marks?uri={generated_only}").json()
@@ -454,6 +460,83 @@ def test_generated_only_song_is_listed_with_no_reference_marks():
         f"/api/testbed/compare?uri={generated_only}&engine=librosa&mark_kind=section_boundary",
     ).json()
     assert compare["reference_marks"] == []
+
+
+def _write_analyzed(scfg, track_id, training_profile_id, triggers):
+    scfg.ANALYZED_TRIGGERS_DIR.mkdir(parents=True, exist_ok=True)
+    data = {"track_id": track_id, "training_profile_id": training_profile_id,
+           "training_profile_hash": "deadbeef",
+           "generated_at": "2026-11-10T00:00:00+00:00", "triggers": triggers}
+    (scfg.ANALYZED_TRIGGERS_DIR / f"{track_id}.json").write_text(
+        json.dumps(data), encoding="utf-8")
+
+
+def _write_training_profile(scfg, profile_id, **event_ids):
+    path = scfg.TRAINING_PROFILES_FILE
+    raw = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    raw[profile_id] = {"id": profile_id, "name": "TP", **event_ids}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+
+def test_songs_listing_reports_drop_lull_charge_counts_for_an_analyzed_song():
+    """The song list's n_drops/n_lulls/n_charges must actually count an
+    analyzed song's own drop/lull/charge events, not read as permanently
+    0 for every analyzed-sourced song."""
+    from spectra import config as scfg
+    track_id = "apianalyzedphases1"
+    uri = f"spotify:track:{track_id}"
+    _write_training_profile(scfg, "tp1", drop_event_id="drop", lull_event_id="lull",
+                            charge_event_id="charge")
+    _write_analyzed(scfg, track_id, "tp1", [
+        {"id": "a1", "timestamp_ms": 1000, "event_id": "drop", "labels": [], "intensity": None},
+        {"id": "a2", "timestamp_ms": 2000, "event_id": "lull", "labels": [], "intensity": None},
+    ])
+
+    client = _client()
+    rows = {s["uri"]: s for s in client.get("/api/testbed/songs").json()}
+    assert rows[uri]["n_drops"] == 1
+    assert rows[uri]["n_lulls"] == 1
+    assert rows[uri]["n_charges"] == 0
+
+
+def test_compare_drops_reference_finds_an_analyzed_songs_drop_mark():
+    """/compare?reference=drops must find an analyzed song's own drop
+    event — not read as permanently empty because the mark's event_class
+    was never set."""
+    from spectra import config as scfg
+    track_id = URI.split(":")[-1]
+    _seed_librosa(scfg)
+    _write_training_profile(scfg, "tp1", drop_event_id="drop")
+    _write_analyzed(scfg, track_id, "tp1", [
+        {"id": "a1", "timestamp_ms": 10000, "event_id": "drop", "labels": [], "intensity": None},
+    ])
+
+    client = _client()
+    resp = client.get(
+        f"/api/testbed/compare?uri={URI}&engine=librosa&mark_kind=section_boundary"
+        "&reference=drops&tolerance_ms=500",
+    ).json()
+    assert [m["timestamp_ms"] for m in resp["reference_marks"]] == [10000]
+    assert resp["reference_marks"][0]["event_class"] == "drop"
+
+
+def test_songs_listing_reports_phase_counts_unavailable_for_an_orphaned_analyzed_cache():
+    """A cache whose training profile was deleted can't be told apart into
+    drop/lull/charge/flare at all — the listing must say so (null) rather
+    than claim a confident 0 drops."""
+    from spectra import config as scfg
+    track_id = "apianalyzedorphan1"
+    uri = f"spotify:track:{track_id}"
+    _write_analyzed(scfg, track_id, "nonexistent-profile", [
+        {"id": "a1", "timestamp_ms": 1000, "event_id": "drop", "labels": [], "intensity": None},
+    ])
+
+    client = _client()
+    rows = {s["uri"]: s for s in client.get("/api/testbed/songs").json()}
+    assert rows[uri]["n_drops"] is None
+    assert rows[uri]["n_lulls"] is None
+    assert rows[uri]["n_charges"] is None
 
 
 def test_promote_refuses_a_second_push_at_the_same_moment_with_409():
@@ -522,9 +605,12 @@ def test_a_pushed_mark_is_shown_flagged_and_kept_out_of_compare(monkeypatch):
     assert by_id[pushed_id]["promoted"] is True
     assert [m["promoted"] for m in marks["transitions"] if m["id"] != pushed_id] == [False]
 
+    # Old authored rows (including a promoted one — testbed_promote lands
+    # it source=="authored") are no longer "work to review" in the LIST;
+    # /compare below (unchanged) still scores against them via marks_for_song.
     rows = {s["uri"]: s for s in client.get("/api/testbed/songs").json()}
-    assert rows[URI]["n_promoted"] == 1
-    assert rows[URI]["n_transitions"] == 2
+    assert rows[URI]["n_promoted"] == 0
+    assert rows[URI]["n_transitions"] == 0
 
     # librosa's only interior section boundary is at 10000 — exactly where
     # the pushed mark sits. Counting it would report a perfect match.

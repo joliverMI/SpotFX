@@ -159,6 +159,24 @@ defects §61 closes. **§64 is a full audit of every SPECTRA site that writes to
 against this rule** — most already complied (ambient.py, or were structurally exempt); one gap
 was found and closed (the release path's off-write, §64).
 
+### D7 — Analysed triggers are the going-forward focus; his old hand-placed ones are frozen, not removed
+
+> "i am done adding my own triggers. the analyzed triggers are better. we should only focus on
+> the analyzed triggers. we do not need to remove the old triggers yet, but they shouldn't be
+> part of any future work, including this." (Admiral, 2026-11-10)
+
+His own `source=="authored"` rows in `trigger_store` stop being a design target for new work —
+nothing going forward should be built to privilege, extend, or specially accommodate them. **Not
+a removal order**: the old rows stay on disk, and every firing path that already reads them
+(`tick()`, `plan_analysed_flares`, live drop-sequence detection via `_drop_view`) keeps doing so
+unchanged; only the direction of new work shifts. First application: PR `fm/testbed-analyzed-songs`
+— the Test Bed's song list (§109) now lists a song from its cached analysed triggers
+(`services/analyzed_trigger_store.py`) when it has any, and `trigger_engine.song_event_moments`
+(word colours) now resolves its candidates and mode from a song's non-authored triggers only. See
+`docs/agents/testbed-and-drops.md`'s `all_song_marks()` entry and
+`.claude/skills/sung-labels/SKILL.md` for the mechanism. Whether live firing should also stop
+favouring authored triggers is left to him as a follow-up, not decided here.
+
 ---
 
 ## Day-one bar

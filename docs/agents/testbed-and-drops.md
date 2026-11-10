@@ -38,6 +38,28 @@ comparison. **A TEST-BED-PROMOTED ROW IS NOT SCORED EITHER** — the same
 circularity through the authored door: push-to-real lands a suggestion
 `source="authored"` at the suggesting engine's OWN exact `time_ms`, so
 every promotion would lift that engine's own P/R/F1 on the next look.
+
+**The song LIST (`all_song_marks()`) has a second exception on top of the
+above, 2026-11**: a song with cached analyzed triggers
+(`services/analyzed_trigger_store.py`, top-level SpotFX —
+`storage/analyzed_triggers/<track_id>.json`, read there as a plain dict,
+never through that module's own pydantic models or
+`services.training_profile_manager`, per the S3 import-discipline rule)
+is listed FROM THOSE instead of `trigger_store`, even if it also has old
+rows there. A song with only old `trigger_store` rows and at least one
+`source=="authored"` row, and NO analyzed cache, is still listed but with
+NO reference marks at all in the LIST specifically (the Admiral: his old
+hand placements "shouldn't be part of any future work") —
+`marks_for_song()`/`reference_marks_for_song()` (the per-song detail and
+`/compare` routes) are deliberately left reading the old rows exactly as
+before; only the list's own "does this song have work to review" read
+changed. **Mind the naming collision**: `services/analyzed_trigger_store.py`
+("analyzed", SpotFX's embedded-engine cache keyed by bare `track_id`) and
+`spectra/services/analysed_flares.py` ("analysed", SPECTRA's own
+midsong_generator-derived plan, keyed into `trigger_store`'s `source==
+"generated"` rows) are two UNRELATED systems that happen to share a name
+root — do not conflate them when touching either.
+
 Nothing on the trigger can tell it from a hand-placed one (that is
 deliberate — see below), so `testbed_promote` keeps its OWN provenance
 store: `promoted_ids.json` (`{uri: [trigger_id, ...]}`, **never
