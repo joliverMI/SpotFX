@@ -22,11 +22,14 @@ follow-up (the Admiral's standing protocol, 2026-10-06: every feature
 change owes Sonic a follow-up, filed when it ships rather than gating the
 feature's own deploy).
 
-**THIS HAS NO EFFECT ON THE ROOM.** Every module here is read-only toward
-the show — proven structurally in `tests/test_lyric_reading.py` (a fresh
-interpreter importing the engine's own modules never pulls these in) and
-mirrored for the new Sonic domain in `tests/test_lyric_console.py`'s own
-import-boundary test.
+**THIS REACHES THE ROOM ONLY THROUGH WORD COLOURS, ON A SHOW HE HAS SWITCHED
+ON** (`spectra/services/lyric_events.py`, off for every show; its own docs are
+`docs/agents/testbed-and-drops.md`'s "Word colours and imprints"). Nothing here
+writes to the show; the only reader is that module, lazily, off the event loop,
+so starting the show still pulls in none of these (`tests/test_lyric_reading.py`'s
+fresh-interpreter test, mirrored for the Sonic domain in
+`tests/test_lyric_console.py`). Sonic does not read or change word colours yet;
+that coverage is still owed.
 
 ## The shape, cold
 

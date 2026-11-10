@@ -4,7 +4,9 @@ edits to it (lyrics plan step 3). Shown on the test bed's Sung words lane.
 The Admiral's ruling: "Every match is a guess: deletable and addable on the
 timeline, and his edits win and survive recapture."
 
-THIS HAS NO EFFECT ON THE ROOM. Nothing in the show reads this module.
+Only one thing in the show reads this module: word colours, on a show he has
+switched on (spectra/services/lyric_events.py, off for every show otherwise).
+A match does not reach the lights any other way.
 
 ONE SMALL FILE PER SONG (storage/spectra/lyric_matches/), keyed by the song's
 URI and in SPECTRA's own directory, because a recapture replaces everything

@@ -1,6 +1,7 @@
 """The Sung words lane's matches (lyrics plan step 3): what Claude guessed a
-song's words are about, and his own corrections. Nothing here reaches the
-lights. spectra/services/lyric_matches.py is the binding statement.
+song's words are about, and his own corrections. Matches reach the lights only
+on a show with word colours switched on (spectra/services/lyric_events.py).
+spectra/services/lyric_matches.py is the binding statement.
 
   GET  /api/testbed/lyric-matches?uri=          the matches and how fresh they are
   POST /api/testbed/lyric-matches/read?uri=     Claude reads this song, now

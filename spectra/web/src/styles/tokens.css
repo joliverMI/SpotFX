@@ -2432,6 +2432,26 @@ kbd {
 .testbed-match-words button { padding: 2px 6px; font-size: 12px; }
 .testbed-match-words button.on { background: var(--accent); color: var(--surface2); border-color: var(--accent); }
 .testbed-match-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.testbed-word-action {
+  position: absolute; height: 17px; padding: 0 4px; display: inline-flex; align-items: center;
+  gap: 4px; font-size: 11px; line-height: 15px; white-space: nowrap; overflow: hidden;
+  color: var(--text); background: var(--surface2); border-radius: 3px; cursor: pointer;
+  border: 1px dashed var(--border);
+}
+.testbed-word-action.fire { border: 1px solid var(--ok); font-weight: 600; }
+.testbed-word-action.imprint { border: 1px solid var(--accent); font-weight: 600; }
+.testbed-word-action.nothing { opacity: 0.55; }
+.testbed-word-action.selected { outline: 2px solid var(--accent); outline-offset: 0; opacity: 1; }
+.testbed-word-action.tick {
+  top: 13px; bottom: auto; width: 6px; height: 16px; margin-left: -3px; padding: 0; border-radius: 2px;
+}
+.testbed-word-switch { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--text); }
+.testbed-word-state { font-size: 12px; color: var(--text-muted); }
+.testbed-word-state.on { color: var(--warning); font-weight: 600; }
+.testbed-word-sliders { flex: 1; display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--text-muted); }
+.testbed-word-slider { display: inline-flex; align-items: center; gap: 6px; }
+.testbed-word-slider input[type=range] { width: 120px; }
+.testbed-word-slider-value { min-width: 34px; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
 /* The Sung labels page. */
 .sung-intro { margin: 0 0 10px; font-size: 13px; color: var(--text-muted); }
 .sung-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }

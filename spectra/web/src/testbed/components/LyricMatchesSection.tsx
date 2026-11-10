@@ -1,7 +1,7 @@
 /** The Sung words lane's matches, with everything he does to them: read the
- * song, select a match and delete it, add one by picking words. Nothing here
- * reaches the lights. spectra/services/lyric_matches.py is the binding
- * statement. */
+ * song, select a match and delete it, add one by picking words. Matches reach
+ * the lights only on a show with Word colours turned on (LyricEventsSection).
+ * spectra/services/lyric_matches.py is the binding statement. */
 import { useEffect, useMemo, useState } from 'react';
 import SearchSelect from '../../components/forms/SearchSelect';
 import type { SearchOption } from '../../components/forms/SearchSelect';
@@ -104,7 +104,7 @@ export default function LyricMatchesSection({
               Bring back {data.n_deleted} deleted
             </button>
           )}
-          <span className="testbed-match-note">Guesses only. Nothing here reaches your lights.</span>
+          <span className="testbed-match-note">Guesses only. They reach your lights only on a show you turn on below.</span>
           <HelpLink topic="testbed-lyric-matches" title="Word matches" />
         </div>
       </div>

@@ -2103,6 +2103,48 @@ export interface LyricMatch {
   score: number;
 }
 
+export interface LyricEventSettings {
+  energy_cutoff: number;
+  min_gap_s: number;
+  imprint_window_s: number;
+}
+
+export interface LyricEventAction {
+  key: string;
+  first_word: number;
+  last_word: number;
+  phrase: string;
+  label: string;
+  ms: number;
+  end_ms: number;
+  source: 'claude' | 'his';
+  strength: number;
+  set_names: string[];
+  verdict: 'fire' | 'imprint' | 'nothing';
+  why: string | null;
+  words: string;
+  energy: number;
+  momentary: boolean;
+  transition_ms: number;
+  blocked_by: string | null;
+  event: {
+    id: string; kind: 'drop' | 'scene' | 'flare'; ms: number; label: string;
+    away_ms: number; can_carry: boolean; why_not: string | null;
+  } | null;
+}
+
+export interface LyricEvents {
+  uri: string;
+  status: 'ok' | 'none' | 'invalid' | 'stale';
+  note: string | null;
+  clock_flagged: boolean;
+  enabled: boolean;
+  settings: LyricEventSettings;
+  n_events: number;
+  shows_on: number;
+  actions: LyricEventAction[];
+}
+
 export type LyricReadingState = 'none' | 'fresh' | 'labels_changed' | 'words_changed';
 
 export interface LyricMatches {

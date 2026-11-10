@@ -19,7 +19,7 @@ import type {
   ReviewSession, ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult,
   SceneV2, SecondAccountState, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
   Liveness, SonicUsageSummary, SpectraTrigger, SpotColorSetCard, TestSessionStatus,
-  LyricMatches, SungLabelEdit, SungLabelsPageData,
+  LyricEventSettings, LyricEvents, LyricMatches, SungLabelEdit, SungLabelsPageData,
   TestbedDropReferenceSet, TestbedEngineMarks, TestbedLyrics, TestbedMarks, TestbedPromoteRequest, TestbedPromoteResult,
   TestbedPromotionLogEntry, TestbedReferenceSet, TestbedSong, TestbedWaveform,
   TranscribeResult, UndoResult,
@@ -1572,8 +1572,10 @@ function useLyricMatchesMutation<V>(fn: (v: V) => Promise<LyricMatches>) {
     mutationFn: fn,
     onSuccess: (data) => {
       qc.setQueryData(['lyric-matches', data.uri], data);
-      // A word's chip on the emphasized mark comes from these.
+      // A word's chip on the emphasized mark comes from these, and what each
+      // word would do.
       void qc.invalidateQueries({ queryKey: ['testbed-engine-marks'] });
+      void qc.invalidateQueries({ queryKey: ['lyric-events', data.uri] });
     },
   });
 }
@@ -1598,6 +1600,34 @@ export function useDeleteLyricMatch() {
 export function useRestoreDeletedLyricMatches() {
   return useLyricMatchesMutation((uri: string) =>
     apiPost<LyricMatches>(`/testbed/lyric-matches/restore-deleted?uri=${enc(uri)}`));
+}
+
+/** Word colours on a show (spectra/services/lyric_events.py): what each word
+ * would do, the per-show switch and the three tuning settings. */
+export function useLyricEvents(uri: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['lyric-events', uri],
+    queryFn: () => apiGet<LyricEvents>(`/testbed/lyric-events?uri=${enc(uri!)}`),
+    enabled: !!uri && enabled,
+  });
+}
+
+export function useSetLyricEventsShow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { uri: string; enabled: boolean }) =>
+      apiPut<{ uri: string; enabled: boolean }>('/testbed/lyric-events/show', body),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['lyric-events'] }); },
+  });
+}
+
+export function useSetLyricEventSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Partial<LyricEventSettings>) =>
+      apiPut<LyricEventSettings>('/testbed/lyric-events/settings', body),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['lyric-events'] }); },
+  });
 }
 
 /** The drop-detection plan's own four-song table (Contra / Dopamine /

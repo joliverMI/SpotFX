@@ -165,6 +165,7 @@ DROP_COLOR_GLIDE_MS = 150  # the drop's own colour change — fast, but not a
 # long later (on_colour_cue) — past the cue's own crossfade (a few hundred
 # ms), so the new walk's first glide never cuts the scene change short.
 CUE_SETTLE_S = 0.5
+LYRIC_HOLD = "lyric_word"  # journey_rec's held_for while a word holds its colour
 
 
 class VirtualState:
@@ -309,6 +310,8 @@ class DriftConductor:
         self.leg_s = leg_s
         self._intensity = intensity or (lambda: None)
         self._deferral = deferral or (lambda: None)
+        # WORD COLOURS: a low-energy word holding its colour (hold_for_lyric).
+        self._lyric_hold = False
         self._broadcast = broadcast or self._no_broadcast
         self._drift_profiles = drift_profiles or self._default_drift_profiles
         self._curve_profiles = curve_profiles or self._default_curve_profiles
@@ -404,6 +407,7 @@ class DriftConductor:
         refire = self.is_refire(scene.id, color_set_id)
         entries = {dev.id: dev for dev in scene.devices}
         self.scene = scene
+        self._lyric_hold = False    # a word's held colour lasts to here
         self.virtuals = {}
         self.mechanisms = []
         for w in writes:
@@ -597,10 +601,28 @@ class DriftConductor:
                           "held_for": "gradient_drift"}
             gradient_rec = self._gradient_leg(active_gradient_id, batches,
                                               leg_ms, legs)
+        elif self._lyric_hold:
+            # WORD COLOURS (spectra/services/lyric_events.py): a low-energy
+            # word's colour holds until the next scene change or matched
+            # word — the same held shape as a pin or a gradient above.
+            journey_rec = {"custody": "room", "paused": True,
+                           "held_for": LYRIC_HOLD}
+            gradient_rec = {"active": False}
         else:
             journey_rec = self._journey_leg(batches, leg_ms, legs)
             gradient_rec = {"active": False}
         return journey_rec, gradient_rec
+
+    def hold_for_lyric(self) -> None:
+        """A low-energy word's colour landed: the walk stays put."""
+        self._lyric_hold = True
+
+    def release_lyric_hold(self) -> None:
+        self._lyric_hold = False
+
+    @property
+    def lyric_hold(self) -> bool:
+        return self._lyric_hold
 
     def _follow_points(self, spec: DriftSpec):
         if spec.inline_points is not None:
@@ -1117,7 +1139,8 @@ class DriftConductor:
         picked and the walk toward it starts now. Same holds as a leg —
         deferral, force colour, an active gradient, no live scene."""
         self._cue_dest = None
-        if self.scene is None or self._deferral() is not None:
+        if (self.scene is None or self._deferral() is not None
+                or self._lyric_hold):
             return None
         from spectra.services import force_color
         controls = self._room_controls()

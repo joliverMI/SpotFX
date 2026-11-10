@@ -48,6 +48,19 @@ const DROP_COLOUR_HOLD: Record<string, string> = {
   scene_change_mode: 'scene-change mode closed',
 };
 
+/** Why a matched word landed no colour. */
+const WORD_STOPPED: Record<string, string> = {
+  scene_disallows: 'the scene does not allow its colours',
+  not_in_selector: 'none of its colours are in the colour selector',
+  cannot_carry: 'that event cannot carry colour',
+  kept_current: 'its colour is already showing',
+  no_active_scene: 'no scene is showing',
+  selector_unconfigured: 'no colour sets are configured',
+  held: 'the room is held',
+  unwired: 'not wired',
+  error: 'it failed',
+};
+
 /** ...and why the set it landed was the one picked (the pick's rung). */
 const DROP_COLOUR_RUNG: Record<string, string> = {
   band: '',
@@ -146,9 +159,33 @@ export function describeEvent(item: ReviewEventItem): string {
         const how = d.moment === 'pre_drop' ? ', faded across the pre-drop' : '';
         return `Colour set: ${name} (drop colour change${dist != null ? `, ${Math.round(dist)}° away` : ''}${how})`;
       }
+      if (d.via === 'lyric_word') return `Colour set: ${name} (matched word)`;
       return `Colour set: ${name}${d.via === 'analysed_cue' ? ' (analysed moment)' : ''}`;
     }
     case 'triggers': {
+      if (d.lyric) {
+        // WORD COLOURS (spectra/services/lyric_events.py): what a matched word
+        // did in the show, or what stopped it.
+        const phrase = `"${(d.phrase as string | undefined) ?? '?'}"`;
+        const set = (d.set_name as string | undefined) ?? (d.set_id as string | undefined);
+        const result = d.result as string | undefined;
+        const landed = result === 'landed' || result === 'jumped';
+        const heldFor = d.held_for as string | undefined;
+        if (d.verdict === 'imprint') {
+          const on = (d.event_label as string | undefined) ?? 'event';
+          if (result === 'staggered') return `Word ${phrase}: colour rides on the ${on}'s staggered flare kind`;
+          const stopped = (result && WORD_STOPPED[result]) ?? result ?? 'unknown';
+          return landed ? `Word ${phrase}: gave its colour (${set}) to the ${on}`
+            : `Word ${phrase}: no imprint on the ${on} (${stopped})`;
+        }
+        if (landed) {
+          const how = d.momentary ? 'momentary' : 'held';
+          return `Word ${phrase}: fired on its own, ${set ?? 'a colour'} (${how})`;
+        }
+        const stopped = (heldFor && (DROP_COLOUR_HOLD[heldFor] ?? heldFor))
+          ?? (result && WORD_STOPPED[result]) ?? result ?? 'unknown';
+        return `Word ${phrase}: did not fire (${stopped})`;
+      }
       if (d.drop_sequence && d.member === 'switch') {
         // THE DROP-LED SCENE SWITCH (spectra/services/drop_switch.py): the
         // cut a drop sequence made, or why it did not.

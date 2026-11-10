@@ -591,9 +591,11 @@ _SHOW_BOUNDARY_DRIVER = textwrap.dedent('''
 ''')
 
 
-def test_nothing_in_the_show_can_reach_the_label_or_match_modules():
-    """No light output in this step. A fresh interpreter, because this file's
-    own tests have already imported them here."""
+def test_nothing_in_the_show_imports_the_label_or_match_modules():
+    """Word colours reach these only when a switched-on show loads its words,
+    off the event loop (spectra/services/lyric_events.py): starting the show
+    pulls in none of them. A fresh interpreter, because this file's own tests
+    have already imported them here."""
     proc = subprocess.run([sys.executable, "-c", _SHOW_BOUNDARY_DRIVER],
                           cwd=os.fspath(scfg.REPO_ROOT), capture_output=True, text=True, timeout=90)
     assert proc.returncode == 0, proc.stderr[-3000:]

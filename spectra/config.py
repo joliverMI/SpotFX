@@ -75,6 +75,10 @@ SUNG_LABELS_FILE = SPECTRA_STORAGE / "sung_labels.json"
 # edits kept apart from it so a re-read or a recapture can never touch them.
 # spectra/services/lyric_matches.py.
 LYRIC_MATCHES_DIR = SPECTRA_STORAGE / "lyric_matches"
+# Word colours and imprints (lyrics plan step 4): which shows they are on for
+# (off for every show unless he turns one on) and the three tuning settings.
+# spectra/services/lyric_events.py.
+LYRIC_EVENTS_FILE = SPECTRA_STORAGE / "lyric_events.json"
 # Sonic's scene/flare change log (spectra/services/scene_console.py) — kept
 # separate from SETTINGS_LOG_FILE so the two domains' audit trails never mix,
 # matching scene_console.py never importing settings_console.py.
