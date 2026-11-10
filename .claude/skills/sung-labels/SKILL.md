@@ -129,6 +129,17 @@ Built as the coverage follow-up this skill exists to record. Load
   over the real router (`lock_console.py`'s own test precedent, see
   `lyric_events_route` in `tests/test_lyric_console.py`) — never a socket,
   live or otherwise.
+- **`song_event_moments` IGNORES HIS OLD `source=="authored"` TRIGGERS,
+  2026-11** (the Admiral: "we should only focus on the analysed
+  triggers... [old triggers] shouldn't be part of any future work"): it
+  builds its candidates and resolves its per-song mode from the song's
+  non-authored triggers only, so word colours land the same whether or
+  not a song also carries his old hand-placed rows. Scoped to this
+  preview path alone — ordinary flare/drop firing (`tick()`,
+  `plan_analysed_flares`, live drop-sequence detection via `_drop_view`)
+  still reads the real triggers and can legitimately disagree with the
+  preview for a song that has them; see the function's own docstring
+  before changing either side.
 - **A SONG IS A SEARCH, NOT A `resolve_name` CANDIDATE DUMP.** His library
   can hold hundreds of analysed songs, so `_resolve_song` caps a clean
   miss's `known_names` fallback (`SONG_CANDIDATES_SHOWN`) rather than
