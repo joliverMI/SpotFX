@@ -1345,5 +1345,36 @@ async def read_song_lyrics(song: Optional[str] = None, confirm_id: Optional[str]
     return await _call("read_song_lyrics", song=song, confirm_id=confirm_id)
 
 
+@mcp.tool()
+async def get_lyric_event_settings(song: Optional[str] = None) -> dict:
+    """Read whether word colours are on for a song, the energy cut-off, minimum gap and
+    imprint window, and how many shows have it on."""
+    return await _call("get_lyric_event_settings", song=song)
+
+
+@mcp.tool()
+async def set_lyric_event_show(enabled: bool, song: Optional[str] = None,
+                               confirm_id: Optional[str] = None) -> dict:
+    """Turn word colours on or off for one song's show (turning it ON always asks first)."""
+    return await _call("set_lyric_event_show", enabled=enabled, song=song, confirm_id=confirm_id)
+
+
+@mcp.tool()
+async def set_lyric_event_settings(energy_cutoff: Optional[float] = None,
+                                   min_gap_s: Optional[float] = None,
+                                   imprint_window_s: Optional[float] = None) -> dict:
+    """Change the energy cut-off, minimum gap and/or imprint window word colours use —
+    shared by every show."""
+    return await _call("set_lyric_event_settings", energy_cutoff=energy_cutoff,
+                       min_gap_s=min_gap_s, imprint_window_s=imprint_window_s)
+
+
+@mcp.tool()
+async def preview_lyric_events(song: Optional[str] = None) -> dict:
+    """Show what each matched word in a song would do — fire, imprint on a nearby event, or
+    nothing and why — the same plan the Test Bed's Word actions row shows."""
+    return await _call("preview_lyric_events", song=song)
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

@@ -2316,7 +2316,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         id: 'testbed-word-colours',
         title: 'Word colours: what a matched word does on a show',
-        keywords: 'word colour color imprint lyric lyrics drop flare scene change update energy momentary held hold minimum gap window slider switch show off on phrase transition',
+        keywords: 'word colour color imprint lyric lyrics drop flare scene change update energy momentary held hold minimum gap window slider switch show off on phrase transition sonic voice',
         body: [
           'A matched word can change your colours on the word it is sung on, or give its colour to a drop, flare, scene change or update right beside it. It is off for every show. Pick a song on the Test Bed, choose Sung words as an engine, and tick "Word colours on this show" under Word matches. Only that show changes.',
           'The Word actions row says what each matched word would do, and why. Click a chip for the full sentence. "Momentary" and "held" chips fire on their own; a chip with an arrow gives its colour to the event named; a dim chip does nothing. Matches are read from the Word matches row above, so deleting or adding one changes this row straight away.',
@@ -2324,6 +2324,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'A word on its own reads the Energy where it is sung. At or above the Energy cut-off the colour is momentary, then fades back; below it the colour holds until the next scene change or next matched word. Energy also sets how long the change takes, from about 0.15 s when it is loud to about 3 s when it is quiet, and the change starts early by that much so the colour arrives on the word.',
           'Only one word per sung line does something, and lyric events stay at least the Minimum gap apart. Your own matches always beat Claude\'s guesses; a weak guess does nothing. Nothing fires unless the scene showing allows at least one of the word\'s colours, or if the event cannot carry colour (a flare with no colour jump, your own colour on a scene change). It only happens in the Scene change modes that react to music, and it stops for everything else that holds the room\'s colours, like a preview or a house mode.',
           'Which scene is showing at a word is decided when the song plays, so this row can say "gives its colour to the flare" while the scene at that moment turns out not to allow it. The Review page\'s show log records what each word really did, and why it did nothing.',
+          'Sonic reaches all of this by voice too: read whether word colours are on for a song and the three tuning settings, change the energy cut-off, minimum gap and imprint window, and ask what each matched word would do — the exact same Word actions row, spoken. Turning word colours on for a show asks first, since it is what lets a matched word start changing your room\'s colours while that song plays; turning it off, or changing only the tuning, does not.',
         ],
       },
       {

@@ -314,8 +314,20 @@ section is what is not obvious from it. His rulings are in
   `held_for: "lyric_word"`), and ends on the next scene fire, the next word that
   lands, a song change, or the switch going off. Flares and drops still change
   colour during it, as they would without one.
-- **Sonic coverage is a separate follow-up.** Nothing in `lyric_console.py` reads
-  or changes these settings yet.
+- **Sonic coverage, built.** `lyric_console.py` reads and changes the per-show
+  switch and the three tuning settings (`get_lyric_event_settings`/
+  `set_lyric_event_show`/`set_lyric_event_settings`), and answers "what would
+  this word do" (`preview_lyric_events`) — the exact `plan_words` output this
+  section describes, including imprints. Turning a show's switch ON asks first,
+  the same "newly lets it act" shape as `sung_labels.auto_read`; the tuning
+  settings are shared by every show, so changing them applies at once.
+  `preview_lyric_events` is the one op in this domain that goes over HTTP
+  (`GET /api/testbed/lyric-events`, SPECTRA calling its own `/spectra`-mounted
+  app) rather than an import: reaching `TriggerEngine.preview_lyric_events`'s
+  own event candidates by import would pull `lyric_console.py` into the whole
+  engine stack (`engine.py`/`scene_response.py`/`drift_conductor.py`/
+  `fx_executor.py`) its own "NO LIGHT OUTPUT, NO TRIGGER WIRING" boundary keeps
+  it out of. See `.claude/skills/sung-labels/SKILL.md`'s "Sonic reach" section.
 
 ## Sung labels and word matches (lyrics plan, step 3 — off the room unless word colours are on)
 
