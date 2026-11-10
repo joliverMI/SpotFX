@@ -3516,7 +3516,11 @@ class ResponseEngine:
           4. an ACTIVE 2D GRADIENT — held: the gradient's own drop kick
              (DriftConductor.on_drop_event, fired with the drop's response)
              IS the drop's colour change;
-          5. otherwise the pick (drop_colour.pick over the automatic pool,
+          5. a WORD IMPRINTING on this drop (lyrics plan step 4; spectra/
+             services/lyric_events.py, docs/agents/testbed-and-drops.md's
+             "Word colours and imprints") — the pick is the word's colour,
+             the 180 rule set aside for this one drop only;
+          6. otherwise the pick (drop_colour.pick over the automatic pool,
              weighted by his selector) lands through _color_jump's picked_id
              path with flare=False (a colour change, not a flare: a Light
              Show "flares off" target changes colour too), the room's active

@@ -1236,7 +1236,10 @@ precedence; `engine.fire_drop_colour_event` the choke point. Four things:
   drop louder than 0.9 lands a rainbow. Holds, each named: the room
   setting (`drop_colour_change`), a room hold, Force Colour (a set pin
   stays, a group pin rolls), a 2D gradient (its own drop kick), a house
-  mode that keeps its look.
+  mode that keeps its look. Below those holds but ahead of this pick, a
+  word imprinting on the drop (lyrics plan step 4, "Word colours and
+  imprints" above) takes the drop instead — the full precedence order is
+  `ResponseEngine.drop_color_change`'s own docstring.
 - **ONE CHANGE PER DROP**: a landed change claims the drop; the drop band's
   own colour-jump kind then skips, named (`_DROP_COLOUR_DONE`, carried on a
   `PendingKindBatch`). `_color_jump` with a ramp of 0 now lands as a JUMP.

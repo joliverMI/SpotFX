@@ -81,6 +81,15 @@ Mechanisms per leg:
            ~20 s leg. Y itself still only drifts toward the target on
            legs — the drop moves the target, not Y.
 
+  lyric hold — a low-energy matched word's colour (lyrics plan step 4,
+           spectra/services/lyric_events.py) holds the journey too, below
+           FORCE COLOUR and an active gradient but ahead of the ordinary
+           walk: hold_for_lyric() sets it, _colour_leg honours it with the
+           same held shape (held_for==LYRIC_HOLD), and release_lyric_hold()
+           (or the next scene fire) clears it — the next scene change, the
+           next word that lands, a song change, or the switch going off
+           (docs/agents/testbed-and-drops.md's "Word colours and imprints").
+
 Degeneracy floor/ceiling (owner defect fix, 2026-08-14): a creep or follow
 spec is authored PARAM-AGNOSTIC (a named profile is reused across effects —
 decision-4) so it can carry bounds that make sense for one param and are
@@ -555,7 +564,8 @@ class DriftConductor:
     def _colour_leg(self, batches: dict, leg_ms: int,
                     legs: list[dict]) -> tuple[dict, dict]:
         """Which colour source moves this leg — force colour (held), an
-        active gradient, else the journey — and its record pair."""
+        active gradient, a low-energy word's held colour (lyric_hold),
+        else the journey — and its record pair."""
         controls = self._room_controls()
         active_gradient_id = self.effective_gradient_id(controls)
         # FORCE COLOUR (owner ask 2026-08-27, spectra/services/
@@ -1137,7 +1147,8 @@ class DriftConductor:
     async def cue_step(self) -> dict | None:
         """A journey-only leg run right after a cue: the next horizon is
         picked and the walk toward it starts now. Same holds as a leg —
-        deferral, force colour, an active gradient, no live scene."""
+        deferral, force colour, an active gradient, a low-energy word's
+        held colour (lyric_hold), no live scene."""
         self._cue_dest = None
         if (self.scene is None or self._deferral() is not None
                 or self._lyric_hold):
