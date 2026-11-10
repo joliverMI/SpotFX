@@ -119,6 +119,11 @@ def _write_profile(scfg, uri, filename, **fields):
 
 
 def test_all_song_marks_agrees_with_per_song_reads_and_carries_title_artist():
+    """Title/artist/provenance still agree between the listing and the
+    per-song read for an old-authored-only song — only its reference
+    marks (transitions/flares) deliberately diverge, since the listing (not
+    marks_for_song) is the one that stops treating his old rows as "work
+    to review" (all_song_marks()'s own docstring)."""
     from spectra import config as scfg
     from spectra.services import testbed_marks
     other = "spotify:track:testbedmarks2"
@@ -133,8 +138,9 @@ def test_all_song_marks_agrees_with_per_song_reads_and_carries_title_artist():
     assert list(listing) == sorted([URI, other])
     for uri, marks in listing.items():
         single = testbed_marks.marks_for_song(uri)
-        assert marks.transitions == single.transitions
-        assert marks.flares == single.flares
+        assert marks.transitions == []
+        assert marks.flares == []
+        assert single.transitions != [] or single.flares != []
         assert marks.provenance == single.provenance
         assert (marks.title, marks.artist) == (single.title, single.artist)
         assert marks.n_generated == single.n_generated
@@ -233,8 +239,11 @@ def test_a_refused_promotion_never_marks_anything_as_promoted():
 
 
 def test_the_listing_resolves_promotions_per_song():
-    """all_song_marks reads the promotion log ONCE for the whole corpus;
-    a push on one song must not flag a same-id-less row on another."""
+    """A promoted mark is still an old authored-door row (testbed_promote's
+    own docstring: it lands source=="authored"), so it gets the same
+    treatment every other old row now gets in the LIST — no reference
+    marks, nothing promoted to show — even though marks_for_song (the
+    per-song page) keeps showing it flagged exactly as before."""
     from spectra.services import testbed_marks
     other = "spotify:track:testbedmarks2"
     _write_trigger(URI, 1000, "fire_scene")
@@ -242,7 +251,103 @@ def test_the_listing_resolves_promotions_per_song():
     _write_trigger(other, 1000, "fire_scene")
 
     rows = testbed_marks.all_song_marks()
-    assert rows[URI].n_promoted == 1
-    assert {m.id for m in rows[URI].transitions if m.promoted} == {pushed}
+    assert rows[URI].n_promoted == 0
+    assert rows[URI].transitions == []
     assert rows[other].n_promoted == 0
-    assert [m.promoted for m in rows[other].transitions] == [False]
+    assert rows[other].transitions == []
+
+    single = testbed_marks.marks_for_song(URI)
+    assert {m.id for m in single.transitions if m.promoted} == {pushed}
+    assert single.n_promoted == 1
+
+
+def _write_analyzed(scfg, track_id, training_profile_id, triggers):
+    scfg.ANALYZED_TRIGGERS_DIR.mkdir(parents=True, exist_ok=True)
+    data = {
+        "track_id": track_id,
+        "training_profile_id": training_profile_id,
+        "training_profile_hash": "deadbeef",
+        "generated_at": "2026-11-10T00:00:00+00:00",
+        "triggers": triggers,
+    }
+    (scfg.ANALYZED_TRIGGERS_DIR / f"{track_id}.json").write_text(
+        json.dumps(data), encoding="utf-8")
+
+
+def _write_training_profile(scfg, profile_id, **event_ids):
+    path = scfg.TRAINING_PROFILES_FILE
+    raw = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    raw[profile_id] = {"id": profile_id, "name": "TP", **event_ids}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+
+def test_an_analyzed_only_song_is_listed_and_scored_from_its_analyzed_triggers():
+    """The 131-song gap: a song with NOTHING in trigger_store but a
+    cached analyzed-trigger set (services/analyzed_trigger_store.py) must
+    appear in the listing, split into transitions/flares by the same
+    scene/flare role routers/ai_triggers_router.py applies at play time."""
+    from spectra import config as scfg
+    from spectra.services import testbed_marks
+    track_id = "analyzedonly1"
+    uri = f"spotify:track:{track_id}"
+    _write_training_profile(scfg, "tp1", drop_event_id="drop", flare_event_id="spark")
+    _write_analyzed(scfg, track_id, "tp1", [
+        {"id": "a1", "timestamp_ms": 1000, "event_id": "drop", "labels": [], "intensity": None},
+        {"id": "a2", "timestamp_ms": 2000, "event_id": "spark", "labels": [], "intensity": 0.5},
+    ])
+
+    listing = testbed_marks.all_song_marks()
+    assert uri in listing
+    assert [m.timestamp_ms for m in listing[uri].transitions] == [1000]
+    assert [m.timestamp_ms for m in listing[uri].flares] == [2000]
+
+    single = testbed_marks.marks_for_song(uri)
+    assert single.transitions == listing[uri].transitions
+    assert single.flares == listing[uri].flares
+
+    transitions, flares = testbed_marks.reference_marks_for_song(uri)
+    assert [m.timestamp_ms for m in transitions] == [1000]
+    assert [m.timestamp_ms for m in flares] == [2000]
+
+
+def test_analyzed_triggers_win_over_old_triggers_for_the_same_song():
+    """A song carrying BOTH an old authored trigger and a cached analyzed
+    set is listed from the analyzed set only — his old placement is no
+    longer "work to review" once an analyzed alternative exists for the
+    same song (the Admiral: old triggers "shouldn't be part of any future
+    work")."""
+    from spectra import config as scfg
+    from spectra.services import testbed_marks
+    track_id = "bothkinds1"
+    uri = f"spotify:track:{track_id}"
+    _write_trigger(uri, 9999, "fire_scene")
+    _write_training_profile(scfg, "tp1", flare_event_id="spark")
+    _write_analyzed(scfg, track_id, "tp1", [
+        {"id": "a1", "timestamp_ms": 2000, "event_id": "spark", "labels": [], "intensity": None},
+    ])
+
+    listing = testbed_marks.all_song_marks()
+    assert [m.timestamp_ms for m in listing[uri].flares] == [2000]
+    assert listing[uri].transitions == []
+    assert 9999 not in [m.timestamp_ms for m in listing[uri].flares + listing[uri].transitions]
+
+
+def test_an_old_authored_only_song_has_no_work_to_review_in_the_listing():
+    """No analyzed cache, only his old hand-placed triggers: the song stays
+    listed (its audio/pin/engine status is still useful) but the listing
+    itself shows no reference marks — the Admiral's old triggers are no
+    longer "work" for the song LIST, even though the per-song page
+    (marks_for_song) is left untouched."""
+    from spectra.services import testbed_marks
+    _write_trigger(URI, 1000, "fire_scene")
+    _write_trigger(URI, 2000, "fire_response", event_class="flare")
+
+    listing = testbed_marks.all_song_marks()
+    assert URI in listing
+    assert listing[URI].transitions == []
+    assert listing[URI].flares == []
+
+    single = testbed_marks.marks_for_song(URI)
+    assert len(single.transitions) == 1
+    assert len(single.flares) == 1

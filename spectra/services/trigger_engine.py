@@ -2265,18 +2265,41 @@ class TriggerEngine:
     def song_event_moments(self, uri: str) -> list[lyric_events.EventMoment]:
         """The events a song would fire, built for any song. tick()'s own
         candidate list and gates, read fresh rather than from the song
-        playing, so the page never disturbs what is playing."""
+        playing, so the page never disturbs what is playing.
+
+        WORD COLOURS IGNORE OLD (source=="authored") TRIGGERS (2026-11,
+        the Admiral, verbatim: "i am done adding my own triggers. the
+        analyzed triggers are better. we should only focus on the
+        analyzed triggers... they shouldn't be part of any future work,
+        including this"): the candidate set AND the per-song mode this
+        method resolves are both built from the song's non-authored
+        triggers only, so a song's word-colour moments come out identical
+        whether or not it also carries old hand-placed ones — neither
+        `analysed_flares_allowed`/`has_stored_scene_cues` (gating the
+        analysed plan) nor `_effective_mode_for_song`'s own "triggers_only
+        stays triggers_only while an authored row exists" fallback (both
+        keyed on authored presence) can swing the result anymore.
+
+        Scoped to THIS preview path alone. Ordinary live firing — tick(),
+        plan_analysed_flares, next_colour_cue, drop_firing's own live
+        callers, and drop-SEQUENCE DETECTION here via `_drop_view` (which
+        still reads the full stored list, so a song's own placed drop/
+        lull/charge markers keep deciding `seq.his` exactly as before) —
+        all still gate on the real has_authored/_effective_mode_for_song
+        and are intentionally left unchanged: whether old triggers should
+        stop mattering there too is a follow-up decision for the Admiral
+        (see the PR), not this one."""
         triggers = self._list_triggers(uri)
-        has_authored = any(t.source == "authored" for t in triggers)
-        mode = self._effective_mode_for_song(self._scene_change_mode(), triggers)
-        candidates = list(triggers)
+        non_authored = [t for t in triggers if t.source != "authored"]
+        mode = self._effective_mode_for_song(self._scene_change_mode(), non_authored)
+        candidates = list(non_authored)
         flare_ids: set[str] = set()
-        if analysed_flares.analysed_flares_allowed(mode, has_authored):
-            plan = self._analysed_plan(uri, list(triggers))
+        if analysed_flares.analysed_flares_allowed(mode, False):
+            plan = self._analysed_plan(uri, list(non_authored))
             flares = self._flare_plan_triggers(list(plan.flares))
             flare_ids = {t.id for t in flares}
             candidates += flares
-            if not analysed_flares.has_stored_scene_cues(triggers):
+            if not analysed_flares.has_stored_scene_cues(non_authored):
                 candidates += self._scene_plan_triggers(list(plan.scene_cues))
         try:
             testing = bool(self._drop_testing())
@@ -2288,7 +2311,7 @@ class TriggerEngine:
             view = self._drop_view(uri, triggers)
             windows = drop_firing.windows_from_view(view, testing)
             for seq in drop_firing.firing_sequences(view, testing):
-                if not drop_firing.fires_here(seq, mode, has_authored):
+                if not drop_firing.fires_here(seq, mode, False):
                     continue
                 for cls, ms in seq.members(mode):
                     tid = seq.trigger_id(cls)
@@ -2299,7 +2322,7 @@ class TriggerEngine:
                         action=FireResponseAction(event_class=cls, intensity=seq.intensity)))
         except Exception:
             logger.exception("word colours: the drops are unreadable for %s", uri)
-        return self._lyric_event_moments(candidates, triggers, mode, windows, seq_meta, flare_ids)
+        return self._lyric_event_moments(candidates, non_authored, mode, windows, seq_meta, flare_ids)
 
     # ── the drop-led scene switch (drop_switch.py) ───────────────────────
 

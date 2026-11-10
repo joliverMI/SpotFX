@@ -42,6 +42,15 @@ the SCORING set — `scoring_marks()`, which is the one definition both
 `reference_marks_for_song()` (the /compare route) and the frontend's own
 local matcher apply.
 
+all_song_marks() (the whole-corpus SONG LIST) is the one exception to
+"ONLY source=='authored' rows are reference marks" above: a song with
+cached analyzed triggers (services/analyzed_trigger_store.py) is listed
+from THOSE instead, and a song with only his old authored rows and no
+analyzed cache is listed with NO reference marks at all (not just no
+generated ones) — see that function's own docstring for why. marks_for_song()
+and reference_marks_for_song() keep the rule above exactly as stated for
+every song that has no analyzed cache.
+
 Provenance (ai_generated / verified) comes from the legacy editor-copy
 SongProfile (storage/profiles/*.json, read-only, same file docs/agents/scenes-and-flares.md's own
 "A scene's stored data is not proof he authored it" caution applies to) —
@@ -64,6 +73,34 @@ logger = logging.getLogger(__name__)
 
 TRANSITION_KINDS = ("fire_scene", "fire_scene_update")
 FLARE_KINDS = ("fire_response", "select_color_set")
+
+# services/analyzed_trigger_store.py's cache (storage/analyzed_triggers/
+# <track_id>.json, read-only here per config.ANALYZED_TRIGGERS_DIR's own
+# docstring — plain dict reads only, never services.training_profile_manager
+# or services.analyzed_trigger_store themselves: the S3 import-discipline
+# rule above forbids spectra/ importing spot-effects runtime internals).
+# A song whose only triggers are his own hand-placed ones has nothing in
+# this store, so it falls through to the old split below.
+#
+# The Admiral, 2026-11: "i am done adding my own triggers. the analyzed
+# triggers are better. we should only focus on the analyzed triggers."
+# The song list surfaces every song that has analyzed triggers (the ones
+# he now cares about), scored against THOSE triggers rather than his old
+# hand-placed ones — see all_song_marks()'s own docstring for the split.
+#
+# Role split (scene change vs flare) mirrors routers/ai_triggers_router.py's
+# own `role_attrs` exactly (the same training-profile event-id attrs,
+# categorized the same way) so an analyzed song's transitions/flares split
+# agrees with what actually fires it at play time.
+_ANALYZED_ROLE_ATTRS = {
+    "song_start_event_id": "scene", "beat_start_event_id": "scene",
+    "song_end_event_id": "scene", "drop_event_id": "scene",
+    "lull_event_id": "scene", "charge_event_id": "scene",
+    "quiet_event_id": "scene", "scene_fill_event_id": "scene",
+    "flare_event_id": "flare", "flare_low_event_id": "flare",
+    "flare_mid_event_id": "flare", "flare_high_event_id": "flare",
+    "flare_scene_event_id": "flare",
+}
 
 
 @dataclass(frozen=True)
@@ -258,13 +295,120 @@ def _song_marks(uri: str, triggers: list[SpectraTrigger],
                      snap_grid_counts=split.snap_grid_counts)
 
 
+def _track_id(uri: str) -> str:
+    return uri.split(":")[-1]
+
+
+def _load_analyzed(uri: str) -> Optional[dict]:
+    """Plain-dict read of storage/analyzed_triggers/<track_id>.json
+    (services/analyzed_trigger_store.py's cache) for ONE song — read-only,
+    never through that module's own pydantic models (the S3 import-
+    discipline rule: nothing under spectra/ imports spot-effects runtime
+    internals — the same reason _find_profile reads storage/profiles/ as a
+    plain dict). None when the song has no cached analyzed triggers."""
+    path = config.ANALYZED_TRIGGERS_DIR / f"{_track_id(uri)}.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _analyzed_index() -> dict[str, dict]:
+    """ONE pass over storage/analyzed_triggers/*.json -> {track_id: cached
+    dict} — the whole-corpus read shape all_song_marks() needs, same
+    reasoning as _profile_index()."""
+    analyzed_dir = config.ANALYZED_TRIGGERS_DIR
+    out: dict[str, dict] = {}
+    if not analyzed_dir.exists():
+        return out
+    for path in analyzed_dir.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        track_id = data.get("track_id") if isinstance(data, dict) else None
+        if track_id:
+            out[track_id] = data
+    return out
+
+
+def _training_profiles_raw() -> dict:
+    """Plain-dict read of storage/training_profiles.json (id -> profile),
+    for classifying an analyzed trigger's event_id as a scene change or a
+    flare — never services.training_profile_manager.TrainingProfile
+    itself (same import-discipline reason as _load_analyzed)."""
+    path = config.TRAINING_PROFILES_FILE
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _event_role_map(profile_id: str, training_profiles: dict) -> dict[str, str]:
+    """{event_id: "scene"|"flare"} for one training profile — the same
+    categorization routers/ai_triggers_router.py's own `role_attrs` applies
+    when it imports analyzed triggers for playback, so an analyzed song's
+    transitions/flares split here agrees with what actually fires it."""
+    profile = training_profiles.get(profile_id)
+    if not isinstance(profile, dict):
+        return {}
+    out: dict[str, str] = {}
+    for attr, role in _ANALYZED_ROLE_ATTRS.items():
+        eid = profile.get(attr) or ""
+        if eid:
+            out[eid] = role
+    return out
+
+
+def _split_analyzed(cached: dict, training_profiles: dict) -> _SplitMarks:
+    """transitions/flares for one song's cached analyzed triggers — the
+    role split above. An event_id the owning training profile no longer
+    names (profile edited/deleted since the cache was written) falls back
+    to a flare rather than vanishing silently."""
+    role_map = _event_role_map(cached.get("training_profile_id", ""), training_profiles)
+    transitions: list[ReferenceMark] = []
+    flares: list[ReferenceMark] = []
+    for t in cached.get("triggers") or []:
+        if not isinstance(t, dict):
+            continue
+        mark = ReferenceMark(id=str(t.get("id", "")),
+                             timestamp_ms=int(t.get("timestamp_ms", 0) or 0),
+                             kind="analyzed", enabled=True)
+        if role_map.get(t.get("event_id", "")) == "scene":
+            transitions.append(mark)
+        else:
+            flares.append(mark)
+    return _SplitMarks(transitions, flares, n_generated=0, n_promoted=0,
+                       n_snapped=0, n_unsnapped_generated=0, snap_grid_counts={})
+
+
+def _song_marks_for_analyzed(uri: str, cached: dict, summary: _ProfileSummary,
+                             training_profiles: dict) -> SongMarks:
+    split = _split_analyzed(cached, training_profiles)
+    return SongMarks(uri=uri, transitions=split.transitions, flares=split.flares,
+                     provenance=summary.provenance,
+                     title=summary.title, artist=summary.artist)
+
+
 def reference_marks_for_song(uri: str) -> tuple[list[ReferenceMark], list[ReferenceMark]]:
-    """(transitions, flares) SCORING marks for ONE song from the fired copy
-    alone — no profile-directory scan. Test-bed-promoted rows are already
-    dropped here (scoring_marks): this is what /compare matches against,
-    and matching an engine against its own pushed suggestions is the one
-    thing that would make the number a lie. The page's own display list
+    """(transitions, flares) SCORING marks for ONE song — from its cached
+    analyzed triggers when it has any (the Admiral: only the analysed
+    triggers are "what the Test Bed shows and scores against" now), else
+    from the fired copy alone, exactly as before. Test-bed-promoted rows
+    are already dropped here (scoring_marks): this is what /compare
+    matches against, and matching an engine against its own pushed
+    suggestion would make the number a lie. The page's own display list
     (promoted rows included, flagged) is marks_for_song()'s."""
+    cached = _load_analyzed(uri)
+    if cached is not None:
+        split = _split_analyzed(cached, _training_profiles_raw())
+        return scoring_marks(split.transitions), scoring_marks(split.flares)
     split = _split(trigger_store.list_for_song(uri),
                    testbed_promote.promoted_trigger_ids(uri))
     return scoring_marks(split.transitions), scoring_marks(split.flares)
@@ -273,20 +417,66 @@ def reference_marks_for_song(uri: str) -> tuple[list[ReferenceMark], list[Refere
 def marks_for_song(uri: str) -> SongMarks:
     profile = _find_profile(uri)
     summary = _NO_PROFILE if profile is None else _summarize(profile)
+    cached = _load_analyzed(uri)
+    if cached is not None:
+        return _song_marks_for_analyzed(uri, cached, summary, _training_profiles_raw())
     return _song_marks(uri, trigger_store.list_for_song(uri), summary,
                        testbed_promote.promoted_trigger_ids(uri))
 
 
 def all_song_marks() -> dict[str, SongMarks]:
-    """marks_for_song() for every stored song, from ONE triggers.json read,
-    ONE profile-directory pass and ONE promotion-log read — the song list's
-    read shape. Keyed by URI in sorted order. A song whose stored triggers
-    are ALL generated stays in the listing with empty reference lists and
-    its n_generated count, so the page can say so rather than drop it."""
+    """marks_for_song() for every stored song, merged with every song that
+    has cached analyzed triggers (services/analyzed_trigger_store.py,
+    storage/analyzed_triggers/*.json) — the gap that otherwise leaves a
+    song unlisted whenever its only SPECTRA trigger_store row is the
+    analyzed cache's own track_id with no matching triggers.json entry at
+    all (his 131 songs, 2026-11).
+
+    The Admiral, verbatim: "i am done adding my own triggers. the analyzed
+    triggers are better. we should only focus on the analyzed triggers...
+    we don't need to remove the old triggers yet, but they shouldn't be
+    part of any future work." Applied to the LIST specifically:
+      - a song with analyzed triggers is listed FROM THOSE — never from
+        trigger_store, even when it also carries old rows there; the
+        analyzed set always wins for this song.
+      - a song with only trigger_store rows and at least one source==
+        "authored" row (his own old hand placements) and NO analyzed cache
+        stays listed (its audio/pin/engine status is still useful) but
+        reads as having NOTHING to review: the same empty-reference-marks
+        treatment a source=="generated"-only song already got (this
+        module's own long-standing exclusion rule, above), now extended to
+        his own old rows too, since they are no longer "work" either.
+        marks_for_song()/reference_marks_for_song() (the per-song detail
+        and /compare routes) are UNCHANGED for this case — deliberately:
+        this split is scoped to the LIST's "does this song have work to
+        review" read, not to the single-song page, which would need a
+        broader, separately-decided change to stop scoring his old marks
+        there too.
+      - a source=="generated"-only song (no authored row, no analyzed
+        cache) is UNCHANGED — still listed with n_generated and empty
+        reference marks exactly as before
+        (test_a_generated_only_song_stays_listed_with_nothing_to_compare_
+        against): there is no old authored row to clear out of that case."""
     profiles = _profile_index()
     promoted = testbed_promote.promoted_ids_by_uri()
+    training_profiles = _training_profiles_raw()
     out: dict[str, SongMarks] = {}
-    for uri, triggers in sorted(trigger_store.list_all().items()):
-        out[uri] = _song_marks(uri, triggers, profiles.get(uri, _NO_PROFILE),
-                               promoted.get(uri, set()))
-    return out
+    for track_id, cached in _analyzed_index().items():
+        uri = f"spotify:track:{track_id}"
+        out[uri] = _song_marks_for_analyzed(uri, cached, profiles.get(uri, _NO_PROFILE),
+                                            training_profiles)
+    for uri, triggers in trigger_store.list_all().items():
+        if uri in out:
+            continue  # analysed triggers already own this song's marks
+        summary = profiles.get(uri, _NO_PROFILE)
+        if any(t.source == "authored" for t in triggers):
+            split = _split(triggers, promoted.get(uri, set()))
+            out[uri] = SongMarks(uri=uri, provenance=summary.provenance,
+                                 title=summary.title, artist=summary.artist,
+                                 n_generated=split.n_generated,
+                                 n_snapped=split.n_snapped,
+                                 n_unsnapped_generated=split.n_unsnapped_generated,
+                                 snap_grid_counts=split.snap_grid_counts)
+        else:
+            out[uri] = _song_marks(uri, triggers, summary, promoted.get(uri, set()))
+    return dict(sorted(out.items()))

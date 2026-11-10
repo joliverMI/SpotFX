@@ -776,11 +776,27 @@ def test_every_song_change_clears_the_plan_and_the_held_colour():
 
 def test_the_events_the_page_shows_are_the_events_the_clock_fires():
     """The page builds the list for any song; the clock builds it from what it
-    is about to fire. The same show must give the same list."""
+    is about to fire. For a song with NO old (source=="authored") triggers the
+    two must still agree exactly.
+
+    Scoped to an all-"generated" show deliberately: song_event_moments now
+    builds its candidates/mode from a song's non-authored triggers only (the
+    Admiral: old triggers "shouldn't be part of any future work"), so once a
+    show carries an authored row the preview and the clock are allowed to
+    diverge on it — see song_event_moments's own docstring, and
+    test_word_colours_are_the_same_with_or_without_his_old_triggers below for
+    that divergence proven deliberate."""
     class M:
         trigger_id, timestamp_ms, generator_key, snap_grid, snap_moved_ms = "af", 7_000, "k", None, None
         intensity = 0.5
-    triggers = _show()
+    triggers = [
+        _trig(4_000, FireSceneAction(intensity=0.5), tid="s1", source="generated"),
+        _trig(6_000, FireResponseAction(event_class="flare", intensity=0.5), tid="f1", source="generated"),
+        _trig(8_000, SelectColorSetAction(set_id="blue"), tid="c1", source="generated"),
+        _trig(10_000, FireSceneUpdateAction(intensity=0.5), tid="u1", source="generated"),
+        _trig(12_000, FireResponseAction(event_class="drop", intensity=0.5), tid="d1", source="generated"),
+        _trig(14_000, FireSceneAction(intensity=0.5), tid="g1", source="generated"),
+    ]
     rec = Rec()
     engine = _engine(triggers, rec, hits=[_hit(1_000)], plan=_Plan(flares=[M()]))
     seen: list = []
@@ -801,6 +817,36 @@ def test_the_events_the_page_shows_are_the_events_the_clock_fires():
     key = lambda e: (e.id, e.kind, e.ms, e.can_carry)
     assert sorted(map(key, seen[-1])) == sorted(map(key, from_page))
     assert {e.kind for e in from_page} == {le.KIND_DROP, le.KIND_SCENE, le.KIND_FLARE}
+
+
+def test_word_colours_are_the_same_with_or_without_his_old_triggers():
+    """The Admiral, verbatim: "i am done adding my own triggers. the
+    analyzed triggers are better. we should only focus on the analyzed
+    triggers... they shouldn't be part of any future work, including this."
+    song_event_moments (word colours) must give the SAME moments for a song
+    whether or not it also carries his old source=="authored" rows."""
+    class M:
+        trigger_id, timestamp_ms, generator_key, snap_grid, snap_moved_ms = "af", 7_000, "k", None, None
+        intensity = 0.5
+    generated_only = [
+        _trig(14_000, FireSceneAction(intensity=0.5), tid="g1", source="generated"),
+    ]
+    # Deliberately no drop/lull/charge row here: drop-SEQUENCE DETECTION
+    # (_drop_view) still reads the full stored list unchanged (scoped out of
+    # this fix, see song_event_moments's own docstring), so adding one would
+    # test that instead of the word-colour independence this test is for.
+    with_old_triggers = generated_only + [
+        _scene_trig(4_000, tid="s1"),
+        _flare_trig(6_000, tid="f1"),
+    ]
+    rec = Rec()
+    plan = _Plan(flares=[M()])
+    bare = _engine(generated_only, rec, hits=[_hit(1_000)], plan=plan, mode="triggers_only")
+    with_old = _engine(with_old_triggers, Rec(), hits=[_hit(1_000)], plan=plan, mode="triggers_only")
+
+    key = lambda e: (e.id, e.kind, e.ms, e.can_carry)
+    assert sorted(map(key, bare.song_event_moments(URI))) == \
+        sorted(map(key, with_old.song_event_moments(URI)))
 
 
 # ── 4. the colour paths, real response engine ───────────────────────────────

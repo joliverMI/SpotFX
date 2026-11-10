@@ -60,6 +60,10 @@ def _seed_librosa(scfg):
 
 
 def test_songs_and_marks_roundtrip():
+    """The song LIST no longer counts his old authored triggers as "work
+    to review" (the Admiral: only analysed triggers are future work), so
+    n_transitions/n_flares read 0 here — but /marks (the per-song page)
+    is unchanged and still shows them."""
     from spectra import config as scfg
     _write_trigger(URI, 10000, "fire_scene")
     _write_trigger(URI, 5000, "fire_response", event_class="flare")
@@ -68,8 +72,8 @@ def test_songs_and_marks_roundtrip():
     songs = client.get("/api/testbed/songs").json()
     assert any(s["uri"] == URI for s in songs)
     row = next(s for s in songs if s["uri"] == URI)
-    assert row["n_transitions"] == 1
-    assert row["n_flares"] == 1
+    assert row["n_transitions"] == 0
+    assert row["n_flares"] == 0
 
     marks = client.get(f"/api/testbed/marks?uri={URI}").json()
     assert [m["timestamp_ms"] for m in marks["transitions"]] == [10000]
@@ -443,7 +447,9 @@ def test_generated_only_song_is_listed_with_no_reference_marks():
     assert rows[generated_only]["n_transitions"] == 0
     assert rows[generated_only]["n_flares"] == 0
     assert rows[generated_only]["n_generated"] == 2
-    assert rows[URI]["n_transitions"] == 1
+    # URI's one trigger is an old authored row with no analyzed cache — the
+    # listing no longer counts it as work to review either.
+    assert rows[URI]["n_transitions"] == 0
     assert rows[URI]["n_generated"] == 0
 
     marks = client.get(f"/api/testbed/marks?uri={generated_only}").json()
@@ -522,9 +528,12 @@ def test_a_pushed_mark_is_shown_flagged_and_kept_out_of_compare(monkeypatch):
     assert by_id[pushed_id]["promoted"] is True
     assert [m["promoted"] for m in marks["transitions"] if m["id"] != pushed_id] == [False]
 
+    # Old authored rows (including a promoted one — testbed_promote lands
+    # it source=="authored") are no longer "work to review" in the LIST;
+    # /compare below (unchanged) still scores against them via marks_for_song.
     rows = {s["uri"]: s for s in client.get("/api/testbed/songs").json()}
-    assert rows[URI]["n_promoted"] == 1
-    assert rows[URI]["n_transitions"] == 2
+    assert rows[URI]["n_promoted"] == 0
+    assert rows[URI]["n_transitions"] == 0
 
     # librosa's only interior section boundary is at 10000 — exactly where
     # the pushed mark sits. Counting it would report a perfect match.

@@ -897,6 +897,19 @@ def _isolated_intensity_scale(tmp_path, monkeypatch):
     analysis_reader._index_built = False
 
 
+@pytest.fixture(autouse=True)
+def _isolated_analyzed_triggers(tmp_path, monkeypatch):
+    """config.ANALYZED_TRIGGERS_DIR is a read-only spot-effects storage
+    dir (services/analyzed_trigger_store.py's cache, one file per
+    track_id) that spectra/services/testbed_marks.py globs over for the
+    whole corpus. Repoint it to an empty tmp_path so a test never sweeps
+    the real, possibly-large library of cached analyzed triggers — same
+    class of risk as TRAINING_PROFILES_FILE/AUDIO_SHAPES_DIR above.
+    Autouse so no individual test needs to know this exists."""
+    from spectra import config as scfg
+    monkeypatch.setattr(scfg, "ANALYZED_TRIGGERS_DIR", tmp_path / "analyzed_triggers")
+
+
 @pytest.fixture()
 def ambient_env(tmp_path, monkeypatch, fresh_ledfx_client):
     """Ambient discovery against the recorded live topology: category file on
