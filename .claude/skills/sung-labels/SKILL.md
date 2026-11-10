@@ -2,14 +2,16 @@
 name: sung-labels
 description: >
   Sung labels, Claude's colour meanings and a song's word matches (lyrics
-  plan step 3, PR #499): spectra/services/sung_labels.py, lyric_matches.py,
-  lyric_reading.py, color_meanings.py, colour_words.py and claude_text.py;
-  the /sung-labels correction page; the Test Bed's Sung words lane and Word
-  matches row; and Sonic's lyrics domain (spectra/services/lyric_console.py).
-  Load before touching any of these files, before adding a sung-label/
-  reading setting or route, or before a report shaped like "a word isn't
-  matching / a re-draft wiped his edits / Sonic can't read or change the
-  sung labels / the weak-match threshold doesn't do anything."
+  plan step 3, PR #499), AND word colours and imprints (lyrics plan step
+  4, PR #504): spectra/services/sung_labels.py, lyric_matches.py,
+  lyric_reading.py, color_meanings.py, colour_words.py, claude_text.py and
+  lyric_events.py; the /sung-labels correction page; the Test Bed's Sung
+  words lane, Word matches row and Word actions row; and Sonic's lyrics
+  domain (spectra/services/lyric_console.py). Load before touching any of
+  these files, before adding a sung-label/reading/word-colour setting or
+  route, or before a report shaped like "a word isn't matching / a
+  re-draft wiped his edits / Sonic can't read or change the sung labels or
+  word colours / the weak-match threshold doesn't do anything."
 ---
 
 # Sung labels, colour meanings and word matches
@@ -28,8 +30,8 @@ ON** (`spectra/services/lyric_events.py`, off for every show; its own docs are
 writes to the show; the only reader is that module, lazily, off the event loop,
 so starting the show still pulls in none of these (`tests/test_lyric_reading.py`'s
 fresh-interpreter test, mirrored for the Sonic domain in
-`tests/test_lyric_console.py`). Sonic does not read or change word colours yet;
-that coverage is still owed.
+`tests/test_lyric_console.py`). Sonic's own reach over the switch, its tuning
+and a preview of what each word would do is the "Sonic reach" section below.
 
 ## The shape, cold
 
@@ -79,13 +81,21 @@ Built as the coverage follow-up this skill exists to record. Load
   effect's name + label count, kind-filterable — call this first to get
   the exact name the other ops expect), `get_sung_labels` (one named
   target's labels, plus meanings for a colour set), `get_lyric_matches`
-  (one song's matches — `song` omitted means whatever is playing now).
+  (one song's matches — `song` omitted means whatever is playing now),
+  `get_lyric_event_settings` (whether word colours are on for a song, the
+  energy cut-off/minimum gap/imprint window, and how many shows have it
+  on), `preview_lyric_events` (what each matched word would do — fire,
+  imprint on a nearby drop/scene change/flare, or nothing and why; the
+  exact plan the Test Bed's Word actions row shows).
 - **Writes, no confirmation needed**: `edit_sung_label` (add/remove one
   word on a target's labels or, colour-set-only, things/moods/places),
   `add_lyric_match`/`delete_lyric_match`/`restore_lyric_matches` (a match
   is named by its PHRASE TEXT, disambiguated by `label` or `occurrence`
   when the same phrase repeats — never by its internal id), turning
-  `auto_read` OFF, and changing `weak_match_threshold` alone.
+  `auto_read` OFF, changing `weak_match_threshold` alone, turning a show's
+  word colours OFF, and changing the energy cut-off/minimum gap/imprint
+  window (`set_lyric_event_settings` — shared by every show, so it is
+  never the per-show "newly lets it act" write).
 - **Writes that ASK FIRST, every single call** (not just the first — the
   absorb_console/drop_console in-process confirm/redeem shape, no HTTP hop
   since these modules live in SPECTRA's own process): `draft_colour_
@@ -96,7 +106,29 @@ Built as the coverage follow-up this skill exists to record. Load
   lyrics` (Claude spend, one song). Turning `auto_read` ON also asks first
   — it is the one write here that newly spends his Claude allowance
   continuously with nobody pressing anything, the same test
-  `absorb_console.py`'s own settings asks apply.
+  `absorb_console.py`'s own settings asks apply. `set_lyric_event_show`
+  turning a show's word colours ON asks first the same way (NOT the
+  "every single call" shape — once he's said yes for a show, it's done;
+  turning it off again needs no confirmation either): it is what lets a
+  matched word start changing his room's colours while that song plays.
+- **`preview_lyric_events` GOES OVER HTTP, DELIBERATELY, UNLIKE EVERY OTHER
+  OP HERE.** It needs the exact same answer the Test Bed's Word actions
+  row shows — including which drop/scene change/flare a word imprints on
+  — which needs `TriggerEngine.song_event_moments`'s own event
+  candidates. Reaching that by import would pull `lyric_console.py` into
+  the whole live engine stack (`engine.py`/`scene_response.py`/
+  `drift_conductor.py`/`fx_executor.py`) this module's own "NO LIGHT
+  OUTPUT, NO TRIGGER WIRING" boundary exists to keep it out of — so
+  instead it calls the real route (`GET /api/testbed/lyric-events`)
+  through `lyric_console.http`, SPECTRA's own HTTP layer calling itself
+  (`root.mount("/spectra", create_app())` in `spectra/app.py` means even
+  SPECTRA's own port answers under `/spectra/...`; `settings_agent.
+  dispatch_url()` is the existing precedent for this same self-loopback,
+  as opposed to `lock_console.py`'s call to the separate ROOT spotfx
+  process). Tests replace `http` with a fake backed by a real `TestClient`
+  over the real router (`lock_console.py`'s own test precedent, see
+  `lyric_events_route` in `tests/test_lyric_console.py`) — never a socket,
+  live or otherwise.
 - **A SONG IS A SEARCH, NOT A `resolve_name` CANDIDATE DUMP.** His library
   can hold hundreds of analysed songs, so `_resolve_song` caps a clean
   miss's `known_names` fallback (`SONG_CANDIDATES_SHOWN`) rather than
@@ -120,15 +152,19 @@ Built as the coverage follow-up this skill exists to record. Load
 ## Files
 
 - `spectra/models/lyric_labels.py` — every stored shape (`SungLabelStore`,
-  `SongMatches`, `Reading`, `ClaudeGuess`, `HisMatch`).
+  `SongMatches`, `Reading`, `ClaudeGuess`, `HisMatch`, `LyricEventStore`,
+  `LyricEventSettings`, `LyricShowState`).
 - `spectra/services/{sung_labels,lyric_matches,lyric_reading,color_meanings,
-  colour_words,claude_text}.py` — the mechanism (see each module's own
-  docstring).
-- `spectra/api/{sung_labels,lyric_matches}.py` — the page's own routes.
+  colour_words,claude_text,lyric_events}.py` — the mechanism (see each
+  module's own docstring).
+- `spectra/api/{sung_labels,lyric_matches,lyric_events}.py` — the page's
+  own routes (the last one is the Test Bed's Word actions row, and the
+  route `preview_lyric_events` below calls over HTTP).
 - `spectra/web/src/sunglabels/{SungLabelsPage.tsx,sungLabels.ts}` — the
   correction page.
-- `spectra/web/src/testbed/` — the Sung words lane and Word matches row
-  (`TestbedLaneBar.tsx`/`TestbedPage.tsx`).
+- `spectra/web/src/testbed/` — the Sung words lane, Word matches row and
+  Word actions row (`TestbedLaneBar.tsx`/`TestbedPage.tsx`/
+  `lyricEvents.ts`).
 - `spectra/services/lyric_console.py` — Sonic's `lyrics` domain, wired into
   `spectra/services/settings_agent.py`'s `_DOMAIN_OP_DICTS`/
   `ALL_OPERATIONS`, with its MCP wrappers in `settings_mcp_server.py`.
@@ -136,15 +172,20 @@ Built as the coverage follow-up this skill exists to record. Load
 ## Specs
 
 `tests/test_sung_labels.py`, `tests/test_lyric_reading.py`,
-`tests/test_lyric_console.py` (the Sonic domain — round trips, the
-ask-first flow for both Claude-spending ops and the auto_read on/off
-asymmetry, the import boundary), `tests/test_scene_console.py::
+`tests/test_lyric_events.py`, `tests/test_lyric_console.py` (the Sonic
+domain — round trips, the ask-first flow for both Claude-spending ops and
+the auto_read/word-colours-show on/off asymmetry, the import boundary
+proof, and `lyric_events_route` — the real-`TestClient`-backed fixture
+`preview_lyric_events`'s own tests use instead of a live socket),
+`tests/test_scene_console.py::
 test_dispatch_recognizes_exactly_the_declared_operation_set` (the
 exhaustive merged-dispatch proof — update its hand-imported domain list
 when a domain is ADDED, not just when an op is added to an existing one),
 `tests/test_settings_agent_cli.py::
 test_the_lyrics_domain_widening_parses_from_its_structured_tool_result`
 (the CLI/MCP manifest widening — every "current manifest" synthetic
-fixture's `tools` array needed the 11 new tool names added, per the
-sonic-ops skill's own step 7). Help: `sung-labels-reading` (updated with
-the threshold and Sonic reach) in `spectra/web/src/help/helpContent.ts`.
+fixture's `tools` array needed the new tool names added, per the
+sonic-ops skill's own step 7, each time this domain widens). Help:
+`sung-labels-reading` (the threshold and Sonic reach) and
+`testbed-word-colours` (the switch/tuning/preview Sonic reach) in
+`spectra/web/src/help/helpContent.ts`.

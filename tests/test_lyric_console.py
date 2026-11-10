@@ -1,9 +1,13 @@
 """Sonic's lyrics domain (spectra/services/lyric_console.py): the sung
-labels, Claude's colour meanings, a song's word matches, and the automatic
-reader's own switch and weak-match threshold — the Sonic coverage
-follow-up for PR #499. Reached through spectra.services.settings_agent's
-real dispatch boundary, same convention as tests/test_drop_console.py; no
-HTTP, no light, Claude always a stub."""
+labels, Claude's colour meanings, a song's word matches and the automatic
+reader's own switch and weak-match threshold (PR #499's own Sonic coverage
+follow-up), plus word colours and imprints' per-show switch, tuning and
+preview (PR #504's own follow-up). Reached through
+spectra.services.settings_agent's real dispatch boundary, same convention
+as tests/test_drop_console.py; no live process, no light, Claude always a
+stub. preview_lyric_events is the one op that goes over HTTP (the module
+docstring's own reasoning) — its own tests wire `lyric_console.http` to a
+real TestClient over the real router, never a socket."""
 from __future__ import annotations
 
 import asyncio
@@ -365,6 +369,153 @@ def test_read_song_lyrics_refuses_when_claude_is_not_set_up(monkeypatch):
     assert out["status"] == "rejected"
 
 
+# ── word colours and imprints: the per-show switch, tuning and preview ──
+
+def test_get_lyric_event_settings_reads_the_switch_and_the_tuning():
+    out = _run("get_lyric_event_settings", song=STEM)
+    assert out["enabled"] is False
+    assert out["energy_cutoff"] == pytest.approx(0.5)
+    assert out["min_gap_s"] == pytest.approx(8.0)
+    assert out["imprint_window_s"] == pytest.approx(2.0)
+    assert out["n_shows_on"] == 0
+
+
+def test_get_lyric_event_settings_defaults_to_whatever_is_playing(monkeypatch):
+    from spectra.services import show_arms
+    monkeypatch.setattr(show_arms, "current_uri", lambda: URI)
+    out = _run("get_lyric_event_settings")
+    assert out["song"] == STEM
+
+
+def test_turning_word_colours_on_needs_his_yes_first():
+    from spectra.services import lyric_events
+    first = _run("set_lyric_event_show", enabled=True, song=STEM)
+    assert first["status"] == "needs_confirmation"
+    assert lyric_events.enabled(URI) is False     # nothing happened yet
+
+    wrong = _run("set_lyric_event_show", enabled=True, song=STEM, confirm_id="not-a-real-id")
+    assert wrong["status"] == "rejected"
+    assert lyric_events.enabled(URI) is False
+
+    second = _run("set_lyric_event_show", enabled=True, song=STEM,
+                  confirm_id=first["confirm_id"])
+    assert second["status"] == "applied"
+    assert lyric_events.enabled(URI) is True
+
+
+def test_a_show_confirm_id_is_single_use():
+    from spectra.services import lyric_events
+    first = _run("set_lyric_event_show", enabled=True, song=STEM)
+    _run("set_lyric_event_show", enabled=True, song=STEM, confirm_id=first["confirm_id"])
+    lyric_events.set_show(URI, False)               # back off, no confirm needed that way
+    replay = _run("set_lyric_event_show", enabled=True, song=STEM,
+                  confirm_id=first["confirm_id"])
+    assert replay["status"] == "rejected"
+    assert lyric_events.enabled(URI) is False
+
+
+def test_turning_word_colours_off_applies_at_once_no_confirm():
+    from spectra.services import lyric_events
+    lyric_events.set_show(URI, True)
+    out = _run("set_lyric_event_show", enabled=False, song=STEM)
+    assert out["status"] == "applied"
+    assert lyric_events.enabled(URI) is False
+
+
+def test_set_lyric_event_show_requires_a_real_boolean():
+    out = _run("set_lyric_event_show", enabled="yes", song=STEM)
+    assert out["status"] == "rejected"
+
+
+def test_set_lyric_event_settings_changes_the_three_values():
+    from spectra.services import lyric_events
+    out = _run("set_lyric_event_settings", energy_cutoff=0.7, min_gap_s=5.0,
+               imprint_window_s=3.0)
+    assert out["status"] == "applied"
+    settings = lyric_events.settings()
+    assert settings.energy_cutoff == pytest.approx(0.7)
+    assert settings.min_gap_s == pytest.approx(5.0)
+    assert settings.imprint_window_s == pytest.approx(3.0)
+
+
+def test_set_lyric_event_settings_only_changes_what_is_named():
+    from spectra.services import lyric_events
+    _run("set_lyric_event_settings", energy_cutoff=0.7)
+    settings = lyric_events.settings()
+    assert settings.energy_cutoff == pytest.approx(0.7)
+    assert settings.min_gap_s == pytest.approx(8.0)
+    assert settings.imprint_window_s == pytest.approx(2.0)
+
+
+def test_set_lyric_event_settings_refuses_out_of_range_with_nothing_changed():
+    from spectra.services import lyric_events
+    out = _run("set_lyric_event_settings", energy_cutoff=5.0)
+    assert out["status"] == "rejected"
+    assert lyric_events.settings().energy_cutoff == pytest.approx(0.5)
+
+
+def test_set_lyric_event_settings_naming_nothing_to_change_is_refused():
+    out = _run("set_lyric_event_settings")
+    assert out["status"] == "rejected"
+
+
+@pytest.fixture
+def lyric_events_route(monkeypatch):
+    """preview_lyric_events reaches the real Test Bed route (spectra/api/
+    lyric_events.py) through `lyric_console.http` — here wired to a real
+    TestClient over the real router, in-process, same precedent as
+    tests/test_lock_console.py's own `root` fixture. No socket, no live
+    process, ever."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from spectra.api import lyric_events as lyric_events_api
+    app = FastAPI()
+    app.include_router(lyric_events_api.router)
+    client = TestClient(app)
+
+    async def fake_http(method, path, *, params=None):
+        return client.request(method, path, params=params)
+
+    monkeypatch.setattr(lyric_console, "http", fake_http)
+    return client
+
+
+def test_preview_lyric_events_shows_the_plan_for_a_song_with_no_matches(lyric_events_route):
+    out = _run("preview_lyric_events", song=STEM)
+    assert out["song"] == STEM
+    assert out["enabled"] is False
+    assert out["actions"] == []
+
+
+def test_preview_lyric_events_reflects_the_switch(lyric_events_route):
+    from spectra.services import lyric_events
+    lyric_events.set_show(URI, True)
+    out = _run("preview_lyric_events", song=STEM)
+    assert out["enabled"] is True
+
+
+def test_preview_lyric_events_defaults_to_whatever_is_playing(lyric_events_route, monkeypatch):
+    from spectra.services import show_arms
+    monkeypatch.setattr(show_arms, "current_uri", lambda: URI)
+    out = _run("preview_lyric_events")
+    assert out["uri"] == URI
+
+
+def test_preview_lyric_events_refuses_a_song_with_no_timeline(monkeypatch):
+    from spectra.services import show_arms
+    monkeypatch.setattr(show_arms, "current_uri", lambda: None)
+    out = _run("preview_lyric_events")
+    assert out["status"] == "rejected"
+
+
+def test_preview_lyric_events_is_a_stated_rejection_when_the_app_is_unreachable(monkeypatch):
+    async def down(*a, **k):
+        raise ConnectionError("connection refused")
+    monkeypatch.setattr(lyric_console, "http", down)
+    out = _run("preview_lyric_events", song=STEM)
+    assert out["status"] == "rejected" and "did not answer" in out["reason"]
+
+
 # ── nothing here writes light ───────────────────────────────────────────
 
 #: Every handler called directly (never through settings_agent._dispatch,
@@ -393,6 +544,8 @@ _NO_LIGHT_DRIVER = textwrap.dedent('''
     scfg.PROFILES_DIR = tmp / "profiles"
     scfg.SUNG_LABELS_FILE = tmp / "sung_labels.json"
     scfg.LYRIC_MATCHES_DIR = tmp / "lyric_matches"
+    scfg.LYRIC_EVENTS_FILE = tmp / "lyric_events.json"
+    scfg.ROOM_CONTROLS_FILE = tmp / "room_controls.json"
     scfg.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
     scfg.AUDIO_SHAPES_DIR.mkdir(parents=True, exist_ok=True)
     analysis_reader._shape_index.clear()
@@ -436,6 +589,20 @@ _NO_LIGHT_DRIVER = textwrap.dedent('''
     first = run("read_song_lyrics", song=STEM)
     run("read_song_lyrics", song=STEM, confirm_id=first["confirm_id"])
 
+    run("get_lyric_event_settings", song=STEM)
+    run("set_lyric_event_settings", min_gap_s=5.0)
+
+    # preview_lyric_events goes over HTTP (lyric_console.http), never an
+    # import of the engine stack — stubbed here so calling it still proves
+    # the import boundary without this driver dialing 127.0.0.1 at all.
+    async def no_http(*a, **k):
+        raise ConnectionError("no real socket in this driver")
+    lyric_console.http = no_http
+    run("preview_lyric_events", song=STEM)
+
+    first = run("set_lyric_event_show", enabled=True, song=STEM)
+    run("set_lyric_event_show", enabled=True, song=STEM, confirm_id=first["confirm_id"])
+
     forbidden = ["fx_seam", "engine", "trigger_engine", "scene_response", "scene_compiler",
                 "scene_sequencer", "drift_conductor", "fx_executor", "live_host",
                 "show_actions"]
@@ -450,7 +617,10 @@ def test_lyric_console_operations_never_reach_a_light_writing_module():
     dynamic import could satisfy without proving anything. A fresh
     interpreter calls every handler (driving the ask/confirm dance for the
     ones that need it) and reports which, if any, light-writing module
-    ended up loaded as a side effect."""
+    ended up loaded as a side effect. preview_lyric_events's own `http` is
+    stubbed to raise rather than dial out, so this driver proves the
+    import boundary without ever touching a socket — the real HTTP path is
+    proven separately, against a real TestClient, in the tests above."""
     proc = subprocess.run([sys.executable, "-c", _NO_LIGHT_DRIVER],
                           cwd=os.fspath(scfg.REPO_ROOT), capture_output=True, text=True,
                           timeout=90)

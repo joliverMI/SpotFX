@@ -1,27 +1,51 @@
 """THE LYRICS DOMAIN — Sonic's reach over the sung labels and word matches
-built in lyrics plan step 3 (PR #499): what a colour set or effect answers
-to when it is sung, Claude's drafted colour meanings, one song's matched
-words, and the automatic reader's own switch and weak-match threshold.
-spectra/services/sung_labels.py, lyric_matches.py, lyric_reading.py and
-color_meanings.py are the binding statements for the mechanism; this
-module only exposes it, through the exact same write paths the
-/sung-labels page and the test bed's Sung words lane already use — never
-a second one.
+built in lyrics plan step 3 (PR #499), AND word colours and imprints from
+lyrics plan step 4 (PR #504): what a colour set or effect answers to when
+it is sung, Claude's drafted colour meanings, one song's matched words,
+the automatic reader's own switch and weak-match threshold, and — the
+step-4 follow-up this module was still missing — the per-show word-colour
+switch, its three tuning settings, and a preview of what each word would
+do. spectra/services/sung_labels.py, lyric_matches.py, lyric_reading.py,
+color_meanings.py and lyric_events.py are the binding statements for the
+mechanism; this module only exposes it, through the exact same write
+paths the /sung-labels page, the test bed's Sung words lane and its Word
+actions row already use — never a second one.
 
 Per the Admiral's standing Sonic coverage protocol (2026-10-06, "add
 protocols to make those after all changes ... adding and updating skills
 as a final step"): this feature shipped without any Sonic operation, and
-this module is that follow-up.
+this module is that follow-up (both the step-3 one and, now, step-4's).
 
 NO LIGHT OUTPUT, NO TRIGGER WIRING. Every handler here reaches only
 sung_labels / lyric_matches / lyric_reading / color_meanings / colour_words
-/ claude_text / analysis_reader / name_resolve — the same boundary those
-modules' own tests already hold (tests/test_lyric_reading.py's
+/ claude_text / analysis_reader / name_resolve / lyric_events — the same
+boundary those modules' own tests already hold (tests/test_lyric_reading.py's
 test_nothing_in_the_show_can_reach_the_label_or_match_modules and
 test_the_label_and_match_modules_import_nothing_that_can_write_light). The
-one exception is a read of the currently-playing track's URI
-(show_arms.current_uri — a plain status read, never a write), used only
-so "read this song" can default to whatever is playing.
+one exception is a read of the currently-playing track's URI (show_arms.
+current_uri — a plain status read, never a write), used only so "read this
+song" can default to whatever is playing.
+
+preview_lyric_events ("what would each word do") needs the SAME answer the
+Test Bed's own Word actions row shows (TriggerEngine.preview_lyric_events,
+spectra/api/lyric_events.py) — including an imprint on a nearby drop, scene
+change/update or flare, which needs that engine's own event candidates.
+Reaching it by import would pull in the whole engine stack this module is
+built to stay out of. So it goes over HTTP instead, the same shape lock_
+console.py/absorb_console.py/jukebox_console.py already use for a domain
+that has to answer through a process boundary — except here the "other
+side" is THIS SAME PROCESS'S own HTTP layer (SPECTRA mounts itself under
+"/spectra" even on its own port, `root.mount("/spectra", create_app())` in
+spectra/app.py; `settings_agent.dispatch_url()` is the existing precedent
+for a SPECTRA-to-itself loopback call, as opposed to lock_console's call to
+the ROOT spotfx process). lyric_console.py itself still imports nothing
+from engine.py/scene_response.py/drift_conductor.py/fx_executor.py/
+trigger_engine.py — the GET just asks the already-running app to answer
+through the one mechanism (test_lyric_console.py's import-boundary test
+proves it). `http` below is the injectable transport seam, same convention
+as the other HTTP domains: tests replace it with a fake backed by a REAL
+TestClient over the real router (lock_console's own test precedent),
+never a live network call.
 
 OPAQUE IDS ARE OFF-LIMITS, as elsewhere (force_scene_*'s own precedent): a
 colour set, an effect and a song are all reached by NAME through
@@ -53,9 +77,14 @@ first; turning it off, or changing only the weak-match threshold, applies
 at once. draft_colour_meanings and read_song_lyrics ALWAYS ask — every
 call spends his Claude allowance, not just the first one, so there is no
 "newly lets it act" distinction to make; absorb_console's start_absorb
-(a consequential act repeated every call) is the matching precedent. An
-id is single-use, expires, and is refused if what he was asked has since
-changed.
+(a consequential act repeated every call) is the matching precedent.
+set_lyric_event_show turning a show's word colours ON is the same "newly
+lets it act" shape as turning auto_read on: it is what lets a matched word
+start changing the room's colours while that song plays, so it asks first;
+turning it OFF, and changing only the energy cut-off / minimum gap /
+imprint window (shared by every show, not a per-show act), apply at once.
+An id is single-use, expires, and is refused if what he was asked has
+since changed.
 
 WHAT STAYS OFF-LIMITS, DELIBERATELY: the automatic reader's own pacing
 constants (lyric_reading.SWEEP_POLL_S / READ_GAP_S / LABELS_QUIET_S /
@@ -64,11 +93,14 @@ them to him either, so there is nothing here to widen. Deleting a colour
 set or an effect's registration is not reached from here (that is the
 Colours page / the effect registry, same as every other domain's own
 "creation and deletion of the underlying thing stays where it already
-was" rule).
+was" rule). The transition-time range (FAST_TRANSITION_MS/SLOW_TRANSITION_MS/
+FAST_AT_ENERGY in lyric_events.py) is likewise a pair of named constants,
+not one of the three stored settings — nothing here widens that either.
 """
 from __future__ import annotations
 
 import json as _json
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -76,8 +108,8 @@ from typing import Any, Callable, Optional
 
 from spectra.models.lyric_labels import TargetRef
 from spectra.services import (analysis_reader, claude_text, color_meanings, colour_words,
-                              lyric_matches, lyric_reading, lyrics_timeline, name_resolve,
-                              sung_labels)
+                              lyric_events, lyric_matches, lyric_reading, lyrics_timeline,
+                              name_resolve, sung_labels)
 from spectra.services.sonic_ops import SonicOperation
 
 TARGET_KINDS = ("color_set", "effect")
@@ -102,6 +134,38 @@ class _Ask:
 _PENDING: dict[str, _Ask] = {}
 #: injectable for tests
 _clock: Callable[[], float] = time.monotonic
+
+
+# ── the one HTTP seam: this process's own Test Bed route ───────────────────
+#: preview_lyric_events's own transport (see the module docstring's "preview_
+#: lyric_events" section for why this is HTTP rather than an import).
+
+LYRIC_EVENTS_HTTP_TIMEOUT_S = 10.0
+
+
+def _base_url() -> str:
+    port = int(os.getenv("SPECTRA_PORT", "8010"))
+    return f"http://127.0.0.1:{port}/spectra"
+
+
+async def _http(method: str, path: str, *, params: Optional[dict] = None):
+    """One request to THIS process's own HTTP layer — never the live engine
+    stack by import. Injectable for tests (no live access from tests, ever):
+    replace `http` with a fake of the same shape, backed by a real TestClient
+    over the real router (lock_console.py's own test precedent), never a
+    real socket."""
+    import httpx
+    async with httpx.AsyncClient(timeout=LYRIC_EVENTS_HTTP_TIMEOUT_S) as client:
+        return await client.request(method, f"{_base_url()}{path}", params=params)
+
+
+#: injectable for tests
+http = _http
+
+
+def _unreachable(exc: Exception) -> dict:
+    return {"status": "rejected",
+            "reason": f"the SPECTRA app's own Test Bed route did not answer: {exc}"}
 
 
 def _fingerprint(op: str, args: dict, state: dict) -> str:
@@ -546,6 +610,91 @@ async def _op_read_song_lyrics(song: Optional[str] = None,
     return _applied(data, song=name, summary=summary)
 
 
+# ── word colours and imprints: the per-show switch, tuning and preview ─────
+
+def _op_get_lyric_event_settings(song: Optional[str] = None) -> dict:
+    uri, rejection = _resolve_song(song)
+    if rejection:
+        return rejection
+    try:
+        tuning = lyric_events.settings()
+        on = lyric_events.enabled(uri)
+        n_shows_on = len(lyric_events.shows_on())
+    except lyric_events.StoreUnreadable as exc:
+        return {"status": "rejected", "reason": str(exc)}
+    return {"song": _song_name(uri), "enabled": on, "n_shows_on": n_shows_on,
+            **tuning.model_dump()}
+
+
+async def _op_set_lyric_event_show(enabled: Optional[bool] = None, song: Optional[str] = None,
+                                   confirm_id: Optional[str] = None) -> dict:
+    if not isinstance(enabled, bool):
+        return {"status": "rejected", "reason": "enabled must be true or false"}
+    uri, rejection = _resolve_song(song)
+    if rejection:
+        return rejection
+    try:
+        before = lyric_events.enabled(uri)
+    except lyric_events.StoreUnreadable as exc:
+        return {"status": "rejected", "reason": str(exc)}
+    name = _song_name(uri)
+    fp = _fingerprint("set_lyric_event_show", {"uri": uri, "enabled": enabled},
+                      {"before": before})
+    if enabled and not before:
+        question = (f"Turn word colours on for {name!r}? A matched word can then change the "
+                    "room's colours while this song plays.")
+        if confirm_id is None:
+            return _ask("set_lyric_event_show", fp, question)
+        refusal = _redeem("set_lyric_event_show", fp, confirm_id)
+        if refusal:
+            return refusal
+    elif isinstance(confirm_id, str):
+        _PENDING.pop(confirm_id, None)      # moot now; still single-use
+    try:
+        lyric_events.set_show(uri, enabled)
+    except lyric_events.StoreUnreadable as exc:
+        return {"status": "rejected", "reason": str(exc)}
+    return {"status": "applied", "song": name, "old": before, "new": enabled,
+            "summary": f"Word colours for {name!r}: {_onoff(before)} → {_onoff(enabled)}."}
+
+
+async def _op_set_lyric_event_settings(energy_cutoff: Optional[float] = None,
+                                       min_gap_s: Optional[float] = None,
+                                       imprint_window_s: Optional[float] = None) -> dict:
+    if energy_cutoff is None and min_gap_s is None and imprint_window_s is None:
+        return {"status": "rejected",
+                "reason": "name at least one setting to change: energy_cutoff, min_gap_s or "
+                          "imprint_window_s"}
+    try:
+        before = lyric_events.settings()
+        after = lyric_events.update_settings(energy_cutoff=energy_cutoff, min_gap_s=min_gap_s,
+                                             imprint_window_s=imprint_window_s)
+    except lyric_events.StoreUnreadable as exc:
+        return {"status": "rejected", "reason": str(exc)}
+    except ValueError as exc:
+        return {"status": "rejected", "reason": str(exc)}
+    bits = []
+    for key, label in (("energy_cutoff", "energy cut-off"), ("min_gap_s", "minimum gap"),
+                       ("imprint_window_s", "imprint window")):
+        old, new = getattr(before, key), getattr(after, key)
+        if old != new:
+            bits.append(f"{label}: {old} → {new}")
+    return {"status": "applied", "old": before.model_dump(), "new": after.model_dump(),
+            "summary": ("; ".join(bits) + "." if bits else "Nothing changed.")}
+
+
+async def _op_preview_lyric_events(song: Optional[str] = None) -> dict:
+    uri, rejection = _resolve_song(song)
+    if rejection:
+        return rejection
+    try:
+        resp = await http("GET", "/api/testbed/lyric-events", params={"uri": uri})
+        resp.raise_for_status()
+    except Exception as exc:                                # noqa: BLE001
+        return _unreachable(exc)
+    return {**resp.json(), "song": _song_name(uri)}
+
+
 # ── the declarations ─────────────────────────────────────────────────────────
 
 _CONFIRM_PROP = {"type": "string",
@@ -721,5 +870,63 @@ OPERATIONS: dict[str, SonicOperation] = {
             "properties": {"song": _SONG_PROP, "confirm_id": _CONFIRM_PROP},
             "additionalProperties": False},
         handler=_op_read_song_lyrics,
+    ),
+    "get_lyric_event_settings": SonicOperation(
+        name="get_lyric_event_settings", domain="lyrics", kind="read",
+        summary="Read whether word colours are on for a song, the energy cut-off, minimum "
+                "gap and imprint window, and how many shows have it on.",
+        instructions="song is optional (omit to mean whatever is playing now).",
+        input_schema={"type": "object", "properties": {"song": _SONG_PROP},
+                     "additionalProperties": False},
+        handler=_op_get_lyric_event_settings,
+    ),
+    "set_lyric_event_show": SonicOperation(
+        name="set_lyric_event_show", domain="lyrics", kind="write",
+        summary="Turn word colours on or off for one song's show.",
+        instructions=(
+            "enabled (true/false) and song (optional, defaults to whatever is playing). "
+            "Turning it ON needs his yes first — a matched word can then change the room's "
+            "colours while that song plays." + _INSTR_CONFIRM + " Turning it off applies at "
+            "once with no confirm_id needed."),
+        input_schema={
+            "type": "object",
+            "properties": {"enabled": {"type": "boolean"}, "song": _SONG_PROP,
+                          "confirm_id": _CONFIRM_PROP},
+            "required": ["enabled"], "additionalProperties": False},
+        handler=_op_set_lyric_event_show,
+    ),
+    "set_lyric_event_settings": SonicOperation(
+        name="set_lyric_event_settings", domain="lyrics", kind="write",
+        summary="Change the energy cut-off, minimum gap and/or imprint window word colours "
+                "use — shared by every show.",
+        instructions=(
+            "Pass energy_cutoff (0 to 1 — at or above this a word's colour is momentary, "
+            "below it the colour holds), min_gap_s (0 to 120 — the shortest distance between "
+            "two lyric events, fired or imprinted) and/or imprint_window_s (0 to 10 — how "
+            "close a word must be, either way, to a drop/scene change/flare to give it its "
+            "colour instead of firing on its own) — whichever he asked to change; an omitted "
+            "one is left exactly as it is. Applies at once, no confirm_id needed; out-of-range "
+            "is refused with nothing changed."),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "energy_cutoff": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "min_gap_s": {"type": "number", "minimum": 0.0, "maximum": 120.0},
+                "imprint_window_s": {"type": "number", "minimum": 0.0, "maximum": 10.0}},
+            "additionalProperties": False},
+        handler=_op_set_lyric_event_settings,
+    ),
+    "preview_lyric_events": SonicOperation(
+        name="preview_lyric_events", domain="lyrics", kind="read",
+        summary="Show what each matched word in a song would do — fire its own colour, "
+                "give it to a nearby drop, scene change/update or flare, or do nothing and "
+                "why — the same plan the Test Bed's Word actions row shows.",
+        instructions=(
+            "song is optional (omit to mean whatever is playing now). Works whether or not "
+            "word colours are switched on for that song — it previews the plan either way, "
+            "and the result's own enabled field says which."),
+        input_schema={"type": "object", "properties": {"song": _SONG_PROP},
+                     "additionalProperties": False},
+        handler=_op_preview_lyric_events,
     ),
 }
