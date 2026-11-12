@@ -2,11 +2,17 @@
 
 Write the plan as `report.md` in the session's data directory (outside
 this repo), with the explainer beside it. Every section below is present,
-even when one line long. He confirms the plan in chat; record his
-confirming words verbatim at the top of the file when they arrive.
+even when one line long. Publish the plan itself as a claude.ai Artifact
+(the "Review link" line below carries its URL) — he confirms FROM THAT
+ARTIFACT, in chat; record his confirming words verbatim at the top of the
+file when they arrive.
 
 ```
 # <Effect/scene> — <one-line what changes>              (plan, YYYY-MM-DD)
+
+## Review link
+<the claude.ai Artifact URL he confirms from; a local Lavish URL, if one
+exists too, is a secondary convenience only>
 
 ## His ask, verbatim
 <the sentence(s) he typed; nothing paraphrased>

@@ -41,6 +41,15 @@ quoted only where they are the ruling.
 11. **Compact UI, nothing said twice** (drop a label a swatch already
     says); icon-only, touch-friendly toggles; the live countdown box
     should participate.
+12. **He reviews from a claude.ai Artifact, not a local Lavish URL.**
+    Lavish serves on `127.0.0.1`; his tablet gets "connection refused."
+    Every explainer, every round, and the plan he confirms is published
+    as an Artifact (renders as supporting PNG/GIF files, not base64) by
+    the agent talking to him; Lavish stays optional, never the only copy.
+13. **A numeric shape param gets a full-range grid, not a 3-option row.**
+    A narrow row of hand-picked options can't surprise him the way the
+    full range can — his "0.5 is flat" assumption on STAR's `edges` only
+    broke once he saw the whole -0.7..+0.7 range rendered.
 
 ## How he answers
 
@@ -127,6 +136,21 @@ Then you ask me a series of highly targeted questions (learned and
 improved from the skill) to build a detailed plan with the visual
 comparisons you have been doing." He has an effect to improve as the
 first test of the workflow: that session's entry goes here next.
+
+### 2026-11-12 — STAR session: tablet review requirement
+He opened the STAR explainer from a local Lavish URL and got "connection
+refused" — Lavish serves on `127.0.0.1`, unreachable from his tablet. The
+fix that worked: DJ published a claude.ai Artifact with the render PNGs
+(a `star x edges` grid) as supporting files, and sent stills/GIFs
+straight into chat. Promoted to a standing preference (§12 above) and
+into the skill files in this same change: every explainer, every round,
+and the confirmed plan now default to an Artifact publish, with Lavish
+optional at most.
+
+Separately, his "0.5 is flat" assumption on the `edges` param only got
+corrected once he saw a full -0.7..+0.7 x 3-6 edges grid, not a narrower
+hand-picked row. Promoted to a standing preference (§13 above) and into
+`visuals.md`.
 
 ### Template for the next entry
 ```

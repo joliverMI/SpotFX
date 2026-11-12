@@ -140,6 +140,16 @@ spec), and answers in chat. Measured numbers belong beside the tiles
 (lit cells, mean brightness, frames to settle), because "too abrupt" and
 "washes out" are claims a number can check.
 
+**Every round ships as a claude.ai Artifact he can open on his tablet or
+phone, not a local Lavish session.** Lavish serves on `127.0.0.1`, which
+his tablet cannot reach ("connection refused" — the STAR session,
+2026-11-12, `learnings.md`); a local Lavish session is optional, at most,
+alongside the Artifact, never the only way he can see a round. Scouts
+build the HTML page and the render PNG/GIF files; the agent talking to
+him (DJ/firstmate) is the one who publishes — scouts never address him
+and cannot publish to him directly. See `visuals.md`'s artifact
+constraints for what that means for the scout's output.
+
 ### 5. The plan document
 
 When the frontier is empty, write the plan (`plan-template.md`): his
@@ -147,9 +157,10 @@ verbatim ask, the decisions in his words, what is built (files,
 params, scene data, migrations), what is NOT built, the acceptance checks
 (offline measurements the build must reproduce, tests), how HE will judge
 it in the room (which song, which scene, what to watch for, how to undo),
-and the open defaults. Put it in front of him and get an explicit
-confirmation before any build is dispatched. A plan he has not confirmed
-is a draft.
+and the open defaults. Publish the plan itself as a claude.ai Artifact
+too (the template's "Review link" line carries its URL) and get his
+explicit confirmation FROM THAT ARTIFACT before any build is dispatched.
+A plan he has not confirmed is a draft.
 
 ### 6. The build
 
