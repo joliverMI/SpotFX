@@ -217,7 +217,7 @@ def _recording_engine(executor):
     responder = ResponseEngine(
         conductor=conductor, executor=executor, rng=Random(5), clock=clock,
         sequencer_config=lambda: SequencerConfig(), curve_profiles=lambda: {},
-        eligible_sets=lambda sc: {}, room_load=lambda: room_box[0],
+        eligible_sets=lambda sc, intensity: {}, room_load=lambda: room_box[0],
         room_save=lambda st: room_box.__setitem__(0, st))
     return conductor, responder
 

@@ -242,7 +242,7 @@ def test_write_point_3_flare_color_jump(mode, expect, tmp_path):
     responder = ResponseEngine(
         conductor=conductor, executor=executor, rng=Random(7),
         sequencer_config=lambda: seq_config, curve_profiles=lambda: {},
-        eligible_sets=lambda sc: {"set-black": 10.0},
+        eligible_sets=lambda sc, intensity: {"set-black": 10.0},
         room_load=lambda: cj.RoomColorState(), room_save=lambda st: None,
         room_controls=lambda: rc.RoomControlState(
             display_mode=mode, display_light_bg_color="#7800be"))

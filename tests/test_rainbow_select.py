@@ -111,6 +111,32 @@ def test_custom_rainbow_limit_is_honored():
     assert "single-set" not in eligible
 
 
+# ── wired into scene_response._default_eligible_sets (the flare colour
+#    jump pool) — owner report 2026-11-11: rainbow sets kept appearing on
+#    flares even at low Energy, because this pool bypassed the gate ─────────
+
+def test_flare_pool_excludes_rainbow_at_low_intensity():
+    from spectra.services.scene_response import ResponseEngine
+    scene_store.save(_scene("s1"))
+    _write_cards(_set("rainbow-set", is_rainbow=True), _set("single-set"))
+    save_room_controls(RoomControlState())   # rainbow_select_limit default 0.9
+    scene = _scene("s1")
+    eligible = ResponseEngine._default_eligible_sets(scene, 0.5)   # <= 0.9
+    assert "single-set" in eligible
+    assert "rainbow-set" not in eligible
+
+
+def test_flare_pool_includes_only_rainbow_at_high_intensity():
+    from spectra.services.scene_response import ResponseEngine
+    scene_store.save(_scene("s1"))
+    _write_cards(_set("rainbow-set", is_rainbow=True), _set("single-set"))
+    save_room_controls(RoomControlState(rainbow_select_limit=0.9))
+    scene = _scene("s1")
+    eligible = ResponseEngine._default_eligible_sets(scene, 0.95)   # > 0.9
+    assert "rainbow-set" in eligible
+    assert "single-set" not in eligible
+
+
 def test_groups_never_become_candidates_here_regardless_of_is_rainbow():
     from spectra.services.scene_sequencer import SceneSequencer
     from spectra.services.color_sets import GroupMember

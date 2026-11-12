@@ -1224,7 +1224,7 @@ class ResponseEngine:
         genre_bucket: Callable[[], Optional[str]] | None = None,
         sequencer_config: Callable[[], Any] | None = None,
         curve_profiles: Callable[[], dict] | None = None,
-        eligible_sets: Callable[[SceneV2], dict[str, Optional[float]]] | None = None,
+        eligible_sets: Callable[[SceneV2, float], dict[str, Optional[float]]] | None = None,
         set_card: Callable[[str], Any] | None = None,
         room_load: Callable[[], color_journey.RoomColorState] | None = None,
         room_save: Callable[[color_journey.RoomColorState], None] | None = None,
@@ -3897,7 +3897,7 @@ class ResponseEngine:
             from spectra.services import color_wheel
             eligible = {forced.id: color_wheel.wheel_position(forced).position_deg}
         else:
-            eligible = self._eligible_sets(scene)
+            eligible = self._eligible_sets(scene, intensity)
             curves = self._curve_profiles()
             wheel_profile = (curves.get(config.wheel_travel_curve)
                              if config.wheel_travel_curve else None)
@@ -4007,8 +4007,10 @@ class ResponseEngine:
         return sequencer_store.load_curves()
 
     @staticmethod
-    def _default_eligible_sets(scene: SceneV2) -> dict[str, Optional[float]]:
-        from spectra.services import color_sets, color_wheel
+    def _default_eligible_sets(scene: SceneV2, intensity: float) -> dict[str, Optional[float]]:
+        from spectra.services import color_sets, color_wheel, rainbow_select
+        from spectra.services.room_controls import load_room_controls
+        limit = load_room_controls().rainbow_select_limit
         out: dict[str, Optional[float]] = {}
         for card in color_sets.list_all():
             if card.kind != "set" or not scene.accepts_color_set(card):
@@ -4018,10 +4020,14 @@ class ResponseEngine:
             # AUTOMATIC pick, so a disabled set is dropped from its pool
             # too. Checked HERE specifically — this pool is a separate
             # function from the sequencer's own (it deliberately applies
-            # neither mode_availability nor rainbow_select), so "the
-            # family is covered" would have been the wrong assumption
-            # (the three-overlay-bypass lesson, docs/SPECTRA_SPEC.md §86).
+            # mode_availability, never applied here — out of scope for
+            # the rainbow-limit fix — but DOES now apply rainbow_select,
+            # owner ask 2026-11-11: flare colour jumps were bypassing the
+            # rainbow limit entirely, the three-overlay-bypass lesson,
+            # docs/SPECTRA_SPEC.md §86).
             if getattr(card, "disabled", False):
+                continue
+            if not rainbow_select.eligible(card.is_rainbow, intensity, limit):
                 continue
             out[card.id] = color_wheel.wheel_position(card).position_deg
         return out

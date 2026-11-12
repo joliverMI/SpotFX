@@ -86,7 +86,7 @@ def _conductor_and_responder(clock, *, room=None, set_positions=None):
     responder = ResponseEngine(
         conductor=conductor, executor=executor, rng=Random(5),
         clock=lambda: clock.now, sequencer_config=lambda: seq_config,
-        curve_profiles=lambda: {}, eligible_sets=lambda sc: dict(positions),
+        curve_profiles=lambda: {}, eligible_sets=lambda sc, intensity: dict(positions),
         room_load=lambda: room_box[0], room_save=lambda st: room_box.__setitem__(0, st))
     return executor, conductor, responder, room_box
 
