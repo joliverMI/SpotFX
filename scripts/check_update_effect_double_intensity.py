@@ -118,7 +118,7 @@ def _engine(clock):
         clock=lambda: clock.now,
         sequencer_config=lambda: SequencerConfig(),
         curve_profiles=lambda: {},
-        eligible_sets=lambda sc: {},
+        eligible_sets=lambda sc, intensity: {},
         room_load=lambda: cj.RoomColorState(),
         room_save=lambda st: None)
     return executor, conductor, responder

@@ -4019,12 +4019,12 @@ class ResponseEngine:
             # ColorSetCard.disabled): a flare's colour jump is an
             # AUTOMATIC pick, so a disabled set is dropped from its pool
             # too. Checked HERE specifically — this pool is a separate
-            # function from the sequencer's own (it deliberately applies
-            # mode_availability, never applied here — out of scope for
-            # the rainbow-limit fix — but DOES now apply rainbow_select,
-            # owner ask 2026-11-11: flare colour jumps were bypassing the
-            # rainbow limit entirely, the three-overlay-bypass lesson,
-            # docs/SPECTRA_SPEC.md §86).
+            # function from the sequencer's own (it deliberately does NOT
+            # apply mode_availability, never applied here — out of scope
+            # for the rainbow-limit fix — but DOES now apply
+            # rainbow_select, owner ask 2026-11-11: flare colour jumps
+            # were bypassing the rainbow limit entirely, the
+            # three-overlay-bypass lesson, docs/SPECTRA_SPEC.md §86).
             if getattr(card, "disabled", False):
                 continue
             if not rainbow_select.eligible(card.is_rainbow, intensity, limit):
