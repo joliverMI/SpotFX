@@ -117,42 +117,72 @@ function lyrics(uri: string) {
 // WORD COLOURS (lyrics plan step 4): what each matched word would do, the
 // shape GET /api/testbed/lyric-events returns — one word imprinting on the
 // scene change at 8 s (haloed in its colour on the Word events row and the
-// lane's guide lines), one firing on its own, one too weak to do anything,
-// and one naming a flare that cannot carry colour.
+// lane's guide lines), one firing on its own, one sitting out this play
+// (THE ROLL, 2026-11-12), and one naming a flare that cannot carry colour.
+// The song is "playing", so the plan is this play's roll; a kept roll and a
+// sample play are kept in memory, so the page's own presses change it.
 const WORD_EVENTS = [
   { id: 'analysed-scene:k1', kind: 'scene', ms: 8000, label: 'scene change', can_carry: true, why_not: null },
   // on an emphasized word, so a test can read that a word and a flare with
   // the same time share an x
   { id: 'analysed-flare:k7', kind: 'flare', ms: alignedWord.ms, label: 'flare', can_carry: false, why_not: 'no colour jump' },
 ];
+let keptSeed: number | null = null;
+const PLAY_SEED = 0x51c3a7f;
+const pinsByMatch: Record<string, 'always' | 'never'> = {};
 function wordAction(over: Record<string, unknown>) {
+  const strength = (over.strength as number | undefined) ?? 0.9;
+  const matchId = (over.match_id as string | undefined) ?? 'g1';
+  const pin = pinsByMatch[matchId] ?? null;
+  const chance = pin === 'always' ? 1 : pin === 'never' ? 0 : strength;
   return {
     key: '0-0', first_word: 0, last_word: 0, phrase: 'red', label: 'red', ms: 7600, end_ms: 7900,
-    source: 'claude', strength: 0.9, set_names: ['Blood Red'], set_ids: ['red1'], swatch: '#c81e1e',
+    source: 'claude', strength, match_id: matchId, pin, chance, draw: 0.31, won: true,
+    chance_words: pin === 'always' ? 'Pinned to play every time.' : pin === 'never' ? 'Pinned to never play.'
+      : `Plays on about ${Math.round(chance * 100)}% of plays (Claude's confidence).`,
+    set_names: ['Blood Red'], set_ids: ['red1'], swatch: '#c81e1e',
     verdict: 'imprint', why: null, words: 'Gives its colour to the scene change at 0:08.0 (+0.4 s from the word).',
     energy: 0.3, momentary: false, transition_ms: 1800, blocked_by: null, event: WORD_EVENTS[0], ...over,
   };
 }
-function lyricEvents(uri: string) {
+function roll(uri: string, sample: number | null, actions: { won: boolean | null }[]) {
+  const playing = uri === CLEAN;
+  const seed = playing ? PLAY_SEED : sample ?? keptSeed;
+  const state = playing ? 'playing' : sample != null ? 'sample' : keptSeed != null ? 'kept' : 'none';
+  return {
+    state, seed, tag: seed == null ? null : (seed & 0xffff).toString(16).padStart(4, '0'),
+    started_ms: playing ? Date.now() - 95_000 : null, kept: false, kept_seed: keptSeed, playing,
+    n_words: actions.length, n_won: state === 'none' ? 0 : actions.filter((a) => a.won).length,
+  };
+}
+function lyricEvents(uri: string, sample: number | null) {
   if (uri === NONE || uri === STALE) {
     return { uri, status: 'none', note: 'No sung words.', clock_flagged: false, enabled: false,
-             settings: { energy_cutoff: 0.5, min_gap_s: 8, imprint_window_s: 2 }, n_events: 0, shows_on: 0, actions: [] };
+             settings: { energy_cutoff: 0.5, min_gap_s: 8, imprint_window_s: 2 }, n_events: 0, shows_on: 0,
+             roll: roll(uri, null, []), actions: [] };
   }
+  const actions = lyricActions();
   return {
-    uri, status: 'ok', note: null, clock_flagged: uri === SLIP, enabled: false,
-    settings: { energy_cutoff: 0.5, min_gap_s: 8, imprint_window_s: 2 }, n_events: 2, shows_on: 0,
-    actions: [
-      wordAction({}),
+    uri, status: 'ok', note: null, clock_flagged: uri === SLIP, enabled: true,
+    settings: { energy_cutoff: 0.5, min_gap_s: 8, imprint_window_s: 2 }, n_events: 2, shows_on: 1,
+    roll: roll(uri, sample, actions), actions,
+  };
+}
+function lyricActions() {
+  return [
+      wordAction({ strength: 0.91 }),
       wordAction({ key: '40-40', first_word: 40, last_word: 40, phrase: 'blue', label: 'blue', ms: 25_000, end_ms: 25_400,
+                   match_id: 'g2', strength: 0.84,
                    set_names: ['Deep Blue'], set_ids: ['blue1'], swatch: '#1e40c8', verdict: 'fire', event: null,
                    words: 'Fires on its own: low energy (0.30), so it holds until the next scene change or matched word, changing over 1.8 s.' }),
       wordAction({ key: '60-60', first_word: 60, last_word: 60, phrase: 'dull', label: 'dull', ms: 33_000, end_ms: 33_300,
-                   strength: 0.4, verdict: 'nothing', why: 'weak_match', event: null, words: 'A weak match, so it fires nothing.' }),
+                   match_id: 'g3', strength: 0.35, draw: 0.62, won: false, verdict: 'nothing', why: 'sat_out', event: null,
+                   words: 'Sits out this play: its chance is 35% and it did not come up this time.' }),
       wordAction({ key: '70-70', first_word: 70, last_word: 70, phrase: 'gold', label: 'gold', ms: alignedWord.ms - 200, end_ms: alignedWord.ms + 100,
+                   match_id: 'g4', strength: 0.75,
                    set_names: ['Gold'], set_ids: ['gold1'], swatch: '#d9a441', verdict: 'nothing', why: 'event_cannot_carry',
                    event: WORD_EVENTS[1], words: 'The flare cannot carry colour (no colour jump), so nothing fires.' }),
-    ],
-  };
+  ];
 }
 
 function engineMarks(uri: string, engine: string, kind: string, sensitivity: number) {
@@ -178,6 +208,7 @@ const TARGETS = {
   fish: { kind: 'effect', id: 'fish', name: 'Fish', swatch: null },
 };
 interface M { id: string; source: 'claude' | 'his'; first_word: number; last_word: number; phrase: string; label: string; confidence: number | null; why: string; target: typeof TARGETS.red }
+
 const matchWords = FIXTURE?.words ?? WORDS;
 const redAt = matchWords.findIndex((w) => w.word === 'red');
 const azulAt = matchWords.findIndex((w) => w.word === 'azul');
@@ -188,13 +219,15 @@ let matchRows: M[] = [
 let deleted = 0;
 let nextHis = 1;
 const matchPayload = (uri: string) => ({
-  uri, status: 'ok', note: null, state: 'fresh', weak_match_threshold: 0.6, claude: CLAUDE,
-  reading: { at_ms: Date.now() - 180_000, model: 'harness-model', n_weak: 2, n_refused: 0 },
+  uri, status: 'ok', note: null, state: 'fresh', claude: CLAUDE,
+  reading: { at_ms: Date.now() - 180_000, model: 'harness-model', n_refused: 0 },
   n_his: matchRows.filter((m) => m.source === 'his').length, n_deleted: deleted, unplaced: [],
+  n_pinned: Object.keys(pinsByMatch).length,
   matches: uri === CLEAN ? matchRows.map((m) => ({
     id: m.id, source: m.source, provenance: m.source === 'his' ? 'his' : 'claude_guess',
     first_word: m.first_word, last_word: m.last_word, phrase: m.phrase, label: m.label,
-    confidence: m.confidence, why: m.why, targets: [m.target], n_targets: 1, targets_missing: 0,
+    confidence: m.confidence, why: m.why, pin: pinsByMatch[m.id] ?? null,
+    targets: [m.target], n_targets: 1, targets_missing: 0,
     ms: matchWords[m.first_word].ms, end_ms: matchWords[m.last_word].end_ms,
     score: Math.max(...matchWords.slice(m.first_word, m.last_word + 1).map((w) => w.score)),
   })) : [],
@@ -227,8 +260,18 @@ const realFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                      phrase: span.map((w) => w.word).join(' '), label: target.name, confidence: null, why: '', target });
     return json(matchPayload(body.uri));
   }
+  if (url.includes('/lyric-matches/pin')) {
+    if (body.pin === 'chance') delete pinsByMatch[body.id]; else pinsByMatch[body.id] = body.pin;
+    return json(matchPayload(body.uri));
+  }
   if (url.includes('/lyric-matches')) return json(matchPayload(uri));
-  if (url.includes('/testbed/lyric-events')) return json(lyricEvents(uri));
+  if (url.includes('/testbed/lyric-events/keep')) {
+    keptSeed = body.seed ?? null;
+    return json({ uri: body.uri, kept_seed: keptSeed });
+  }
+  if (url.includes('/testbed/lyric-events')) {
+    return json(lyricEvents(uri, q.get('sample') == null ? null : Number(q.get('sample'))));
+  }
   if (url.includes('/testbed/songs')) return json(SONGS);
   if (url.includes('/testbed/marks')) return json(marks(uri));
   if (url.includes('/testbed/waveform')) {

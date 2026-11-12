@@ -80,7 +80,6 @@ class SettingsBody(BaseModel):
     # A true partial update: an omitted field is left exactly as it was,
     # the same contract room_controls' own PUT holds (AGENTS.md).
     auto_read: Optional[bool] = None
-    weak_match_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 
 @router.put("/settings")
@@ -88,8 +87,6 @@ async def put_settings(body: SettingsBody):
     def _run() -> dict:
         if body.auto_read is not None:
             sung_labels.set_auto_read(body.auto_read)
-        if body.weak_match_threshold is not None:
-            sung_labels.set_weak_match_threshold(body.weak_match_threshold)
         return _page()
     try:
         return await asyncio.to_thread(_run)

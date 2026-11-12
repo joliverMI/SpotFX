@@ -8,10 +8,13 @@ spectra/services/lyric_matches.py is the binding statement.
   POST /api/testbed/lyric-matches/add           he matches words himself
   POST /api/testbed/lyric-matches/delete        he takes a match off
   POST /api/testbed/lyric-matches/restore-deleted?uri=  brings his deleted ones back
+  PUT  /api/testbed/lyric-matches/pin           Always / Chance / Never on a match
 """
 from __future__ import annotations
 
 import asyncio
+
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -76,6 +79,25 @@ class DeleteBody(BaseModel):
 async def delete_match(body: DeleteBody):
     try:
         data = await asyncio.to_thread(lyric_matches.delete, body.uri, body.id)
+    except lyric_matches.MatchRefused as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except sung_labels.StoreUnreadable as exc:
+        raise HTTPException(500, str(exc)) from exc
+    return {**data, "claude": claude_text.availability()}
+
+
+class PinBody(BaseModel):
+    uri: str = Field(min_length=1)
+    id: str = Field(min_length=1)
+    pin: Literal["always", "chance", "never"]
+
+
+@router.put("/pin")
+async def pin_match(body: PinBody):
+    """How often this match plays: always, never, or by chance (its own
+    confidence). Kept on the match's words, through a re-read."""
+    try:
+        data = await asyncio.to_thread(lyric_matches.set_pin, body.uri, body.id, body.pin)
     except lyric_matches.MatchRefused as exc:
         raise HTTPException(404, str(exc)) from exc
     except sung_labels.StoreUnreadable as exc:

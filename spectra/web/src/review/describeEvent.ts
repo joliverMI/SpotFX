@@ -163,6 +163,14 @@ export function describeEvent(item: ReviewEventItem): string {
       return `Colour set: ${name}${d.via === 'analysed_cue' ? ' (analysed moment)' : ''}`;
     }
     case 'triggers': {
+      if (d.lyric && d.roll) {
+        // THE ROLL (lyric_events.py): one row per play — its number and how
+        // many of the song's matched words won it.
+        const nWon = (d.n_won as number | undefined) ?? 0;
+        const nWords = (d.n_words as number | undefined) ?? 0;
+        const how = d.kept ? ', your kept roll' : d.restored ? ', carried on after a restart' : '';
+        return `Words rolled for this play #${(d.tag as string | undefined) ?? '?'}: ${nWon} of ${nWords} play${how}`;
+      }
       if (d.lyric) {
         // WORD COLOURS (spectra/services/lyric_events.py): what a matched word
         // did in the show, or what stopped it.

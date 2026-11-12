@@ -14,6 +14,9 @@
  *      marks as guide lines, and the chip's place on a mark.
  *   4. A flagged song draws no guides and says why; a song with no usable
  *      words says which reason it is; nothing on the lane is clickable.
+ *   5. The roll (spectra/web/src/testbed/lyricEvents.ts, 2026-11-12): a chip
+ *      carries its chance, a word sitting out says so, the roll line names
+ *      the play, and the Always / Chance / Never control marks the one on.
  *
  * Run: node scripts/check_testbed_lyrics_lane.mjs
  */
@@ -37,8 +40,11 @@ const entry = `
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import LyricsLane from './spectra/web/src/testbed/components/LyricsLane';
+import PinControl from './spectra/web/src/testbed/components/PinControl';
 export * from './spectra/web/src/testbed/lyricsLane';
+export * as events from './spectra/web/src/testbed/lyricEvents';
 export function render(props) { return renderToStaticMarkup(React.createElement(LyricsLane, props)); }
+export function renderPin(props) { return renderToStaticMarkup(React.createElement(PinControl, props)); }
 `;
 const built = await esbuild.build({
   stdin: { contents: entry, resolveDir: repo, loader: 'tsx' },
@@ -159,6 +165,41 @@ console.log('§4 states');
     ok(html.includes(`the ${status} sentence`) && !html.includes('testbed-lyrics-lane'),
       `"${status}" says which reason it is and draws no lane`);
   }
+}
+
+console.log('§5 the roll');
+{
+  const ev = lib.events;
+  const action = (over = {}) => ({
+    key: '1-1', first_word: 1, last_word: 1, phrase: 'gold', label: 'gold', ms: 1000, end_ms: 1300,
+    source: 'claude', strength: 0.65, match_id: 'g1', pin: null, chance: 0.65, draw: 0.2, won: true,
+    chance_words: '', set_names: ['Gold'], set_ids: ['gold'], swatch: '#d9a441', verdict: 'fire',
+    why: null, words: '', energy: 0.3, momentary: false, transition_ms: 1800, blocked_by: null, event: null,
+    ...over,
+  });
+  ok(ev.actionChipLabel(action()) === 'gold · held · 65%', 'a chip carries its chance');
+  ok(ev.actionChipLabel(action({ source: 'his', strength: 1, chance: 1 })) === 'gold · held',
+    'a word that always plays carries none');
+  ok(ev.chanceTag(action({ pin: 'never', chance: 0 })) === 'never', 'a Never word says so');
+  const out = action({ verdict: 'nothing', why: 'sat_out', won: false, draw: 0.8 });
+  ok(ev.satOut(out) && !ev.satOut(action()), 'a word sitting out is told apart');
+  ok(ev.summaryWords([action(), out]) === '1 word fires alone, 0 words imprint, 0 words do nothing, 1 word sits out this play',
+    'the summary counts the words sitting out on their own');
+  ok(ev.summaryWords([action()]).endsWith('0 words do nothing'), 'and says nothing of them when there are none');
+  const roll = { state: 'playing', seed: 0x3a7f, tag: '3a7f', started_ms: 0, kept: false, kept_seed: null,
+                 playing: true, n_words: 4, n_won: 3 };
+  ok(ev.rollWords(roll) === 'This play #3a7f: 3 of 4 words play.', 'the roll line names this play');
+  ok(ev.rollWords({ ...roll, kept_seed: 0x3a7f }).includes('your kept roll #3a7f'), 'and says when it is kept');
+  ok(ev.rollWords({ ...roll, state: 'sample', playing: false }).startsWith('Sample play #3a7f'), 'a sample says it is one');
+  ok(ev.rollWords({ ...roll, state: 'none', seed: null, tag: null }).includes('as if every word plays'),
+    'no play: every word as if it plays');
+  const n = ev.samplePlayNumber(() => 0.999999999);
+  ok(Number.isInteger(n) && n >= 0 && n <= 0xffffffff, 'a sample number is a 32-bit play number');
+  const pin = lib.renderPin({ pin: null, chance: 0.35, busy: false, onPin: () => {} });
+  ok(pin.includes('Chance 35%') && (pin.match(/aria-pressed="true"/g) ?? []).length === 1
+    && /aria-pressed="true"[^>]*>Chance 35%/.test(pin), 'the pin control is on Chance, with its share');
+  const never = lib.renderPin({ pin: 'never', chance: 0.35, busy: false, onPin: () => {} });
+  ok(/aria-pressed="true"[^>]*>Never/.test(never), 'and on Never when pinned');
 }
 
 if (failures) {

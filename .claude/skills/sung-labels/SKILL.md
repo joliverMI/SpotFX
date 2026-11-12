@@ -3,7 +3,8 @@ name: sung-labels
 description: >
   Sung labels, Claude's colour meanings and a song's word matches (lyrics
   plan step 3, PR #499), AND word colours and imprints (lyrics plan step
-  4, PR #504): spectra/services/sung_labels.py, lyric_matches.py,
+  4, PR #504), and THE ROLL (word chance per play, 2026-11-12):
+  spectra/services/sung_labels.py, lyric_matches.py,
   lyric_reading.py, color_meanings.py, colour_words.py, claude_text.py and
   lyric_events.py; the /sung-labels correction page; the Test Bed's Sung
   words lane, Word matches row and Word actions row; and Sonic's lyrics
@@ -11,7 +12,8 @@ description: >
   these files, before adding a sung-label/reading/word-colour setting or
   route, or before a report shaped like "a word isn't matching / a
   re-draft wiped his edits / Sonic can't read or change the sung labels or
-  word colours / the weak-match threshold doesn't do anything."
+  word colours / a word never (or always) plays / every play does the same
+  thing / the kept roll or a pin didn't stick."
 ---
 
 # Sung labels, colour meanings and word matches
@@ -51,15 +53,16 @@ and a preview of what each word would do is the "Sonic reach" section below.
    really there. `claude_text.py` is the one Claude client (same account/
    model switch as Sonic, `config.lyric_agent_model()`), shared by
    `color_meanings.draft` too.
-3. **THE WEAK-MATCH THRESHOLD IS A LIVE SETTING, not a hardcoded constant**
-   (`SungLabelSettings.weak_match_threshold`, default 0.6 — matching
-   `lyric_matches.WEAK_MATCH_THRESHOLD`'s own default, the two kept in sync
-   by hand since models stay pure). `sung_labels.weak_match_threshold()`/
-   `set_weak_match_threshold()` are the getter/setter; `lyric_reading.
-   read_song()` reads the LIVE value and threads it into both
-   `build_system_prompt` and `parse_reply` (both keep an optional param
-   defaulting to the module constant, for existing direct callers/tests).
-   `lyric_matches.payload()` reports the live value too, not the constant.
+3. **THERE IS NO WEAK-MATCH THRESHOLD ANY MORE** (2026-11-12, the Admiral:
+   "no cutoff anymore"). Every guess is kept with its confidence, and the
+   confidence is the share of plays the word acts on (`lyric_events.
+   chance_for`, below). The reading prompt asks for doubtful guesses with an
+   honest low number instead of leaving them out; `parse_reply` drops only
+   rows that are not really there. `SungLabelSettings.weak_match_threshold`,
+   its getter/setter, its API field and Sonic's `weak_match_threshold`
+   argument are all gone; a stored value is ignored on load
+   (`extra="ignore"`) and dropped on the next save. Do not bring a cut-off
+   back as a setting: a "too weak" word is a word with a small chance.
 4. **A MATCH SITS ON WORDS, NEVER ON TIMES OR AN OPAQUE NAME TO SPEAK.**
    `lyric_matches.py`: `his` (his own matches) and `deleted` (guesses he
    took out) are the only writable parts; `reading` is replaced whole by
@@ -114,13 +117,52 @@ ONE plan.
   `spectra/web/harness/testbedlyrics.tsx` now mocks `/testbed/lyric-events`),
   `tests/test_lyric_events.py`'s "the highlight" section.
 
+## The roll: which words act this play (2026-11-12)
+
+`/home/javi/fleet-spotfx/data/word-chance-plan/` (report + explainer), and
+`lyric_events.py`'s "THE ROLL" docstring, which is binding. The Admiral:
+"Instead of always using a "word" effect, it should randomly be used, based
+on it's confidence ... The choice is calculated when the song is loaded",
+and "if the confidence leve is .97, it runs 97% of the time".
+
+- **`plan_play` = `roll_hits` then `plan_words`, everywhere.** The trigger
+  clock (`_refresh_lyric_plan`), the Test Bed (`preview_lyric_events`) and
+  the strip/Home join (`upcoming.with_words` → `preview_lyric_events`) all
+  roll the same play, so only this play's winners get halos and diamonds.
+  `plan_words`' own rules are untouched. Rolling BEFORE it is the point: a
+  word sitting out (`WHY_SAT_OUT`) frees its line, event and gap.
+- **`chance_for` is the one mapping** (confidence exactly; `his` → 1.0; pin
+  Always/Never → 1.0/0.0). "We might add more math to that later" — add it
+  there and nowhere else.
+- **`draw_for(seed, uri, hit)`** hashes the seed with the word's own span
+  and label: independent per word, monotone in chance, same seed = same
+  winners. Never draw from a shared RNG stream: a new match would reshuffle
+  every other word.
+- **The play** is begun lazily for a switched-on show only (an off show
+  writes nothing — the switch-off proof asserts `LYRIC_PLAYS_FILE` absent),
+  kept through pause/seek/rewind/restart, ended by a different song, by the
+  same song after `PLAY_GAP_S` away, or by a repeat wrap (needs the
+  bridge's `track_duration_ms`, wired in `engine.py`). Logged once per play
+  as `lyric:roll`.
+- **Kept roll** = `LyricShowState.kept_seed` (`keep_roll`); `set_show` must
+  keep preserving it. **Sample** = `GET ?sample=N`, page-only, never stored.
+  **Pins** = `SongMatches.pins` (`lyric_matches.set_pin`), on words + label
+  like `deleted`.
+- **UI:** the roll line, chance on each Word actions chip, dotted sat-out
+  chips and the `PinControl` live ONLY on the Test Bed's Sung words slot —
+  his rule: nothing on Home, "keep it subtle and clean". Help topic
+  `testbed-word-chance`.
+- **Proofs:** `tests/test_lyric_events.py` §7, `tests/test_lyric_reading.py`
+  (pins through a re-read, the prompt), `scripts/check_testbed_lyrics_lane.
+  mjs` §5, `scripts/render_testbed_lyrics_lane.py` (roll-1440/390 shots).
+
 ## Sonic reach (`spectra/services/lyric_console.py`, domain `lyrics`)
 
 Built as the coverage follow-up this skill exists to record. Load
 `.claude/skills/sonic-ops/SKILL.md` before changing anything here.
 
-- **Reads**: `get_lyric_reading_settings` (auto_read, weak_match_threshold,
-  Claude availability), `list_sung_label_targets` (every colour set's/
+- **Reads**: `get_lyric_reading_settings` (auto_read and Claude
+  availability), `list_sung_label_targets` (every colour set's/
   effect's name + label count, kind-filterable — call this first to get
   the exact name the other ops expect), `get_sung_labels` (one named
   target's labels, plus meanings for a colour set), `get_lyric_matches`
@@ -129,13 +171,14 @@ Built as the coverage follow-up this skill exists to record. Load
   energy cut-off/minimum gap/imprint window, and how many shows have it
   on), `preview_lyric_events` (what each matched word would do — fire,
   imprint on a nearby drop/scene change/flare, or nothing and why; the
-  exact plan the Test Bed's Word actions row shows).
+  exact plan the Test Bed's Word actions row shows, including THE ROLL:
+  `roll`, and each action's `chance`/`won`/`pin`).
 - **Writes, no confirmation needed**: `edit_sung_label` (add/remove one
   word on a target's labels or, colour-set-only, things/moods/places),
   `add_lyric_match`/`delete_lyric_match`/`restore_lyric_matches` (a match
   is named by its PHRASE TEXT, disambiguated by `label` or `occurrence`
   when the same phrase repeats — never by its internal id), turning
-  `auto_read` OFF, changing `weak_match_threshold` alone, turning a show's
+  `auto_read` OFF, turning a show's
   word colours OFF, and changing the energy cut-off/minimum gap/imprint
   window (`set_lyric_event_settings` — shared by every show, so it is
   never the per-show "newly lets it act" write).
@@ -244,6 +287,7 @@ test_the_lyrics_domain_widening_parses_from_its_structured_tool_result`
 (the CLI/MCP manifest widening — every "current manifest" synthetic
 fixture's `tools` array needed the new tool names added, per the
 sonic-ops skill's own step 7, each time this domain widens). Help:
-`sung-labels-reading` (the threshold and Sonic reach) and
+`sung-labels-reading` (no cut-off any more, and Sonic reach),
+`testbed-word-chance` (the roll, keep, sample, pins) and
 `testbed-word-colours` (the switch/tuning/preview Sonic reach) in
 `spectra/web/src/help/helpContent.ts`.

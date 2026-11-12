@@ -1,5 +1,5 @@
 """Claude's reading of a song's lyrics and his edits to it (lyrics plan step 3):
-text only, every guess checked, weak ones gone, off by default, and his edits
+text only, every guess checked, none dropped for being unsure, off by default, and his edits
 standing through a re-read and a recapture. Claude is always a stub here."""
 from __future__ import annotations
 
@@ -115,14 +115,19 @@ def test_a_good_guess_records_its_confidence_and_that_it_is_a_guess():
     assert guess["why"] == "colour named outright"
 
 
-def test_a_weak_guess_is_no_match_and_is_only_counted():
-    matches, n_weak, refused = _parse([_row(1, "azul", "blue", lyric_reading.WEAK_MATCH_THRESHOLD - 0.01)])
-    assert matches == [] and n_weak == 1 and refused == {}
+@pytest.mark.parametrize("confidence", [0.0, 0.03, 0.3, 0.59])
+def test_an_unsure_guess_is_kept_with_its_confidence(confidence):
+    """2026-11-12, the Admiral: "no cutoff anymore". Its confidence is its
+    chance of playing, so even a long shot is stored."""
+    matches, refused = _parse([_row(1, "azul", "blue", confidence)])
+    assert [m.confidence for m in matches] == [confidence] and refused == {}
 
 
-def test_a_guess_at_the_line_is_a_match():
-    matches, n_weak, _ = _parse([_row(1, "azul", "blue", lyric_reading.WEAK_MATCH_THRESHOLD)])
-    assert len(matches) == 1 and n_weak == 0
+def test_the_prompt_asks_for_doubtful_guesses_and_names_no_cutoff():
+    system = lyric_reading.build_system_prompt(sung_labels.catalogue())
+    assert "leave out anything below" not in system
+    assert "Prefer saying nothing" not in system
+    assert "share of" in system and "0.1 or less for a long shot" in system
 
 
 @pytest.mark.parametrize("row,reason", [
@@ -133,17 +138,17 @@ def test_a_guess_at_the_line_is_a_match():
     (_row(1, "azul", "blue", 1.7), lyric_reading.REFUSED_ROW),
 ])
 def test_a_guess_naming_something_that_is_not_there_is_thrown_away(row, reason):
-    matches, _, refused = _parse([row])
+    matches, refused = _parse([row])
     assert matches == [] and refused == {reason: 1}
 
 
 def test_a_guess_lands_on_every_line_that_sings_it():
-    matches, _, _ = _parse([_row(0, "red", "red")])
+    matches, _ = _parse([_row(0, "red", "red")])
     assert [m.first_word for m in matches] == [1, 8]
 
 
 def test_a_guess_is_matched_past_case_accents_and_apostrophes():
-    matches, _, _ = _parse([_row(3, "DON'T", "blue"), _row(1, "Azúl", "blue")])
+    matches, _ = _parse([_row(3, "DON'T", "blue"), _row(1, "Azúl", "blue")])
     assert {m.phrase for m in matches} == {"don't", "azul"}
 
 
@@ -179,6 +184,39 @@ def test_a_re_read_replaces_claudes_reading_and_nothing_of_his():
     assert labels == {"fish"}           # blue stays deleted, red was not offered again
     his = [m for m in payload["matches"] if m["source"] == "his"]
     assert [m["first_word"] for m in his] == [8]
+
+
+def test_a_pin_sits_on_the_words_and_survives_a_re_read():
+    """Always / Chance / Never (2026-11-12): his override of a match's chance,
+    kept apart from the reading like a deleted guess."""
+    _read([_row(1, "azul", "blue", 0.4)])
+    guess = _guesses(lyric_matches.payload(URI))[0]
+    payload = lyric_matches.set_pin(URI, guess["id"], "always")
+    assert _guesses(payload)[0]["pin"] == "always" and payload["n_pinned"] == 1
+    payload = _read([_row(1, "azul", "blue", 0.2)])
+    [again] = _guesses(payload)
+    assert again["pin"] == "always" and again["confidence"] == 0.2
+    payload = lyric_matches.set_pin(URI, again["id"], "never")
+    assert _guesses(payload)[0]["pin"] == "never" and payload["n_pinned"] == 1, "replaced, not added"
+    payload = lyric_matches.set_pin(URI, again["id"], "chance")
+    assert _guesses(payload)[0]["pin"] is None and payload["n_pinned"] == 0
+
+
+def test_a_pin_on_his_own_match_and_the_refusals():
+    lyric_matches.add(URI, 3, 3, TargetRef(kind="effect", id="fish"))
+    his = lyric_matches.payload(URI)["matches"][0]
+    assert lyric_matches.set_pin(URI, his["id"], "never")["matches"][0]["pin"] == "never"
+    with pytest.raises(lyric_matches.MatchRefused):
+        lyric_matches.set_pin(URI, "g_nothere", "never")
+    with pytest.raises(lyric_matches.MatchRefused):
+        lyric_matches.set_pin(URI, his["id"], "sometimes")
+
+
+def test_a_pin_on_another_label_is_not_this_matchs():
+    _read([_row(1, "azul", "blue")])
+    lyric_matches.set_pin(URI, _guesses(lyric_matches.payload(URI))[0]["id"], "never")
+    payload = _read([_row(1, "azul", "ocean")])
+    assert _guesses(payload)[0]["pin"] is None
 
 
 def test_the_same_words_with_a_different_label_are_a_new_guess():

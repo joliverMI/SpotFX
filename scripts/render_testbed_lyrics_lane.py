@@ -10,7 +10,11 @@ screenshot can hide:
   - printed words that overlap each other or run out of the lane;
   - a word and a flare with the same time not sharing an x;
   - a flagged song still drawing the guide lines or his two rows;
-  - a song with no words, or stale ones, not saying so.
+  - a song with no words, or stale ones, not saying so;
+  - the roll (2026-11-12): the playing song not saying which play its plan
+    is for, a chip without its chance, a word sitting out not looking it,
+    "Keep this roll" not keeping it, or the Always / Chance / Never control
+    not answering.
 
 Never touches a live service: the harness is served from the built
 `harness-dist` by a plain static server on a spare port.
@@ -37,7 +41,7 @@ from check_ui_fidelity import (  # noqa: E402
 OUT_DIR = REPO / "docs" / "evidence" / "testbed-lyrics"
 WIDTHS = (1440, 1180, 390)
 KEEP_SHOTS = {"whole-song-1440", "zoomed-30s-1440", "zoomed-8s-1440", "flagged-1440", "zoomed-30s-390",
-              "matches-1440", "matches-390"}
+              "matches-1440", "matches-390", "roll-1440", "roll-390"}
 
 ERROR_TRAP = """
 window.__pageErrors = [];
@@ -176,6 +180,56 @@ MATCH_FACTS = """(() => {
 })()"""
 
 PANEL_TEXT = "document.querySelector('.testbed-match-panel')?.textContent ?? ''"
+
+# THE ROLL: which play the Word actions are for, the chance on each chip,
+# a word sitting out this play, and the selected word's panel.
+ROLL_FACTS = """(() => {
+  const chips = [...document.querySelectorAll('.testbed-word-action:not(.tick)')];
+  const panels = [...document.querySelectorAll('.testbed-match-panel')];
+  const panel = panels[panels.length - 1];
+  const pressed = [...document.querySelectorAll('.testbed-pin button[aria-pressed="true"]')]
+    .map((b) => b.textContent);
+  const de = document.documentElement;
+  return {
+    line: document.querySelector('.testbed-roll')?.textContent ?? null,
+    chips: chips.map((c) => c.textContent),
+    // a crowded lane draws a word as a bare tick: its phrase is in its title
+    satOut: [...document.querySelectorAll('.testbed-word-action.sat-out')]
+      .map((c) => c.textContent || (c.title || '').split(' · ')[1]),
+    satOutStyle: (() => {
+      const c = document.querySelector('.testbed-word-action.sat-out');
+      return c ? getComputedStyle(c).borderTopStyle : null;
+    })(),
+    panel: panel?.textContent ?? '',
+    pins: document.querySelectorAll('.testbed-pin').length,
+    pressed,
+    pageWide: de.scrollWidth > de.clientWidth + 1,
+  };
+})()"""
+
+click_sat_out = ("(() => { const c = document.querySelector('.testbed-word-action.sat-out'); "
+                 "if (c) c.click(); return !!c; })()")
+
+
+def press_pin(label_start: str) -> str:
+    return f"""(() => {{
+  const panels = [...document.querySelectorAll('.testbed-match-panel')];
+  const b = [...panels[panels.length - 1].querySelectorAll('.testbed-pin button')]
+    .find((x) => (x.textContent || '').startsWith({label_start!r}));
+  if (b) b.click();
+  return !!b;
+}})()"""
+
+
+SLOT_CLIP = """(() => {
+  const group = document.querySelector('.testbed-lyrics-group');
+  if (!group) return null;
+  group.scrollIntoView({ block: 'start' });
+  const r = group.getBoundingClientRect();
+  // a screenshot clip is in page coordinates, not the viewport's
+  return { x: Math.max(0, r.left + window.scrollX - 8), y: Math.max(0, r.top + window.scrollY - 8),
+           width: Math.min(r.width + 16, document.documentElement.clientWidth), height: r.height + 16 };
+})()"""
 
 click_chip = "(() => { document.querySelector('.testbed-match:not(.tick)').click(); return true; })()"
 
@@ -348,6 +402,50 @@ async def run() -> int:
                 await shot(f"matches-{width}")
                 errs = await ev("window.__pageErrors")
                 check("no page errors in the matches", not errs, str(errs))
+
+                # THE ROLL (2026-11-12): this play's words, each with its chance.
+                await ev(zoom("Whole song"))
+                await settle()
+                roll = await ev(ROLL_FACTS)
+                check("the playing song says which play its plan is for",
+                      (roll["line"] or "").startswith("This play #") and "3 of 4 words play" in roll["line"],
+                      str(roll["line"]))
+                check("a chip carries its chance", any(c.endswith("· 91%") for c in roll["chips"]),
+                      str(roll["chips"]))
+                check("a word sitting out this play is drawn quieter, dotted",
+                      roll["satOut"] in (["dull · 35%"], ["dull"]) and roll["satOutStyle"] == "dotted",
+                      f"{roll['satOut']} {roll['satOutStyle']}")
+                await ev(click_sat_out)
+                await settle()
+                picked = await ev(ROLL_FACTS)
+                check("selecting it says it sits out, and how often it plays",
+                      "Sits out this play" in picked["panel"] and "35% of plays" in picked["panel"],
+                      picked["panel"])
+                check("its panel offers Always / Chance / Never, on Chance",
+                      picked["pressed"] == ["Chance 35%"], str(picked["pressed"]))
+                check("the roll adds nothing that scrolls sideways", not picked["pageWide"])
+                if shots and f"roll-{width}" in KEEP_SHOTS:
+                    clip = await ev(SLOT_CLIP)
+                    await settle()
+                    clip = await ev(SLOT_CLIP)
+                    await shoot(ws, nid, OUT_DIR / f"roll-{width}.png", clip=clip)
+                await ev(press("Keep this roll"))
+                await settle()
+                kept = await ev(ROLL_FACTS)
+                check("Keep this roll keeps it, says so, and offers to let it go",
+                      "your kept roll #3a7f" in (kept["line"] or "")
+                      and "Let it roll again" in (kept["line"] or "")
+                      and "Keep this roll" not in (kept["line"] or ""), str(kept["line"]))
+                await ev(press_pin("Always"))
+                await settle()
+                pinned = await ev(ROLL_FACTS)
+                check("pinning it Always takes", "Always" in pinned["pressed"], str(pinned["pressed"]))
+                await ev(press_pin("Chance"))
+                await settle()
+                await ev(press("Let it roll again"))
+                await settle()
+                errs = await ev("window.__pageErrors")
+                check("no page errors in the roll", not errs, str(errs))
 
                 await ev(zoom("8 s"))
                 await settle()

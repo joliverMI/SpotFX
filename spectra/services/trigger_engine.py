@@ -352,6 +352,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from dataclasses import dataclass, replace
 from random import Random
@@ -843,7 +844,8 @@ class TriggerEngine:
         # binding statement). OFF unless he turns a show on: `_lyric_on` is
         # the only thing the clock reads with the switch off. `_lyric_words`
         # reads a song's words and matches off the loop, cached per song;
-        # `_lyric_plan` is plan_words' answer, worked out here against the
+        # `_lyric_plan` is plan_play's answer (this play's roll, then
+        # plan_words), worked out here against the
         # events this tick would fire. `_lyric_imprints` maps an event's
         # trigger id to the word giving it its colour. Hooks are no-ops until
         # services/engine.py wires them (the _analysed_color reasoning).
@@ -871,6 +873,26 @@ class TriggerEngine:
         # Drops whose imprint landed at their pre-drop's fade, so the drop
         # itself does not take it again.
         self._lyric_spent: set[str] = set()
+        # THE ROLL (lyric_events.py's docstring): the play under way and the
+        # number its words were rolled with. Begun the first time a switched-
+        # on show is planned (or previewed) on the song playing, so an off show
+        # never writes anything; kept through pause, seek, rewind and a
+        # restart (`_lyric_may_restore`, the first play since SPECTRA started
+        # with no other song between); ended by a different song, by this
+        # song coming back after PLAY_GAP_S without it, and by a repeat wrap
+        # (`_track_duration_ms`, wired to the bridge by engine.py). A lock,
+        # because the Test Bed's preview reaches it from a worker thread.
+        self._lyric_play: Optional[lyric_events.Play] = None
+        self._lyric_play_lock = threading.Lock()
+        self._lyric_left_at: Optional[float] = None
+        self._lyric_first_song: Optional[str] = None
+        self._lyric_may_restore = True
+        self._lyric_play_saved_at: Optional[float] = None
+        self._lyric_roll_logged: Optional[tuple] = None
+        self._lyric_begin_play = lyric_events.begin_play
+        self._lyric_save_play = lyric_events.save_play
+        self._lyric_kept = lyric_events.kept_seed
+        self._track_duration_ms: Callable[[], Optional[int]] = lambda: None
 
         # LOOKAHEAD (2026-08-19): trigger_id -> _PinnedPick, or trigger_id ->
         # None for "already attempted once, the draw came back empty" (the
@@ -964,6 +986,7 @@ class TriggerEngine:
             self._forget_switches()
             self._drop_history = drop_switch.DropHistory()
             self._forget_lyric_plan(release_hold=True)
+            self._note_song_for_play(uri)
         if uri is None or uri == self._last_transition_uri:
             return
         armed = self._last_transition_uri is not None
@@ -1135,6 +1158,7 @@ class TriggerEngine:
             self._lyric_spent.clear()
             # a sequence approached again is decided again
             self._forget_switches()
+            self._note_wrap_for_play(last, position_ms)
             return []  # rewind/seek back: silently rearmed via the line above
         # Cues run BEFORE the stored triggers in the same tick, so a set that
         # forces a scene or a colour governs the scene change landing on
@@ -2037,19 +2061,104 @@ class TriggerEngine:
         words = self._lyric_words
         if words is None or words.uri != uri:
             return
+        play = self._lyric_play_now(uri)
+        self._keep_play_written(play, now)
         tuning = self._lyric_tuning()
-        key = (uri, id(words), tuning.energy_cutoff, tuning.min_gap_s,
-               tuning.imprint_window_s)
+        key = (uri, id(words), play.seed, play.started_ms, tuning.energy_cutoff,
+               tuning.min_gap_s, tuning.imprint_window_s)
         if (key == self._lyric_planned and self._lyric_planned_at is not None
                 and now - self._lyric_planned_at < LYRIC_REPLAN_S):
             return
         self._lyric_planned, self._lyric_planned_at = key, now
         events = self._lyric_event_moments(candidates, triggers, mode, windows,
                                            self._seq_meta, self._flare_ids)
-        self._lyric_plan = lyric_events.plan_words(words.hits, events, tuning)
+        self._lyric_plan = lyric_events.plan_play(words.hits, events, tuning, play)
         self._lyric_imprints = {
             a.event.id: a for a in self._lyric_plan
             if a.verdict == lyric_events.VERDICT_IMPRINT and a.event is not None}
+        self._log_lyric_roll(play)
+
+    # ── the roll: one play number per play (lyric_events.py, THE ROLL) ──
+
+    def _note_song_for_play(self, uri: Optional[str]) -> None:
+        """A URI change. Going quiet (no song) keeps the play and notes
+        when; a different song ends it; the same song back after PLAY_GAP_S
+        without it ends it too. Any second song also ends the chance to carry
+        on a play written down before a restart."""
+        if uri is None:
+            self._lyric_left_at = self._clock()
+            return
+        if self._lyric_first_song is None:
+            self._lyric_first_song = uri
+        elif uri != self._lyric_first_song:
+            self._lyric_may_restore = False
+        left_at, self._lyric_left_at = self._lyric_left_at, None
+        with self._lyric_play_lock:
+            play = self._lyric_play
+            if play is None:
+                return
+            if play.uri != uri or (left_at is not None
+                                   and self._clock() - left_at >= lyric_events.PLAY_GAP_S):
+                self._lyric_play = None
+                self._lyric_may_restore = False
+
+    def _note_wrap_for_play(self, last: int, position_ms: int) -> None:
+        """A rewind. Only a repeat wrap (the end straight back to the start)
+        is a new play; every other rewind keeps it."""
+        if self._lyric_play is None:
+            return
+        try:
+            duration = self._track_duration_ms()
+        except Exception:                                # noqa: BLE001
+            duration = None
+        if lyric_events.is_repeat_wrap(last, position_ms, duration):
+            with self._lyric_play_lock:
+                self._lyric_play = None
+                self._lyric_may_restore = False
+            self._forget_lyric_plan()
+
+    def _lyric_play_now(self, uri: str) -> lyric_events.Play:
+        """The play under way for the song playing, begun now if there is
+        none. Only ever called for a switched-on show."""
+        with self._lyric_play_lock:
+            play = self._lyric_play
+            if play is not None and play.uri == uri:
+                return play
+            restore = self._lyric_may_restore and uri == self._lyric_first_song
+            self._lyric_may_restore = False
+            play = self._lyric_begin_play(uri, restore=restore)
+            self._lyric_play = play
+            self._lyric_play_saved_at = self._clock()
+            return play
+
+    def _keep_play_written(self, play: lyric_events.Play, now: float) -> None:
+        """Refresh when the play under way was last seen, at most once every
+        PLAY_SAVE_S, so a restart mid-song finds it."""
+        if (self._lyric_play_saved_at is not None
+                and now - self._lyric_play_saved_at < lyric_events.PLAY_SAVE_S):
+            return
+        self._lyric_play_saved_at = now
+        self._lyric_save_play(play)
+
+    def _log_lyric_roll(self, play: lyric_events.Play) -> None:
+        """One row on the show log per play: its number and the words that
+        won it, so a play can be told apart from the next and kept."""
+        mark = (play.uri, play.seed, play.started_ms)
+        if self._lyric_roll_logged == mark:
+            return
+        self._lyric_roll_logged = mark
+        won = [a.hit for a in self._lyric_plan if a.hit.won]
+        from spectra.services import fire_history
+        try:
+            fire_history.record_fire(
+                "triggers", "lyric:roll",
+                {"lyric": True, "roll": True, "seed": play.seed, "tag": play.tag,
+                 "kept": play.kept, "restored": play.restored,
+                 "n_words": len(self._lyric_plan), "n_won": len(won),
+                 "won": [h.phrase for h in won][:40]},
+                uri=play.uri, position_ms=self._last_position_ms)
+        except Exception:
+            logger.exception("word colours: could not write the roll to the show log")
 
     def _lyric_event_moments(self, candidates: list[SpectraTrigger],
                              triggers: list[SpectraTrigger], mode: str, windows: list,
@@ -2277,16 +2386,38 @@ class TriggerEngine:
         except Exception:
             logger.exception("word colours: could not write the show log")
 
-    def preview_lyric_events(self, uri: str) -> lyric_events.Preview:
-        """What each word of this song would do, for the Test Bed. Runs on a
-        worker thread: it reads the song's words and analysis, and touches no
-        state of the song playing now."""
+    def preview_lyric_events(self, uri: str,
+                             sample: Optional[int] = None) -> lyric_events.Preview:
+        """What each word of this song would do, for the Test Bed and the
+        song strip. Runs on a worker thread: it reads the song's words and
+        analysis, and touches no state of the song playing now except the
+        one below.
+
+        WHICH PLAY (lyric_events.py, THE ROLL). The song playing with its
+        show switched on: the play under way, begun here if the clock has not
+        yet (the same play the clock then uses, so the strip and the show
+        agree). Otherwise a sample play numbered `sample` (the Test Bed's
+        throwaway, never stored), else his kept roll, else no play: every
+        word as if it won, each with its chance."""
         words = self._lyric_load(uri)
         events = self.song_event_moments(uri) if words.hits else []
+        enabled = bool(self._lyric_on(uri))
+        playing = uri == self._uri
+        kept = self._lyric_kept(uri)
+        play: Optional[lyric_events.Play] = None
+        under_way = self._lyric_play           # one read: the clock may change it
+        if playing and enabled:
+            play = self._lyric_play_now(uri)
+        elif playing and under_way is not None and under_way.uri == uri:
+            play = under_way
+        elif sample is not None:
+            play = lyric_events.Play(uri, int(sample), source=lyric_events.ROLL_SAMPLE)
+        elif kept is not None:
+            play = lyric_events.Play(uri, kept, kept=True, source=lyric_events.ROLL_KEPT)
         return lyric_events.Preview(
-            enabled=bool(self._lyric_on(uri)), words=words,
-            actions=lyric_events.plan_words(words.hits, events, self._lyric_tuning()),
-            n_events=len(events))
+            enabled=enabled, words=words,
+            actions=lyric_events.plan_play(words.hits, events, self._lyric_tuning(), play),
+            n_events=len(events), play=play, kept_seed=kept, playing=playing)
 
     def song_event_moments(self, uri: str) -> list[lyric_events.EventMoment]:
         """The events a song would fire, built for any song. tick()'s own

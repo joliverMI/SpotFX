@@ -355,6 +355,46 @@ section is what is not obvious from it. His rulings are in
   word_colour`) so the marker and the box flash in the set that really
   landed. Words that do nothing draw nowhere outside the Test Bed. No engine
   timing change; see `.claude/skills/sung-labels/SKILL.md`'s "The highlight".
+- **THE ROLL (2026-11-12, `/home/javi/fleet-spotfx/data/word-chance-plan/`).**
+  Each play rolls which words act, once: `lyric_events.plan_play` =
+  `roll_hits` then `plan_words`, and the trigger clock, the Test Bed preview
+  and the `/api/upcoming` join all call it, so the strip, Home's box and the
+  Word events row show only this play's winners. A word's chance is
+  `chance_for` (its confidence exactly; his own matches 1.0; his pin overrides)
+  — the ONE place to change the mapping. Its draw is
+  `sha256(seed|uri|first|last|label)`: independent of every other word, so a
+  new match or a pin moves nothing else, and monotone in chance. Rolling
+  BEFORE the planner is deliberate and measured (the plan's report §2): a
+  word sitting out (`WHY_SAT_OUT`) frees its phrase, event and gap; rolling
+  after would only ever remove words, never let a crowded-out one in.
+  - **The play** (`TriggerEngine._lyric_play`, a `lyric_events.Play`) is begun
+    the first time a switched-on show plans or previews on the song playing —
+    lazily, so an off show writes nothing (`LYRIC_PLAYS_FILE` is asserted
+    absent by the switch-off proof). A different song ends it, the same song
+    back after `PLAY_GAP_S` (10 min) of no song ends it, and a repeat wrap
+    ends it (`is_repeat_wrap`: from the last 10% straight to the first 5%,
+    needing `bridge.track_duration_ms`, wired by `engine.py` onto
+    `trigger_engine._track_duration_ms`; unknown length = never a wrap).
+    Pause, seek and an ordinary rewind keep it. A restart carries it on from
+    `storage/spectra/lyric_plays.json` only for the FIRST play since start
+    with no other song between (`_lyric_may_restore`), and only when it was
+    seen less than `PLAY_GAP_S` ago (`seen_ms`, refreshed at most once a
+    minute while it plays).
+  - **Kept roll / sample.** `LyricShowState.kept_seed` (PUT
+    `/api/testbed/lyric-events/keep`) is every later play's number;
+    `set_show` preserves it. `GET ...?sample=N` rolls a throwaway play for the
+    page only (nothing stored). A song not playing with neither shows every
+    word as if it won (`roll.state == "none"`).
+  - **Pins** (`SongMatches.pins`, `WordPin`, PUT `/api/testbed/lyric-matches/
+    pin`) sit on words and a label like `deleted`, re-anchored by `anchor()`,
+    so a re-read keeps them. A cluster's pin is its leading match's, else the
+    first pinned match it stands for.
+  - **Show log:** one `lyric:roll` row per play (`seed`, `tag`, `n_won`,
+    `n_words`, `won` phrases), drawn by `describeEvent.ts`.
+  - **No weak-match cut-off any more**: the reading keeps every guess and the
+    prompt asks for honest low confidences (`lyric_reading.build_system_
+    prompt`); `SungLabelSettings.weak_match_threshold` and its Sonic/API
+    surface are gone (a stored one is ignored and dropped on next save).
 - **Sonic coverage, built.** `lyric_console.py` reads and changes the per-show
   switch and the three tuning settings (`get_lyric_event_settings`/
   `set_lyric_event_show`/`set_lyric_event_settings`), and answers "what would
@@ -369,6 +409,9 @@ section is what is not obvious from it. His rulings are in
   engine stack (`engine.py`/`scene_response.py`/`drift_conductor.py`/
   `fx_executor.py`) its own "NO LIGHT OUTPUT, NO TRIGGER WIRING" boundary keeps
   it out of. See `.claude/skills/sung-labels/SKILL.md`'s "Sonic reach" section.
+  Its payload carries the roll (`roll`, each action's `chance`/`won`/`pin`),
+  so Sonic can already say what won this play; setting a pin or keeping a
+  roll by voice is the owed follow-up (`lyric_console.py`'s docstring).
 
 ## Sung labels and word matches (lyrics plan, step 3 — off the room unless word colours are on)
 
@@ -405,12 +448,10 @@ are the Word matches row under the Sung words lane. Five things:
 protocol, 2026-10-06): `spectra/services/lyric_console.py` (domain
 `lyrics`) reads and changes sung labels/meanings, shows and edits a
 song's word matches (a match is named by its PHRASE, never its opaque
-id), and reads/changes the auto-read switch and the weak-match
-threshold — `WEAK_MATCH_THRESHOLD` is no longer a bare module constant:
-`SungLabelSettings.weak_match_threshold` (default 0.6) is a real,
-persisted setting `read_song()` reads live, so he (or Sonic) can actually
-tune the "first guess, his to tune" the module docstring always promised.
-Turning `auto_read` ON, drafting colour meanings and reading a song's
+id), and reads/changes the auto-read switch. (It also changed a
+weak-match threshold until 2026-11-12, when the Admiral removed the
+cut-off: every guess is kept and its confidence is its chance of playing —
+the roll, in the section above.) Turning `auto_read` ON, drafting colour meanings and reading a song's
 lyrics all ask first — the last two on EVERY call, since each one spends
 his Claude allowance regardless of whether it's the first. A song is
 resolved by a bounded search, not `name_resolve`'s own `known_names`

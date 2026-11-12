@@ -732,6 +732,9 @@ bridge = SpotEffectsBridge(
     on_response_event=fire_response_event,
     on_track_uri=_on_track_uri,
 )
+# Word colours' repeat wrap (lyric_events.is_repeat_wrap): a song going from
+# its end straight back to its start is a new play, which needs its length.
+trigger_engine._track_duration_ms = bridge.track_duration_ms
 
 _conductor_task: asyncio.Task | None = None
 _trigger_task: asyncio.Task | None = None

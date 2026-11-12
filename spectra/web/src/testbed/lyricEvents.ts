@@ -2,7 +2,7 @@
  * is the server half and says the rules; the same plan drives the show). Every
  * chip is placed through lyricsLane's layoutLabelRows, so it sits under the word
  * it belongs to at any zoom. */
-import type { LyricEventAction } from '../types';
+import type { LyricEventAction, LyricPin, LyricRoll } from '../types';
 import { inView, layoutLabelRows } from './lyricsLane';
 import type { LabelPlacement, LaneView } from './lyricsLane';
 
@@ -13,6 +13,24 @@ export const MIN_GAP_S = { min: 0, max: 30, step: 0.5 };
 export const IMPRINT_WINDOW_S = { min: 0, max: 5, step: 0.25 };
 
 const EVENT_WORDS: Record<string, string> = { drop: 'drop', scene: 'scene', flare: 'flare' };
+
+/** A share of plays as a page prints it. */
+export function percentWords(chance: number | null): string {
+  return chance == null ? '–' : `${Math.round(chance * 100)}%`;
+}
+
+/** The small chance a chip carries (THE ROLL, lyric_events.py): only for a
+ * word that does not play every time. */
+export function chanceTag(action: Pick<LyricEventAction, 'chance' | 'pin'>): string | null {
+  if (action.pin === 'never') return 'never';
+  if (action.chance == null || action.chance >= 1) return null;
+  return percentWords(action.chance);
+}
+
+/** A word sitting out this play: rolled, and it did not come up. */
+export function satOut(action: Pick<LyricEventAction, 'why'>): boolean {
+  return action.why === 'sat_out';
+}
 
 /** What a chip prints. */
 export function actionChipText(action: LyricEventAction): string {
@@ -25,10 +43,49 @@ export function actionChipText(action: LyricEventAction): string {
   return action.phrase;
 }
 
+/** Which play the plan shows, in one sentence. */
+export function rollWords(roll: LyricRoll): string {
+  const of = `${roll.n_won} of ${roll.n_words} ${roll.n_words === 1 ? 'word' : 'words'}`;
+  switch (roll.state) {
+    case 'playing':
+      return roll.kept || rollIsKept(roll) ? `This play, your kept roll #${roll.tag}: ${of} play.`
+        : `This play #${roll.tag}: ${of} play.`;
+    case 'kept':
+      return `Kept roll #${roll.tag}: the same ${of} play every time.`;
+    case 'sample':
+      return `Sample play #${roll.tag}: ${of} would play.`;
+    default:
+      return 'Each play rolls which words act. Shown here as if every word plays.';
+  }
+}
+
+/** Is the play shown the one he has kept? */
+export function rollIsKept(roll: LyricRoll): boolean {
+  return roll.seed != null && roll.kept_seed === roll.seed;
+}
+
+/** A fresh throwaway play number for "Sample a play" (0 to 2^32 - 1). */
+export function samplePlayNumber(random: () => number = Math.random): number {
+  return Math.floor(random() * 0x1_0000_0000) >>> 0;
+}
+
+/** The three ways a match can play, as the pin control offers them. */
+export const PIN_CHOICES: { pin: LyricPin | null; words: (chance: number | null) => string }[] = [
+  { pin: 'always', words: () => 'Always' },
+  { pin: null, words: (chance) => `Chance ${percentWords(chance)}` },
+  { pin: 'never', words: () => 'Never' },
+];
+
 /** Which marks show first when a lane is crowded: what will really happen comes
  * before a word that will do nothing. */
 function rank(action: LyricEventAction): number {
   return (action.verdict === 'nothing' ? 0 : 2) + action.strength;
+}
+
+/** The chip's full printed text, with its chance when it has one. */
+export function actionChipLabel(action: LyricEventAction): string {
+  const tag = chanceTag(action);
+  return tag ? `${actionChipText(action)} · ${tag}` : actionChipText(action);
 }
 
 export interface ShownAction {
@@ -43,7 +100,7 @@ export function layoutActions(actions: LyricEventAction[], view: LaneView,
   const placements = layoutLabelRows(
     shown.map((a) => ({
       xPx: ((Math.max(a.ms, view.startMs) - view.startMs) / span) * laneWidthPx,
-      text: actionChipText(a),
+      text: actionChipLabel(a),
       score: rank(a),
     })),
     laneWidthPx, ACTION_ROWS,
@@ -54,12 +111,14 @@ export function layoutActions(actions: LyricEventAction[], view: LaneView,
 /** The line above the chips: how many words do what. */
 export function summaryWords(actions: LyricEventAction[]): string {
   const count = (verdict: LyricEventAction['verdict']) =>
-    actions.filter((a) => a.verdict === verdict).length;
+    actions.filter((a) => a.verdict === verdict && !satOut(a)).length;
+  const out = actions.filter(satOut).length;
   const words = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   return [
     words(count('fire'), 'word fires alone', 'words fire alone'),
     words(count('imprint'), 'word imprints', 'words imprint'),
     words(count('nothing'), 'word does nothing', 'words do nothing'),
+    ...(out ? [words(out, 'word sits out this play', 'words sit out this play')] : []),
   ].join(', ');
 }
 

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fmtMsTenths } from '../../lib/time';
 import type { LyricEventAction } from '../../types';
-import { actionChipText, layoutActions } from '../lyricEvents';
+import { actionChipLabel, layoutActions, satOut } from '../lyricEvents';
 import { viewPct } from '../lyricsLane';
 import type { LaneView } from '../lyricsLane';
 
@@ -39,7 +39,7 @@ export default function LyricEventsRow({
       <div ref={setBarEl} className="testbed-lane-bar testbed-match-lane">
         {chips.map(({ action, placement }) => {
           const title = `${fmtMsTenths(action.ms)} · ${action.phrase} · ${action.words}`;
-          const classes = ['testbed-word-action', action.verdict,
+          const classes = ['testbed-word-action', action.verdict, satOut(action) ? 'sat-out' : '',
             action.key === selectedKey ? 'selected' : ''].filter(Boolean).join(' ');
           const select = () => onSelect(action.key === selectedKey ? null : action.key);
           if (!placement) {
@@ -53,7 +53,7 @@ export default function LyricEventsRow({
             <button key={action.key} type="button" className={classes}
                     style={{ left: placement.leftPx, top: 2 + placement.row * ROW_PX, maxWidth: placement.widthPx }}
                     data-ms={action.ms} title={title} onClick={select}>
-              <span className="testbed-match-text">{actionChipText(action)}</span>
+              <span className="testbed-match-text">{actionChipLabel(action)}</span>
             </button>
           );
         })}
