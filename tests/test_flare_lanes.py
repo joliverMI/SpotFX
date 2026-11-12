@@ -94,7 +94,7 @@ def _engine(clock, *, rng_seed=7):
         clock=lambda: clock.now,
         sequencer_config=lambda: SequencerConfig(),
         curve_profiles=lambda: {},
-        eligible_sets=lambda sc: {},
+        eligible_sets=lambda sc, intensity: {},
         room_load=lambda: room_box[0],
         room_save=lambda st: room_box.__setitem__(0, st))
     return executor, conductor, responder

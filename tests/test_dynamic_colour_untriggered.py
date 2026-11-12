@@ -94,7 +94,7 @@ class Rig:
         self.responses = ResponseEngine(
             conductor=self.conductor, executor=self.executor, rng=Random(5),
             sequencer_config=lambda: config, curve_profiles=lambda: {},
-            eligible_sets=lambda scene: {
+            eligible_sets=lambda scene, intensity: {
                 sid: pos for sid, pos in POSITIONS.items() if sid != "rainbow"},
             set_card=lambda sid: CARDS.get(sid),
             room_load=lambda: self.room[0],

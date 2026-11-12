@@ -595,12 +595,17 @@ rainbow_select_limit` (default 0.9, his words) — above it, automatic
 colour-set selection is restricted to `is_rainbow=True` cards only; at or
 below it, to `is_rainbow=False` ("single") cards only — a clean exclusive
 partition (`spectra/services/rainbow_select.eligible()`), never both, never
-neither. Wired into `scene_sequencer._default_eligible_sets` — the SAME one
-automatic-selection choke point `mode_availability`/`color_set_preferred`
-already reach, following that established precedent — deliberately NOT
-`drift_conductor`'s destination pool or `scene_response`'s flare colour-jump
-pool (neither of those apply the other two gates either; same documented
-scope boundary, not an oversight). A Group card is never itself a selector
+neither. Wired into `scene_sequencer._default_eligible_sets` (and
+`scene_sequencer.automatic_pool_cards`, which the drop colour change
+reuses) — the SAME one automatic-selection choke point
+`mode_availability`/`color_set_preferred` already reach, following that
+established precedent. As of 2026-11-11 (owner report: rainbow sets kept
+appearing on flares even at low Energy) `scene_response`'s flare
+colour-jump pool (`_default_eligible_sets`) applies this gate too, at the
+flare's own intensity — it still deliberately does NOT apply
+`mode_availability`/`color_set_preferred`, out of that fix's scope.
+`drift_conductor`'s destination pool remains the one pool with none of the
+three gates (checked, not an oversight). A Group card is never itself a selector
 candidate here (unchanged, pre-existing), so a Group's own `is_rainbow`
 mark has no effect on this gate — it exists for completeness/authoring
 symmetry only. UI: `RainbowToggle.tsx` on `ColorSetsPage.tsx`, next to

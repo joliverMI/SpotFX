@@ -8,13 +8,18 @@ get selected if they are above the set rainbow limit."
 
 A clean partition, not a filter that can leave BOTH kinds eligible at once:
 this is deliberate — "anything above chooses a rainbow color set" reads as
-exclusive, not merely permissive. Wired at the same one automatic-selection
-choke point mode_availability/color_set_preferred already reach
-(scene_sequencer._default_eligible_sets) — matching that precedent, this
-is NOT applied to drift_conductor's destination pool or scene_response's
-flare colour-jump pool (checked, not assumed to be covered; those two
-choke points don't apply mode_availability/preference either, for the
-same reason: out of this feature's stated scope).
+exclusive, not merely permissive. Wired at the automatic-selection choke
+point mode_availability/color_set_preferred already reach
+(scene_sequencer._default_eligible_sets, and scene_sequencer.
+automatic_pool_cards for the drop colour change) AND, since the owner's
+2026-11-11 report that rainbow sets kept appearing on flares at low
+Energy, scene_response._default_eligible_sets (the flare colour-jump
+pool) too — matching that precedent for the gate itself, but NOT for
+mode_availability/color_set_preferred, which the flare pool still does
+not apply (out of this fix's stated scope; see scene_response.py's
+_default_eligible_sets docstring/comment). It is NOT applied to
+drift_conductor's destination pool (checked, not assumed to be covered;
+out of scope for the same reason).
 """
 from __future__ import annotations
 

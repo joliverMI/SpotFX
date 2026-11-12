@@ -87,7 +87,7 @@ def _engine(clock, *, brightness_multiplier=1.0):
     responder = ResponseEngine(
         conductor=conductor, executor=executor, rng=Random(7),
         clock=lambda: clock.now, sequencer_config=lambda: seq_config,
-        curve_profiles=lambda: {}, eligible_sets=lambda sc: {},
+        curve_profiles=lambda: {}, eligible_sets=lambda sc, intensity: {},
         room_load=lambda: room_box[0],
         room_save=lambda st: room_box.__setitem__(0, st))
     return executor, conductor, responder, controls

@@ -184,7 +184,7 @@ def test_flare_colour_jump_pool_drops_a_disabled_set():
     from spectra.services.scene_response import ResponseEngine
     _write_cards(_set("keep"), _set("off", disabled=True))
     scene = _scene("s1")
-    assert set(ResponseEngine._default_eligible_sets(scene)) == {"keep"}
+    assert set(ResponseEngine._default_eligible_sets(scene, 0.5)) == {"keep"}
 
 
 def test_resolve_for_fire_mode_gated_refuses_a_disabled_set():
