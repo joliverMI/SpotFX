@@ -65,10 +65,15 @@ const estimate = [{
   time_ms: 20_000, label: 'red', score: 0.7,
   detail: { end_ms: 20_800, line: 0, features: { loud: 0.5, held: 1, beat: 0, line_end: 1, hook: 0.4 }, matched_label: null },
 }];
-const transitions = [{ id: 't', timestamp_ms: 20_000, kind: 'fire_scene', enabled: true, promoted: false }];
-const flares = [{ id: 'f', timestamp_ms: 5000, kind: 'fire_response', enabled: true, promoted: false }];
+// The engine's own word events as guide lines (TestbedLaneBar's Word events
+// row, 2026-11-12): a scene change a word imprints on, in the word's colour,
+// and a flare no word reaches.
+const guides = [
+  { id: 'analysed-scene:k', ms: 20_000, cls: 'scene', halo: '#c81e1e' },
+  { id: 'analysed-flare:k', ms: 5000, cls: 'flare', halo: null },
+];
 const lane = (over = {}) => lib.render({
-  label: 'Sung words', data, estimate, view: VIEW, metrics: null, transitions, flares, ...over,
+  label: 'Sung words', data, estimate, view: VIEW, metrics: null, guides, ...over,
 });
 
 console.log('§1 one scale');
@@ -123,7 +128,10 @@ console.log('§3 the lane');
   ok((html.match(/testbed-lyric-mark/g) ?? []).length === 1, 'only the emphasized one is marked');
   ok(html.includes('>red<') || html.includes('>red'), 'the word is printed on its mark');
   ok(html.includes('testbed-lyric-guide scene') && html.includes('testbed-lyric-guide flare'),
-    'his scene changes and flares are guide lines through it');
+    'the word events are guide lines through it');
+  ok(html.includes('testbed-lyric-guide scene worded') && html.includes('--halo:#c81e1e'),
+    'an event a word gives its colour to draws its guide in the word\'s colour');
+  ok(!html.includes('testbed-lyric-guide flare worded'), 'one no word reaches does not');
   ok(html.includes('data-ms="20000"') && (html.match(/data-ms="20000"/g) ?? []).length === 2,
     'a word and a scene change at the same time carry the same time');
   ok(!html.includes('testbed-lyric-chip'), 'no chip until a label is matched');

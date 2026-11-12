@@ -84,7 +84,9 @@ export const DEFAULT_SHAPE_BANDS: RmsBandVisibility = {
  * trigger, one of the analysed-events family, and the strip deliberately
  * draws no shape for it anyway (songStrip.ts::drawShapeMarkers). */
 export function kindShown(kind: UpcomingKind, f: KindFilter): boolean {
-  if (kind === 'scene' || kind === 'flare' || kind === 'colour') return f.analysed;
+  // a word firing alone (kind "word") rides the analysed toggle: it is a
+  // colour change on the analysed tier, not a drop and not a Light Show cue
+  if (kind === 'scene' || kind === 'flare' || kind === 'colour' || kind === 'word') return f.analysed;
   if (kind === 'charge' || kind === 'lull' || kind === 'drop') return f.drop;
   return f.lightShow;
 }

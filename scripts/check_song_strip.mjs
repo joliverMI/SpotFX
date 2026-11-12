@@ -52,7 +52,8 @@ execFileSync('npx', ['esbuild', TS, '--bundle', '--format=esm', '--platform=node
 });
 const mod = await import(js);
 const { fmtCountdown, fmtMMSS, eventLabel, pickNext, markerSizePx, markerOpacity,
-       xFraction, FINAL_STRETCH_MS, NEXT_EVENT_BOX_WIDTH, drawShapeMarkers, KIND_COLOR } = mod;
+       xFraction, FINAL_STRETCH_MS, NEXT_EVENT_BOX_WIDTH, drawShapeMarkers, KIND_COLOR,
+       wordColour, kindGlyphSvg, HALO_GAP } = mod;
 
 // THE BOUNDARY IS 99.95s, THE APPROVED MOCKUP'S OWN (`cd()`), not 60s —
 // changed in the 2026-10-14 design-fidelity pass. It is what makes
@@ -182,5 +183,59 @@ console.log('FIVE — drawShapeMarkers: same shape/colour per kind, windowed, of
 }
 
 rmSync(tmp, { recursive: true, force: true });
+console.log('SIX — word colours (data/word-effect-highlight-options, option A): halo, diamond, box glyph');
+{
+  const makeCtx = () => {
+    const calls = [];
+    const rec = (name) => (...a) => { calls.push([name, ...a]); };
+    return {
+      calls,
+      set fillStyle(v) { calls.push(['fillStyle', v]); }, set strokeStyle(v) { calls.push(['strokeStyle', v]); },
+      set globalAlpha(v) { calls.push(['globalAlpha', v]); }, set lineWidth(v) { calls.push(['lineWidth', v]); },
+      fillRect: rec('fillRect'), beginPath: rec('beginPath'), arc: rec('arc'), fill: rec('fill'),
+      moveTo: rec('moveTo'), lineTo: rec('lineTo'), closePath: rec('closePath'), stroke: rec('stroke'),
+    };
+  };
+  const scene = { ms: 10_000, kind: 'scene', rank: 1, rank_of: 10, source: 'analysed', id: 'analysed-scene:k',
+                  word: 'smoke', word_ms: 9600, swatch: '#5a14b4' };
+  const plain = { ms: 20_000, kind: 'flare', rank: 1, rank_of: 10, source: 'analysed', id: 'analysed-flare:k' };
+  const word = { ms: 30_000, kind: 'word', rank: null, rank_of: null, source: 'word', id: 'lyric:300-300',
+                 word: 'roses', word_ms: 30_000, swatch: '#ff0000' };
+  ok(wordColour(scene) === '#5a14b4', 'an imprinted event lends its word\'s swatch');
+  ok(wordColour(plain) === null, 'an event no word reaches lends nothing');
+  ok(wordColour(word) === '#ff0000' && wordColour({ ...word, swatch: null }) === KIND_COLOR.word,
+    'a word marker wears its swatch, else the kind\'s fallback');
+  ok(eventLabel(scene) === 'Scene · 1 of 10 · word “smoke”' && eventLabel(word) === 'Word “roses”',
+    'the box\'s label names the word');
+  ok(pickNext([scene, word], 25_000) === word, 'a fire-alone word can be "next" like any other event');
+  {
+    const ctx = makeCtx();
+    drawShapeMarkers(ctx, [scene], (ms) => ms / 100, 1000);
+    const r = markerSizePx('scene', 1, 10);
+    ok(ctx.calls.some((c) => c[0] === 'strokeStyle' && c[1] === '#5a14b4')
+      && ctx.calls.some((c) => c[0] === 'arc' && Math.abs(c[3] - (r + HALO_GAP)) < 1e-9),
+      'the canvas halo is a ring in the word\'s colour, HALO_GAP outside the marker');
+    ok(ctx.calls.some((c) => c[0] === 'fillStyle' && c[1] === KIND_COLOR.scene), 'and the marker keeps its own colour');
+  }
+  {
+    const ctx = makeCtx();
+    drawShapeMarkers(ctx, [plain], (ms) => ms / 100, 1000);
+    ok(!ctx.calls.some((c) => c[0] === 'strokeStyle'), 'no halo where no word reaches');
+  }
+  {
+    const ctx = makeCtx();
+    drawShapeMarkers(ctx, [word], (ms) => ms / 100, 1000);
+    ok(ctx.calls.some((c) => c[0] === 'fillStyle' && c[1] === '#ff0000')
+      && ctx.calls.filter((c) => c[0] === 'lineTo').length === 3 && ctx.calls.some((c) => c[0] === 'closePath'),
+      'a fire-alone word is a filled diamond in its colour');
+  }
+  const haloed = kindGlyphSvg('scene', null, '#5a14b4');
+  ok(haloed.includes('stroke="#5a14b4"') && haloed.includes(`fill="${KIND_COLOR.scene}"`),
+    'the box glyph rings the kind\'s own square in the word\'s colour — no second swatch');
+  ok(!kindGlyphSvg('scene', null, null).includes('stroke='), 'and draws no ring without a word');
+  ok(kindGlyphSvg('word', null, '#ff0000').includes('fill="#ff0000"') && kindGlyphSvg('word').includes(`fill="${KIND_COLOR.word}"`),
+    'a word\'s glyph is a diamond in its colour, falling back to the kind\'s');
+}
+
 console.log(failures === 0 ? '\nALL OK' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

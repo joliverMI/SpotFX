@@ -43,16 +43,43 @@ his_fire_moment_ms` instead, since his stored timestamp is already
 offset-inclusive and the plain formula would double-count a nonzero
 `trigger_offset_ms` — see drop_firing.annotate's own docstring. Its
 marker is drawn at `ms`, the mark; the next-event box counts to `fire_ms`.
+
+EVERY ROW CARRIES `id` — THE TRIGGER ID tick() FIRES FOR IT (2026-11-12): a
+stored trigger's own id, the analysed plan's synthetic ids (`analysed_plan.
+_plan`), or a drop sequence member's `drop_firing.ID_PREFIX + key + ":" +
+class`. Light Show cues have none. It is how a row is joined to anything
+else the engine says about the same fire — never by time, since a flare's
+landing moment carries its lead and its mark does not.
+
+WORD COLOURS (the Admiral, 2026-11-12: "Add a visual highlight to scene
+changes and flares and drops that are getting a word related effect"; his
+pick on data/word-effect-highlight-options: option A plus E's live pulse).
+On a song whose show has word colours on (`lyric_events.enabled`), the SAME
+plan the Test Bed's Word actions row shows (`TriggerEngine.
+preview_lyric_events`, `lyric_events.plan_words`) is joined on here by id:
+an event a word imprints on gains `word` / `word_ms` / `swatch` (the word's
+first candidate set's colour, as the Word matches row draws it — which set
+really lands is decided at fire time and pushed as {"type": "word_colour"}),
+and a word firing on its own becomes its own row, `kind: "word"`, drawn
+where it is sung and counted down to like any other event (his answer to
+decision 3). Words that do nothing add nothing here — the Test Bed is
+where those are explained. No new gating rule: `plan_words` is the one
+plan, read once per request on this worker thread, and a failure to read
+the words leaves the list exactly as it was (the strip must never go blank
+because the lyrics are unreadable).
 """
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from fastapi import APIRouter, Query
 
 from spectra.api.analysed_plan import _plan_with_cues
-from spectra.services import trigger_store
-from spectra.services.trigger_engine import TriggerEngine
+from spectra.services import drop_firing, lyric_events, trigger_store
+from spectra.services.trigger_engine import TriggerEngine, trigger_engine
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["spectra-upcoming"])
 
@@ -80,13 +107,13 @@ def upcoming_for_song(uri: str, limit: int = 20) -> dict:
             events.append({
                 "ms": s["timestamp_ms"], "kind": "scene",
                 "rank": s.get("rank"), "rank_of": s.get("rank_of"),
-                "source": plan.get("scene_source") or "analysed",
+                "source": plan.get("scene_source") or "analysed", "id": s.get("id"),
             })
         for f in plan["flares"]:
             events.append({
                 "ms": f["timestamp_ms"], "kind": "flare",
                 "rank": f.get("rank"), "rank_of": f.get("rank_of"),
-                "source": "analysed",
+                "source": "analysed", "id": f.get("id"),
             })
     else:
         # His own triggers fire instead of the planned analysed events —
@@ -100,7 +127,7 @@ def upcoming_for_song(uri: str, limit: int = 20) -> dict:
                 kind = _ACTION_KIND.get(t.action.kind, "flare")
             ev = {
                 "ms": t.timestamp_ms + t.trigger_offset_ms, "kind": kind,
-                "rank": None, "rank_of": None, "source": "authored",
+                "rank": None, "rank_of": None, "source": "authored", "id": str(t.id),
             }
             if kind == "drop" and his_fire.get(str(t.id)) is not None:
                 ev["fire_ms"] = int(his_fire[str(t.id)])
@@ -112,19 +139,21 @@ def upcoming_for_song(uri: str, limit: int = 20) -> dict:
         if not s.get("fires"):
             continue
         stood_down = s.get("stood_down") or {}
+        member_id = (lambda cls: f"{drop_firing.ID_PREFIX}{s['key']}:{cls}"
+                     if s.get("key") is not None else None)
         if (s.get("charge_ms") is not None and not s.get("charge_off")
                 and "charge" not in stood_down):
             events.append({"ms": s["charge_ms"], "kind": "charge",
                            "rank": None, "rank_of": None,
-                           "source": "drop_sequence", "num": num})
+                           "source": "drop_sequence", "num": num, "id": member_id("charge")})
         if (s.get("lull_ms") is not None and not s.get("lull_off")
                 and "lull" not in stood_down):
             events.append({"ms": s["lull_ms"], "kind": "lull",
                            "rank": None, "rank_of": None,
-                           "source": "drop_sequence", "num": num})
+                           "source": "drop_sequence", "num": num, "id": member_id("lull")})
         if s.get("drop_ms") is not None:
             ev = {"ms": s["drop_ms"], "kind": "drop", "rank": None, "rank_of": None,
-                  "source": "drop_sequence", "num": num}
+                  "source": "drop_sequence", "num": num, "id": member_id("drop")}
             if s.get("fire_ms") is not None:
                 ev["fire_ms"] = int(s["fire_ms"])
             events.append(ev)
@@ -136,9 +165,39 @@ def upcoming_for_song(uri: str, limit: int = 20) -> dict:
             events.append({"ms": c["timestamp_ms"], "kind": level,
                            "rank": None, "rank_of": None, "source": "show_cue"})
 
+    events = with_words(uri, events)
     events.sort(key=lambda e: e["ms"])
     return {"uri": uri, "effective_mode": mode, "has_authored": has_authored,
             "events": events[:max(0, limit)]}
+
+
+def word_plan(uri: str) -> lyric_events.Preview | None:
+    """The word plan for the join above — the engine's own preview, the one
+    the Test Bed shows — or None when the show has word colours off (the
+    common case: one store read, nothing else touched). Split out so a test
+    can hand the route a plan without a lyrics timeline on disk."""
+    if not lyric_events.enabled(uri):
+        return None
+    return trigger_engine.preview_lyric_events(uri)
+
+
+def with_words(uri: str, events: list[dict]) -> list[dict]:
+    """Lend each imprinted event its word, and add a marker per word firing
+    alone (lyric_events.word_marks). Any failure leaves `events` untouched."""
+    try:
+        preview = word_plan(uri)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("upcoming: the word plan is unreadable for %s", uri)
+        return events
+    if preview is None or not preview.actions:
+        return events
+    imprints, fires = lyric_events.word_marks(preview.actions)
+    out: list[dict] = []
+    for ev in events:
+        word = imprints.get(ev.get("id") or "")
+        out.append({**ev, **word} if word else ev)
+    out.extend(fires)
+    return out
 
 
 @router.get("/upcoming")

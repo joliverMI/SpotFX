@@ -46,6 +46,7 @@ import SongNextBox, { useNextBoxInBar } from './SongNextBox';
 import { paintTrack, type MarkNode } from './trackPainter';
 import { useEnergyTimeline, useEngineStatus, useUpcoming } from '../queries';
 import { getPositionMs, getShowClockMs } from '../lib/showClock';
+import { flashInWordColour, onWordColour } from '../lib/wordColourPush';
 import InfoTip from './InfoTip';
 import { kindShown, useSongTimelineView } from './songTimelineView';
 
@@ -121,6 +122,21 @@ export default function SongStrip() {
     observer.observe(svg);
     return () => observer.disconnect();
   }, [events, durationMs, sections]);
+
+  // THE LIVE PULSE (option E's live half, the Admiral's pick 2026-11-12):
+  // when a matched word fires or imprints, the engine pushes `word_colour`
+  // and the marker it names flashes IN THE WORD'S COLOUR — the colour of
+  // the set that really landed — instead of the plain white fire flash.
+  // Found by the row's own id (a flare lands at its mark plus its lead, so
+  // time alone would miss), falling back to the moment for a row with none.
+  useEffect(() => onWordColour((push) => {
+    if (!uri || push.uri !== uri) return;
+    const at = push.event_kind === 'word' ? push.word_ms : push.event_ms;
+    for (const m of markNodesRef.current) {
+      const hit = m.id ? m.id === push.event_id : Math.abs(m.ms - at) <= 400;
+      if (hit) flashInWordColour(m.node, 'song-strip-mk-flash-word', push.swatch);
+    }
+  }), [uri]);
 
   // THE ONE rAF LOOP — played tint, playhead, the "next" ring, the
   // countdown/fill, passed-marker fade, and the one-shot fire flashes.
@@ -371,7 +387,7 @@ export default function SongStrip() {
 
       {/* AT <=1100px THIS BOX IS IN THE BAR INSTEAD (his Q1 answer) —
         * mounted by TopBarStrip, never both at once. */}
-      {!nextInBar && <SongNextBox events={events} durationMs={durationMs} host="strip" />}
+      {!nextInBar && <SongNextBox events={events} durationMs={durationMs} host="strip" uri={uri} />}
 
       <span className="song-strip-time tabular-nums">
         <b ref={timeRef}>—:—</b> / {durationMs > 0 ? fmtMMSS(durationMs) : '—:—'}

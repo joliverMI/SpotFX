@@ -336,6 +336,25 @@ section is what is not obvious from it. His rulings are in
   `held_for: "lyric_word"`), and ends on the next scene fire, the next word that
   lands, a song change, or the switch going off. Flares and drops still change
   colour during it, as they would without one.
+- **The highlight (2026-11-12, the Admiral: "Add a visual highlight to scene
+  changes and flares and drops that are getting a word related effect"; his
+  pick, option A + E's live pulse, in `/home/javi/fleet-spotfx/data/word-
+  effect-highlight-options/report.md`).** Every `/api/upcoming` row carries
+  the trigger id tick() fires, and `upcoming.with_words` joins the same
+  `plan_words` output onto it by that id (`lyric_events.word_marks`): an
+  imprinted event gains `word`/`swatch` (the FIRST candidate set's swatch,
+  `WordHit.swatches`, as the Word matches row draws it) and a fire-alone word
+  is its own `kind: "word"` row, counted down to like any event. The strip
+  and Home draw a halo ring / a diamond in that colour (`songStrip.ts`,
+  `trackPainter.ts`), the next-event box rings the kind's own glyph with the
+  word under it, and the Test Bed's **Word events row** (which REPLACED the
+  "His scene changes"/"His flares" rows — they drew a different mark set from
+  the events a word can reach) draws the same events and feeds the lane's
+  guide lines. At fire time `lyric_events.fired_payload` is pushed as
+  `{"type": "word_colour"}` (`TriggerEngine._lyric_fired` → `engine._push_
+  word_colour`) so the marker and the box flash in the set that really
+  landed. Words that do nothing draw nowhere outside the Test Bed. No engine
+  timing change; see `.claude/skills/sung-labels/SKILL.md`'s "The highlight".
 - **Sonic coverage, built.** `lyric_console.py` reads and changes the per-show
   switch and the three tuning settings (`get_lyric_event_settings`/
   `set_lyric_event_show`/`set_lyric_event_settings`), and answers "what would

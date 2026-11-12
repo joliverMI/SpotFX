@@ -12,6 +12,7 @@ import '../src/styles/tokens.css';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
+import { SongTimelineViewProvider } from '../src/components/songTimelineView';
 import SongStrip from '../src/components/SongStrip';
 
 const DURATION_MS = 189_258;
@@ -29,11 +30,18 @@ const STATUS = {
 const UPCOMING = {
   uri: 'spotify:track:perf', effective_mode: 'analysed', has_authored: false,
   events: [
-    { ms: 30928, kind: 'flare', rank: 9, rank_of: 15, source: 'analysed' },
-    { ms: 47821, kind: 'scene', rank: 7, rank_of: 15, source: 'planned' },
-    { ms: 55089, kind: 'flare', rank: 12, rank_of: 15, source: 'analysed' },
-    { ms: 61990, kind: 'drop', rank: null, rank_of: null, source: 'drop_sequence', num: 1 },
-    { ms: 69021, kind: 'scene', rank: 15, rank_of: 15, source: 'planned' },
+    // WORD COLOURS (data/word-effect-highlight-options, option A): the first
+    // flare and the drop each get a word's colour (a halo ring), and a word
+    // firing alone is its own diamond marker at 38 s.
+    { ms: 30928, kind: 'flare', rank: 9, rank_of: 15, source: 'analysed', id: 'analysed-flare:a',
+      word: 'smoke', word_ms: 30500, swatch: '#5a14b4' },
+    { ms: 38200, kind: 'word', rank: null, rank_of: null, source: 'word', id: 'lyric:380-380',
+      word: 'roses', word_ms: 38200, swatch: '#ff0000' },
+    { ms: 47821, kind: 'scene', rank: 7, rank_of: 15, source: 'planned', id: 'analysed-scene:b' },
+    { ms: 55089, kind: 'flare', rank: 12, rank_of: 15, source: 'analysed', id: 'analysed-flare:c' },
+    { ms: 61990, kind: 'drop', rank: null, rank_of: null, source: 'drop_sequence', num: 1, id: 'drop-seq:k:drop',
+      word: 'diamonds', word_ms: 61400, swatch: '#00fff0' },
+    { ms: 69021, kind: 'scene', rank: 15, rank_of: 15, source: 'planned', id: 'analysed-scene:d' },
     { ms: 169726, kind: 'low', rank: null, rank_of: null, source: 'show_cue' },
     { ms: 20549, kind: 'high', rank: null, rank_of: null, source: 'show_cue' },
   ],
@@ -81,6 +89,9 @@ window.requestAnimationFrame = (cb: FrameRequestCallback) => origRaf((t) => { ra
 
 createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={new QueryClient()}>
-    <MemoryRouter><SongStrip /></MemoryRouter>
+    {/* The strip reads its track through the shared view state
+      * (components/songTimelineView.tsx) since the Home/strip merge, so the
+      * harness mounts the same provider AppChrome does. */}
+    <MemoryRouter><SongTimelineViewProvider><SongStrip /></SongTimelineViewProvider></MemoryRouter>
   </QueryClientProvider>,
 );

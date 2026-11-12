@@ -114,6 +114,47 @@ function lyrics(uri: string) {
   return { ...base, status: 'ok', note: null, clock, words };
 }
 
+// WORD COLOURS (lyrics plan step 4): what each matched word would do, the
+// shape GET /api/testbed/lyric-events returns — one word imprinting on the
+// scene change at 8 s (haloed in its colour on the Word events row and the
+// lane's guide lines), one firing on its own, one too weak to do anything,
+// and one naming a flare that cannot carry colour.
+const WORD_EVENTS = [
+  { id: 'analysed-scene:k1', kind: 'scene', ms: 8000, label: 'scene change', can_carry: true, why_not: null },
+  // on an emphasized word, so a test can read that a word and a flare with
+  // the same time share an x
+  { id: 'analysed-flare:k7', kind: 'flare', ms: alignedWord.ms, label: 'flare', can_carry: false, why_not: 'no colour jump' },
+];
+function wordAction(over: Record<string, unknown>) {
+  return {
+    key: '0-0', first_word: 0, last_word: 0, phrase: 'red', label: 'red', ms: 7600, end_ms: 7900,
+    source: 'claude', strength: 0.9, set_names: ['Blood Red'], set_ids: ['red1'], swatch: '#c81e1e',
+    verdict: 'imprint', why: null, words: 'Gives its colour to the scene change at 0:08.0 (+0.4 s from the word).',
+    energy: 0.3, momentary: false, transition_ms: 1800, blocked_by: null, event: WORD_EVENTS[0], ...over,
+  };
+}
+function lyricEvents(uri: string) {
+  if (uri === NONE || uri === STALE) {
+    return { uri, status: 'none', note: 'No sung words.', clock_flagged: false, enabled: false,
+             settings: { energy_cutoff: 0.5, min_gap_s: 8, imprint_window_s: 2 }, n_events: 0, shows_on: 0, actions: [] };
+  }
+  return {
+    uri, status: 'ok', note: null, clock_flagged: uri === SLIP, enabled: false,
+    settings: { energy_cutoff: 0.5, min_gap_s: 8, imprint_window_s: 2 }, n_events: 2, shows_on: 0,
+    actions: [
+      wordAction({}),
+      wordAction({ key: '40-40', first_word: 40, last_word: 40, phrase: 'blue', label: 'blue', ms: 25_000, end_ms: 25_400,
+                   set_names: ['Deep Blue'], set_ids: ['blue1'], swatch: '#1e40c8', verdict: 'fire', event: null,
+                   words: 'Fires on its own: low energy (0.30), so it holds until the next scene change or matched word, changing over 1.8 s.' }),
+      wordAction({ key: '60-60', first_word: 60, last_word: 60, phrase: 'dull', label: 'dull', ms: 33_000, end_ms: 33_300,
+                   strength: 0.4, verdict: 'nothing', why: 'weak_match', event: null, words: 'A weak match, so it fires nothing.' }),
+      wordAction({ key: '70-70', first_word: 70, last_word: 70, phrase: 'gold', label: 'gold', ms: alignedWord.ms - 200, end_ms: alignedWord.ms + 100,
+                   set_names: ['Gold'], set_ids: ['gold1'], swatch: '#d9a441', verdict: 'nothing', why: 'event_cannot_carry',
+                   event: WORD_EVENTS[1], words: 'The flare cannot carry colour (no colour jump), so nothing fires.' }),
+    ],
+  };
+}
+
 function engineMarks(uri: string, engine: string, kind: string, sensitivity: number) {
   if (engine !== 'lyrics' || uri === NONE || uri === STALE) {
     return { uri, engine, mark_kind: kind, available: false, estimate: [] };
@@ -187,6 +228,7 @@ const realFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     return json(matchPayload(body.uri));
   }
   if (url.includes('/lyric-matches')) return json(matchPayload(uri));
+  if (url.includes('/testbed/lyric-events')) return json(lyricEvents(uri));
   if (url.includes('/testbed/songs')) return json(SONGS);
   if (url.includes('/testbed/marks')) return json(marks(uri));
   if (url.includes('/testbed/waveform')) {

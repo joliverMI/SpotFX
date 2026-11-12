@@ -60,6 +60,12 @@ WHO READS WHAT. This module imports nothing from the label, match or Claude
 modules at import time: `load_words` imports them when a switched-on show is
 loaded, off the event loop. The show's import graph is checked by
 tests/test_lyric_reading.py.
+
+THE HIGHLIGHT (2026-11-12). `word_marks` is this plan as the song strip, Home
+and the Test Bed's Word events row draw it ahead of the song (joined onto
+`/api/upcoming` by trigger id), and `fired_payload` is what the engine tells
+every open page the moment a word fires or imprints (`{"type": "word_colour"}`
+on the websocket). Neither changes what fires or when.
 """
 from __future__ import annotations
 
@@ -242,6 +248,28 @@ class WordHit:
     set_names: tuple[str, ...] = ()
     energy: Optional[float] = None
     why_not: Optional[str] = None
+    # One swatch per set in `set_ids` (sung_labels.Target.swatch, the colour
+    # the Word matches row draws a set with), so the song strip can lend a
+    # word's colour to the event it reaches before the song plays. None where
+    # a set has no swatch.
+    swatches: tuple[Optional[str], ...] = ()
+
+    @property
+    def swatch(self) -> Optional[str]:
+        """The colour a page shows for this word ahead of fire time: its
+        first candidate set's, the same one the Word matches row draws."""
+        return next((s for s in self.swatches if s), None)
+
+
+def swatch_for(hit: WordHit, set_id: Optional[str]) -> Optional[str]:
+    """The swatch of the set that actually landed, or the word's own when
+    the set is not one of the word's (or is unknown). Pure, no store read:
+    this runs on the fire path."""
+    if set_id is not None:
+        for sid, sw in zip(hit.set_ids, hit.swatches):
+            if sid == set_id and sw:
+                return sw
+    return hit.swatch
 
 
 @dataclass(frozen=True)
@@ -445,9 +473,9 @@ def hits_from_matches(matches: Sequence[Mapping[str, Any]], lines: Sequence[int]
                       reach: Callable[[Mapping[str, Any]], Sequence[tuple[str, str]]]
                       ) -> list[WordHit]:
     """Pure. `lines` is each word's sung line; `reach(match)` every colour set a
-    match reaches as (id, name), effects left out. His matches outrank every
-    guess on the same words, so a correction wins without him also having to
-    delete what it replaces."""
+    match reaches as (id, name) or (id, name, swatch), effects left out. His
+    matches outrank every guess on the same words, so a correction wins without
+    him also having to delete what it replaces."""
     hits: list[WordHit] = []
     for cluster in _clusters(matches):
         first = min(m["first_word"] for m in cluster)
@@ -460,10 +488,12 @@ def hits_from_matches(matches: Sequence[Mapping[str, Any]], lines: Sequence[int]
         top = max(_strength(m) for m in considered)
         best = [m for m in considered if _strength(m) >= top - STRONG_TIE]
         lead = max(best, key=_strength)
-        pairs: dict[str, str] = {}
+        pairs: dict[str, tuple[str, Optional[str]]] = {}
         for match in best:
-            for set_id, name in reach(match):
-                pairs.setdefault(set_id, name)
+            for reached in reach(match):
+                set_id, name = reached[0], reached[1]
+                swatch = reached[2] if len(reached) > 2 else None
+                pairs.setdefault(set_id, (name, swatch))
         if why_not is None and not pairs:
             why_not = WHY_NO_COLOUR
         hits.append(WordHit(
@@ -471,7 +501,9 @@ def hits_from_matches(matches: Sequence[Mapping[str, Any]], lines: Sequence[int]
             label=str(lead["label"]), line=int(lines[first]) if first < len(lines) else 0,
             ms=float(lead["ms"]), end_ms=float(lead["end_ms"]),
             emphasis=max(float(m.get("score") or 0.0) for m in best),
-            strength=top, his=bool(his), set_ids=tuple(pairs), set_names=tuple(pairs.values()),
+            strength=top, his=bool(his), set_ids=tuple(pairs),
+            set_names=tuple(name for name, _sw in pairs.values()),
+            swatches=tuple(sw for _name, sw in pairs.values()),
             energy=energy_at(int(lead["ms"])), why_not=why_not))
     return hits
 
@@ -492,12 +524,12 @@ def load_words(uri: str) -> SongWords:
     def energy_at(ms: int) -> Optional[float]:
         return None if energy is None else energy.at(ms)
 
-    def reach(match: Mapping[str, Any]) -> list[tuple[str, str]]:
+    def reach(match: Mapping[str, Any]) -> list[tuple[str, str, Optional[str]]]:
         if match.get("source") == "his":
-            return [(t["id"], t["name"]) for t in match.get("targets", ())
+            return [(t["id"], t["name"], t.get("swatch")) for t in match.get("targets", ())
                     if t.get("kind") == sung_labels.KIND_COLOR_SET]
         owners = catalogue.owners.get(colour_words.word_key(str(match.get("label") or "")), ())
-        return [(t.id, t.name) for t in owners if t.kind == sung_labels.KIND_COLOR_SET]
+        return [(t.id, t.name, t.swatch) for t in owners if t.kind == sung_labels.KIND_COLOR_SET]
 
     hits = hits_from_matches(matches, [w.line for w in timeline.scored],
                              sung_labels.weak_match_threshold(), energy_at, reach)
@@ -553,7 +585,8 @@ def action_payload(action: WordAction) -> dict[str, Any]:
         "key": hit.key, "first_word": hit.first_word, "last_word": hit.last_word,
         "phrase": hit.phrase, "label": hit.label, "ms": hit.ms, "end_ms": hit.end_ms,
         "source": "his" if hit.his else "claude", "strength": round(hit.strength, 3),
-        "set_names": list(hit.set_names), "verdict": action.verdict, "why": action.why,
+        "set_names": list(hit.set_names), "set_ids": list(hit.set_ids), "swatch": hit.swatch,
+        "verdict": action.verdict, "why": action.why,
         "words": describe(action), "energy": round(action.energy, 3),
         "momentary": action.momentary, "transition_ms": action.transition_ms,
         "blocked_by": action.blocked_by,
@@ -561,6 +594,71 @@ def action_payload(action: WordAction) -> dict[str, Any]:
             "id": event.id, "kind": event.kind, "ms": event.ms, "label": event.label,
             "away_ms": int(round(event.ms - hit.ms)), "can_carry": event.can_carry,
             "why_not": event.why_not},
+    }
+
+
+# ── the highlight: what a page draws before, and is told at, fire time ──────
+
+KIND_WORD = "word"
+
+
+def word_marks(actions: Sequence[WordAction]) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """The plan as the song strip, Home and the Test Bed draw it, ahead of
+    the song (2026-11-12, the Admiral: "a visual highlight to scene changes
+    and flares and drops that are getting a word related effect" — option A
+    of data/word-effect-highlight-options). Pure.
+
+    Returns (imprints, fires): `imprints` maps an event's id (the trigger id
+    tick() fires, the same id `/api/upcoming` now carries) to the word that
+    gives it its colour — its phrase, time and swatch; `fires` is one marker
+    per word firing on its own, kind "word" (a diamond on the marker row),
+    drawn where the word is sung. Words that do nothing are left out: the
+    Test Bed's Word actions row is where those are explained.
+
+    The swatch is the word's FIRST candidate set's, as the Word matches row
+    draws it (his default, 2026-11-12): which set really lands, and whether
+    the event can carry it, is decided at fire time and told through
+    `fired_payload`."""
+    imprints: dict[str, dict[str, Any]] = {}
+    fires: list[dict[str, Any]] = []
+    for action in actions:
+        hit = action.hit
+        if action.verdict == VERDICT_IMPRINT and action.event is not None:
+            imprints[action.event.id] = {
+                "word": hit.phrase, "word_ms": int(round(hit.ms)), "swatch": hit.swatch,
+                "word_key": hit.key}
+        elif action.verdict == VERDICT_FIRE:
+            fires.append({
+                "ms": int(round(hit.ms)), "end_ms": int(round(hit.end_ms)), "kind": KIND_WORD,
+                "rank": None, "rank_of": None, "source": "word", "id": fire_id(hit),
+                "word": hit.phrase, "word_ms": int(round(hit.ms)), "swatch": hit.swatch,
+                "word_key": hit.key, "momentary": action.momentary})
+    return imprints, fires
+
+
+def fire_id(hit: WordHit) -> str:
+    """The id a fire-alone word's marker carries on `/api/upcoming`, and the
+    `event_id` its fire-time push names, so a page can find the marker."""
+    return f"lyric:{hit.key}"
+
+
+def fired_payload(verdict: str, hit: WordHit, *, event: Optional[EventMoment],
+                  set_id: Optional[str], set_name: Optional[str], result: Optional[str],
+                  landed: bool, uri: Optional[str], position_ms: Optional[int]) -> dict[str, Any]:
+    """What the engine tells every open page the moment a word fires or
+    imprints (`TriggerEngine._lyric_fired`, pushed as {"type": "word_colour",
+    ...} on SPECTRA's websocket by engine.py): enough for the strip's marker
+    flash and the next-event box to take the word's colour — option E's live
+    pulse — without a second idea of what happened. `swatch` is the set that
+    actually landed when known, else the word's own."""
+    return {
+        "uri": uri, "verdict": verdict, "phrase": hit.phrase, "label": hit.label,
+        "word_ms": int(round(hit.ms)), "word_key": hit.key,
+        "event_id": fire_id(hit) if event is None else event.id,
+        "event_kind": KIND_WORD if event is None else event.kind,
+        "event_ms": int(round(hit.ms)) if event is None else int(event.ms),
+        "result": result, "landed": bool(landed), "set_id": set_id, "set_name": set_name,
+        "swatch": swatch_for(hit, set_id), "position_ms": position_ms,
     }
 
 

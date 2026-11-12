@@ -2366,6 +2366,32 @@ kbd {
 }
 .testbed-lyric-guide.scene { background: var(--accent); opacity: 0.7; }
 .testbed-lyric-guide.flare { background: var(--warning); opacity: 0.55; }
+.testbed-lyric-guide.drop { background: var(--danger); opacity: 0.6; }
+.testbed-lyric-guide.word { background: var(--accent2); opacity: 0.7; }
+/* A guide for an event a word gives its colour to, or a word firing alone,
+   wears the word's own colour (`--halo`, set inline) and reads a touch wider. */
+.testbed-lyric-guide.worded { background: var(--halo); opacity: 0.9; width: 2px; margin-left: -0.5px; }
+/* THE WORD EVENTS ROW (2026-11-12, data/word-effect-highlight-options — his
+   answer to decision 5: it REPLACES the "His scene changes" / "His flares"
+   rows): the engine's own events near a matched word, each drawn as its kind
+   the way the song strip draws it — a cyan square, a lime dot, a pink pill —
+   with a HALO in the word's colour when a word imprints on it, and a diamond
+   in the word's colour where a word fires on its own. */
+.testbed-word-event {
+  position: absolute; top: 50%; transform: translate(-50%, -50%); padding: 0; border: none;
+  cursor: default; background: var(--text-muted); opacity: 0.85;
+}
+.testbed-word-event.scene { width: 9px; height: 9px; border-radius: 2px; background: #22d3ee; }
+.testbed-word-event.flare { width: 8px; height: 8px; border-radius: 50%; background: #a3e635; }
+.testbed-word-event.drop { width: 8px; height: 14px; border-radius: 4px; background: #ec4899; }
+.testbed-word-event.word {
+  width: 8px; height: 8px; border-radius: 1px; background: var(--halo, var(--accent2));
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.testbed-word-event.imprinted {
+  opacity: 1; box-shadow: 0 0 0 2px var(--surface2), 0 0 0 3.5px var(--halo), 0 0 7px var(--halo);
+}
+.testbed-word-event.cannot { opacity: 0.4; }
 .testbed-lyric-word {
   position: absolute; bottom: 3px; height: 5px; border-radius: 1px;
   background: var(--text-muted); opacity: 0.3;
@@ -3251,6 +3277,18 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   0% { filter: drop-shadow(0 0 7px #fff) brightness(2.2); }
   100% { filter: none; }
 }
+/* WORD COLOURS ON THE TRACK (data/word-effect-highlight-options, option A
+ * + E's live pulse, the Admiral's pick 2026-11-12): the halo ring and the
+ * fire-alone word's diamond are drawn by trackPainter in the word's own
+ * colour (an inline drop-shadow glow, since the colour is per marker). The
+ * fire-time push flashes the marker IN THAT COLOUR — `--word-flash` is set
+ * on the node by lib/wordColourPush.ts — where the plain fire flash is white. */
+.song-strip-mk-halo { pointer-events: none; }
+.song-strip-mk-flash-word { animation: song-strip-mk-flash-word 1.1s ease-out; }
+@keyframes song-strip-mk-flash-word {
+  0% { filter: drop-shadow(0 0 9px var(--word-flash)) drop-shadow(0 0 3px var(--word-flash)) brightness(1.8); }
+  100% { filter: none; }
+}
 /* The "it is next" ring, pulsing out from whatever fires next. */
 .song-strip-ring {
   animation: song-strip-ring 1.3s ease-out infinite;
@@ -3272,7 +3310,8 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   overflow: hidden;
   height: 39px;
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  /* the glyph column may grow to 30px for a word under the glyph */
+  grid-template-columns: minmax(22px, auto) minmax(0, 1fr);
   gap: 8px;
   align-items: center;
   padding: 0 10px;
@@ -3291,6 +3330,30 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   pointer-events: none;
 }
 .song-strip-next-icon { width: 22px; height: 22px; }
+/* THE GLYPH COLUMN: the kind's glyph and, for an event a word gives its
+ * colour to, THE WORD UNDER IT in that colour (his edit, 2026-11-12: no
+ * second swatch beside the word, no "→ scene" — the haloed square already
+ * says the kind). The column may grow to 30px for the word; the count's own
+ * 4.4ch field keeps "99.9s" whole beside it. */
+.song-strip-next-kind {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px; min-width: 22px; max-width: 30px; line-height: 1;
+}
+.song-strip-next-word {
+  display: none; max-width: 30px; font-size: 8px; font-weight: 700; letter-spacing: -0.01em;
+  line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-transform: lowercase; color: var(--text-muted);
+}
+.song-strip-next-worded .song-strip-next-word { display: block; }
+.song-strip-next-worded .song-strip-next-icon { width: 18px; height: 18px; }
+/* THE LIVE PULSE on the box: the word's own colour (`--word-flash`, set by
+ * lib/wordColourPush.ts) where the plain fire flash is white. */
+.song-strip-next-flash-word { animation: song-strip-flash-word 1.1s ease-out; }
+@keyframes song-strip-flash-word {
+  0% { box-shadow: 0 0 0 2px var(--word-flash), 0 0 26px var(--word-flash); border-color: var(--word-flash); }
+  70% { border-color: var(--word-flash); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
 .song-strip-next-count {
   display: block;
   width: 4.4ch;
@@ -3342,6 +3405,7 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
 
 @media (prefers-reduced-motion: reduce) {
   .song-strip-next-flash, .song-strip-mk-flash { animation: none; }
+  .song-strip-next-flash-word, .song-strip-mk-flash-word { animation: none; }
   .song-strip-ring, .song-strip-eq i { animation: none; }
 }
 
@@ -3368,7 +3432,7 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   /* The phone tier keeps its OWN next-event box (the box moves to the
      bar only in the 521-1100 band — components/SongNextBox.tsx). */
   .song-strip-track { grid-row: 2; grid-column: 1; }
-  .song-strip-next { grid-row: 2; grid-column: 2; grid-template-columns: 16px minmax(0, 1fr); padding: 0 6px; gap: 5px; }
+  .song-strip-next { grid-row: 2; grid-column: 2; grid-template-columns: minmax(16px, auto) minmax(0, 1fr); padding: 0 6px; gap: 5px; }
   .song-strip-next-count { font-size: 14px; }
 }
 

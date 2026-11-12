@@ -23,10 +23,11 @@ import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   countdownParts, eventFireMs, eventLabel, FINAL_STRETCH_MS, kindGlyphSvg, NEXT_EVENT_BOX_WIDTH,
-  pickNext, type UpcomingEvent,
+  pickNext, wordColour, type UpcomingEvent,
 } from './songStrip';
 import { getShowClockMs } from '../lib/showClock';
 import useMediaQuery from '../lib/useMediaQuery';
+import { flashInWordColour, onWordColour } from '../lib/wordColourPush';
 
 /** The width band where the box belongs to the BAR rather than the
  * timeline row — EXACTLY the band tokens.css gives its deliberate two
@@ -47,13 +48,18 @@ export function useNextBoxInBar(): boolean {
 }
 
 export default function SongNextBox({
-  events, durationMs, host,
+  events, durationMs, host, uri,
 }: {
   events: UpcomingEvent[];
   durationMs: number;
   /** Which of the two hosts is drawing it — styling only (the bar's own
    * copy is a bar-height slot, the row's is the 39px track-height box). */
   host: 'strip' | 'bar';
+  /** The song this box is displaying, from the same useSongTimelineView()
+   * track both callers already resolve — used to ignore a word_colour push
+   * for a different song (e.g. the engine has already moved on while this
+   * box, via `showingLast`, still shows the previous one). */
+  uri: string | null;
 }) {
   // HTMLElement, not HTMLDivElement: the same ref is attached to a <div>
   // on the timeline row and an <a> in the bar, and the rAF loop below
@@ -61,10 +67,23 @@ export default function SongNextBox({
   const boxRef = useRef<HTMLElement>(null);
   const fillRef = useRef<HTMLDivElement>(null);
   const iconRef = useRef<SVGSVGElement>(null);
+  const wordRef = useRef<HTMLSpanElement>(null);
   const countRef = useRef<HTMLSpanElement>(null);
   const unitRef = useRef<HTMLElement>(null);
   const flashedKeyRef = useRef<string | null>(null);
   const lastGlyphRef = useRef<string | null>(null);
+
+  // THE LIVE PULSE (option E, the Admiral's pick 2026-11-12): the moment a
+  // matched word fires or imprints the box flashes in THE WORD'S COLOUR —
+  // the set that really landed — rather than white. Any word of THIS song
+  // (guarded the same way SongStrip.tsx's sibling listener is, since `uri`
+  // can lag to the last-played song via showingLast): the box is the one
+  // place on every page that says "something coloured just happened",
+  // whichever event it was counting to.
+  useEffect(() => onWordColour((push) => {
+    if (!boxRef.current || !uri || push.uri !== uri) return;
+    flashInWordColour(boxRef.current, 'song-strip-next-flash-word', push.swatch);
+  }), [uri]);
 
   useEffect(() => {
     let raf = 0;
@@ -75,10 +94,20 @@ export default function SongNextBox({
         // a drop counts to the moment it FIRES (mark + drop timing, his Q4)
         const remaining = eventFireMs(next) - (now as number);
         const key = `${next.ms}:${next.kind}`;
-        const glyphKey = `${next.kind}:${next.num ?? ''}`;
+        // A WORDED EVENT (option A on the box, his edit 2026-11-12): the
+        // kind's own glyph with a halo in the word's colour — "just
+        // highlight the blue square, like you do in the strip" — and the
+        // word itself printed under it; no second swatch, no "→ scene".
+        const halo = wordColour(next);
+        const glyphKey = `${next.kind}:${next.num ?? ''}:${halo ?? ''}:${next.word ?? ''}`;
         if (iconRef.current && lastGlyphRef.current !== glyphKey) {
           lastGlyphRef.current = glyphKey;
-          iconRef.current.innerHTML = kindGlyphSvg(next.kind, next.num);
+          iconRef.current.innerHTML = kindGlyphSvg(next.kind, next.num, halo);
+          if (wordRef.current) {
+            wordRef.current.textContent = next.word ?? '';
+            wordRef.current.style.color = halo ?? '';
+          }
+          boxRef.current?.classList.toggle('song-strip-next-worded', !!next.word);
         }
         const parts = countdownParts(remaining);
         if (countRef.current) countRef.current.textContent = parts.value;
@@ -99,8 +128,10 @@ export default function SongNextBox({
         if (countRef.current) countRef.current.textContent = '—';
         if (unitRef.current) unitRef.current.textContent = '';
         if (iconRef.current) { iconRef.current.innerHTML = ''; lastGlyphRef.current = null; }
+        if (wordRef.current) wordRef.current.textContent = '';
         if (boxRef.current) {
           boxRef.current.title = durationMs > 0 ? 'Nothing left this song' : 'Nothing playing';
+          boxRef.current.classList.remove('song-strip-next-worded');
         }
         if (fillRef.current) fillRef.current.style.transform = 'scaleX(0)';
         boxRef.current?.classList.remove('song-strip-next-soon');
@@ -117,8 +148,13 @@ export default function SongNextBox({
       {/* The TYPE GLYPH IS THE MARKER SHAPE, filled and kind-coloured
         * (songStrip.ts::kindGlyphSvg) — swapped with one innerHTML write
         * from the rAF loop, never a React render. */}
-      <svg ref={iconRef} viewBox="0 0 16 16" width={18} height={18}
-          className="song-strip-next-icon" aria-hidden="true" />
+      <span className="song-strip-next-kind">
+        <svg ref={iconRef} viewBox="0 0 16 16" width={18} height={18}
+            className="song-strip-next-icon" aria-hidden="true" />
+        {/* THE WORD UNDER THE GLYPH (his edit, 2026-11-12) — empty for an
+          * event no word reaches, so the column keeps its usual width. */}
+        <span ref={wordRef} className="song-strip-next-word" />
+      </span>
       <span className="song-strip-next-count tabular-nums">
         <span ref={countRef}>—</span>
         <small ref={unitRef} />

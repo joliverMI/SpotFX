@@ -170,7 +170,7 @@ def test_upcoming_excludes_a_stood_down_member_of_a_firing_sequence():
     body = _client().get("/api/upcoming", params={"uri": URI}).json()
     lulls = [e for e in body["events"] if e["kind"] == "lull"]
     assert lulls == [{"ms": mark_ms, "kind": "lull", "rank": None, "rank_of": None,
-                      "source": "authored"}], (
+                      "source": "authored", "id": str(t_lull.id)}], (
         "exactly one lull event — his own trigger — never a duplicate from "
         f"the sequence member it stood down; got {lulls}")
     assert any(e["kind"] == "drop" and e["ms"] == drop_ms for e in body["events"]), \
@@ -205,3 +205,97 @@ def test_upcoming_excludes_a_suggested_unconfirmed_drop():
     body = _client().get("/api/upcoming", params={"uri": URI}).json()
     assert not any(e["kind"] in ("charge", "lull", "drop") for e in body["events"]), \
         "a SUGGESTED, unconfirmed drop must never be shown as upcoming"
+
+
+# ── word colours on the strip (2026-11-12, data/word-effect-highlight-options) ──
+
+
+def _his_scene_and_flare():
+    from spectra.models.trigger import (FireResponseAction, FireSceneAction,
+                                        SpectraTrigger)
+    from spectra.services import trigger_store
+    t_scene = SpectraTrigger(timestamp_ms=1000, source="authored",
+                             action=FireSceneAction(scene_id="s1"))
+    t_flare = SpectraTrigger(timestamp_ms=4000, source="authored",
+                             action=FireResponseAction(event_class="flare", intensity=0.6))
+    trigger_store.upsert(URI, t_scene)
+    trigger_store.upsert(URI, t_flare)
+    return t_scene, t_flare
+
+
+def test_every_upcoming_row_carries_the_trigger_id_tick_fires():
+    _mode("triggers_only")
+    t_scene, t_flare = _his_scene_and_flare()
+    body = _client().get("/api/upcoming", params={"uri": URI}).json()
+    assert [e["id"] for e in body["events"]] == [str(t_scene.id), str(t_flare.id)]
+
+
+def _hit(ms, key, phrase, swatch):
+    from spectra.services import lyric_events as le
+    # one word per sung line, so each is the line's own candidate
+    return le.WordHit(key=key, first_word=int(ms // 100), last_word=int(ms // 100), phrase=phrase,
+                      label=phrase, line=int(ms // 10_000), ms=float(ms), end_ms=float(ms + 300),
+                      emphasis=0.5,
+                      strength=0.9, his=False, set_ids=(f"set-{phrase}",), set_names=(phrase.title(),),
+                      swatches=(swatch,), energy=0.3)
+
+
+def test_upcoming_lends_an_imprinted_event_its_word_and_lists_a_fire_alone_word(monkeypatch):
+    """With word colours on for the show, the SAME plan the Test Bed shows is
+    joined on by id: the scene a word imprints on carries the word and its
+    colour, and a word firing alone is its own `kind: "word"` row — so the
+    strip, Home and the next-event box can highlight exactly what the engine
+    will do, never a second idea of it."""
+    _mode("triggers_only")
+    from spectra.api import upcoming
+    from spectra.services import lyric_events as le
+    t_scene, t_flare = _his_scene_and_flare()
+    events = [le.EventMoment(str(t_scene.id), le.KIND_SCENE, 1000, "your scene change"),
+              le.EventMoment(str(t_flare.id), le.KIND_FLARE, 4000, "flare")]
+    hits = [_hit(900, "9-9", "smoke", "#5a14b4"), _hit(12_000, "120-120", "roses", "#ff0000")]
+    plan = le.plan_words(hits, events, le.LyricEventSettings())
+    monkeypatch.setattr(upcoming, "word_plan",
+                        lambda uri: le.Preview(True, le.SongWords(uri, "ok", hits=tuple(hits)),
+                                               actions=plan, n_events=len(events)))
+
+    body = _client().get("/api/upcoming", params={"uri": URI}).json()
+    rows = {(e["ms"], e["kind"]): e for e in body["events"]}
+    scene = rows[(1000, "scene")]
+    assert scene["word"] == "smoke" and scene["swatch"] == "#5a14b4" and scene["word_ms"] == 900
+    assert scene["id"] == str(t_scene.id), "the row keeps its own identity"
+    assert "word" not in rows[(4000, "flare")], "an event no word reaches is left alone"
+    word = rows[(12_000, "word")]
+    assert word["id"] == "lyric:120-120" and word["word"] == "roses" and word["swatch"] == "#ff0000"
+    assert word["source"] == "word" and word["rank"] is None
+    assert [k for _ms, k in sorted(rows)] == ["scene", "flare", "word"], "sorted into the one list"
+
+
+def test_upcoming_is_unchanged_when_the_word_plan_cannot_be_read(monkeypatch):
+    _mode("triggers_only")
+    _his_scene_and_flare()
+    from spectra.api import upcoming
+
+    def unreadable(uri):
+        raise RuntimeError("no lyrics store")
+    monkeypatch.setattr(upcoming, "word_plan", unreadable)
+    body = _client().get("/api/upcoming", params={"uri": URI}).json()
+    assert [(e["ms"], e["kind"]) for e in body["events"]] == [(1000, "scene"), (4000, "flare")]
+    assert not any("word" in e for e in body["events"])
+
+
+def test_upcoming_reads_no_words_while_the_show_is_off(monkeypatch):
+    """Off means off: with the switch off the words are never loaded — the
+    one store read is the switch itself."""
+    _mode("triggers_only")
+    _his_scene_and_flare()
+    from spectra.api import upcoming
+    from spectra.services import lyric_events as le
+    from spectra.services.trigger_engine import trigger_engine
+    monkeypatch.setattr(le, "enabled", lambda uri: False)
+
+    def never(uri):
+        raise AssertionError("the words were read with the show off")
+    monkeypatch.setattr(trigger_engine, "preview_lyric_events", never)
+    body = _client().get("/api/upcoming", params={"uri": URI}).json()
+    assert len(body["events"]) == 2
+    assert upcoming.word_plan(URI) is None

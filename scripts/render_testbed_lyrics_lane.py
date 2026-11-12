@@ -129,7 +129,10 @@ LANE_FACTS = """(() => {
     })(),
     faintText: document.querySelectorAll('.testbed-lyric-word-text').length,
     flagged: !!document.querySelector('.testbed-lyrics-lane.flagged'),
-    hisRows: rows.filter((r) => r === 'His scene changes' || r === 'His flares').length,
+    wordRows: rows.filter((r) => r === 'Word events').length,
+    wordEvents: document.querySelectorAll('.testbed-word-event').length,
+    haloed: document.querySelectorAll('.testbed-word-event.imprinted').length,
+    wordedGuides: document.querySelectorAll('.testbed-lyric-guide.worded').length,
     notes,
     pageWide: de.scrollWidth > de.clientWidth + 1,
     page: de.scrollWidth + 'x' + de.clientWidth,
@@ -276,9 +279,14 @@ async def run() -> int:
                 check("the lane is drawn", whole["hasLane"])
                 check("every word is drawn faintly", whole["words"] > 100, f"{whole['words']} words")
                 check("emphasized words are marked", whole["marks"] > 0, f"{whole['marks']} marks")
-                check("his marks are guide lines through the lane", whole["guides"] == 5,
+                check("the word events are guide lines through the lane", whole["guides"] == 3,
                       f"{whole['guides']} guides")
-                check("his two rows sit under it", whole["hisRows"] == 2)
+                check("the Word events row sits under it", whole["wordRows"] == 1)
+                check("it draws the events a word reaches and the words firing alone",
+                      whole["wordEvents"] == 3, f"{whole['wordEvents']} events")
+                check("an event a word gives its colour to is haloed, on the row and in the lane",
+                      whole["haloed"] == 1 and whole["wordedGuides"] == 2,
+                      f"{whole['haloed']} haloed, {whole['wordedGuides']} worded guides")
                 check("no printed word overlaps another", whole["overlaps"] == 0)
                 check("no printed word leaves the lane", whole["outside"] == 0, str(whole.get("outsideList")))
                 check("it does not scroll sideways", not whole["pageWide"], whole["page"])
@@ -309,7 +317,10 @@ async def run() -> int:
                 check("a chip sits under its first word", row["offset"] is not None and row["offset"] <= 1.5,
                       f"{row['offset']} px")
                 check("a reading says what state it is in", "guess" in (row["status"] or ""), str(row["status"]))
-                check("it says it reaches nothing", "Nothing here reaches your lights" in (row["status"] or ""))
+                # the sentence PR #504 gave the row ("They reach your lights only on
+                # a show you turn on below") — the check had kept step 3's wording
+                check("it says it reaches nothing by itself",
+                      "reach your lights only on a show" in (row["status"] or ""), str(row["status"]))
                 await ev(click_chip)
                 await settle()
                 panel = await ev(PANEL_TEXT)
@@ -368,7 +379,7 @@ async def run() -> int:
                 check("the warning sits clear of the printed words", not flagged["flagOverlapsLane"])
                 check("its words are still drawn", flagged["words"] > 100)
                 check("no guide lines on a flagged song", flagged["guides"] == 0)
-                check("his two rows are withheld", flagged["hisRows"] == 0)
+                check("the Word events row is withheld", flagged["wordRows"] == 0)
                 await shot(f"flagged-{width}")
 
                 await ev(pick_song("Captured again since"))

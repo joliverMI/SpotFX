@@ -15,7 +15,12 @@ import { energyFill } from '../lib/energyAt';
 import { PHASE_COLOR } from '../timeline/dropSequences';
 
 export type UpcomingKind =
-  | 'scene' | 'flare' | 'colour' | 'charge' | 'lull' | 'drop' | 'high' | 'low';
+  | 'scene' | 'flare' | 'colour' | 'charge' | 'lull' | 'drop' | 'high' | 'low'
+  /** a matched word firing ON ITS OWN (lyric_events.word_marks) — drawn
+   * where it is sung, as a diamond in the word's colour, and counted down
+   * to like any other event (the Admiral, 2026-11-12: "A fire-alone word
+   * is a marker and can be 'next' in the box") */
+  | 'word';
 
 export interface UpcomingEvent {
   ms: number;
@@ -28,6 +33,25 @@ export interface UpcomingEvent {
    * spectra/api/upcoming.py) — what the next-event box counts to; `ms` stays
    * the mark, where its marker is drawn */
   fire_ms?: number;
+  /** the trigger id tick() fires for this row (spectra/api/upcoming.py) —
+   * what a fire-time push names, so a page can find the marker by identity
+   * rather than by time */
+  id?: string | null;
+  /** WORD COLOURS (data/word-effect-highlight-options, option A): set on an
+   * event a matched word gives its colour to, and on every `kind: "word"`
+   * row — the word's phrase, where it is sung, and the colour of its first
+   * candidate set (which set really lands is decided at fire time). */
+  word?: string;
+  word_ms?: number;
+  swatch?: string | null;
+}
+
+/** The colour a worded marker lends: the word's own swatch, else the kind's
+ * fallback. Null for an event no word reaches. */
+export function wordColour(e: Pick<UpcomingEvent, 'kind' | 'word' | 'swatch'>): string | null {
+  if (e.kind === 'word') return e.swatch || KIND_COLOR.word;
+  if (!e.word) return null;
+  return e.swatch || KIND_COLOR.word;
 }
 
 /** When an event fires: a drop's `fire_ms`, everything else its `ms`. */
@@ -72,19 +96,22 @@ export function fmtCountdown(ms: number): string {
 const KIND_LABEL: Record<UpcomingKind, string> = {
   scene: 'Scene', flare: 'Flare', colour: 'Colour',
   charge: 'Charge', lull: 'Lull', drop: 'Drop',
-  high: 'High trigger', low: 'Low trigger',
+  high: 'High trigger', low: 'Low trigger', word: 'Word',
 };
 
 /** "Scene · 7 of 15", "Flare", "Charge · drop 1", "Drop 1", "High trigger"
  * — the next-event box's full label (shown on hover; the box itself
  * shows only the type icon + countdown, decision: no label text in the
  * box). */
-export function eventLabel(e: Pick<UpcomingEvent, 'kind' | 'rank' | 'rank_of' | 'num'>): string {
+export function eventLabel(e: Pick<UpcomingEvent, 'kind' | 'rank' | 'rank_of' | 'num' | 'word'>): string {
   const base = KIND_LABEL[e.kind];
-  if ((e.kind === 'charge' || e.kind === 'lull') && e.num != null) return `${base} · drop ${e.num}`;
-  if (e.kind === 'drop' && e.num != null) return `${base} ${e.num}`;
-  if (e.kind === 'scene' && e.rank != null && e.rank_of != null) return `${base} · ${e.rank} of ${e.rank_of}`;
-  return base;
+  // a word firing alone names itself; an event a word imprints on says so
+  if (e.kind === 'word') return e.word ? `${base} “${e.word}”` : base;
+  const worded = e.word ? ` · word “${e.word}”` : '';
+  if ((e.kind === 'charge' || e.kind === 'lull') && e.num != null) return `${base} · drop ${e.num}${worded}`;
+  if (e.kind === 'drop' && e.num != null) return `${base} ${e.num}${worded}`;
+  if (e.kind === 'scene' && e.rank != null && e.rank_of != null) return `${base} · ${e.rank} of ${e.rank_of}${worded}`;
+  return `${base}${worded}`;
 }
 
 
@@ -92,7 +119,29 @@ export const KIND_COLOR: Record<UpcomingKind, string> = {
   scene: '#22d3ee', flare: '#a3e635', colour: '#c084fc',
   charge: PHASE_COLOR.charge, lull: PHASE_COLOR.lull, drop: PHASE_COLOR.drop,
   high: '#f5f5f4', low: '#818cf8',
+  // a word marker normally wears its own swatch; this is the fallback when
+  // its set has none (the magenta accent, so it never passes for a kind)
+  word: '#e879f9',
 };
+
+/** THE HALO (option A): a ring around a marker in the word's colour, drawn
+ * `HALO_GAP` outside the marker's own edge, with a soft glow of the same
+ * colour. One rule for the strip, Home's shape and the next-event box's
+ * glyph, so "this event gets a word" always looks the same. */
+export const HALO_GAP = 3.5;
+export const HALO_STROKE = 1.5;
+/** The fire-alone word's own marker: a diamond this far from centre to tip. */
+export const WORD_DIAMOND_R = 4.5;
+
+export function haloFilter(colour: string): string {
+  return `drop-shadow(0 0 3px ${colour})`;
+}
+
+/** A diamond path centred on (cx, cy) — the fire-alone word's marker on the
+ * strip and its glyph in the next-event box. */
+export function diamondPath(cx: number, cy: number, r: number): string {
+  return `M${cx} ${cy - r}L${cx + r} ${cy}L${cx} ${cy + r}L${cx - r} ${cy}Z`;
+}
 
 /** The first event that FIRES strictly after `nowMs` (`eventFireMs`: a drop
  * counts to the moment it fires, not its mark — his Q4) — events are assumed
@@ -166,27 +215,53 @@ export function drawShapeMarkers(
   xAt: (ms: number) => number,
   w: number,
 ): void {
+  // THE HALO on the canvas: a ring in the word's colour around the marker a
+  // word imprints on — the same rule trackPainter draws on the strip.
+  const halo = (e: UpcomingEvent, cx: number, cy: number, r: number) => {
+    const colour = wordColour(e);
+    if (!colour || e.kind === 'word') return;
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = HALO_STROKE;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + HALO_GAP, 0, Math.PI * 2);
+    ctx.stroke();
+  };
   for (const e of events) {
     const x = xAt(e.ms);
     if (x < -10 || x > w + 10) continue;
     const color = KIND_COLOR[e.kind];
     if (e.kind === 'scene') {
       const r = markerSizePx('scene', e.rank, e.rank_of);
+      halo(e, x, 2 + r, r);
       ctx.globalAlpha = markerOpacity(e.rank, e.rank_of);
       ctx.fillStyle = color;
       ctx.fillRect(x - r, 2, r * 2, r * 2);
     } else if (e.kind === 'flare') {
       const r = markerSizePx('flare', e.rank, e.rank_of);
+      halo(e, x, 12, r);
       ctx.globalAlpha = markerOpacity(e.rank, e.rank_of);
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(x, 12, r, 0, Math.PI * 2);
       ctx.fill();
     } else if (e.kind === 'charge' || e.kind === 'lull' || e.kind === 'drop') {
+      const bw = e.kind === 'drop' ? 4 : 10;
+      if (e.kind === 'drop') halo(e, x, 16, 4);
       ctx.globalAlpha = 1;
       ctx.fillStyle = color;
-      const bw = e.kind === 'drop' ? 4 : 10;
       ctx.fillRect(x - bw / 2, 13, bw, 6);
+    } else if (e.kind === 'word') {
+      // a word firing alone: a diamond in the word's own colour
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = wordColour(e) ?? color;
+      ctx.beginPath();
+      ctx.moveTo(x, 12 - WORD_DIAMOND_R);
+      ctx.lineTo(x + WORD_DIAMOND_R, 12);
+      ctx.lineTo(x, 12 + WORD_DIAMOND_R);
+      ctx.lineTo(x - WORD_DIAMOND_R, 12);
+      ctx.closePath();
+      ctx.fill();
     } else if (e.kind === 'high' || e.kind === 'low') {
       ctx.globalAlpha = 1;
       ctx.strokeStyle = color;
@@ -355,20 +430,29 @@ export function countdownParts(ms: number): { value: string; unit: string | null
  *
  * Returns SVG markup for a `viewBox="0 0 16 16"` element, so the caller's
  * rAF loop can swap it with one `innerHTML` write and no React render. */
-export function kindGlyphSvg(kind: UpcomingKind, num?: number | null): string {
+export function kindGlyphSvg(kind: UpcomingKind, num?: number | null, halo?: string | null): string {
   const c = KIND_COLOR[kind];
+  // THE HALO ON THE GLYPH (the Admiral, 2026-11-12: "just highlight the blue
+  // square, like you do in the strip"): a ring in the word's colour around
+  // the kind's own shape — no second swatch beside it.
+  const ring = halo && kind !== 'word'
+    ? `<rect x="0.75" y="0.75" width="14.5" height="14.5" rx="4" fill="none"`
+      + ` stroke="${halo}" stroke-width="${HALO_STROKE}" style="filter:${haloFilter(halo)}"/>`
+    : '';
   switch (kind) {
+    case 'word':
+      return `<path d="${diamondPath(8, 8, 6.5)}" fill="${halo || c}"/>`;
     case 'scene':
-      return `<rect x="2" y="2" width="12" height="12" rx="2.5" fill="${c}"/>`;
+      return `${ring}<rect x="2" y="2" width="12" height="12" rx="2.5" fill="${c}"/>`;
     case 'flare':
-      return `<circle cx="8" cy="8" r="5.5" fill="${c}"/>`;
+      return `${ring}<circle cx="8" cy="8" r="5.5" fill="${c}"/>`;
     case 'charge':
       return `<path d="M2 13L14 3V13Z" fill="${c}"/>`;
     case 'lull':
       return `<rect x="3" y="3" width="3.4" height="10" rx="1" fill="${c}"/>`
         + `<rect x="9.6" y="3" width="3.4" height="10" rx="1" fill="${c}"/>`;
     case 'drop':
-      return `<rect x="3" y="1.5" width="10" height="13" rx="5" fill="${c}"/>`
+      return `${ring}<rect x="3" y="1.5" width="10" height="13" rx="5" fill="${c}"/>`
         + (num != null
           ? `<text x="8" y="11.2" font-size="8.5" font-weight="800" text-anchor="middle"`
             + ` fill="#14061f" font-family="inherit">${num}</text>`

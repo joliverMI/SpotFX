@@ -2123,6 +2123,11 @@ export interface LyricEventAction {
   source: 'claude' | 'his';
   strength: number;
   set_names: string[];
+  set_ids: string[];
+  /** the colour of the word's first candidate set (the Word matches row's
+   * swatch) — what the strip lends an event ahead of fire time; null when
+   * the set has no swatch */
+  swatch: string | null;
   verdict: 'fire' | 'imprint' | 'nothing';
   why: string | null;
   words: string;
@@ -2146,6 +2151,30 @@ export interface LyricEvents {
   n_events: number;
   shows_on: number;
   actions: LyricEventAction[];
+}
+
+/** A word just fired on its own or imprinted on an event (spectra/services/
+ * lyric_events.py `fired_payload`, pushed as {"type": "word_colour", ...} on
+ * the SPECTRA websocket by engine.py — the live pulse). `event_id` is the id
+ * the marker carries on /api/upcoming; `swatch` is the colour of the set that
+ * actually landed when known, else the word's own. */
+export interface WordColourPush {
+  type: 'word_colour';
+  uri: string | null;
+  verdict: 'fire' | 'imprint';
+  phrase: string;
+  label: string;
+  word_ms: number;
+  word_key: string;
+  event_id: string;
+  event_kind: 'drop' | 'scene' | 'flare' | 'word';
+  event_ms: number;
+  result: string | null;
+  landed: boolean;
+  set_id: string | null;
+  set_name: string | null;
+  swatch: string | null;
+  position_ms: number | null;
 }
 
 export type LyricReadingState = 'none' | 'fresh' | 'labels_changed' | 'words_changed';
