@@ -433,6 +433,12 @@ class Radial2d(Twod):
         # revolutions the AUDIO callback has added since the last rendered
         # frame — read (and zeroed) only by _base_rotation_step
         self._reactive_advance = 0.0
+        # revolutions EVERY writer (audio, charge spin-up, the base-rotation
+        # correction) has added to spin_total since the last GOVERNED frame —
+        # read (and zeroed) only by _govern_rotation. Unlike spin_total
+        # itself this is never reduced mod 1, so it is always the exact
+        # advance even when it exceeds half a revolution.
+        self._frame_adv = 0.0
         self.max_radius = None
         # particle ⇄ radial handoff state (here, NOT do_once, so it survives
         # config-patch grid rebuilds)
@@ -531,6 +537,7 @@ class Radial2d(Twod):
         self.impulse = getattr(data, self.power_func)()
         delta = self.impulse * self.spin
         self._reactive_advance += delta
+        self._frame_adv += delta
         self.spin_total += delta
         self.spin_total %= 1.0  # keep it in [0, 1)
 
@@ -851,9 +858,9 @@ class Radial2d(Twod):
                 or 1.0
             )
             # ease-in: spin-up maxes AT the ramp end
-            self.spin_total = (
-                self.spin_total + sign * CHARGE_SPIN_REV_S * p * p * dt
-            ) % 1.0
+            delta = sign * CHARGE_SPIN_REV_S * p * p * dt
+            self._frame_adv += delta
+            self.spin_total = (self.spin_total + delta) % 1.0
         elif self._phase == "drop":
             done = max(p, min(self._phase_t / DROP_BLOOM_S, 1.0))
             if done >= 1.0:
@@ -908,9 +915,9 @@ class Radial2d(Twod):
         got = reactive * sign                   # revolutions the audio made,
         #                                         measured along `sign`
         if want > got:
-            self.spin_total = (
-                self.spin_total + sign * (want - got)
-            ) % 1.0
+            delta = sign * (want - got)
+            self._frame_adv += delta
+            self.spin_total = (self.spin_total + delta) % 1.0
 
     def _phase_warp(self):
         """Standalone lull implode / drop bloom warp, when no crossfade
@@ -1273,10 +1280,12 @@ class Radial2d(Twod):
     def _govern_rotation(self, dt):
         """THE STAR IMPROVE PLAN's ease-in and cap, on the TOTAL advance of
         the pattern this frame — whatever the audio callback, the base
-        floor and the charge spin-up added since the last rendered frame,
-        measured as the shortest signed turn from that frame's angle:
+        floor and the charge spin-up added to `_frame_adv` since the last
+        rendered frame (an exact, never-wrapped sum — unlike `spin_total`
+        itself, kept in [0, 1), this can be larger than half a revolution
+        and still read correctly):
 
-            adv  = unwrap(spin_total - last frame's spin_total)
+            adv  = _frame_adv                                 (exact, drained)
             adv *= smoothstep(active_s / spin_ease_in_s)      (the ease-in)
             adv  = clamp(adv, -cap dt, +cap dt)               (the cap)
 
@@ -1287,9 +1296,10 @@ class Radial2d(Twod):
         rendered frame (nothing to measure against — a hand-off may have
         just set the angle) is never governed. The pre-drop outline keeps
         its own spin (`_pd_spin`); it is not rotation of the pattern."""
+        adv = self._frame_adv
+        self._frame_adv = 0.0
         prev = self._spin_frame_prev
         if prev is not None and dt > 0.0:
-            adv = (self.spin_total - prev + 0.5) % 1.0 - 0.5
             ease = self.spin_ease_in_s
             if ease > 0.0 and self._active_s < ease:
                 x = self._active_s / ease

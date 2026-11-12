@@ -166,6 +166,33 @@ def test_cap_holds_the_total_advance_and_is_identity_below():
     assert np.all(charged / DT <= cap + 1e-6)
 
 
+def test_cap_clamps_forward_when_a_frame_stall_advances_more_than_half_a_turn():
+    """A render stall (dt up to the 0.1s clamp in draw()) combined with a
+    loud drive can advance the pattern by more than half a revolution in
+    one governed frame. The governor must still clamp FORWARD to +cap*dt —
+    never misread the advance's sign and spin the star backward."""
+    cap = radial.ROTATION_CAP_REV_S
+
+    async def go():
+        with tempfile.TemporaryDirectory() as tmp:
+            async with star_room(tmp, radial={"spin_ease_in_s": 0.0}) as room:
+                room.rev_s = 2.0
+                room.step(2)                       # past the first, ungoverned frame
+                eff = room.star
+                before = eff.spin_total
+                dt = 0.1
+                rev_s = 6.0                         # rev_s * dt == 0.6 > half a turn
+                eff._frame_adv = rev_s * dt
+                eff.spin_total = (before + rev_s * dt) % 1.0
+                eff._govern_rotation(dt)
+                after = eff.spin_total
+        return before, after, dt
+    before, after, dt = run(go())
+    adv = (after - before + 0.5) % 1.0 - 0.5
+    assert adv > 0.0                                # forward, never a misread reversal
+    assert abs(adv / dt - cap) < 1e-6                # clamped to exactly the cap
+
+
 # ── 4. the star wave ───────────────────────────────────────────────────────
 
 WAVE = {"star_wave": True, "star_wave_lo": -0.2, "star_wave_hi": 0.4,
