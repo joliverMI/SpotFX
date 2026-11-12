@@ -2782,8 +2782,10 @@ against that commit.
     but it shouldn't slow down at lower speeds ... the amount of star should
     dynamically change with the music ... -.2 to +.4 ... I want it to go
     through 0"). `_govern_rotation` (draw) measures each frame's TOTAL
-    advance — audio spin, base floor and charge spin-up together — as the
-    shortest signed turn from the last rendered frame's angle, scales it by
+    advance — audio spin, base floor and charge spin-up together, summed
+    exactly into `_frame_adv` by each writer as it adds its own signed
+    revolutions, and drained (never reduced mod 1, so it reads correctly
+    however large) once per governed frame — scales it by
     smoothstep(active_s / `spin_ease_in_s`) (new param, effect default 0 =
     byte-identical; STAR's entry 1.0) and clamps it at `ROTATION_CAP_REV_S`
     = 0.7 x 6.0 x ROTATION_SPEED_SCALE = 3.36 rev/s (identity below).

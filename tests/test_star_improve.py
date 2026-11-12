@@ -493,3 +493,44 @@ def test_energy_feed_reaches_star_with_energy_only():
     assert "radial" in device_model.ENERGY_FED_EFFECTS
     assert pulse_feed.PulseFeed._values_for("radial", {"energy": 0.7, "beat_ms": 500}) == {"energy": 0.7}
     assert pulse_feed.PulseFeed._values_for("pulse", {"energy": 0.7, "beat_ms": 500}) == {"energy": 0.7, "beat_ms": 500}
+
+
+def test_patch_tolerates_a_values_dict_missing_beat_ms():
+    from spectra.services import pulse_feed
+    f = pulse_feed.PulseFeed()
+    assert f._patch({}, {"energy": 0.6}) == {"energy": 0.6}
+    assert f._patch({"energy": 0.6}, {"energy": 0.6}) == {}
+    assert f._patch({}, {"energy": 0.6, "beat_ms": 500.0}) == {
+        "energy": 0.6, "beat_ms": 500.0}
+    assert f._patch({"energy": 0.6, "beat_ms": 500.0},
+                    {"energy": 0.6, "beat_ms": 500.0}) == {}
+
+
+def test_tick_pushes_energy_only_to_a_radial_virtual_without_raising(monkeypatch):
+    from spectra.services import pulse_feed
+    from spectra.services import room_controls as rc
+    from spectra.services import color_journey as cj
+    from spectra.services.drift_conductor import DriftConductor
+    from spectra.services.fx_executor import RecordingExecutor
+
+    f = pulse_feed.PulseFeed(loader=lambda uri: pulse_feed.SongFeed(uri=uri))
+    monkeypatch.setattr(
+        f, "values",
+        lambda uri, position_ms, genres=(lambda: []): {"energy": 0.6})
+
+    room = [cj.RoomColorState()]
+    ex = RecordingExecutor(room_controls_load=lambda: rc.RoomControlState())
+    c = DriftConductor(
+        executor=ex, drift_profiles=lambda: {}, curve_profiles=lambda: {},
+        room_load=lambda: room[0], room_save=lambda st: room.__setitem__(0, st),
+        set_cards=lambda: [], gradient_profiles=lambda: {},
+        room_controls=lambda: rc.RoomControlState(), rng=Random(1))
+    c.on_scene_fire(SceneV2(name="t"), [
+        {"virtual_id": STAR, "effect_type": "radial",
+         "config": {"gradient": "#ff0000"}, "entry_id": "", "color_mode": "set"}])
+
+    written = asyncio.run(f.tick("spotify:track:star-energy-tick", 1_000, conductor=c))
+    assert written == 1
+    pushed = c.executor.writes[-1]
+    assert set(pushed["params"]) == {"energy"}
+    assert c.virtuals[STAR].param_baseline["energy"] == 0.6

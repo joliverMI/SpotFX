@@ -203,9 +203,11 @@ want it to go through 0". Five things not visible cold:
   wrote spin back. `_maybe_flip_sign` now never flips a param whose `lo >=
   0` (`spectra/services/binding_resolver.py`). The direction is Flip's job.
 - **`_govern_rotation` (draw, after `_base_rotation_step`)** measures this
-  frame's TOTAL advance (audio spin + base floor + charge spin-up, as the
-  shortest signed turn from the last rendered frame's angle), scales it by
-  smoothstep(`_active_s` / `spin_ease_in_s`) and clamps it at
+  frame's TOTAL advance (audio spin + base floor + charge spin-up, each
+  writer adding its own signed revolutions into `_frame_adv` as it moves
+  `spin_total`; `_govern_rotation` drains that accumulator exactly once
+  per governed frame — never reduced mod 1, so it reads correctly even
+  past half a revolution), scales it by
   `ROTATION_CAP_REV_S` = 0.7 x 6.0 x ROTATION_SPEED_SCALE = **3.36 rev/s**.
   Identity below the cap. `spin_ease_in_s` defaults to **0** on the effect
   (every other Radial scene byte-identical); STAR's Matrix entry carries

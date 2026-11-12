@@ -247,10 +247,13 @@ class PulseFeed:
 
     def _patch(self, carried: dict, values: dict[str, float]) -> dict[str, float]:
         patch: dict[str, float] = {}
-        if self._differs(carried.get("energy"), values["energy"], ENERGY_EPSILON):
+        if "energy" in values and self._differs(
+            carried.get("energy"), values["energy"], ENERGY_EPSILON
+        ):
             patch["energy"] = values["energy"]
-        if self._differs(carried.get("beat_ms"), values["beat_ms"],
-                         BEAT_EPSILON_MS):
+        if "beat_ms" in values and self._differs(
+            carried.get("beat_ms"), values["beat_ms"], BEAT_EPSILON_MS
+        ):
             patch["beat_ms"] = values["beat_ms"]
         return patch
 
