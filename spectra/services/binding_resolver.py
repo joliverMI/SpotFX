@@ -67,10 +67,22 @@ def signal_value(binding: ValueBinding, ctx: FireContext) -> Optional[float]:
     return None   # beat-window signals need the S2 bridge
 
 
-def _maybe_flip_sign(binding: ValueBinding, value, rng: Random):
+def _maybe_flip_sign(binding: ValueBinding, value, rng: Random,
+                     lo: float | None = None):
     """With random_sign, negate a numeric value 50% of the time (fresh roll
     per field — sign flips are deliberately never dice-correlated). Bools /
-    strings pass through. Runs BEFORE kind clamping."""
+    strings pass through. Runs BEFORE kind clamping.
+
+    NEVER on a param whose range has no negative side (`lo >= 0`, e.g.
+    radial's magnitude-only `spin`, registry 0..1): the flipped value could
+    only ever be clamped back to the floor, so the roll would land exactly
+    `lo` — which is how STAR fired dead (spin 0.0, no rotation until a flare
+    wrote it back) on about half of its fires until 2026-11-12 (the star
+    improve plan, data/star-improve-plan/report.md §1a). On such a param the
+    sign is a separate control's job (spin_sign / Flip), and the binding's
+    `random_sign` is inert rather than destructive."""
+    if lo is not None and lo >= 0:
+        return value
     if (binding.random_sign and isinstance(value, (int, float))
             and not isinstance(value, bool) and rng.random() < 0.5):
         return -value
@@ -114,19 +126,19 @@ def apply_binding(binding: ValueBinding, ctx: FireContext, kind: str,
 
     if binding.mode == "steps":
         if sig is None:
-            return coerce(_maybe_flip_sign(binding, binding.fallback, rng), kind, lo, hi)
+            return coerce(_maybe_flip_sign(binding, binding.fallback, rng, lo), kind, lo, hi)
         chosen = None
         for step in binding.steps:   # validator keeps these ascending
             if sig >= step.threshold:
                 chosen = step.value
         if chosen is None:
-            return coerce(_maybe_flip_sign(binding, binding.fallback, rng), kind, lo, hi)
-        return coerce(_maybe_flip_sign(binding, chosen, rng), kind, lo, hi)
+            return coerce(_maybe_flip_sign(binding, binding.fallback, rng, lo), kind, lo, hi)
+        return coerce(_maybe_flip_sign(binding, chosen, rng, lo), kind, lo, hi)
 
     # map mode
     if sig is None:
         if binding.fallback is not None:
-            return coerce(_maybe_flip_sign(binding, binding.fallback, rng), kind, lo, hi)
+            return coerce(_maybe_flip_sign(binding, binding.fallback, rng, lo), kind, lo, hi)
         sig = 0.5   # neutral — the standing eff_intensity convention
     span = binding.in_max - binding.in_min
     if span == 0:
@@ -134,7 +146,7 @@ def apply_binding(binding: ValueBinding, ctx: FireContext, kind: str,
     else:
         t = max(0.0, min(1.0, (sig - binding.in_min) / span))
     out = binding.out_min + t * (binding.out_max - binding.out_min)
-    return coerce(_maybe_flip_sign(binding, out, rng), kind, lo, hi)
+    return coerce(_maybe_flip_sign(binding, out, rng, lo), kind, lo, hi)
 
 
 def kind_for_meta(meta: dict | None) -> tuple[str, float | None, float | None]:

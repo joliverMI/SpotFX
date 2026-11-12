@@ -137,20 +137,49 @@ improved from the skill) to build a detailed plan with the visual
 comparisons you have been doing." He has an effect to improve as the
 first test of the workflow: that session's entry goes here next.
 
-### 2026-11-12 — STAR session: tablet review requirement
-He opened the STAR explainer from a local Lavish URL and got "connection
-refused" — Lavish serves on `127.0.0.1`, unreachable from his tablet. The
-fix that worked: DJ published a claude.ai Artifact with the render PNGs
-(a `star x edges` grid) as supporting files, and sent stills/GIFs
-straight into chat. Promoted to a standing preference (§12 above) and
-into the skill files in this same change: every explainer, every round,
-and the confirmed plan now default to an Artifact publish, with Lavish
-optional at most.
-
-Separately, his "0.5 is flat" assumption on the `edges` param only got
-corrected once he saw a full -0.7..+0.7 x 3-6 edges grid, not a narrower
-hand-picked row. Promoted to a standing preference (§13 above) and into
-`visuals.md`.
+### 2026-11-12 — star-improve-plan (improve, scene + Matrix/Strip effect + flare kind + device mapping, STAR)
+- Rounds: 3 (+ one render ask); questions asked: 13; answered explicitly: 5
+  (Q5, Q10, Q11, Q13, plus the Q8 fact); "all other defaults": 8.
+- Changed the plan: Q10 quiet floor → "it can slow to a stop during quiet
+  music" (NO floor — the rec was a 0.12 rev/s floor; demote "never still"
+  as a recommendation, his default is: music-driven may stop). Q11/Q13
+  star range → "try .3 to .7 (assuming .5 is flat, which i think it is)",
+  then after the grid "let's do -.2 to +.4 ... I want it to go through 0"
+  (promote: CHECK EVERY NUMERIC ASSUMPTION IN HIS ANSWER AGAINST THE CODE
+  — his "0.5 is flat" was wrong; the facts scout must state what the
+  neutral/flat/zero value of a param IS before he picks a range).
+- Waved through: Q7 (Melt floor), Q9 (ring by angle), Q12 (which bands),
+  Q1–Q4, Q6 — all "defaults" (demote: engineering-shaped; fold into the
+  plan's defaults next time, ask only the taste ones).
+- Facts that were decisive and he could not know: the fire-time
+  sign-flip-then-clamp defect (the "not dynamic at all" was a bug, not
+  taste); Melt's lit share (61% vs 14–28%); flat = 0. A visual/number
+  settled each.
+- New preference: a FULL-RANGE GRID beats a three-option pick for a
+  continuous param — he asked for it himself ("Show me what the full range
+  from -.7 to +.7 star looks like in increments of .1 ... with 3, 4, 5, and
+  6 sides in a grid") and decided from it in one message. Offer the grid
+  first for any "what range" question (→ bank, look/motion; visuals.md).
+  Promoted to a standing preference (§13 above) and into `visuals.md`.
+- New constraint: he reviews on a TABLET. He opened the STAR explainer
+  from a local Lavish URL and got "connection refused" — Lavish serves on
+  `127.0.0.1`, unreachable from his tablet. The fix that worked: DJ
+  published a claude.ai Artifact with the render PNGs (a `star x edges`
+  grid) as supporting files, and sent stills/GIFs straight into chat.
+  Make every explainer tablet-reachable from the start (→ visuals.md).
+  Promoted to a standing preference (§12 above) and into the skill files
+  in this same change: every explainer, every round, and the confirmed
+  plan now default to an Artifact publish, with Lavish optional at most.
+- Visuals: the sprite tiles + measured numbers drove Q7 and Q9 without a
+  word of argument; the frozen "what is flat" row caught his wrong
+  assumption; the TV tile needed the REAL geometry (HyperHDR's LED layout
+  read off the Pi) — an assumed loop would have mis-shown today. Missed:
+  the first explainer embedded nothing and showed blank tiles under
+  file:// (sprites must be data URIs); the first entry tiles carried a
+  floor he then declined.
+- Confirmation: "STAR plan is approved, go ahead and deploy as soon as
+  it's ready" (from the plan artifact).
+- Room verdict: pending (after deploy).
 
 ### Template for the next entry
 ```

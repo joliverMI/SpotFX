@@ -40,6 +40,43 @@ ROTATION_SPEED_SCALE = 0.8
 # `phase_progress`; see _phase_step)
 # extra rev/s at full charge — scaled by ROTATION_SPEED_SCALE (was 0.9)
 CHARGE_SPIN_REV_S = 0.9 * ROTATION_SPEED_SCALE
+
+# ── THE STAR IMPROVE PLAN (2026-11-12, data/star-improve-plan/plan.md; the
+# Admiral: "I want it to be able to spin from the beginning. It should also
+# cap the max speed it can spin to 70% of what it is now, but it shouldn't
+# slow down at lower speeds. Also, the amount of star should dynamically
+# change with the music ... constantly be flowing and bouncing between the
+# top and bottom values", and after the star grid: "let's do -.2 to +.4 as
+# the standard range they sway between. I want it to go through 0").
+#
+# THE CAP: a hard clamp on the TOTAL per-frame advance of the pattern — the
+# audio spin, the base floor and the charge spin-up together — at 70% of
+# the old reactive ceiling (6 rev/s x ROTATION_SPEED_SCALE = 4.8 -> 3.36).
+# Identity below it: a frame that advances less is untouched.
+ROTATION_CAP_REV_S = 0.7 * 6.0 * ROTATION_SPEED_SCALE
+# THE EASE-IN: from activation the advance is scaled by a smoothstep over
+# this many seconds, so the star is already turning on its first frames and
+# reaches the song's own speed over ~1 s instead of starting at whatever
+# the audio callback happens to give. The effect's own default is 0 — the
+# old behaviour, byte-identical for every Radial scene that does not ask —
+# and STAR's Matrix entry carries STAR_SPIN_EASE_IN_S (scripts/
+# star_improve_scene_data.py). (The quiet floor stays `base_rotation`,
+# default 0 — his Q10: "it can slow to a stop during quiet music".)
+DEFAULT_SPIN_EASE_IN_S = 0.0
+STAR_SPIN_EASE_IN_S = 1.0
+# THE STAR WAVE: `star` sways on a continuous cosine between two bounds, its
+# period following the told section energy (slow when calm, quicker when
+# loud); the phase integrates, so a period change never jumps the value.
+# -0.2 .. +0.4 is his standard range: the wave passes through 0 (the flat
+# polygon) every cycle, the points tucking in through flat and coming out
+# at the other angle — continuous, because the shaping is
+# radius x (1 + star cos(edges phi)) and that is smooth through star = 0.
+# Off by default (byte-identical for every other Radial scene); STAR's
+# Matrix entry switches it on.
+DEFAULT_STAR_WAVE_LO = -0.2
+DEFAULT_STAR_WAVE_HI = 0.4
+DEFAULT_STAR_WAVE_PERIOD_SLOW_S = 7.0
+DEFAULT_STAR_WAVE_PERIOD_FAST_S = 3.0
 LULL_IMPLODE_S = 1.2     # implode fallback when no lull ramp arrives
 DROP_BLOOM_S = 0.5       # bloom fallback when no drop ramp arrives
 
@@ -274,6 +311,47 @@ class Radial2d(Twod):
                 default=0.0,
             ): vol.All(vol.Coerce(float), vol.Range(min=-1.0, max=1.0)),
             vol.Optional(
+                "energy",
+                description="Section intensity, 0 calm to 1 intense (pushed by SpotFX)",
+                default=0.5,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+            vol.Optional(
+                "spin_ease_in_s",
+                description=(
+                    "Seconds the rotation eases up to the song's own speed "
+                    "from the scene's first frame (0 = none)"
+                ),
+                default=DEFAULT_SPIN_EASE_IN_S,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=5.0)),
+            vol.Optional(
+                "star_wave",
+                description=(
+                    "Sway Star between Star Wave Low and High on a slow wave "
+                    "whose pace follows the song's energy"
+                ),
+                default=False,
+            ): bool,
+            vol.Optional(
+                "star_wave_lo",
+                description="Star wave: the low end of the sway",
+                default=DEFAULT_STAR_WAVE_LO,
+            ): vol.All(vol.Coerce(float), vol.Range(min=-1.0, max=1.0)),
+            vol.Optional(
+                "star_wave_hi",
+                description="Star wave: the high end of the sway",
+                default=DEFAULT_STAR_WAVE_HI,
+            ): vol.All(vol.Coerce(float), vol.Range(min=-1.0, max=1.0)),
+            vol.Optional(
+                "star_wave_period_slow_s",
+                description="Star wave: seconds per full sway when the music is calm",
+                default=DEFAULT_STAR_WAVE_PERIOD_SLOW_S,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=30.0)),
+            vol.Optional(
+                "star_wave_period_fast_s",
+                description="Star wave: seconds per full sway when the music is intense",
+                default=DEFAULT_STAR_WAVE_PERIOD_FAST_S,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=30.0)),
+            vol.Optional(
                 "phase",
                 description="Charge/lull/drop choreography phase (driven by SpotFX)",
                 default="none",
@@ -355,6 +433,12 @@ class Radial2d(Twod):
         # revolutions the AUDIO callback has added since the last rendered
         # frame — read (and zeroed) only by _base_rotation_step
         self._reactive_advance = 0.0
+        # revolutions EVERY writer (audio, charge spin-up, the base-rotation
+        # correction) has added to spin_total since the last GOVERNED frame —
+        # read (and zeroed) only by _govern_rotation. Unlike spin_total
+        # itself this is never reduced mod 1, so it is always the exact
+        # advance even when it exceeds half a revolution.
+        self._frame_adv = 0.0
         self.max_radius = None
         # particle ⇄ radial handoff state (here, NOT do_once, so it survives
         # config-patch grid rebuilds)
@@ -379,6 +463,13 @@ class Radial2d(Twod):
         self._pd_clk = None
         self._pd_spin = 0.0
         self._pd_seen = False
+        # THE STAR IMPROVE PLAN: seconds since activation (the ease-in's
+        # clock), the pattern's angle at the end of the last rendered frame
+        # (what the cap and the ease measure this frame's advance against)
+        # and the star wave's phase (None = off / not started)
+        self._active_s = 0.0
+        self._spin_frame_prev = None
+        self._wave_phase = None
         super().__init__(ledfx, config)
 
     def config_updated(self, config):
@@ -417,6 +508,14 @@ class Radial2d(Twod):
             self._config["frequency_range"]
         ]
         self.star = self._config.get("star")
+        # THE STAR IMPROVE PLAN: the ease-in length and the wave's bounds /
+        # periods; the wave itself runs in draw() (`_star_wave_step`) and
+        # overrides `self.star` per frame while on — the stored `star`
+        # value is never rewritten.
+        self.spin_ease_in_s = float(
+            self._config.get("spin_ease_in_s", DEFAULT_SPIN_EASE_IN_S) or 0.0)
+        if not self._config.get("star_wave", False):
+            self._wave_phase = None
 
         # charge/lull/drop: edge-detect the phase key. State is created here
         # (not __init__) because config_updated runs first, during
@@ -438,6 +537,7 @@ class Radial2d(Twod):
         self.impulse = getattr(data, self.power_func)()
         delta = self.impulse * self.spin
         self._reactive_advance += delta
+        self._frame_adv += delta
         self.spin_total += delta
         self.spin_total %= 1.0  # keep it in [0, 1)
 
@@ -758,9 +858,9 @@ class Radial2d(Twod):
                 or 1.0
             )
             # ease-in: spin-up maxes AT the ramp end
-            self.spin_total = (
-                self.spin_total + sign * CHARGE_SPIN_REV_S * p * p * dt
-            ) % 1.0
+            delta = sign * CHARGE_SPIN_REV_S * p * p * dt
+            self._frame_adv += delta
+            self.spin_total = (self.spin_total + delta) % 1.0
         elif self._phase == "drop":
             done = max(p, min(self._phase_t / DROP_BLOOM_S, 1.0))
             if done >= 1.0:
@@ -815,9 +915,9 @@ class Radial2d(Twod):
         got = reactive * sign                   # revolutions the audio made,
         #                                         measured along `sign`
         if want > got:
-            self.spin_total = (
-                self.spin_total + sign * (want - got)
-            ) % 1.0
+            delta = sign * (want - got)
+            self._frame_adv += delta
+            self.spin_total = (self.spin_total + delta) % 1.0
 
     def _phase_warp(self):
         """Standalone lull implode / drop bloom warp, when no crossfade
@@ -1177,6 +1277,81 @@ class Radial2d(Twod):
         splat_brighter(layer, x, y, cols[on] * b[on, None])
         return layer
 
+    def _govern_rotation(self, dt):
+        """THE STAR IMPROVE PLAN's ease-in and cap, on the TOTAL advance of
+        the pattern this frame — whatever the audio callback, the base
+        floor and the charge spin-up added to `_frame_adv` since the last
+        rendered frame (an exact, never-wrapped sum — unlike `spin_total`
+        itself, kept in [0, 1), this can be larger than half a revolution
+        and still read correctly):
+
+            adv  = _frame_adv                                 (exact, drained)
+            adv *= smoothstep(active_s / spin_ease_in_s)      (the ease-in)
+            adv  = clamp(adv, -cap dt, +cap dt)               (the cap)
+
+        so the first frames after activation turn gently up to the song's
+        own speed, and no frame ever turns faster than ROTATION_CAP_REV_S
+        (3.36 rev/s = 70% of the old 4.8 ceiling). Below the cap a frame
+        is untouched; with spin_ease_in_s 0 the ease is gone. The first
+        rendered frame (nothing to measure against — a hand-off may have
+        just set the angle) is never governed. The pre-drop outline keeps
+        its own spin (`_pd_spin`); it is not rotation of the pattern."""
+        adv = self._frame_adv
+        self._frame_adv = 0.0
+        prev = self._spin_frame_prev
+        if prev is not None and dt > 0.0:
+            ease = self.spin_ease_in_s
+            if ease > 0.0 and self._active_s < ease:
+                x = self._active_s / ease
+                adv *= x * x * (3.0 - 2.0 * x)
+            cap = ROTATION_CAP_REV_S * dt
+            if adv > cap:
+                adv = cap
+            elif adv < -cap:
+                adv = -cap
+            self.spin_total = (prev + adv) % 1.0
+        self._active_s += dt
+        self._spin_frame_prev = self.spin_total
+
+    def _star_wave_step(self, dt):
+        """THE STAR WAVE (`star_wave`): `star` sways on a continuous cosine
+        between `star_wave_lo` and `star_wave_hi`; a full sway takes
+        `star_wave_period_slow_s` at energy 0 and `_fast_s` at energy 1
+        (the told section energy, linear between). The phase integrates,
+        so a change of energy changes the pace and never the value. On the
+        scene's FIRST activation the wave starts AT the value the fire
+        landed (`star`, clamped into the bounds), heading up, so the first
+        frame is the picked shape and nothing steps; a later re-fire while
+        STAR is already showing (the same effect instance, `_wave_phase`
+        already running) carries on from its current point in the sway
+        instead — jumping to the newly landed value would be a visible
+        step. Crossing 0 is smooth: the shaping is radius x
+        (1 + star cos(edges phi)), continuous through star = 0 — the points
+        tuck in through the flat polygon and come out at the other angle."""
+        cfg = self._config
+        if not cfg.get("star_wave", False):
+            self._wave_phase = None
+            return
+        lo = float(cfg.get("star_wave_lo", DEFAULT_STAR_WAVE_LO))
+        hi = float(cfg.get("star_wave_hi", DEFAULT_STAR_WAVE_HI))
+        if hi < lo:
+            lo, hi = hi, lo
+        if self._wave_phase is None:
+            base = float(cfg.get("star") or 0.0)
+            base = min(max(base, lo), hi)
+            x = (base - lo) / (hi - lo) if hi > lo else 0.0
+            # cos phase for which lo + (hi-lo)(0.5 - 0.5 cos(2 pi p)) == base,
+            # on the rising half (p in [0, 0.5])
+            self._wave_phase = float(np.arccos(1.0 - 2.0 * x)) / (2.0 * np.pi)
+        slow = float(cfg.get("star_wave_period_slow_s",
+                             DEFAULT_STAR_WAVE_PERIOD_SLOW_S) or 0.5)
+        fast = float(cfg.get("star_wave_period_fast_s",
+                             DEFAULT_STAR_WAVE_PERIOD_FAST_S) or 0.5)
+        energy = min(max(float(cfg.get("energy", 0.5) or 0.0), 0.0), 1.0)
+        period = max(slow + (fast - slow) * energy, 0.05)
+        self._wave_phase = (self._wave_phase + dt / period) % 1.0
+        self.star = lo + (hi - lo) * (0.5 - 0.5 * np.cos(2.0 * np.pi * self._wave_phase))
+
     def _track_rotation(self, dt):
         """The live rotation rate (rad/s, smoothed) — what the bands release
         hands its pieces as tangential velocity."""
@@ -1203,6 +1378,8 @@ class Radial2d(Twod):
         self._phase_step(dt)
         self._pre_drop_step(dt)
         self._base_rotation_step(dt)
+        self._govern_rotation(dt)
+        self._star_wave_step(dt)
         self._track_rotation(dt)
         if self._morph is not None:
             self._morph["t"] += dt

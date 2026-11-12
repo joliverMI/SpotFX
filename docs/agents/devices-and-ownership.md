@@ -148,6 +148,31 @@ backs ONLY the `porch-rail` and `dining-table` WLED devices and nothing
 else, so no virtual-routing change was needed to give those two their
 own category.
 
+## A per-LED `pixel_map` on a device (the TV ring, 2026-11-12)
+
+`fx/devices/__init__.py` (VENDOR.md #93): every device accepts `pixel_map`
+(default empty) — physical LED i shows effect pixel `pixel_map[i]`, applied
+in `assemble_frame` after `center_offset`, for every effect alike; a bad
+map is ignored with one warning. Why it exists: `tv-mapper` is a COPY-
+mapped virtual (the 560-px TV strip + two kitchen sconces), so a sconce ring
+gets the whole 560-px picture resampled and looks radial, while the TV got
+it one-to-one along its frame. `scripts/tv_ring_pixel_map.py` (dry run /
+`--apply` / `--revert`, a backup, DJ applies at deploy) builds the TV's
+table from the strip's REAL geometry in `config/tv_backlight_layout.json`
+(HyperHDR's LED layout read off the strip's own Pi, 2026-11-12:
+one clockwise loop seen from the front, LED 0 at the bottom-right corner,
+0–199 left along the bottom, 200–259 up the left edge, 260–479 right along
+the top, 480–559 down the right; River: DDP pixel i IS physical LED i, no
+remap) — each LED shows the strip pixel at its ANGLE about the screen
+centre (aspect-corrected), a permutation of 0..559; the old `center_offset`
+90 is SUPERSEDED and set to 0 (a ring pattern's start angle has no visible
+meaning, so there is nothing to fold in) — the old value is kept in the
+revert sidecar so undo restores it. The strip is the Pi stand-in (WLED 16.0.1
+emulation, `product tv-strip-standin`); the fixture's own geometry lives
+there, not in any SpotFX store. A `spectra` restart loads the new device
+config (the restart hazard in AGENTS.md applies). Help topic
+`tv-ring-mapping`; proof `tests/test_star_improve.py`.
+
 ## SPECTRA phone A/V-sync instrument (`/avsync`) — MEASURE the audio/visual offset, don't argue it
 
 `spectra/services/av_sync_{correlate,audio_ref,pattern,session}.py` +

@@ -764,6 +764,16 @@
           "aspect_scale": 1.0,
           "default": 0.5
         },
+        "dark_floor": {
+          "label": "Dark Floor",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 0.9,
+          "default": 0.0,
+          "help_topic": "melt-dark-floor",
+          "note": "Cut the melt's brightness below this level to black and re-stretch the rest, so the blobs become separate islands with real dark gaps (the star improve plan, 2026-11-12, his 'more dark blobs'). 0 = today, byte-identical; STAR's Strips entry carries 0.5 (measured: 61% of a 560-px strip lit -> 33%, mean luminance 0.130 -> 0.082, still the brightest strip)."
+        },
         "gradient": {
           "label": "Gradient",
           "type": "gradient",
@@ -1177,7 +1187,74 @@
           "max": 1,
           "flip_sign": true,
           "aspect": "shape",
-          "default": 0.0
+          "default": 0.0,
+          "help_topic": "star-wave",
+          "note": "flat (the plain polygon) is 0: the shaping is radius x (1 + star cos(edges angle)), so 0.3 is a 1.9x star, 0.5 a 3.0x one, 0.7 a 5.7x one; a negative value puts the points at the polygon's corners instead of its edge-midpoints. STAR's standard range is -0.2..+0.4 (the Admiral, 2026-11-12, the star improve plan) and its Matrix entry sways across it with star_wave; while the wave is on this stored value is only where the sway starts."
+        },
+        "energy": {
+          "label": "Energy (pushed)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 1,
+          "default": 0.5,
+          "help_topic": "star-wave",
+          "note": "The song's section energy, pushed by SPECTRA's pulse feed (spectra/services/pulse_feed.py, fx.device_model.ENERGY_FED_EFFECTS) exactly as Pulse's own `energy` is; the star wave paces itself by it. Not a value to author."
+        },
+        "spin_ease_in_s": {
+          "label": "Spin Ease-In (s)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 5,
+          "default": 0.0,
+          "help_topic": "radial-base-rotation",
+          "note": "Seconds the rotation eases up to the song's own speed from the scene's first frame (the star improve plan, 2026-11-12: 'spin from the beginning'). 0 = the old behaviour (the effect default; STAR's Matrix entry carries 1.0). The 70% speed cap (fx/effects/radial.py ROTATION_CAP_REV_S, 3.36 rev/s) is a constant, not a param."
+        },
+        "star_wave": {
+          "label": "Star Wave",
+          "type": "toggle",
+          "smooth": false,
+          "aspect": "shape",
+          "default": false,
+          "help_topic": "star-wave",
+          "note": "Sway Star between Star Wave Low and High on a continuous wave whose pace follows the song's energy (never a jump, never parked). Off = today (every Radial scene but STAR). The star improve plan, 2026-11-12."
+        },
+        "star_wave_lo": {
+          "label": "Star Wave Low",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "default": -0.2,
+          "help_topic": "star-wave"
+        },
+        "star_wave_hi": {
+          "label": "Star Wave High",
+          "type": "numeric",
+          "smooth": true,
+          "min": -1,
+          "max": 1,
+          "default": 0.4,
+          "help_topic": "star-wave"
+        },
+        "star_wave_period_slow_s": {
+          "label": "Star Wave Period, calm (s)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 30,
+          "default": 7.0,
+          "help_topic": "star-wave"
+        },
+        "star_wave_period_fast_s": {
+          "label": "Star Wave Period, intense (s)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 30,
+          "default": 3.0,
+          "help_topic": "star-wave"
         },
         "edges": {
           "label": "Edges",

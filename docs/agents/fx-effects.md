@@ -1281,6 +1281,24 @@ baseline, not evaluable at load time). Unverified against his live room
 `tests/test_radial_base_rotation.py`'s rotation-speed-cap cases,
 `scripts/check_radial_base_rotation.py`.
 
+## Radial (STAR) — the star improve plan (2026-11-12): ease-in, the 70% cap, the star wave, Edge Morph
+
+The radial-effect skill's "THE STAR IMPROVE PLAN" section is the binding
+statement; `data/star-improve-plan/plan.md` the plan he approved. In one
+line each: the "dead on entry" was a FIRE-TIME defect (a `random_sign`
+binding on a 0..1 param flipped then clamped to 0 — `binding_resolver.
+_maybe_flip_sign` now skips any param with `lo >= 0`); `_govern_rotation`
+eases the first `spin_ease_in_s` seconds (STAR 1.0, effect default 0) and
+clamps every frame's TOTAL advance at `ROTATION_CAP_REV_S` 3.36 rev/s;
+`_star_wave_step` sways `star` between `star_wave_lo`/`_hi` (STAR −0.2..
++0.4, through flat = 0 — flat is 0, not 0.5) at a pace set by the pushed
+`energy` (the pulse feed now feeds radial, energy only); "Edge Morph" is a
+`ParamTarget` mode `random_other` on `edges` 3..6, permanent, on STAR's two
+upper flare bands; Melt's `dark_floor` (VENDOR.md #92) and the TV's
+`pixel_map` (#93, `docs/agents/devices-and-ownership.md`) are the strip
+half. Proofs: `tests/test_star_improve.py`; rig: `scripts/
+render_star_improve_*.py`.
+
 ## `crystal-mapper` (the hex Matrix virtual) — read the skill before touching it
 
 Load `.claude/skills/crystal-hex-grid/SKILL.md` before changing any effect

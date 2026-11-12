@@ -185,6 +185,67 @@ invariants not visible cold:
   against the module at the step-8 base through `pre_drop_look_harness.
   star_run`, which hosts the strip Star samples).
 
+## THE STAR IMPROVE PLAN (2026-11-12, data/star-improve-plan/plan.md) — spin from the first frame, the 70% cap, the star wave, Edge Morph
+
+His ask, verbatim: "I want it to be able to spin from the beginning. It
+should also cap the max speed it can spin to 70% of what it is now, but it
+shouldn't slow down at lower speeds. Also, the amount of star should
+dynamically change with the music ... constantly be flowing and bouncing
+between the top and bottom values for that setting. Flares should change
+the number of edges, but do it visually smoothly like we have"; after the
+star grid: "let's do -.2 to +.4 as the standard range they sway between. I
+want it to go through 0". Five things not visible cold:
+
+- **The entry no-spin was a FIRE-TIME DEFECT, not the effect's.** STAR's
+  `spin` binding carries `random_sign: true`; `binding_resolver` flipped
+  the sign and THEN clamped to the registry's `min 0`, so ~52% of fires
+  landed `spin = 0.0` and nothing turned until a flare's "Flare patch" kind
+  wrote spin back. `_maybe_flip_sign` now never flips a param whose `lo >=
+  0` (`spectra/services/binding_resolver.py`). The direction is Flip's job.
+- **`_govern_rotation` (draw, after `_base_rotation_step`)** measures this
+  frame's TOTAL advance (audio spin + base floor + charge spin-up, each
+  writer adding its own signed revolutions into `_frame_adv` as it moves
+  `spin_total`; `_govern_rotation` drains that accumulator exactly once
+  per governed frame — never reduced mod 1, so it reads correctly even
+  past half a revolution), scales it by
+  `ROTATION_CAP_REV_S` = 0.7 x 6.0 x ROTATION_SPEED_SCALE = **3.36 rev/s**.
+  Identity below the cap. `spin_ease_in_s` defaults to **0** on the effect
+  (every other Radial scene byte-identical); STAR's Matrix entry carries
+  1.0 (`STAR_SPIN_EASE_IN_S`, written by `scripts/star_improve_scene_data.
+  py`). No quiet floor on STAR by his word ("it can slow to a stop during
+  quiet music"): `base_rotation` stays 0 and his.
+- **`_star_wave_step` (draw)**: with `star_wave` on, `self.star` is
+  overridden per frame by a cosine between `star_wave_lo` and `_hi`
+  (STAR: **-0.2 .. +0.4**, through flat = 0 every cycle), period
+  `star_wave_period_slow_s` (7) at `energy` 0 -> `_fast_s` (3) at 1; the
+  phase integrates (a pace change never jumps the value) and, on the
+  scene's FIRST activation, starts AT the fired `star` value (clamped into
+  the bounds), heading up — a later re-fire while STAR is already showing
+  carries on from its current point in the sway instead, so nothing steps.
+  The stored `star` is never rewritten. **Flat is star = 0**, not 0.5 (he assumed
+  0.5 until the -0.7..+0.7 x 3-6 edges grid): `radius x (1 + star
+  cos(edges phi))`; 0.5 is a 3.0x star. Crossing 0 is continuous.
+- **`energy`** (0..1, default 0.5) is PUSHED by the pulse feed
+  (`spectra/services/pulse_feed.py`; `fx.device_model.ENERGY_FED_EFFECTS`
+  = the one-colour effects + radial, `ENERGY_ONLY_EFFECTS` = radial takes
+  `energy` alone, never `beat_ms`). Not a value to author.
+- **Edge Morph** is scene data + one engine addition: a `ParamTarget` mode
+  `random_other` (`spectra/models/scene.py`; resolved per virtual in
+  `scene_response._compute_param_moves` via `_roll_other` — a uniform
+  integer in [lo, hi] that is never the carried value, landed verbatim, a
+  PERMANENT kind carries it). STAR's kind targets `edges` 3..6 on the two
+  upper flare bands; the existing `shape_morph_s` (0.6 s) glides it; it
+  holds until the next flare/update (his Q5). The 0.7-1 patch kinds no
+  longer write `star: 0`.
+
+Proofs: `tests/test_star_improve.py` (the fire-time fix, the ease, the
+cap under a full charge, the wave's bounds/continuity/zero crossing/start,
+Edge Morph through the real ResponseEngine, Melt's floor, the TV ring and
+both data scripts). Rig scripts: `scripts/render_star_improve_crystal.py`
+(the explainer's crystal tiles; the live law driven per frame),
+`scripts/render_star_improve_strips.py`, `scripts/render_star_improve_grid.py`
+(the star x edges grid he decided from), `scripts/render_star_improve_tablet.py`.
+
 ## Out of Star: the bands release (transition programs)
 
 A program out of Star captures `_program_snapshot(settings)` — NOT

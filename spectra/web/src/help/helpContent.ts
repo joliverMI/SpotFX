@@ -323,6 +323,8 @@ export const HELP_SECTIONS: HelpSection[] = [
           'BASE SPEED (rev/s) is the opposite kind of number: LINEAR, absolute, and independent of the music. It is stated in revolutions per second — 0.05 is one full turn every 20 seconds, 0.25 is one every four, 1.0 is one a second. Set it and the pattern never turns slower than that, audio or no audio.',
           'The two combine as a FLOOR, not a sum: the pattern turns at whichever is faster right now. In quiet it turns at your Base Speed; the moment the music\'s own drive is faster, the reactive Speed takes over completely unchanged — so setting a base never speeds up or alters what you already tuned at the peaks. Base Speed is left at 0 by default, which is exactly today\'s behaviour.',
           'Direction is not a separate choice: the base follows whichever way the pattern is already turning (Speed\'s own sign, which is what the Flip control writes), so it never fights a reverse flare. And it is advanced by the render clock, not by audio frames, so it keeps turning even if the audio capture goes quiet or stalls entirely.',
+          'SPIN FROM THE FIRST MOMENT (the star improve plan). Two things used to leave STAR dead when it came on. First, a defect: a Speed binding with "random sign" was flipped negative and then clamped to Speed\'s 0..1 range, so about half of all fires landed Speed at exactly 0 and nothing turned until a flare or an update wrote it back — a sign flip is now never applied to a setting that has no negative side (the direction is Flip\'s job). Second, Speed is audio-driven, so the first frames turned at whatever the bass happened to be. Spin Ease-In (seconds, STAR\'s entry carries 1.0; 0 is the old behaviour, the default everywhere else) eases the rotation up to the song\'s own speed from the scene\'s first frame. There is no quiet floor on STAR by his choice ("it can slow to a stop during quiet music") — Base Speed stays 0 and is yours to set.',
+          'THE SPEED CAP. The pattern never turns faster than 3.36 revolutions a second — 70% of the old ceiling (4.8) — however hard the bass, the Speed setting and a charge\'s own spin-up push together. Below the cap nothing changes: a frame that turns slower is exactly what it was.',
         ],
       },
       {
@@ -354,6 +356,34 @@ export const HELP_SECTIONS: HelpSection[] = [
         keywords: 'star radial edges shape morph glide dice re-roll polygon points cut smooth',
         body: [
           'When STAR\'s Edges changes (its dice re-roll picks a new number of points), the shape glides from the old polygon to the new one over Shape Morph seconds (0.6 by default) instead of cutting in one frame. 0 puts the old instant cut back. Changing anything else — Star, Twist, the speed — never starts a morph; those already glide on their own.',
+          'EDGE MORPH (the star improve plan). Flares now change the number of points: STAR carries a permanent flare kind, "Edge Morph", on its two upper flare bands (0.35–0.7 and 0.7–1). Each time it fires it picks a NEW count from 3 to 6 — never the one showing — and the shape morphs to it over Shape Morph seconds; the new count then holds until the next flare or scene update picks again (his words: "it should change until there is a new scene update or flare"). Small flares (below 0.35) leave the shape alone. The kind\'s target mode is "random other": a fresh whole number in a range that is never the current value — it works on any whole-number setting, and Sonic can make such a kind ("add a flare kind that picks a different edge count").',
+        ],
+      },
+      {
+        id: 'star-wave',
+        title: 'STAR / Radial — the star wave (how much star, flowing with the music)',
+        keywords: 'star radial star wave sway flat polygon points amount of star energy period calm intense range -0.2 0.4 through zero corners edges flare patch',
+        body: [
+          'The Star setting is how far the polygon\'s points pull out. FLAT — the plain polygon — is 0, not 0.5: the shape\'s radius is multiplied by 1 + Star × cos(Edges × angle), so 0.3 is a star whose points reach 1.9× further than its valleys, 0.5 reaches 3.0×, 0.7 reaches 5.7×, and a negative value is the same star with its points at the polygon\'s corners instead of the middles of its sides.',
+          'With Star Wave on (STAR\'s Matrix entry carries it; every other Radial scene is unchanged), Star sways continuously between Star Wave Low and Star Wave High on a cosine — never a jump, never parked. His standard range for STAR is −0.2 to +0.4: the sway passes through flat every cycle, the points tucking in through the plain polygon and coming out at the other angle, which is smooth because the shaping is smooth through 0. The pace follows the song\'s energy: a full sway takes Star Wave Period (calm) seconds in a quiet section (7 by default) and Star Wave Period (intense) in a loud one (3), with a straight line between; a change of energy changes the pace, never the value.',
+          'On the scene\'s first activation, the wave starts at the value the fire landed (the entry\'s Star binding, now kept inside the standard range) and heads up from there, so the first frame is the picked shape. A later re-fire while STAR is already showing — the next song picking STAR again — carries on from wherever the sway already is instead of jumping to the new fire\'s value, so nothing steps. The stored Star value is never rewritten by the wave. STAR\'s 0.7–1 "patch" flare kinds no longer write Star to 0 — that used to flatten the star for the rest of the song on any loud flare. Sonic reaches every one of these values per scene entry ("set Star Wave High to 0.3 on STAR\'s Matrix entry").',
+        ],
+      },
+      {
+        id: 'melt-dark-floor',
+        title: 'Melt — the dark floor (more dark between the blobs)',
+        keywords: 'melt dark floor dark blobs gaps bright strips tv sconce dark mode brightness star strips lit share',
+        body: [
+          'Melt\'s brightness along a strip is a smooth wave that is never black between its blobs, so in dark mode it lit about 61% of the TV strip while the other scenes\' strips sat at 14–28%. Dark Floor cuts everything below that level to black and stretches the rest back to full, so the blobs become separate islands with real dark gaps and each blob\'s peak stays as bright as before. 0 is exactly the old look (the default on every Melt, House Star and House Fish included); STAR\'s strips carry 0.5, measured at 33% of the strip lit — still the brightest strip, as he asked, but in the others\' range. STAR\'s crystal reads the same strip, so its rings get the same gaps.',
+        ],
+      },
+      {
+        id: 'tv-ring-mapping',
+        title: 'The TV strip — turning round the screen like a sconce',
+        keywords: 'tv backlight strip ring radial sconce pixel map lookup angle clockwise loop blobs left right copy mapping',
+        body: [
+          'The TV backlight, both kitchen sconces and the TV strip itself are one copy-mapped virtual: a strip effect renders once at the TV\'s 560 pixels and each sconce ring gets that whole picture squeezed into its 28 or 60 pixels — which is why a sconce always looks radial, every blob an arc turning about its centre. The TV got the same 560 pixels one-to-one along its frame, where a blob is a stretch of one edge.',
+          'The TV now carries a per-LED lookup (its device\'s Pixel Map): each LED shows the strip pixel at that LED\'s ANGLE round the screen\'s centre — equal angle, not equal length — built once from the strip\'s real geometry (one clockwise loop seen from the front, LED 0 at the bottom-right corner, 200 LEDs along the bottom, 60 up the left, 220 along the top, 80 down the right). So on the TV, as on a sconce, a blob is an arc of constant angle and turns about the centre at the effect\'s own pace, for every strip effect alike (Melt, Black Hole, Orbits, Fireworks). An empty Pixel Map is the old one-to-one order; the device\'s old centre offset is superseded by the angle table and set to 0 (a ring pattern\'s start angle has no visible meaning), with the old value kept so undo can restore it.',
         ],
       },
       {

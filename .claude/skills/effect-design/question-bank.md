@@ -54,6 +54,20 @@ classification said back in one line.
 - ❗ **Continuity of motion across a change.** Recommended: velocity and
   heading continuous through any hand-off; moving targets are met where
   they will be, not where they were. (transitions-plan-rev, shoal-burst-plan)
+- 👁❗ **What range for a continuous param — show the FULL range as a grid
+  first.** Before asking "A, B or C" for a numeric range, render the whole
+  range in small steps (× the other shape axis, e.g. star −0.7..+0.7 in 0.1
+  × edges 3–6 = 60 stills, 240 px, no labels) and STATE the param's
+  neutral/flat value from the code in the facts. He decided from the grid
+  in one message after a wrong assumption ("0.5 is flat") had survived two
+  rounds of three-option tiles. Recommended default when a param has a
+  neutral value: a range that passes THROUGH it (his "I want it to go
+  through 0"). (star-improve-plan)
+- **May a music-driven motion stop in quiet music?** Recommended: yes —
+  he declined a quiet floor on STAR ("it can slow to a stop during quiet
+  music"); "spin from the beginning" meant the first frames when the music
+  has energy, not a motor. Offer the floor only as his own knob, never on
+  by default. (star-improve-plan)
 - **Where is the effect's centre / "eye"?** Any shock, bloom or ring
   originates from the effect's own form (horizon ring, tether ring, iris
   rim), never from the panel centre or the panel perimeter. 🅰 Yes.
@@ -215,6 +229,13 @@ classification said back in one line.
 - ✂ Report, don't ask: per-frame cost on the build box for 976 cells and
   for the strip; Hue relay rate; WLED power limiter. Include the number in
   the plan's acceptance checks.
+
+## 7b. How he reviews (every kind)
+
+- ❗ **Tablet-reachable visuals.** He reviews on a tablet: the local Lavish
+  link does not reach it. Publish the explainer where he can open it, and
+  keep plain stills/GIFs under `data/<plan>/tablet/` (three-panel PNG per
+  option, ~6 s GIF under 3 MB per option). (star-improve-plan)
 
 ## 8. Testing and proof
 

@@ -63,6 +63,7 @@ class StarRoom(Room):
                     with eff.lock:
                         adv = self.rev_s * DT
                         eff._reactive_advance += adv
+                        eff._frame_adv += adv
                         eff.spin_total = (eff.spin_total + adv) % 1.0
                 f = v.assemble_frame()
                 if f is not None:
