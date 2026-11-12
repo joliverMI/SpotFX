@@ -84,8 +84,8 @@ ASKING FIRST, same shape as drop_console.py's in-process confirm/redeem
 these lyric modules live in THIS process, so there is nothing to cross):
 turning auto_read ON (letting Claude read songs with nobody pressing
 anything, one a minute, continuously spending his Claude allowance) asks
-first; turning it off, or changing only the weak-match threshold, applies
-at once. draft_colour_meanings and read_song_lyrics ALWAYS ask — every
+first; turning it off applies at once. draft_colour_meanings and
+read_song_lyrics ALWAYS ask — every
 call spends his Claude allowance, not just the first one, so there is no
 "newly lets it act" distinction to make; absorb_console's start_absorb
 (a consequential act repeated every call) is the matching precedent.

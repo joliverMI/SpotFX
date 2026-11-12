@@ -6,8 +6,7 @@ the lights. spectra/services/sung_labels.py is the binding statement.
   POST /api/sung-labels/draft      Claude drafts meanings for a small batch of
                                     cards (color_meanings.DRAFT_BATCH_SIZE)
   PUT  /api/sung-labels/settings   a true partial update: automatic reading
-                                    on or off (off by default), and the
-                                    weak-match threshold a reading uses
+                                    on or off (off by default)
 """
 from __future__ import annotations
 
