@@ -251,6 +251,33 @@ def test_star_wave_pace_follows_energy_and_off_is_today():
     assert np.all(off == 0.0)
 
 
+def test_star_wave_continues_through_a_same_scene_refire():
+    """A re-fire while STAR is already showing (the next song also picking
+    STAR) lands a fresh `star` on the SAME effect instance via update_config
+    — `_wave_phase` keeps running, so the sway must carry on from wherever
+    it already is rather than jump to the newly landed value."""
+    async def go():
+        with tempfile.TemporaryDirectory() as tmp:
+            async with star_room(tmp, radial={**WAVE, "star": 0.1, "energy": 0.0,
+                                               "spin_ease_in_s": 0.0}) as room:
+                stars = []
+                for _ in range(40):
+                    room.rev_s = 0.3
+                    room.step(1)
+                    stars.append(float(room.star.star))
+                room.star.update_config({"star": 0.35})     # the re-fire's landed value
+                for _ in range(20):
+                    room.rev_s = 0.3
+                    room.step(1)
+                    stars.append(float(room.star.star))
+        return np.array(stars)
+    stars = run(go())
+    max_slope = 0.6 / (1.0 * 60) * 3.5                      # the wave's own steepest slope
+    step = np.abs(np.diff(stars))
+    assert step.max() < max_slope                           # no jump, including at the re-fire
+    assert np.any(step[40:] > 0.0)                           # and it keeps sweeping after
+
+
 # ── 5. Edge Morph ──────────────────────────────────────────────────────────
 
 def test_random_other_target_validates_and_never_repeats():

@@ -1318,10 +1318,14 @@ class Radial2d(Twod):
         between `star_wave_lo` and `star_wave_hi`; a full sway takes
         `star_wave_period_slow_s` at energy 0 and `_fast_s` at energy 1
         (the told section energy, linear between). The phase integrates,
-        so a change of energy changes the pace and never the value. The
-        wave starts AT the value the fire landed (`star`, clamped into the
-        bounds), heading up, so the first frame is the picked shape and
-        nothing steps. Crossing 0 is smooth: the shaping is radius x
+        so a change of energy changes the pace and never the value. On the
+        scene's FIRST activation the wave starts AT the value the fire
+        landed (`star`, clamped into the bounds), heading up, so the first
+        frame is the picked shape and nothing steps; a later re-fire while
+        STAR is already showing (the same effect instance, `_wave_phase`
+        already running) carries on from its current point in the sway
+        instead — jumping to the newly landed value would be a visible
+        step. Crossing 0 is smooth: the shaping is radius x
         (1 + star cos(edges phi)), continuous through star = 0 — the points
         tuck in through the flat polygon and come out at the other angle."""
         cfg = self._config

@@ -218,9 +218,11 @@ want it to go through 0". Five things not visible cold:
   overridden per frame by a cosine between `star_wave_lo` and `_hi`
   (STAR: **-0.2 .. +0.4**, through flat = 0 every cycle), period
   `star_wave_period_slow_s` (7) at `energy` 0 -> `_fast_s` (3) at 1; the
-  phase integrates (a pace change never jumps the value) and starts AT the
-  fired `star` value (clamped into the bounds), heading up. The stored
-  `star` is never rewritten. **Flat is star = 0**, not 0.5 (he assumed
+  phase integrates (a pace change never jumps the value) and, on the
+  scene's FIRST activation, starts AT the fired `star` value (clamped into
+  the bounds), heading up — a later re-fire while STAR is already showing
+  carries on from its current point in the sway instead, so nothing steps.
+  The stored `star` is never rewritten. **Flat is star = 0**, not 0.5 (he assumed
   0.5 until the -0.7..+0.7 x 3-6 edges grid): `radius x (1 + star
   cos(edges phi))`; 0.5 is a 3.0x star. Crossing 0 is continuous.
 - **`energy`** (0..1, default 0.5) is PUSHED by the pulse feed
