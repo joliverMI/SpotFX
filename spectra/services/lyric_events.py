@@ -14,20 +14,51 @@ reads as off. With the switch off the trigger clock never reaches this module's
 planner and its output is exactly what it was without the feature
 (tests/test_lyric_events.py proves it against an engine running the same show).
 
-THE PLAN IS ONE PURE FUNCTION, `plan_words`, and the Test Bed and the trigger
-clock both call it, so what the page says a word will do is what the show does.
+THE PLAN IS ONE PURE FUNCTION, `plan_words` (behind `plan_play`, which rolls
+the play first), and the Test Bed and the trigger clock both call it, so what
+the page says a word will do is what the show does.
 It decides, once per word, whether the word FIRES ALONE, IMPRINTS on an event or
 does NOTHING and why. Only three facts need the room at the moment it happens,
 and those are decided there and logged: whether the scene showing allows the
 colour, whether that event can really carry it, and whether anything is holding
 the room's colours.
 
-HOW A WORD IS WEIGHED. The strongest word goes first (his own matches ahead of
-every guess, then Claude's confidence, then the emphasis score, then the earlier
-word), so a stronger word can never be crowded out by a weaker one:
+THE ROLL (2026-11-12). Each play of a song rolls which words act this time,
+once, before the plan is worked out, so the timeline is ready while the song
+plays. The Admiral: "Instead of always using a "word" effect, it should randomly
+be used, based on it's confidence ... My goal is for more words to get to show
+up occassionally, but also to prevent a song always doing the same thing every
+play", and "if the confidence leve is .97, it runs 97% of the time. If it is
+.03, it runs 3% of the time. We might add more math to that later, but start
+there." So:
 
-  1. A weak match fires nothing. A match that reaches only an effect has no
-     event yet, and fires nothing.
+  - A word's chance is `chance_for`: its confidence, exactly. His own matches
+    are 1.0 and always play. His pin overrides it: Always is 1.0, Never 0.0.
+    Every later change to the mapping belongs in that one function.
+  - A play has one number, its seed. Each word's draw is a hash of the seed,
+    the song and the word's own span and label, in [0, 1); the word plays this
+    time when its draw is under its chance. A word's draw does not depend on
+    any other word, so adding or pinning one moves nothing else, and the same
+    seed always gives the same winners.
+  - A word that did not win sits out BEFORE the planner runs, so it frees its
+    phrase, its event and its gap for the next word: a weaker word that is
+    always crowded out today gets its turn on the plays a stronger neighbour
+    sits out.
+  - A new play: a different song, the same song after another song or after
+    PLAY_GAP_S without it, or a repeat wrap (the end of the song straight back
+    to its start). Pause, seek, rewind and a SPECTRA restart keep the play.
+  - "Keep this roll": he can keep a play's number as the song's plan
+    (`keep_roll`); every later play then uses it.
+  - With no play (a song not playing and no kept roll) the Test Bed shows
+    every word as if it won, each with its chance, and can sample a play.
+
+HOW A WORD IS WEIGHED. Among the words that play, the strongest goes first (his
+own matches ahead of every guess, then Claude's confidence, then the emphasis
+score, then the earlier word), so a stronger word can never be crowded out by a
+weaker one:
+
+  1. A word sitting out this play fires nothing. A match that reaches only an
+     effect has no event yet, and fires nothing.
   2. Once per phrase: a sung line that already gave a lyric event gives no more.
   3. The event: every drop, scene change or update, and flare within the imprint
      window either way, inclusive of the window's edge. Drop first, then scene
@@ -69,17 +100,21 @@ on the websocket). Neither changes what fires or when.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import secrets
 import threading
 import time
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from spectra import config
-from spectra.models.lyric_labels import LyricEventSettings, LyricEventStore, LyricShowState
+from spectra.models.lyric_labels import (
+    SEED_MAX, LyricEventSettings, LyricEventStore, LyricPlay, LyricPlayStore, LyricShowState,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +122,7 @@ VERDICT_FIRE = "fire"
 VERDICT_IMPRINT = "imprint"
 VERDICT_NOTHING = "nothing"
 
-WHY_WEAK = "weak_match"
+WHY_SAT_OUT = "sat_out"
 WHY_NO_COLOUR = "no_colour_set"
 WHY_PHRASE = "phrase_taken"
 WHY_TOO_SOON = "too_soon"
@@ -102,6 +137,22 @@ _PRIORITY = {KIND_DROP: 0, KIND_SCENE: 1, KIND_FLARE: 2}
 # Why an event cannot carry colour, known ahead of time.
 CANNOT_DROP_COLOUR_OFF = "drop colour changes are off"
 CANNOT_OWN_COLOUR = "it names its own colour"
+
+# His per-match override of the chance (SongMatches.pins). No pin is Chance.
+PIN_ALWAYS = "always"
+PIN_NEVER = "never"
+PIN_CHANCE = "chance"
+PINS = (PIN_ALWAYS, PIN_NEVER)
+
+# THE ROLL: away from a song this long, and coming back to it is a new play.
+# How often a switched-on show's play under way is written down, so a restart
+# mid-song finds it (LyricPlay.seen_ms).
+PLAY_GAP_S = 600.0
+PLAY_SAVE_S = 60.0
+# A repeat wrap: from the last tenth of the song straight to its first
+# twentieth.
+WRAP_FROM = 0.9
+WRAP_TO = 0.05
 
 # Energy unknown is neutral, the way every Energy reader treats it.
 NEUTRAL_ENERGY = 0.5
@@ -199,9 +250,40 @@ def set_show(uri: str, on: bool) -> bool:
     rather than being overwritten."""
     with _lock:
         store = _load().model_copy(deep=True)
-        store.shows[uri] = LyricShowState(enabled=bool(on), changed_ms=int(time.time() * 1000))
+        prior = store.shows.get(uri) or LyricShowState()
+        store.shows[uri] = prior.model_copy(
+            update={"enabled": bool(on), "changed_ms": int(time.time() * 1000)})
         _save(store)
     return bool(on)
+
+
+def kept_seed(uri: Optional[str]) -> Optional[int]:
+    """The play number he kept for this song, or None. Never raises: an
+    unreadable store keeps nothing, so every play rolls its own."""
+    if not uri:
+        return None
+    try:
+        state = _load().shows.get(uri)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("word colours: the kept roll is unreadable — rolling fresh")
+        return None
+    return None if state is None else state.kept_seed
+
+
+def keep_roll(uri: str, seed: Optional[int]) -> Optional[int]:
+    """Keep this play number as the song's plan, or (None) let every play
+    roll again. Does not touch the show's switch. An unreadable store raises
+    rather than being overwritten; a number out of range raises ValueError."""
+    if seed is not None and not 0 <= int(seed) <= SEED_MAX:
+        raise ValueError(f"a play number is between 0 and {SEED_MAX}")
+    with _lock:
+        store = _load().model_copy(deep=True)
+        prior = store.shows.get(uri) or LyricShowState()
+        store.shows[uri] = prior.model_copy(update={
+            "kept_seed": None if seed is None else int(seed),
+            "kept_ms": int(time.time() * 1000) if seed is not None else 0})
+        _save(store)
+    return None if seed is None else int(seed)
 
 
 def update_settings(energy_cutoff: Optional[float] = None, min_gap_s: Optional[float] = None,
@@ -224,6 +306,96 @@ def shows_on() -> list[str]:
     except Exception:                                    # noqa: BLE001
         logger.exception("word colours: the switch is unreadable")
         return []
+
+
+# ── the play under way (THE ROLL) ───────────────────────────────────────────
+
+ROLL_PLAYING = "playing"
+ROLL_KEPT = "kept"
+ROLL_SAMPLE = "sample"
+ROLL_NONE = "none"
+
+
+@dataclass(frozen=True)
+class Play:
+    """One play of one song: the number its words were rolled with.
+    `source` says where it came from: the song playing now, his kept roll
+    for a song not playing, or a throwaway sample from the Test Bed."""
+    uri: str
+    seed: int
+    started_ms: int = 0
+    kept: bool = False
+    restored: bool = False
+    source: str = ROLL_PLAYING
+
+    @property
+    def tag(self) -> str:
+        """The short name a page prints for this play."""
+        return f"{self.seed & 0xFFFF:04x}"
+
+
+def new_seed() -> int:
+    return secrets.randbits(32)
+
+
+def _load_plays() -> LyricPlayStore:
+    path = config.LYRIC_PLAYS_FILE
+    try:
+        return LyricPlayStore.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    except FileNotFoundError:
+        return LyricPlayStore()
+
+
+def save_play(play: Play, now_ms: Optional[int] = None) -> None:
+    """Write down the play under way (or refresh when it was last seen).
+    Only ever called for a switched-on show. Never raises: losing it costs
+    only a fresh roll after a restart."""
+    now_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    path = config.LYRIC_PLAYS_FILE
+    try:
+        record = LyricPlayStore(current=LyricPlay(
+            uri=play.uri, seed=play.seed, started_ms=play.started_ms, seen_ms=now_ms,
+            kept=play.kept))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(record.model_dump(), ensure_ascii=False, indent=1),
+                       encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("word colours: could not write down the play under way")
+
+
+def begin_play(uri: str, *, restore: bool, now_ms: Optional[int] = None) -> Play:
+    """The play of `uri` starting now, for a switched-on show. `restore`
+    (only the first play since SPECTRA started, with no other song between)
+    carries on the play written down before a restart, when it is this song
+    and was seen less than PLAY_GAP_S ago. Otherwise his kept roll, else a
+    fresh number. Written down either way. Never raises."""
+    now_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    if restore:
+        try:
+            saved = _load_plays().current
+        except Exception:                                # noqa: BLE001
+            logger.exception("word colours: the play under way is unreadable — rolling fresh")
+            saved = None
+        if (saved is not None and saved.uri == uri
+                and 0 <= now_ms - saved.seen_ms < PLAY_GAP_S * 1000):
+            play = Play(uri, saved.seed, saved.started_ms, kept=saved.kept, restored=True)
+            save_play(play, now_ms)
+            return play
+    kept = kept_seed(uri)
+    play = (Play(uri, kept, now_ms, kept=True) if kept is not None
+            else Play(uri, new_seed(), now_ms))
+    save_play(play, now_ms)
+    return play
+
+
+def is_repeat_wrap(last_ms: int, position_ms: int, duration_ms: Optional[int]) -> bool:
+    """The song went from its end straight back to its start: repeat-one,
+    or he started it over from the very end. Unknown length: never."""
+    if not duration_ms or duration_ms <= 0:
+        return False
+    return last_ms >= WRAP_FROM * duration_ms and position_ms <= WRAP_TO * duration_ms
 
 
 # ── what the plan works on ──────────────────────────────────────────────────
@@ -253,6 +425,15 @@ class WordHit:
     # word's colour to the event it reaches before the song plays. None where
     # a set has no swatch.
     swatches: tuple[Optional[str], ...] = ()
+    # THE ROLL. `match_id` is the leading match's id (what a pin is set
+    # through); `pin` his override, if any. `chance` is set by roll_hits;
+    # `draw` and `won` only when a play is rolled (None: not rolled, every
+    # word planned as if it won).
+    match_id: Optional[str] = None
+    pin: Optional[str] = None
+    chance: Optional[float] = None
+    draw: Optional[float] = None
+    won: Optional[bool] = None
 
     @property
     def swatch(self) -> Optional[str]:
@@ -366,6 +547,55 @@ def moment_fade_ms(transition_ms: int) -> int:
     return max(MOMENT_FADE_MIN_MS, int(round(transition_ms * MOMENT_FADE_RATIO)))
 
 
+# ── the roll ────────────────────────────────────────────────────────────────
+
+
+def chance_for(hit: WordHit) -> float:
+    """The share of plays this word acts on: its confidence, exactly (his
+    own matches are 1.0), unless he pinned it. The one place the mapping
+    lives, so "more math later" changes only this."""
+    if hit.pin == PIN_ALWAYS:
+        return 1.0
+    if hit.pin == PIN_NEVER:
+        return 0.0
+    if hit.his:
+        return 1.0
+    return _clamp01(hit.strength)
+
+
+def draw_for(seed: int, uri: str, hit: WordHit) -> float:
+    """This word's draw for this play, in [0, 1): the same seed, song, words
+    and label always give the same number, and no other word changes it."""
+    text = f"{int(seed)}|{uri}|{hit.first_word}|{hit.last_word}|{hit.label.strip().casefold()}"
+    digest = hashlib.sha256(text.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") / float(1 << 64)
+
+
+def roll_hits(hits: Sequence[WordHit], play: Optional[Play]) -> list[WordHit]:
+    """Every hit with its chance and, when a play is rolled, its draw and
+    whether it won. A word that did not win sits out (WHY_SAT_OUT) BEFORE
+    plan_words runs, so it takes no phrase, event or gap from another word.
+    No play: nothing is rolled, and every word is planned as if it won."""
+    out: list[WordHit] = []
+    for hit in hits:
+        chance = chance_for(hit)
+        if play is None:
+            out.append(replace(hit, chance=chance, draw=None, won=None))
+            continue
+        u = draw_for(play.seed, play.uri, hit)
+        won = u < chance
+        why_not = hit.why_not if (won or hit.why_not is not None) else WHY_SAT_OUT
+        out.append(replace(hit, chance=chance, draw=u, won=won, why_not=why_not))
+    return out
+
+
+def plan_play(hits: Sequence[WordHit], events: Sequence[EventMoment],
+              tuning: LyricEventSettings, play: Optional[Play]) -> list[WordAction]:
+    """Roll this play, then plan the words that won it. What the trigger
+    clock and the Test Bed both call."""
+    return plan_words(roll_hits(hits, play), events, tuning)
+
+
 # ── the plan ────────────────────────────────────────────────────────────────
 
 
@@ -451,10 +681,6 @@ def _strength(match: Mapping[str, Any]) -> float:
     return float(match.get("confidence") or 0.0)
 
 
-def _is_weak(match: Mapping[str, Any], threshold: float) -> bool:
-    return match.get("source") != "his" and float(match.get("confidence") or 0.0) < threshold
-
-
 def _clusters(matches: Sequence[Mapping[str, Any]]) -> list[list[Mapping[str, Any]]]:
     out: list[list[Mapping[str, Any]]] = []
     reach = -1
@@ -468,23 +694,33 @@ def _clusters(matches: Sequence[Mapping[str, Any]]) -> list[list[Mapping[str, An
     return out
 
 
+def _pin_of(lead: Mapping[str, Any], considered: Sequence[Mapping[str, Any]]) -> Optional[str]:
+    """The hit's pin: the leading match's own, else the first pinned match
+    among those it stands for (strongest first)."""
+    if lead.get("pin") in PINS:
+        return str(lead["pin"])
+    for match in sorted(considered, key=lambda m: -_strength(m)):
+        if match.get("pin") in PINS:
+            return str(match["pin"])
+    return None
+
+
 def hits_from_matches(matches: Sequence[Mapping[str, Any]], lines: Sequence[int],
-                      weak_threshold: float, energy_at: Callable[[int], Optional[float]],
+                      energy_at: Callable[[int], Optional[float]],
                       reach: Callable[[Mapping[str, Any]], Sequence[tuple[str, str]]]
                       ) -> list[WordHit]:
     """Pure. `lines` is each word's sung line; `reach(match)` every colour set a
     match reaches as (id, name) or (id, name, swatch), effects left out. His
     matches outrank every guess on the same words, so a correction wins without
-    him also having to delete what it replaces."""
+    him also having to delete what it replaces. No guess is too weak to keep:
+    its confidence is its chance (chance_for)."""
     hits: list[WordHit] = []
     for cluster in _clusters(matches):
         first = min(m["first_word"] for m in cluster)
         last = max(m["last_word"] for m in cluster)
         his = [m for m in cluster if m.get("source") == "his"]
-        pool = his or cluster
-        strong = [m for m in pool if not _is_weak(m, weak_threshold)]
-        why_not: Optional[str] = None if strong else WHY_WEAK
-        considered = strong or pool
+        considered = his or cluster
+        why_not: Optional[str] = None
         top = max(_strength(m) for m in considered)
         best = [m for m in considered if _strength(m) >= top - STRONG_TIE]
         lead = max(best, key=_strength)
@@ -504,7 +740,9 @@ def hits_from_matches(matches: Sequence[Mapping[str, Any]], lines: Sequence[int]
             strength=top, his=bool(his), set_ids=tuple(pairs),
             set_names=tuple(name for name, _sw in pairs.values()),
             swatches=tuple(sw for _name, sw in pairs.values()),
-            energy=energy_at(int(lead["ms"])), why_not=why_not))
+            energy=energy_at(int(lead["ms"])), why_not=why_not,
+            match_id=None if lead.get("id") is None else str(lead["id"]),
+            pin=_pin_of(lead, considered)))
     return hits
 
 
@@ -531,8 +769,7 @@ def load_words(uri: str) -> SongWords:
         owners = catalogue.owners.get(colour_words.word_key(str(match.get("label") or "")), ())
         return [(t.id, t.name, t.swatch) for t in owners if t.kind == sung_labels.KIND_COLOR_SET]
 
-    hits = hits_from_matches(matches, [w.line for w in timeline.scored],
-                             sung_labels.weak_match_threshold(), energy_at, reach)
+    hits = hits_from_matches(matches, [w.line for w in timeline.scored], energy_at, reach)
     return SongWords(uri, timeline.status, timeline.note, tuple(hits),
                      clock_flagged=timeline.clock.flagged)
 
@@ -550,9 +787,27 @@ def _seconds(ms: float) -> str:
     return f"{float(ms) / 1000.0:.2f}".rstrip("0").rstrip(".") + " s"
 
 
+def _percent(chance: Optional[float]) -> str:
+    return "–" if chance is None else f"{int(round(float(chance) * 100))}%"
+
+
+def chance_words(hit: WordHit) -> str:
+    """How often this word plays, in a few words."""
+    if hit.pin == PIN_ALWAYS:
+        return "Pinned to play every time."
+    if hit.pin == PIN_NEVER:
+        return "Pinned to never play."
+    if hit.his:
+        return "Your own match: plays every time."
+    return f"Plays on about {_percent(hit.chance)} of plays (Claude's confidence)."
+
+
 def describe(action: WordAction) -> str:
     """The sentence the Test Bed prints for this word."""
     hit, event = action.hit, action.event
+    if action.why == WHY_SAT_OUT:
+        return (f"Sits out this play: its chance is {_percent(hit.chance)} and it did not "
+                "come up this time.")
     if action.verdict == VERDICT_FIRE:
         how = (f"high energy ({action.energy:.2f}), so it is momentary" if action.momentary
                else (f"low energy ({action.energy:.2f}), so it holds until the next scene "
@@ -562,8 +817,6 @@ def describe(action: WordAction) -> str:
         away = (event.ms - hit.ms) / 1000.0
         return (f"Gives its colour to the {event.label} at {_clock_words(event.ms)} "
                 f"({away:+.1f} s from the word).")
-    if action.why == WHY_WEAK:
-        return "A weak match, so it fires nothing."
     if action.why == WHY_NO_COLOUR:
         return "This match reaches no colour set, so it fires nothing yet."
     if action.why == WHY_PHRASE:
@@ -585,6 +838,10 @@ def action_payload(action: WordAction) -> dict[str, Any]:
         "key": hit.key, "first_word": hit.first_word, "last_word": hit.last_word,
         "phrase": hit.phrase, "label": hit.label, "ms": hit.ms, "end_ms": hit.end_ms,
         "source": "his" if hit.his else "claude", "strength": round(hit.strength, 3),
+        "match_id": hit.match_id, "pin": hit.pin,
+        "chance": None if hit.chance is None else round(hit.chance, 3),
+        "draw": None if hit.draw is None else round(hit.draw, 4), "won": hit.won,
+        "chance_words": chance_words(hit),
         "set_names": list(hit.set_names), "set_ids": list(hit.set_ids), "swatch": hit.swatch,
         "verdict": action.verdict, "why": action.why,
         "words": describe(action), "energy": round(action.energy, 3),
@@ -668,6 +925,26 @@ class Preview:
     words: SongWords
     actions: list[WordAction] = field(default_factory=list)
     n_events: int = 0
+    play: Optional[Play] = None
+    kept_seed: Optional[int] = None
+    playing: bool = False
+
+
+def roll_payload(preview: Preview) -> dict[str, Any]:
+    """Which play the plan is for, and how many words won it."""
+    play = preview.play
+    rolled = [a for a in preview.actions if a.hit.won is not None]
+    return {
+        "state": ROLL_NONE if play is None else play.source,
+        "seed": None if play is None else play.seed,
+        "tag": None if play is None else play.tag,
+        "started_ms": None if play is None else play.started_ms,
+        "kept": bool(play is not None and play.kept),
+        "kept_seed": preview.kept_seed,
+        "playing": preview.playing,
+        "n_words": len(preview.actions),
+        "n_won": sum(1 for a in rolled if a.hit.won),
+    }
 
 
 def preview_payload(preview: Preview, tuning: LyricEventSettings) -> dict[str, Any]:
@@ -676,5 +953,6 @@ def preview_payload(preview: Preview, tuning: LyricEventSettings) -> dict[str, A
         "clock_flagged": preview.words.clock_flagged, "enabled": preview.enabled,
         "settings": tuning.model_dump(), "n_events": preview.n_events,
         "shows_on": len(shows_on()),
+        "roll": roll_payload(preview),
         "actions": [action_payload(a) for a in preview.actions],
     }

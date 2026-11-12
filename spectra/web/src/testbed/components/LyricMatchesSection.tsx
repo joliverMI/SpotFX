@@ -9,7 +9,7 @@ import { useToast } from '../../components/Toast';
 import HelpLink from '../../help/HelpLink';
 import {
   useAddLyricMatch, useDeleteLyricMatch, useLyricMatches, useReadLyrics,
-  useRestoreDeletedLyricMatches, useSungLabels,
+  useRestoreDeletedLyricMatches, useSetLyricMatchPin, useSungLabels,
 } from '../../queries';
 import type { SungLabelsPageData, TestbedLyricWord } from '../../types';
 import {
@@ -19,6 +19,7 @@ import {
 import type { PickState } from '../lyricMatches';
 import type { LaneView } from '../lyricsLane';
 import LyricMatchesRow from './LyricMatchesRow';
+import PinControl from './PinControl';
 
 function targetOptions(page: SungLabelsPageData | undefined): SearchOption[] {
   if (!page) return [];
@@ -48,6 +49,7 @@ export default function LyricMatchesSection({
   const add = useAddLyricMatch();
   const del = useDeleteLyricMatch();
   const restore = useRestoreDeletedLyricMatches();
+  const pin = useSetLyricMatchPin();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [pick, setPick] = useState<PickState>({ first: null, last: null });
@@ -136,6 +138,12 @@ export default function LyricMatchesSection({
             <div className="testbed-match-detail">{provenanceWords(selected)}</div>
             {selected.why && <div className="testbed-match-detail">{selected.why}</div>}
             <div className="testbed-match-detail">Would reach: {targetsWords(selected)}</div>
+            <PinControl
+              pin={selected.pin}
+              chance={selected.source === 'his' ? 1 : selected.confidence}
+              busy={pin.isPending}
+              onPin={(choice) => pin.mutate({ uri, id: selected.id, pin: choice }, { onError: report })}
+            />
             <button type="button" onClick={removeSelected} disabled={del.isPending}>Delete this match</button>
           </div>
         </div>

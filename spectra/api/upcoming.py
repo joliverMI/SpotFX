@@ -63,7 +63,9 @@ really lands is decided at fire time and pushed as {"type": "word_colour"}),
 and a word firing on its own becomes its own row, `kind: "word"`, drawn
 where it is sung and counted down to like any other event (his answer to
 decision 3). Words that do nothing add nothing here — the Test Bed is
-where those are explained. No new gating rule: `plan_words` is the one
+where those are explained. That includes a word sitting out this play (THE
+ROLL, lyric_events.py): for the song playing the preview is this play's
+roll, so only the words that won it are lent to an event or drawn. No new gating rule: `plan_words` is the one
 plan, read once per request on this worker thread, and a failure to read
 the words leaves the list exactly as it was (the strip must never go blank
 because the lyrics are unreadable).

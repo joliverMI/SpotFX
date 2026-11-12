@@ -1540,7 +1540,7 @@ export function useSungLabelEdit() {
 export function useSungLabelSettings() {
   // A true partial update (spectra/api/sung_labels.py's own contract):
   // an omitted field is left exactly as it was.
-  return useSungLabelsMutation((body: { auto_read?: boolean; weak_match_threshold?: number }) =>
+  return useSungLabelsMutation((body: { auto_read?: boolean }) =>
     apiPut<SungLabelsPageData>('/sung-labels/settings', body));
 }
 
@@ -1597,18 +1597,39 @@ export function useDeleteLyricMatch() {
     apiPost<LyricMatches>('/testbed/lyric-matches/delete', body));
 }
 
+/** Always / Chance / Never on one match: how often it plays (its own
+ * confidence, unless pinned). Kept on the match's words through a re-read. */
+export function useSetLyricMatchPin() {
+  return useLyricMatchesMutation((body: { uri: string; id: string; pin: 'always' | 'chance' | 'never' }) =>
+    apiPut<LyricMatches>('/testbed/lyric-matches/pin', body));
+}
+
 export function useRestoreDeletedLyricMatches() {
   return useLyricMatchesMutation((uri: string) =>
     apiPost<LyricMatches>(`/testbed/lyric-matches/restore-deleted?uri=${enc(uri)}`));
 }
 
 /** Word colours on a show (spectra/services/lyric_events.py): what each word
- * would do, the per-show switch and the three tuning settings. */
-export function useLyricEvents(uri: string | null, enabled: boolean) {
+ * would do, the per-show switch and the three tuning settings. `sample` is a
+ * throwaway play number for a song not playing (the page's "Sample a play"):
+ * the server rolls it for the page only. */
+export function useLyricEvents(uri: string | null, enabled: boolean, sample: number | null = null) {
   return useQuery({
-    queryKey: ['lyric-events', uri],
-    queryFn: () => apiGet<LyricEvents>(`/testbed/lyric-events?uri=${enc(uri!)}`),
+    queryKey: ['lyric-events', uri, sample],
+    queryFn: () => apiGet<LyricEvents>(
+      `/testbed/lyric-events?uri=${enc(uri!)}${sample == null ? '' : `&sample=${sample}`}`),
     enabled: !!uri && enabled,
+  });
+}
+
+/** "Keep this roll": a play number kept as the song's plan, or null to let
+ * every play roll again. */
+export function useKeepLyricRoll() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { uri: string; seed: number | null }) =>
+      apiPut<{ uri: string; kept_seed: number | null }>('/testbed/lyric-events/keep', body),
+    onSuccess: (data) => { void qc.invalidateQueries({ queryKey: ['lyric-events', data.uri] }); },
   });
 }
 

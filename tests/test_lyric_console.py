@@ -127,12 +127,12 @@ def test_edit_sung_label_refuses_an_unknown_target_without_writing():
     assert before == after
 
 
-# ── the auto-read switch and the weak-match threshold ──────────────────
+# ── the auto-read switch (there is no weak-match threshold any more) ───
 
 def test_get_lyric_reading_settings_reads_the_defaults():
     out = _run("get_lyric_reading_settings")
     assert out["auto_read"] is False
-    assert out["weak_match_threshold"] == pytest.approx(0.6)
+    assert "weak_match_threshold" not in out, "every guess is kept: its confidence is its chance"
 
 
 def test_turning_auto_read_on_needs_his_yes_first():
@@ -165,24 +165,9 @@ def test_turning_auto_read_off_applies_at_once_no_confirm():
     assert sung_labels.auto_read_enabled() is False
 
 
-def test_the_weak_match_threshold_changes_with_no_confirmation():
-    out = _run("set_lyric_reading_settings", weak_match_threshold=0.8)
-    assert out["status"] == "applied"
-    assert sung_labels.weak_match_threshold() == pytest.approx(0.8)
-
-
-def test_the_weak_match_threshold_is_refused_out_of_range():
-    out = _run("set_lyric_reading_settings", weak_match_threshold=1.5)
-    assert out["status"] == "rejected"
-    assert sung_labels.weak_match_threshold() == pytest.approx(0.6)
-
-
-def test_asking_to_turn_auto_read_off_and_lower_the_threshold_together_needs_no_confirm():
-    sung_labels.set_auto_read(True)
-    out = _run("set_lyric_reading_settings", auto_read=False, weak_match_threshold=0.7)
-    assert out["status"] == "applied"
-    assert sung_labels.auto_read_enabled() is False
-    assert sung_labels.weak_match_threshold() == pytest.approx(0.7)
+def test_the_reading_settings_op_no_longer_takes_a_threshold():
+    schema = lyric_console.OPERATIONS["set_lyric_reading_settings"].input_schema
+    assert set(schema["properties"]) == {"auto_read", "confirm_id"}
 
 
 def test_naming_nothing_to_change_is_refused():
@@ -545,6 +530,7 @@ _NO_LIGHT_DRIVER = textwrap.dedent('''
     scfg.SUNG_LABELS_FILE = tmp / "sung_labels.json"
     scfg.LYRIC_MATCHES_DIR = tmp / "lyric_matches"
     scfg.LYRIC_EVENTS_FILE = tmp / "lyric_events.json"
+    scfg.LYRIC_PLAYS_FILE = tmp / "lyric_plays.json"
     scfg.ROOM_CONTROLS_FILE = tmp / "room_controls.json"
     scfg.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
     scfg.AUDIO_SHAPES_DIR.mkdir(parents=True, exist_ok=True)
@@ -572,7 +558,7 @@ _NO_LIGHT_DRIVER = textwrap.dedent('''
     run("list_sung_label_targets")
     run("get_sung_labels", kind="color_set", name="Blood Red")
     run("get_lyric_matches", song=STEM)
-    run("set_lyric_reading_settings", weak_match_threshold=0.6)
+    run("set_lyric_reading_settings", auto_read=False)
     run("edit_sung_label", kind="color_set", name="Blood Red", list="labels", op="add",
         text="scarlet")
     run("add_lyric_match", target_kind="color_set", target_name="Blood Red",

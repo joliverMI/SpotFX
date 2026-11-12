@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+from dataclasses import replace
 
 import pytest
 
@@ -205,8 +207,8 @@ def test_the_stronger_word_wins_the_gap_whichever_comes_first():
 
 
 def test_a_word_refused_earlier_stays_nothing_and_says_why():
-    a = _only(_plan([_hit(why_not=le.WHY_WEAK)], [_flare(10_100)]))
-    assert a.verdict == le.VERDICT_NOTHING and a.why == le.WHY_WEAK
+    a = _only(_plan([_hit(why_not=le.WHY_NO_COLOUR)], [_flare(10_100)]))
+    assert a.verdict == le.VERDICT_NOTHING and a.why == le.WHY_NO_COLOUR
 
 
 def test_the_order_of_words_does_not_change_the_plan():
@@ -264,20 +266,18 @@ def _match(first, last, *, source="claude", confidence=0.9, label="red", ms=None
             "phrase": phrase, "targets": []}
 
 
-def _hits(matches, *, reach=None, threshold=0.6, energy=None):
+def _hits(matches, *, reach=None, energy=None):
     return le.hits_from_matches(
-        matches, list(range(50)), threshold, energy or (lambda ms: 0.3),
+        matches, list(range(50)), energy or (lambda ms: 0.3),
         reach or (lambda m: [(f"set-{m['label']}", m["label"].title())]))
 
 
-def test_a_weak_match_fires_nothing():
-    [hit] = _hits([_match(1, 1, confidence=0.5)])
-    assert hit.why_not == le.WHY_WEAK
-
-
-def test_the_threshold_is_live_not_the_stored_reading():
-    [hit] = _hits([_match(1, 1, confidence=0.7)], threshold=0.8)
-    assert hit.why_not == le.WHY_WEAK
+def test_no_guess_is_too_weak_to_keep_its_confidence_is_its_chance():
+    """2026-11-12, the Admiral: "no cutoff anymore" — a 0.03 guess is a word
+    that plays on 3% of plays, not a word thrown away."""
+    [hit] = _hits([_match(1, 1, confidence=0.03)])
+    assert hit.why_not is None and hit.strength == pytest.approx(0.03)
+    assert le.chance_for(hit) == pytest.approx(0.03)
 
 
 def test_a_match_reaching_only_an_effect_has_no_event_yet():
@@ -370,7 +370,12 @@ class _Plan:
 
 
 def _engine(triggers, rec, *, hits=(), enabled=True, mode="full", tuning=TUNING, pick=None,
-            lyric_load=None, plan=None, **kw) -> TriggerEngine:
+            lyric_load=None, plan=None, roll=False, **kw) -> TriggerEngine:
+    """An engine on one song's words. Every word is pinned Always unless
+    `roll`: these specs are about what a word that plays does, and the roll
+    (which words play) has its own section below."""
+    if not roll:
+        hits = [replace(h, pin=h.pin or le.PIN_ALWAYS) for h in hits]
     words = le.SongWords(URI, "ok", hits=tuple(hits))
     return TriggerEngine(
         energy_for=lambda uri, t: 0.5,
@@ -521,6 +526,8 @@ def test_with_the_switch_off_the_output_is_exactly_an_engine_without_the_feature
     assert control.fires, "the control really fired things"
     assert off.words == [] and off.imprints == [None] * len(off.imprints)
     assert loaded == [], "with the switch off the words are never even read"
+    from spectra import config as scfg
+    assert not scfg.LYRIC_PLAYS_FILE.exists(), "and no play is ever rolled or written down"
 
 
 def test_switching_a_show_off_mid_song_stops_it():
@@ -1305,7 +1312,7 @@ def test_a_hit_carries_each_sets_swatch_and_the_landed_set_wins():
 def test_word_marks_lend_an_imprint_its_word_and_make_a_fire_alone_word_a_marker():
     actions = _plan([_hit(10_000, swatches=("#ff0000",)),
                      _hit(19_000, line=1, first=190, phrase="smoke", swatches=("#5a14b4",)),
-                     _hit(30_000, line=2, first=300, strength=0.5, why_not=le.WHY_WEAK)],
+                     _hit(30_000, line=2, first=300, strength=0.5, why_not=le.WHY_SAT_OUT)],
                     [_flare(10_500, "f1")])
     imprints, fires = le.word_marks(actions)
     assert imprints == {"f1": {"word": "red", "word_ms": 10_000, "swatch": "#ff0000",
@@ -1314,7 +1321,7 @@ def test_word_marks_lend_an_imprint_its_word_and_make_a_fire_alone_word_a_marker
     assert fire["kind"] == le.KIND_WORD and fire["ms"] == 19_000 and fire["id"] == "lyric:190-190"
     assert fire["word"] == "smoke" and fire["swatch"] == "#5a14b4" and fire["source"] == "word"
     assert fire["rank"] is None and fire["rank_of"] is None, "the strip's row shape"
-    # the weak word does nothing and is drawn nowhere outside the Test Bed
+    # the word sitting out does nothing and is drawn nowhere outside the Test Bed
     assert not any(f["ms"] == 30_000 for f in fires)
 
 
@@ -1352,3 +1359,326 @@ def test_a_failing_push_never_reaches_the_fire_path():
     _sweep(engine, rec)
     assert len(rec.words) == 1 and ("analysed_flare",) not in rec.fires and rec.fires, \
         "the word fired and the flare fired, the push's failure notwithstanding"
+
+
+# ── 7. the roll (2026-11-12): which words act this play ─────────────────────
+# The Admiral: "Instead of always using a "word" effect, it should randomly be
+# used, based on it's confidence ... The choice is calculated when the song is
+# loaded", and "if the confidence leve is .97, it runs 97% of the time. If it is
+# .03, it runs 3% of the time."
+
+OTHER = "spotify:track:another"
+
+
+def _play(seed, uri=URI):
+    return le.Play(uri, seed)
+
+
+def _wins(hit, seed):
+    return le.roll_hits([hit], _play(seed))[0].won
+
+
+def _seed_where(test, limit=20_000):
+    for seed in range(limit):
+        if test(seed):
+            return seed
+    raise AssertionError("no play number found")
+
+
+def test_a_words_chance_is_its_confidence_exactly_and_his_own_always_play():
+    assert le.chance_for(_hit(strength=0.97)) == pytest.approx(0.97)
+    assert le.chance_for(_hit(strength=0.03)) == pytest.approx(0.03)
+    assert le.chance_for(_hit(strength=0.0, his=True)) == 1.0, "his own match always plays"
+    assert le.chance_for(replace(_hit(strength=0.03), pin=le.PIN_ALWAYS)) == 1.0
+    assert le.chance_for(replace(_hit(his=True), pin=le.PIN_NEVER)) == 0.0
+
+
+@pytest.mark.parametrize("confidence", [0.03, 0.3, 0.6, 0.97])
+def test_over_many_plays_a_word_plays_on_its_share_of_them(confidence):
+    hit = _hit(strength=confidence)
+    plays = 4000
+    share = sum(_wins(hit, seed) for seed in range(plays)) / plays
+    assert share == pytest.approx(confidence, abs=0.025)
+
+
+def test_his_own_match_plays_on_every_play():
+    his = _hit(strength=1.0, his=True)
+    assert all(_wins(his, seed) for seed in range(500))
+
+
+def _song(n=12, strength=0.5):
+    return [_hit(10_000 + i * 10_000, line=i, first=100 + i, strength=strength) for i in range(n)]
+
+
+def test_the_same_play_number_always_gives_the_same_plan():
+    hits = _song()
+    once = le.plan_play(hits, [], TUNING, _play(1234))
+    again = le.plan_play(list(reversed(hits)), [], TUNING, _play(1234))
+    shape = lambda actions: [(a.hit.key, a.verdict, a.why) for a in actions]  # noqa: E731
+    assert shape(once) == shape(again)
+    other = le.plan_play(hits, [], TUNING, _play(1235))
+    assert shape(once) != shape(other), "a different play is a different roll"
+
+
+def test_a_words_draw_depends_on_no_other_word():
+    hits = _song()
+    alone = {h.key: _wins(h, 77) for h in hits}
+    together = {h.key: h.won for h in le.roll_hits(hits, _play(77))}
+    assert alone == together
+    more = le.roll_hits(hits + [_hit(500_000, line=99, first=5000)], _play(77))
+    assert {h.key: h.won for h in more if h.key in alone} == alone, "a new word moves nothing"
+
+
+def test_raising_a_chance_only_ever_adds_a_word():
+    for seed in range(400):
+        assert _wins(_hit(strength=0.7), seed) or not _wins(_hit(strength=0.4), seed)
+
+
+def test_a_word_sitting_out_frees_its_phrase_for_the_next_word():
+    """Rolled BEFORE the plan: with every word in, the stronger word always
+    takes the line's one event; on a play it sits out, the weaker word acts."""
+    strong = _hit(10_000, strength=0.6, line=0, first=1)
+    weak = _hit(11_000, strength=0.5, line=0, first=2)
+    seed = _seed_where(lambda s: not _wins(strong, s) and _wins(weak, s))
+    out = {a.hit.first_word: a for a in le.plan_play([strong, weak], [], TUNING, _play(seed))}
+    assert out[1].verdict == le.VERDICT_NOTHING and out[1].why == le.WHY_SAT_OUT
+    assert out[2].verdict == le.VERDICT_FIRE
+    out = {a.hit.first_word: a for a in le.plan_play([strong, weak], [], TUNING, None)}
+    assert out[1].verdict == le.VERDICT_FIRE and out[2].why == le.WHY_PHRASE
+
+
+def test_a_word_sitting_out_frees_the_event_and_the_gap_too():
+    strong = _hit(10_000, strength=0.6, line=0, first=1)
+    weak = _hit(10_400, strength=0.5, line=1, first=2)
+    seed = _seed_where(lambda s: not _wins(strong, s) and _wins(weak, s))
+    out = {a.hit.first_word: a for a in le.plan_play([strong, weak], [_flare(10_200, "f1")],
+                                                     TUNING, _play(seed))}
+    assert out[2].verdict == le.VERDICT_IMPRINT and out[2].event.id == "f1"
+
+
+def test_a_pin_overrides_the_roll():
+    never = replace(_hit(strength=1.0, his=True), pin=le.PIN_NEVER)
+    always = replace(_hit(20_000, line=1, first=200, strength=0.01), pin=le.PIN_ALWAYS)
+    for seed in range(300):
+        a, b = le.roll_hits([never, always], _play(seed))
+        assert a.why_not == le.WHY_SAT_OUT and b.won
+
+
+def test_with_no_play_every_word_is_planned_as_if_it_won_with_its_chance():
+    [a] = le.plan_play([_hit(strength=0.3)], [], TUNING, None)
+    assert a.verdict == le.VERDICT_FIRE and a.hit.won is None
+    payload = le.action_payload(a)
+    assert payload["chance"] == 0.3 and payload["won"] is None and payload["draw"] is None
+    assert "30%" in payload["chance_words"]
+
+
+def test_a_word_sitting_out_says_so_and_is_drawn_nowhere_outside_the_test_bed():
+    hit = _hit(strength=0.2)
+    seed = _seed_where(lambda s: not _wins(hit, s))
+    [a] = le.plan_play([hit], [_flare(10_500, "f1")], TUNING, _play(seed))
+    assert a.why == le.WHY_SAT_OUT and a.event is None
+    assert "Sits out this play" in le.describe(a) and "20%" in le.describe(a)
+    assert le.word_marks([a]) == ({}, []), "no halo and no diamond for a word sitting out"
+    payload = le.action_payload(a)
+    assert payload["won"] is False and 0.2 <= payload["draw"] < 1.0
+
+
+# the play under way, in the engine
+
+
+def _roll_engine(rec, hits=None, **kw):
+    return _engine([], rec, hits=_song() if hits is None else hits, roll=True, **kw)
+
+
+async def _start(engine, uri, pos=1_000):
+    await engine.on_track_state(uri)
+    await engine.load_lyric_words(uri)
+    await engine.tick(pos)
+    return engine._lyric_play
+
+
+def test_a_play_keeps_its_number_through_pause_seek_rewind_and_a_blip():
+    engine = _roll_engine(Rec())
+    engine._track_duration_ms = lambda: 200_000
+
+    async def run():
+        first = await _start(engine, URI)
+        assert first is not None and first.uri == URI
+        for pos in (5_000, 90_000, 3_000, 3_000, 3_000, 40_000):    # seek, rewind, pause
+            await engine.tick(pos)
+        assert engine._lyric_play is first
+        await engine.on_track_state(None)            # the bridge blinks
+        assert await _start(engine, URI, 41_000) is first
+    asyncio.run(run())
+
+
+def test_a_different_song_or_ten_minutes_away_is_a_new_play():
+    engine = _roll_engine(Rec())
+    now = {"t": 0.0}
+    engine._clock = lambda: now["t"]
+    seeds = iter(range(100, 200))
+    engine._lyric_begin_play = lambda uri, restore: le.Play(uri, next(seeds))
+
+    async def run():
+        first = await _start(engine, URI)
+        await engine.on_track_state(None)
+        now["t"] += le.PLAY_GAP_S - 60
+        assert await _start(engine, URI) is first, "back within the gap: the same play"
+        await engine.on_track_state(None)
+        now["t"] += le.PLAY_GAP_S
+        later = await _start(engine, URI)
+        assert later.seed == 101, "away for the gap: a new play"
+        await engine.on_track_state(OTHER)
+        assert (await _start(engine, URI)).seed == 102, "after another song: a new play"
+    asyncio.run(run())
+
+
+def test_a_repeat_wrap_is_a_new_play_and_an_ordinary_rewind_is_not():
+    engine = _roll_engine(Rec())
+    engine._track_duration_ms = lambda: 200_000
+    seeds = iter(range(100, 200))
+    engine._lyric_begin_play = lambda uri, restore: le.Play(uri, next(seeds))
+
+    async def run():
+        assert (await _start(engine, URI)).seed == 100
+        for pos in (100_000, 20_000, 60_000):        # a rewind from the middle
+            await engine.tick(pos)
+        assert engine._lyric_play.seed == 100
+        await engine.tick(195_000)
+        await engine.tick(400)                        # repeat-one: the end back to 0:00
+        await engine.tick(800)
+        assert engine._lyric_play.seed == 101
+        engine._track_duration_ms = lambda: None      # length unknown: never a wrap
+        await engine.tick(195_000)
+        await engine.tick(400)
+        await engine.tick(800)
+        assert engine._lyric_play.seed == 101
+    asyncio.run(run())
+
+
+def test_a_restart_mid_song_carries_on_the_same_play():
+    from spectra import config as scfg
+    first = _roll_engine(Rec())
+    played = asyncio.run(_start(first, URI))
+    stored = json.loads(scfg.LYRIC_PLAYS_FILE.read_text())["current"]
+    assert stored["uri"] == URI and stored["seed"] == played.seed
+
+    after_restart = _roll_engine(Rec())
+    carried = asyncio.run(_start(after_restart, URI))
+    assert carried.seed == played.seed and carried.restored
+
+    another = _roll_engine(Rec())
+
+    async def other_song_first():
+        await another.on_track_state(OTHER)
+        return await _start(another, URI)
+    fresh = asyncio.run(other_song_first())
+    assert not fresh.restored, "a song between the restart and this one: a new play"
+
+
+def test_a_play_written_down_too_long_ago_is_not_carried_on():
+    le.save_play(le.Play(URI, 4242, 0), now_ms=int(time.time() * 1000) - int(le.PLAY_GAP_S * 1000) - 5_000)
+    play = le.begin_play(URI, restore=True)
+    assert not play.restored and not play.kept
+
+
+def test_a_kept_roll_is_every_later_plays_number():
+    le.keep_roll(URI, 4242)
+    play = le.begin_play(URI, restore=False)
+    assert play.seed == 4242 and play.kept
+    le.keep_roll(URI, None)
+    assert not le.begin_play(URI, restore=False).kept
+
+
+def test_keeping_a_roll_leaves_the_switch_alone_and_the_switch_keeps_the_roll():
+    le.set_show(URI, True)
+    le.keep_roll(URI, 7)
+    assert le.enabled(URI) and le.kept_seed(URI) == 7
+    le.set_show(URI, False)
+    assert le.kept_seed(URI) == 7 and not le.enabled(URI)
+    with pytest.raises(ValueError):
+        le.keep_roll(URI, -1)
+
+
+def test_the_show_log_gets_one_roll_row_per_play():
+    from spectra.services import fire_history
+    rec = Rec()
+    engine = _roll_engine(rec)
+    engine._lyric_begin_play = lambda uri, restore: le.Play(uri, 31337)
+    _sweep(engine, rec)
+    rows = [e for e in fire_history.load_show_log() if e["key"] == "lyric:roll"]
+    assert len(rows) == 1
+    detail = rows[0]["detail"]
+    won = [h.phrase for h in le.roll_hits(_song(), _play(31337)) if h.won]
+    assert detail["seed"] == 31337 and detail["n_words"] == 12 and detail["n_won"] == len(won)
+    assert rows[0]["uri"] == URI
+
+
+def test_the_playing_song_previews_the_play_under_way_and_the_clock_agrees():
+    engine = _roll_engine(Rec())
+    asyncio.run(_start(engine, URI))
+    preview = engine.preview_lyric_events(URI)
+    assert preview.play is engine._lyric_play and preview.playing
+    shape = lambda actions: [(a.hit.key, a.verdict, a.why) for a in actions]  # noqa: E731
+    assert shape(preview.actions) == shape(engine._lyric_plan)
+    payload = le.preview_payload(preview, TUNING)["roll"]
+    assert payload["state"] == le.ROLL_PLAYING and payload["seed"] == engine._lyric_play.seed
+
+
+def test_the_strip_lends_its_colours_only_to_the_words_that_won_this_play():
+    hits = [_hit(10_000, strength=0.5, line=0, first=1)]
+    seed = _seed_where(lambda s: not _wins(hits[0], s))
+    engine = _engine([_flare_trig(10_500)], Rec(), hits=hits, roll=True)
+    engine._lyric_begin_play = lambda uri, restore: le.Play(uri, seed)
+    asyncio.run(_start(engine, URI))
+    imprints, fires = le.word_marks(engine.preview_lyric_events(URI).actions)
+    assert imprints == {} and fires == []
+
+
+def test_a_preview_of_a_song_not_playing_rolls_nothing_unless_asked():
+    from spectra import config as scfg
+    engine = _roll_engine(Rec())
+    preview = engine.preview_lyric_events(URI)
+    assert preview.play is None and all(a.hit.won is None for a in preview.actions)
+    sample = engine.preview_lyric_events(URI, 99)
+    assert sample.play.source == le.ROLL_SAMPLE and sample.play.seed == 99
+    assert not scfg.LYRIC_PLAYS_FILE.exists(), "a sample is for the page only"
+    le.keep_roll(URI, 5)
+    kept = engine.preview_lyric_events(URI)
+    assert kept.play.source == le.ROLL_KEPT and kept.play.seed == 5 and kept.kept_seed == 5
+
+
+def test_the_page_samples_keeps_and_lets_go_of_a_roll(client, lyric_song):
+    from spectra import config as scfg
+    data = client.get("/api/testbed/lyric-events", params={"uri": lyric_song}).json()
+    assert data["roll"]["state"] == le.ROLL_NONE and data["roll"]["n_won"] == 0
+    sample = client.get("/api/testbed/lyric-events",
+                        params={"uri": lyric_song, "sample": 99}).json()["roll"]
+    assert sample["state"] == le.ROLL_SAMPLE and sample["seed"] == 99 and sample["n_won"] == 1
+    assert not scfg.LYRIC_PLAYS_FILE.exists() and not scfg.LYRIC_EVENTS_FILE.exists()
+    res = client.put("/api/testbed/lyric-events/keep", json={"uri": lyric_song, "seed": 99})
+    assert res.status_code == 200 and res.json()["kept_seed"] == 99
+    kept = client.get("/api/testbed/lyric-events", params={"uri": lyric_song}).json()["roll"]
+    assert kept["state"] == le.ROLL_KEPT and kept["seed"] == 99 and kept["kept_seed"] == 99
+    assert client.put("/api/testbed/lyric-events/keep",
+                      json={"uri": lyric_song, "seed": None}).json()["kept_seed"] is None
+    assert client.put("/api/testbed/lyric-events/keep",
+                      json={"uri": lyric_song, "seed": -3}).status_code == 422
+
+
+def test_a_pin_from_the_page_reaches_the_plan(client, lyric_song):
+    match_id = client.get("/api/testbed/lyric-matches",
+                          params={"uri": lyric_song}).json()["matches"][0]["id"]
+    res = client.put("/api/testbed/lyric-matches/pin",
+                     json={"uri": lyric_song, "id": match_id, "pin": "never"})
+    assert res.status_code == 200 and res.json()["matches"][0]["pin"] == "never"
+    [action] = client.get("/api/testbed/lyric-events",
+                          params={"uri": lyric_song, "sample": 1}).json()["actions"]
+    assert action["pin"] == "never" and action["chance"] == 0.0 and action["why"] == le.WHY_SAT_OUT
+    client.put("/api/testbed/lyric-matches/pin",
+               json={"uri": lyric_song, "id": match_id, "pin": "chance"})
+    [action] = client.get("/api/testbed/lyric-events",
+                          params={"uri": lyric_song, "sample": 1}).json()["actions"]
+    assert action["pin"] is None and action["chance"] == 1.0, "his own match: always"
+    assert client.put("/api/testbed/lyric-matches/pin",
+                      json={"uri": lyric_song, "id": "nope", "pin": "never"}).status_code == 404

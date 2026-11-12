@@ -33,7 +33,7 @@
  * predrop plan step 3: a spike and a vocal intro each get the glyph the
  * Drops panel draws for them), tinted like any other mark; a suggested one
  * is drawn fainter, as a suggested drop is. */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Icon, { type IconName } from '../../components/Icon';
 import { fmtMs } from '../../lib/time';
 import { useLyricEvents } from '../../queries';
@@ -258,7 +258,8 @@ function WordEventsRow({ events, view }: { events: WordEvent[]; view: LaneView }
 
 /** The Sung words slot: the lane, the Word events row under it, then the
  * Word matches and Word actions sections. One `useLyricEvents` read serves
- * the lane's guide lines and the row; LyricEventsSection shares the cache. */
+ * the lane's guide lines and the row; LyricEventsSection shares the cache,
+ * and the sample play number lives here so all three show the same play. */
 function LyricsGroup({ label, lane, lyrics, shown }: {
   label: string;
   lane: { estimate: TestbedEstimateMark[]; metrics: TestbedMetrics | null | undefined };
@@ -267,7 +268,9 @@ function LyricsGroup({ label, lane, lyrics, shown }: {
 }) {
   const ok = lyrics.data?.status === 'ok';
   const uri = lyrics.data?.uri ?? null;
-  const { data: plan } = useLyricEvents(uri, ok);
+  const [sample, setSample] = useState<number | null>(null);
+  useEffect(() => setSample(null), [uri]);
+  const { data: plan } = useLyricEvents(uri, ok, sample);
   const events = useMemo(() => wordEvents(plan?.status === 'ok' ? plan.actions : []), [plan]);
   const guides = useMemo<LaneGuide[]>(
     () => events.map((e) => ({ id: e.id, ms: e.ms, cls: e.kind, halo: e.imprinted || e.kind === 'word' ? e.swatch : null })),
@@ -292,7 +295,9 @@ function LyricsGroup({ label, lane, lyrics, shown }: {
           sensitivity={lyrics.sensitivity}
         />
       )}
-      {ok && lyrics.data && <LyricEventsSection uri={lyrics.data.uri} view={shown} />}
+      {ok && lyrics.data && (
+        <LyricEventsSection uri={lyrics.data.uri} view={shown} sample={sample} onSample={setSample} />
+      )}
     </>
   );
 }

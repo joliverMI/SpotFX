@@ -52,17 +52,19 @@ class SungLabelSettings(_Model):
     # OFF by default: nothing is sent to Claude until he turns this on or
     # presses a read button himself.
     auto_read: bool = False
-    # Below this confidence a guess is no match at all (lyric_matches.py's
-    # own docstring). A first guess, his to tune — 0.6 to match that
-    # module's own default; the two are never cross-imported (models stay
-    # pure), so keep them in sync by hand if either changes.
-    weak_match_threshold: float = Field(0.6, ge=0.0, le=1.0)
+    # There is no weak-match threshold any more (2026-11-12, the Admiral:
+    # "no cutoff anymore"): every guess is kept, and its confidence is the
+    # share of plays it acts on (lyric_events.chance_for). A stored
+    # `weak_match_threshold` from before is ignored on load (extra="ignore")
+    # and dropped on the next save.
 
 
 class LyricEventSettings(_Model):
     """The tuning for word colours (spectra/services/lyric_events.py). Every
     default is a first guess of his to tune. Only these three are settings;
-    the transition-time range is a pair of named constants in that module."""
+    the transition-time range is a pair of named constants in that module,
+    and a word's chance is its confidence (lyric_events.chance_for), not a
+    setting."""
     # At or above this Energy a word's colour is momentary; below it the colour
     # holds. Starts at the midpoint.
     energy_cutoff: float = Field(0.5, ge=0.0, le=1.0)
@@ -73,9 +75,18 @@ class LyricEventSettings(_Model):
     imprint_window_s: float = Field(2.0, ge=0.0, le=10.0)
 
 
+SEED_MAX = 2 ** 32 - 1
+
+
 class LyricShowState(_Model):
     enabled: bool = False
     changed_ms: int = 0
+    # "Keep this roll" (2026-11-12): a play he liked, kept as this song's plan.
+    # Every later play of the song uses this play number instead of a fresh
+    # one, so the same words win while the matches stay as they are. None:
+    # each play rolls its own (lyric_events.py, "THE ROLL").
+    kept_seed: Optional[int] = Field(None, ge=0, le=SEED_MAX)
+    kept_ms: int = 0
 
 
 class LyricEventStore(_Model):
@@ -83,6 +94,23 @@ class LyricEventStore(_Model):
     schema_version: int = 1
     settings: LyricEventSettings = Field(default_factory=LyricEventSettings)
     shows: dict[str, LyricShowState] = Field(default_factory=dict)
+
+
+class LyricPlay(_Model):
+    """The play of a switched-on show that is under way: which play number
+    it rolled, so a SPECTRA restart in the middle of the song carries on with
+    the same words (lyric_events.py, "THE ROLL"). `seen_ms` is refreshed while
+    it plays, at most once a minute."""
+    uri: str
+    seed: int = Field(ge=0, le=SEED_MAX)
+    started_ms: int = 0
+    seen_ms: int = 0
+    kept: bool = False
+
+
+class LyricPlayStore(_Model):
+    schema_version: int = 1
+    current: Optional[LyricPlay] = None
 
 
 class SungLabelStore(_Model):
@@ -139,10 +167,26 @@ class Reading(_Model):
     labels_hash: str
     words_hash: str
     matches: list[ClaudeGuess] = Field(default_factory=list)
-    # What was thrown away, by reason: below the weak-match line, or naming a
-    # line, phrase or label that is not there.
-    n_weak: int = 0
+    # What was thrown away, by reason: naming a line, phrase or label that is
+    # not there. (A guess is never thrown away for being unsure any more; an
+    # older reading's `n_weak` count is ignored on load.)
     refused: dict[str, int] = Field(default_factory=dict)
+
+
+PinKind = Literal["always", "never"]
+
+
+class WordPin(_Model):
+    """His override of a match's chance (2026-11-12): Always plays on every
+    play, Never on none. No pin is Chance, the match's own confidence. Sits
+    on words and a label like a deleted guess, so a re-read or a recapture
+    keeps it (lyric_matches.anchor)."""
+    first_word: int
+    last_word: int
+    norm: list[str]
+    label: str
+    pin: PinKind
+    changed_ms: int = 0
 
 
 class SongMatches(_Model):
@@ -151,3 +195,4 @@ class SongMatches(_Model):
     reading: Optional[Reading] = None
     his: list[HisMatch] = Field(default_factory=list)
     deleted: list[DeletedGuess] = Field(default_factory=list)
+    pins: list[WordPin] = Field(default_factory=list)

@@ -318,7 +318,6 @@ def page() -> dict:
         "labels_hash": cat.labels_hash,
         "n_labels": len(cat.labels),
         "auto_read": store.settings.auto_read,
-        "weak_match_threshold": store.settings.weak_match_threshold,
     }
 
 
@@ -336,26 +335,6 @@ def set_auto_read(enabled: bool) -> bool:
         store.settings.auto_read = bool(enabled)
         _save(store)
     return store.settings.auto_read
-
-
-def weak_match_threshold() -> float:
-    """Below this confidence a reading's guess is no match at all — the
-    live value a read_song() call uses, not the model field's default."""
-    return load().settings.weak_match_threshold
-
-
-def set_weak_match_threshold(value: Any) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        raise EditRefused("The weak-match threshold has to be a number.")
-    if not 0.0 <= parsed <= 1.0:
-        raise EditRefused("The weak-match threshold has to be between 0 and 1.")
-    with _lock:
-        store = load()
-        store.settings.weak_match_threshold = parsed
-        _save(store)
-    return store.settings.weak_match_threshold
 
 
 def _edit_list(edits: LabelEdits, computed: Sequence[str], op: str, word: str) -> None:

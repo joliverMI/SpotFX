@@ -19,9 +19,12 @@ against what is really there: the line must exist, the phrase must be sung on
 it, the label must be on the list. One that is not is thrown away and counted by
 reason, the same posture Sonic's tool results have towards its prose.
 
-A WEAK MATCH IS NO MATCH. Below WEAK_MATCH_THRESHOLD a guess is not stored at
-all, only counted, so nothing downstream can ever act on one. The number is a
-first guess and his to tune.
+EVERY GUESS IS KEPT, WITH ITS CONFIDENCE (2026-11-12, the Admiral: "no cutoff
+anymore"). The confidence is the share of plays the word acts on
+(lyric_events.chance_for: 0.97 plays 97% of plays, 0.03 plays 3%), so the
+prompt asks for an honest number on every plausible match, doubtful ones too,
+rather than leaving out anything under a line. Only a row that is not really
+there (a line, phrase or label that does not exist) is thrown away.
 
 A LINE SUNG AGAIN IS READ ONCE. Each distinct line goes in the prompt once, with
 the other places it is sung, and a match on it lands on every one of them. A
@@ -50,7 +53,6 @@ logger = logging.getLogger(__name__)
 
 Ask = Callable[..., Awaitable[claude_text.ClaudeReply]]
 
-WEAK_MATCH_THRESHOLD = lyric_matches.WEAK_MATCH_THRESHOLD
 MAX_PHRASE_WORDS = 6
 
 # THE AUTOMATIC READER'S PACE. Reading his whole library spends his Claude
@@ -108,8 +110,7 @@ def reset() -> None:
     _read_lock = asyncio.Lock()
 
 
-def build_system_prompt(catalogue: sung_labels.Catalogue,
-                        weak_match_threshold: float = WEAK_MATCH_THRESHOLD) -> str:
+def build_system_prompt(catalogue: sung_labels.Catalogue) -> str:
     return (
         "You read song lyrics for a home light show. The show has a list of LABELS "
         "(colours, things, moods, places and effects) and can react when a sung word or "
@@ -126,9 +127,12 @@ def build_system_prompt(catalogue: sung_labels.Catalogue,
         "- Report specific sung words and phrases only. Do not report what the song as a "
         "whole is about.\n"
         "- A short common word is rarely worth reporting unless the line is really about "
-        "it. Prefer saying nothing to stretching.\n\n"
-        "Give each match a confidence from 0 to 1: 0.9 or more when the words clearly mean "
-        f"the label, about 0.7 for a good fit, and leave out anything below {weak_match_threshold}. "
+        "it.\n\n"
+        "Give each match a confidence from 0 to 1. The show plays a match on that share of "
+        "its plays: 0.9 plays nine plays in ten, 0.1 one play in ten. So be honest about "
+        "doubt rather than leaving a match out: 0.9 or more when the words clearly mean the "
+        "label, about 0.7 for a good fit, 0.3 to 0.5 for a plausible but uncertain one, and "
+        "0.1 or less for a long shot. Leave out only what is plainly not about the label. "
         "When one phrase fits two labels, give the single best one unless they are really "
         "different meanings.\n\n"
         "For each match, give `line` (the number at the start of the line), `phrase` "
@@ -184,17 +188,16 @@ def _count(refused: dict[str, int], reason: str) -> None:
 
 
 def parse_reply(data: dict[str, Any], words: Sequence[lyrics_emphasis.ScoredWord],
-                catalogue: sung_labels.Catalogue,
-                weak_match_threshold: float = WEAK_MATCH_THRESHOLD
-                ) -> tuple[list[ClaudeGuess], int, dict[str, int]]:
-    """Claude's rows, checked. Returns (matches, weak count, refused by reason)."""
+                catalogue: sung_labels.Catalogue
+                ) -> tuple[list[ClaudeGuess], dict[str, int]]:
+    """Claude's rows, checked. Returns (matches, refused by reason). No row
+    is dropped for its confidence: that is its chance of playing."""
     lines = _lines(words)
     keys = lyric_matches.word_keys(words)
     groups = _repeat_groups(lines, keys)
     group_of = {line: group for group in groups.values() for line in group}
     out: list[ClaudeGuess] = []
     seen: set[tuple[int, int, str]] = set()
-    n_weak = 0
     refused: dict[str, int] = {}
 
     for row in data.get("matches") or []:
@@ -209,9 +212,6 @@ def parse_reply(data: dict[str, Any], words: Sequence[lyrics_emphasis.ScoredWord
             continue
         if not 0.0 <= confidence <= 1.0:
             _count(refused, REFUSED_ROW)
-            continue
-        if confidence < weak_match_threshold:
-            n_weak += 1
             continue
         phrase = str(row.get("phrase") or "")
         phrase_keys = [k for k in (colour_words.word_key(w) for w in phrase.split()) if k]
@@ -245,7 +245,7 @@ def parse_reply(data: dict[str, Any], words: Sequence[lyrics_emphasis.ScoredWord
         if not placed:
             _count(refused, REFUSED_PHRASE)
     out.sort(key=lambda g: g.first_word)
-    return out, n_weak, refused
+    return out, refused
 
 
 async def read_song(uri: str, *, ask: Optional[Ask] = None) -> dict[str, Any]:
@@ -259,22 +259,21 @@ async def read_song(uri: str, *, ask: Optional[Ask] = None) -> dict[str, Any]:
         catalogue = await asyncio.to_thread(sung_labels.catalogue)
         if not catalogue.labels:
             raise NoLabels("There are no sung labels to read against yet.")
-        threshold = await asyncio.to_thread(sung_labels.weak_match_threshold)
         stem = await asyncio.to_thread(analysis_reader.stem_for_uri, uri)
         reply = await (ask or claude_text.ask_json)(
-            system=build_system_prompt(catalogue, threshold),
+            system=build_system_prompt(catalogue),
             user=build_user_prompt(stem or uri, timeline.scored),
             schema=SCHEMA, purpose="lyric-reading")
-        matches, n_weak, refused = parse_reply(reply.data, timeline.scored, catalogue, threshold)
+        matches, refused = parse_reply(reply.data, timeline.scored, catalogue)
         reading = Reading(
             at_ms=int(time.time() * 1000), model=reply.model, backend=reply.backend,
             labels_hash=catalogue.labels_hash,
             words_hash=lyric_matches.words_hash(timeline.scored),
-            matches=matches, n_weak=n_weak, refused=refused)
+            matches=matches, refused=refused)
         await asyncio.to_thread(lyric_matches.save_reading, uri, reading)
         _last_read_at = time.monotonic()
-    logger.info("lyric reading: %s — %d matches, %d weak, %d refused",
-                uri, len(matches), n_weak, sum(refused.values()))
+    logger.info("lyric reading: %s — %d matches, %d refused",
+                uri, len(matches), sum(refused.values()))
     return await asyncio.to_thread(lyric_matches.payload, uri)
 
 

@@ -1267,18 +1267,16 @@ async def put_on_tv(script_entity: Optional[str] = None, confirm_id: Optional[st
 
 @mcp.tool()
 async def get_lyric_reading_settings() -> dict:
-    """Read whether songs are read automatically and the weak-match threshold a reading uses."""
+    """Read whether songs are read automatically."""
     return await _call("get_lyric_reading_settings")
 
 
 @mcp.tool()
 async def set_lyric_reading_settings(auto_read: Optional[bool] = None,
-                                     weak_match_threshold: Optional[float] = None,
                                      confirm_id: Optional[str] = None) -> dict:
-    """Turn reading songs automatically on or off, and/or change the weak-match threshold
-    (turning auto_read ON asks first)."""
+    """Turn reading songs automatically on or off (turning it ON asks first)."""
     return await _call("set_lyric_reading_settings", auto_read=auto_read,
-                       weak_match_threshold=weak_match_threshold, confirm_id=confirm_id)
+                       confirm_id=confirm_id)
 
 
 @mcp.tool()

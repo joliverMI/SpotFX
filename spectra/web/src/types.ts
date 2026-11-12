@@ -2068,7 +2068,6 @@ export interface SungLabelsPageData {
   labels_hash: string;
   n_labels: number;
   auto_read: boolean;
-  weak_match_threshold: number;
   claude: ClaudeAvailability;
   draft_batch_size: number;
 }
@@ -2088,6 +2087,9 @@ export interface LyricMatchTarget {
   swatch: string | null;
 }
 
+/** Always plays, or never; no pin is Chance: the match's own confidence. */
+export type LyricPin = 'always' | 'never';
+
 export interface LyricMatch {
   id: string;
   source: 'claude' | 'his';
@@ -2098,6 +2100,8 @@ export interface LyricMatch {
   label: string;
   confidence: number | null;
   why: string;
+  /** his override of how often it plays; null is Chance (its confidence) */
+  pin: LyricPin | null;
   targets: LyricMatchTarget[];
   n_targets: number;
   targets_missing: number;
@@ -2122,6 +2126,15 @@ export interface LyricEventAction {
   end_ms: number;
   source: 'claude' | 'his';
   strength: number;
+  /** THE ROLL (lyric_events.py): the leading match (what a pin is set
+   * through), his pin, the share of plays it acts on, and — when a play is
+   * rolled — its draw and whether it won. `won` null: not rolled. */
+  match_id: string | null;
+  pin: LyricPin | null;
+  chance: number | null;
+  draw: number | null;
+  won: boolean | null;
+  chance_words: string;
   set_names: string[];
   set_ids: string[];
   /** the colour of the word's first candidate set (the Word matches row's
@@ -2150,7 +2163,23 @@ export interface LyricEvents {
   settings: LyricEventSettings;
   n_events: number;
   shows_on: number;
+  roll: LyricRoll;
   actions: LyricEventAction[];
+}
+
+/** Which play a word plan is for (lyric_events.roll_payload): the song
+ * playing's play under way, his kept roll, a sample for the page, or none
+ * (every word as if it plays). */
+export interface LyricRoll {
+  state: 'playing' | 'kept' | 'sample' | 'none';
+  seed: number | null;
+  tag: string | null;
+  started_ms: number | null;
+  kept: boolean;
+  kept_seed: number | null;
+  playing: boolean;
+  n_words: number;
+  n_won: number;
 }
 
 /** A word just fired on its own or imprinted on an event (spectra/services/
@@ -2184,11 +2213,12 @@ export interface LyricMatches {
   status: 'ok' | 'none' | 'invalid' | 'stale';
   note: string | null;
   state: LyricReadingState;
-  reading: { at_ms: number; model: string; n_weak: number; n_refused: number } | null;
+  reading: { at_ms: number; model: string; n_refused: number } | null;
   matches: LyricMatch[];
   unplaced: { id: string; phrase: string; label: string }[];
   n_his: number;
   n_deleted: number;
-  weak_match_threshold: number;
+  /** how many of his Always / Never pins this song carries */
+  n_pinned: number;
   claude: ClaudeAvailability;
 }

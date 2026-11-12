@@ -10,7 +10,7 @@ A match does not reach the lights any other way.
 
 ONE SMALL FILE PER SONG (storage/spectra/lyric_matches/), keyed by the song's
 URI and in SPECTRA's own directory, because a recapture replaces everything
-stored beside the audio. Three parts, and only one is ever replaced:
+stored beside the audio. Four parts, and only one is ever replaced:
 
   reading  — Claude's guesses. Replaced whole by the next reading.
   his      — words he matched himself. Only he changes these.
@@ -18,6 +18,12 @@ stored beside the audio. Three parts, and only one is ever replaced:
              the same label stays deleted. The same words with a DIFFERENT
              label is a new guess, which is what a re-read after a label change
              is for.
+  pins     — his Always / Never on a match (2026-11-12): the share of plays it
+             acts on, overriding its confidence (lyric_events.chance_for). On
+             words and a label like `deleted`, so a re-read keeps it.
+
+EVERY GUESS IS KEPT (2026-11-12, the Admiral: "no cutoff anymore"). There is no
+weak-match threshold: a guess's confidence is the share of plays it acts on.
 
 A MATCH SITS ON WORDS, NOT ON TIMES. It stores which words (by position) and
 what they said. Its times come from the current word timeline at read time, so
@@ -48,7 +54,7 @@ from typing import Any, Optional, Sequence
 
 from spectra import config
 from spectra.models.lyric_labels import (
-    ClaudeGuess, DeletedGuess, HisMatch, Reading, SongMatches, TargetRef,
+    ClaudeGuess, DeletedGuess, HisMatch, Reading, SongMatches, TargetRef, WordPin,
 )
 from spectra.services import colour_words, lyrics_emphasis, lyrics_timeline, sung_labels
 
@@ -62,12 +68,9 @@ STATE_WORDS_CHANGED = "words_changed"
 PROVENANCE_GUESS = "claude_guess"
 PROVENANCE_HIS = "his"
 
-# Below this confidence Claude's guess is not a match, and is not stored.
-# A first guess, his to tune — the model field's default
-# (SungLabelSettings.weak_match_threshold) and read_song()'s own fallback
-# when nothing in particular is asked. sung_labels.weak_match_threshold()
-# is the LIVE value a reading actually uses once he changes it.
-WEAK_MATCH_THRESHOLD = 0.6
+PIN_ALWAYS = "always"
+PIN_NEVER = "never"
+PIN_CHANCE = "chance"
 
 MAX_PHRASE_WORDS = 12
 MAX_TARGETS_SHOWN = 8
@@ -150,19 +153,32 @@ def guess_id(guess: ClaudeGuess) -> str:
         .encode("utf-8")).hexdigest()[:12]
 
 
-def _is_deleted(first: int, last: int, label: str, norm: Sequence[str],
-                deleted: Sequence[DeletedGuess], keys: Sequence[str]) -> bool:
+def _on_words(first: int, last: int, label: str, norm: Sequence[str],
+              rows: Sequence[Any], keys: Sequence[str]) -> Optional[Any]:
+    """The first stored row (a deleted guess or a pin) sitting on these
+    words with this label, found again by its words like a match."""
     label_key = colour_words.word_key(label)
     norm_keys = [colour_words.word_key(w) for w in norm]
-    for row in deleted:
+    for row in rows:
         if colour_words.word_key(row.label) != label_key:
             continue
         if [colour_words.word_key(w) for w in row.norm] != norm_keys:
             continue
         spot = anchor(row.first_word, row.norm, keys)
         if spot == (first, last):
-            return True
-    return False
+            return row
+    return None
+
+
+def _is_deleted(first: int, last: int, label: str, norm: Sequence[str],
+                deleted: Sequence[DeletedGuess], keys: Sequence[str]) -> bool:
+    return _on_words(first, last, label, norm, deleted, keys) is not None
+
+
+def _pin(first: int, last: int, label: str, norm: Sequence[str],
+         pins: Sequence[WordPin], keys: Sequence[str]) -> Optional[str]:
+    row = _on_words(first, last, label, norm, pins, keys)
+    return None if row is None else row.pin
 
 
 def _target_payload(target: sung_labels.Target) -> dict:
@@ -203,6 +219,7 @@ def resolve(doc: SongMatches, words: Sequence[lyrics_emphasis.ScoredWord],
         out.append({"id": his.id, "source": "his", "provenance": PROVENANCE_HIS,
                     "first_word": spot[0], "last_word": spot[1], "phrase": his.phrase,
                     "label": his.label, "confidence": None, "why": "",
+                    "pin": _pin(spot[0], spot[1], his.label, his.norm, doc.pins, keys),
                     "targets": targets, "n_targets": len(targets), "targets_missing": missing,
                     **_span_times(spot[0], spot[1], words)})
         taken.append(spot)
@@ -229,6 +246,7 @@ def resolve(doc: SongMatches, words: Sequence[lyrics_emphasis.ScoredWord],
                         "first_word": spot[0], "last_word": spot[1], "phrase": guess.phrase,
                         "label": catalogue.labels.get(label_key, guess.label),
                         "confidence": guess.confidence, "why": guess.why,
+                        "pin": _pin(spot[0], spot[1], guess.label, guess.norm, doc.pins, keys),
                         "targets": [_target_payload(t) for t in owners[:MAX_TARGETS_SHOWN]],
                         "n_targets": len(owners), "targets_missing": 0,
                         **_span_times(spot[0], spot[1], words)})
@@ -261,8 +279,7 @@ def payload(uri: str) -> dict[str, Any]:
     doc = load(uri)
     base: dict[str, Any] = {
         "uri": uri, "status": timeline.status, "note": timeline.note,
-        "weak_match_threshold": sung_labels.weak_match_threshold(),
-        "n_deleted": len(doc.deleted),
+        "n_deleted": len(doc.deleted), "n_pinned": len(doc.pins),
     }
     if not timeline.usable:
         return {**base, "state": STATE_NONE, "reading": None, "matches": [], "unplaced": [],
@@ -274,7 +291,7 @@ def payload(uri: str) -> dict[str, Any]:
         **base,
         "state": reading_state(doc, words_hash(timeline.scored), catalogue.labels_hash),
         "reading": None if reading is None else {
-            "at_ms": reading.at_ms, "model": reading.model, "n_weak": reading.n_weak,
+            "at_ms": reading.at_ms, "model": reading.model,
             "n_refused": sum(reading.refused.values()),
         },
         "matches": matches,
@@ -343,6 +360,44 @@ def delete(uri: str, match_id: str) -> dict[str, Any]:
             raise MatchRefused("That match is no longer there.")
         doc.deleted.append(DeletedGuess(first_word=guess.first_word, last_word=guess.last_word,
                                         norm=guess.norm, label=guess.label))
+        _save(doc)
+    return payload(uri)
+
+
+def set_pin(uri: str, match_id: str, pin: str) -> dict[str, Any]:
+    """He set how often this match plays: Always, Never, or Chance (its own
+    confidence — the pin taken off). Kept on the match's words and label,
+    so it survives a re-read and a recapture."""
+    if pin not in (PIN_ALWAYS, PIN_NEVER, PIN_CHANCE):
+        raise MatchRefused("A match plays always, never, or by chance.")
+    timeline = lyrics_timeline.timeline_for_uri(uri)
+    if not timeline.usable:
+        raise MatchRefused(timeline.note or "This song has no usable word timeline.")
+    keys = word_keys(timeline.scored)
+    with _lock:
+        doc = load(uri)
+        span: Optional[tuple[int, int, list[str], str]] = None
+        his = next((h for h in doc.his if h.id == match_id), None)
+        if his is not None:
+            spot = anchor(his.first_word, his.norm, keys)
+            if spot is not None:
+                span = (spot[0], spot[1], list(his.norm), his.label)
+        else:
+            guess = next((g for g in (doc.reading.matches if doc.reading else [])
+                          if guess_id(g) == match_id), None)
+            if guess is not None:
+                spot = anchor(guess.first_word, guess.norm, keys)
+                if spot is not None:
+                    span = (spot[0], spot[1], list(guess.norm), guess.label)
+        if span is None:
+            raise MatchRefused("That match is no longer there.")
+        first, last, norm, label = span
+        existing = _on_words(first, last, label, norm, doc.pins, keys)
+        kept = [p for p in doc.pins if p is not existing]
+        if pin != PIN_CHANCE:
+            kept.append(WordPin(first_word=first, last_word=last, norm=norm, label=label,
+                                pin=pin, changed_ms=int(time.time() * 1000)))
+        doc.pins = kept
         _save(doc)
     return payload(uri)
 

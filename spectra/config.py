@@ -79,6 +79,10 @@ LYRIC_MATCHES_DIR = SPECTRA_STORAGE / "lyric_matches"
 # (off for every show unless he turns one on) and the three tuning settings.
 # spectra/services/lyric_events.py.
 LYRIC_EVENTS_FILE = SPECTRA_STORAGE / "lyric_events.json"
+# The play of a switched-on show under way, and its play number, so a
+# restart mid-song carries on with the same words (lyric_events.py,
+# "THE ROLL"). Written only for a show switched on.
+LYRIC_PLAYS_FILE = SPECTRA_STORAGE / "lyric_plays.json"
 # Sonic's scene/flare change log (spectra/services/scene_console.py) — kept
 # separate from SETTINGS_LOG_FILE so the two domains' audit trails never mix,
 # matching scene_console.py never importing settings_console.py.

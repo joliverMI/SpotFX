@@ -2,7 +2,7 @@
 built in lyrics plan step 3 (PR #499), AND word colours and imprints from
 lyrics plan step 4 (PR #504): what a colour set or effect answers to when
 it is sung, Claude's drafted colour meanings, one song's matched words,
-the automatic reader's own switch and weak-match threshold, and — the
+the automatic reader's own switch, and — the
 step-4 follow-up this module was still missing — the per-show word-colour
 switch, its three tuning settings, and a preview of what each word would
 do. spectra/services/sung_labels.py, lyric_matches.py, lyric_reading.py,
@@ -15,6 +15,17 @@ Per the Admiral's standing Sonic coverage protocol (2026-10-06, "add
 protocols to make those after all changes ... adding and updating skills
 as a final step"): this feature shipped without any Sonic operation, and
 this module is that follow-up (both the step-3 one and, now, step-4's).
+
+THE ROLL (2026-11-12, lyric_events.py's "THE ROLL") — FOLLOW-UP OWED. Each
+play rolls which words act, by confidence, with his Always / Chance / Never
+pin per match and "Keep this roll" per song. Sonic already READS it:
+preview_lyric_events passes the Test Bed's payload through, so `roll` (this
+play's number, how many words won, a kept roll) and each action's `chance`
+/`won`/`pin` are in its answer. Not yet here, and named so an audit can tell
+"not yet" from "forgotten": an op to pin a match (by phrase, like
+delete_lyric_match; Always on a switched-on show newly lets a word act, so
+it would ask first) and an op to keep or release a song's roll. The weak-
+match threshold this module used to change is gone: there is no cut-off.
 
 NO LIGHT OUTPUT, NO TRIGGER WIRING. Every handler here reaches only
 sung_labels / lyric_matches / lyric_reading / color_meanings / colour_words
@@ -73,8 +84,8 @@ ASKING FIRST, same shape as drop_console.py's in-process confirm/redeem
 these lyric modules live in THIS process, so there is nothing to cross):
 turning auto_read ON (letting Claude read songs with nobody pressing
 anything, one a minute, continuously spending his Claude allowance) asks
-first; turning it off, or changing only the weak-match threshold, applies
-at once. draft_colour_meanings and read_song_lyrics ALWAYS ask — every
+first; turning it off applies at once. draft_colour_meanings and
+read_song_lyrics ALWAYS ask — every
 call spends his Claude allowance, not just the first one, so there is no
 "newly lets it act" distinction to make; absorb_console's start_absorb
 (a consequential act repeated every call) is the matching precedent.
@@ -295,7 +306,9 @@ def _find_occurrences(keys: list, phrase_keys: list) -> list[tuple[int, int]]:
     return out
 
 
-# ── his settings: the auto-read switch and the weak-match threshold ────────
+# ── his settings: the auto-read switch ──────────────────────────────────────
+# (There is no weak-match threshold any more, 2026-11-12: every guess is kept
+# and its confidence is its chance of playing, lyric_events.chance_for.)
 
 def _op_get_lyric_reading_settings() -> dict:
     try:
@@ -303,43 +316,30 @@ def _op_get_lyric_reading_settings() -> dict:
     except sung_labels.StoreUnreadable as exc:
         return {"status": "rejected", "reason": str(exc)}
     avail = claude_text.availability()
-    return {"auto_read": page["auto_read"], "weak_match_threshold": page["weak_match_threshold"],
+    return {"auto_read": page["auto_read"],
             "n_labels": page["n_labels"], "claude_available": avail["available"],
             "claude_reason": avail["reason"], "claude_model": avail["model"]}
 
 
 async def _op_set_lyric_reading_settings(auto_read: Optional[bool] = None,
-                                         weak_match_threshold: Optional[float] = None,
                                          confirm_id: Optional[str] = None) -> dict:
-    if auto_read is None and weak_match_threshold is None:
-        return {"status": "rejected",
-                "reason": "name at least one setting to change: auto_read or weak_match_threshold"}
-    if auto_read is not None and not isinstance(auto_read, bool):
+    if auto_read is None:
+        return {"status": "rejected", "reason": "name the setting to change: auto_read"}
+    if not isinstance(auto_read, bool):
         return {"status": "rejected", "reason": "auto_read must be true or false"}
-    wmt: Optional[float] = None
-    if weak_match_threshold is not None:
-        try:
-            wmt = float(weak_match_threshold)
-        except (TypeError, ValueError):
-            return {"status": "rejected", "reason": "weak_match_threshold must be a number"}
-        if not 0.0 <= wmt <= 1.0:
-            return {"status": "rejected", "reason": "weak_match_threshold must be between 0 and 1"}
     try:
         store = sung_labels.load()
     except sung_labels.StoreUnreadable as exc:
         return {"status": "rejected", "reason": str(exc)}
-    before = {"auto_read": store.settings.auto_read,
-              "weak_match_threshold": store.settings.weak_match_threshold}
-    after = {"auto_read": auto_read if auto_read is not None else before["auto_read"],
-             "weak_match_threshold": wmt if wmt is not None else before["weak_match_threshold"]}
+    before = {"auto_read": store.settings.auto_read}
+    after = {"auto_read": auto_read}
     question = None
     if after["auto_read"] and not before["auto_read"]:
         question = ("Turn on reading songs automatically? Claude will read any song that "
                     "has not been read, and re-read a song when the words on this list "
                     "change — one song a minute, continuously, which spends your Claude "
                     "allowance the whole time it is on.")
-    fp = _fingerprint("set_lyric_reading_settings",
-                      {"auto_read": auto_read, "weak_match_threshold": wmt}, before)
+    fp = _fingerprint("set_lyric_reading_settings", {"auto_read": auto_read}, before)
     if question is not None:
         if confirm_id is None:
             return _ask("set_lyric_reading_settings", fp, question)
@@ -349,20 +349,12 @@ async def _op_set_lyric_reading_settings(auto_read: Optional[bool] = None,
     elif isinstance(confirm_id, str):
         _PENDING.pop(confirm_id, None)      # moot now; still single-use
     try:
-        if auto_read is not None:
-            sung_labels.set_auto_read(auto_read)
-        if wmt is not None:
-            sung_labels.set_weak_match_threshold(wmt)
+        sung_labels.set_auto_read(auto_read)
     except sung_labels.EditRefused as exc:
         return {"status": "rejected", "reason": str(exc)}
-    bits = []
-    if auto_read is not None:
-        bits.append(f"reading songs automatically: {_onoff(before['auto_read'])} → "
-                    f"{_onoff(after['auto_read'])}")
-    if wmt is not None:
-        bits.append(f"weak-match threshold: {before['weak_match_threshold']} → "
-                    f"{after['weak_match_threshold']}")
-    return {"status": "applied", "old": before, "new": after, "summary": "; ".join(bits) + "."}
+    summary = (f"reading songs automatically: {_onoff(before['auto_read'])} → "
+               f"{_onoff(after['auto_read'])}.")
+    return {"status": "applied", "old": before, "new": after, "summary": summary}
 
 
 # ── reading and changing the labels themselves ──────────────────────────────
@@ -605,8 +597,8 @@ async def _op_read_song_lyrics(song: Optional[str] = None,
         return {"status": "rejected", "reason": str(exc)}
     reading = data.get("reading") or {}
     n_matches = len([m for m in data.get("matches", []) if m.get("source") == "claude"])
-    summary = (f"Read {name!r}: {n_matches} match(es) found, {reading.get('n_weak', 0)} too "
-              f"weak, {reading.get('n_refused', 0)} refused.")
+    summary = (f"Read {name!r}: {n_matches} match(es) found, "
+               f"{reading.get('n_refused', 0)} refused.")
     return _applied(data, song=name, summary=summary)
 
 
@@ -714,30 +706,25 @@ _KIND_PROP = {"type": "string", "enum": list(TARGET_KINDS),
 OPERATIONS: dict[str, SonicOperation] = {
     "get_lyric_reading_settings": SonicOperation(
         name="get_lyric_reading_settings", domain="lyrics", kind="read",
-        summary="Read whether songs are read automatically and the weak-match threshold "
-                "a reading uses.",
-        instructions=("No arguments. Call this before changing either setting so you can "
-                     "tell him the current value."),
+        summary="Read whether songs are read automatically.",
+        instructions=("No arguments. Call this before changing it so you can tell him the "
+                     "current value. There is no weak-match threshold any more: every guess "
+                     "is kept, and its confidence is the share of plays it acts on."),
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},
         handler=_op_get_lyric_reading_settings,
     ),
     "set_lyric_reading_settings": SonicOperation(
         name="set_lyric_reading_settings", domain="lyrics", kind="write",
-        summary="Turn reading songs automatically on or off, and/or change the "
-                "weak-match threshold.",
+        summary="Turn reading songs automatically on or off.",
         instructions=(
-            "Pass auto_read (true/false) and/or weak_match_threshold (0 to 1) — whichever "
-            "he asked to change; an omitted one is left exactly as it is. Turning auto_read "
-            "ON needs his yes first (it spends his Claude allowance continuously, one song a "
-            "minute, with nobody pressing anything)." + _INSTR_CONFIRM + " Turning it off, or "
-            "changing only the threshold, applies at once with no confirm_id needed. Below "
-            "the weak-match threshold a Claude guess is thrown away and never stored; lower "
-            "it to let more through, raise it to be stricter."),
+            "Pass auto_read (true/false). Turning it ON needs his yes first (it spends his "
+            "Claude allowance continuously, one song a minute, with nobody pressing "
+            "anything)." + _INSTR_CONFIRM + " Turning it off applies at once with no "
+            "confirm_id needed."),
         input_schema={
             "type": "object",
             "properties": {
                 "auto_read": {"type": "boolean"},
-                "weak_match_threshold": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "confirm_id": _CONFIRM_PROP},
             "additionalProperties": False},
         handler=_op_set_lyric_reading_settings,
@@ -924,7 +911,12 @@ OPERATIONS: dict[str, SonicOperation] = {
         instructions=(
             "song is optional (omit to mean whatever is playing now). Works whether or not "
             "word colours are switched on for that song — it previews the plan either way, "
-            "and the result's own enabled field says which."),
+            "and the result's own enabled field says which. Each play rolls which words act: "
+            "a word plays on the share of plays its `chance` says (Claude's confidence; his "
+            "own matches and Always pins every time). `roll.state` says which play the plan "
+            "is for — `playing` (this play of the song playing, `roll.tag` its number), "
+            "`kept` (his kept roll), or `none` (not playing: every word shown as if it "
+            "plays) — and `won` false / why `sat_out` marks a word sitting out this play."),
         input_schema={"type": "object", "properties": {"song": _SONG_PROP},
                      "additionalProperties": False},
         handler=_op_preview_lyric_events,

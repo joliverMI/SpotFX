@@ -2467,10 +2467,27 @@ kbd {
 .testbed-word-action.fire { border: 1px solid var(--ok); font-weight: 600; }
 .testbed-word-action.imprint { border: 1px solid var(--accent); font-weight: 600; }
 .testbed-word-action.nothing { opacity: 0.55; }
+/* THE ROLL (lyric_events.py): a word sitting out this play is quieter
+   still, and dotted, so the words that play stand out. */
+.testbed-word-action.sat-out { opacity: 0.4; border-style: dotted; font-weight: 400; }
 .testbed-word-action.selected { outline: 2px solid var(--accent); outline-offset: 0; opacity: 1; }
 .testbed-word-action.tick {
   top: 13px; bottom: auto; width: 6px; height: 16px; margin-left: -3px; padding: 0; border-radius: 2px;
 }
+.testbed-roll {
+  flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-muted); min-height: 20px;
+}
+.testbed-roll .testbed-match-link { font-size: 12px; padding: 0; }
+.testbed-pin { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0; font-size: 12px; }
+.testbed-pin-title { color: var(--text-muted); margin-right: 6px; }
+.testbed-pin button {
+  font-size: 12px; padding: 1px 8px; border-radius: 0; margin-left: -1px; white-space: nowrap;
+  background: var(--surface); color: var(--text-muted);
+}
+.testbed-pin button:first-of-type { border-radius: 4px 0 0 4px; margin-left: 0; }
+.testbed-pin button:last-of-type { border-radius: 0 4px 4px 0; }
+.testbed-pin button.on { color: var(--text); background: var(--surface2); border-color: var(--accent); position: relative; }
 .testbed-word-switch { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--text); }
 .testbed-word-state { font-size: 12px; color: var(--text-muted); }
 .testbed-word-state.on { color: var(--warning); font-weight: 600; }
