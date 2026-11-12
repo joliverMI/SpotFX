@@ -292,11 +292,18 @@ class ParamTarget(BaseModel):
     the band's existing scale factor (moves the resolved declared target to
     baseline + (declared − baseline)·scale — composes with every mode
     above); ABSOLUTE set value is this type's own default mode."""
-    mode: Literal["absolute", "offset", "random"] = "absolute"
+    mode: Literal["absolute", "offset", "random", "random_other"] = "absolute"
     value:  Optional[float] = None   # absolute
     offset: Optional[float] = None   # offset — signed, up = positive
-    lo:     Optional[float] = None   # random
-    hi:     Optional[float] = None   # random
+    lo:     Optional[float] = None   # random / random_other
+    hi:     Optional[float] = None   # random / random_other
+    # random_other (the star improve plan, 2026-11-12 — his "flares should
+    # change the number of edges ... it should change until there is a new
+    # scene update or flare"): a fresh uniform INTEGER draw in [lo, hi]
+    # that is never the param's current carried value (never the same
+    # twice in a row), rolled per landing virtual. For integer params such
+    # as radial's `edges`; on a PERMANENT kind the pick carries, so it
+    # holds until the next flare or update re-rolls it.
 
     @model_validator(mode="after")
     def _shape(self) -> "ParamTarget":
@@ -304,11 +311,14 @@ class ParamTarget(BaseModel):
             raise ValueError("an absolute target needs a value")
         if self.mode == "offset" and self.offset is None:
             raise ValueError("an offset target needs an offset")
-        if self.mode == "random":
+        if self.mode in ("random", "random_other"):
             if self.lo is None or self.hi is None:
-                raise ValueError("a random target needs lo and hi")
+                raise ValueError(f"a {self.mode} target needs lo and hi")
             if self.lo > self.hi:
-                raise ValueError(f"random target needs lo ({self.lo}) <= hi ({self.hi})")
+                raise ValueError(f"{self.mode} target needs lo ({self.lo}) <= hi ({self.hi})")
+            if self.mode == "random_other" and int(self.hi) - int(self.lo) < 1:
+                raise ValueError("a random_other target needs at least two "
+                                 "integers between lo and hi")
         return self
 
 

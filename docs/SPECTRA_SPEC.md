@@ -196,6 +196,24 @@ checking before saying "ready."
 
 ## Capability ledger
 
+### D8 — STAR's standard star range is −0.2..+0.4, swaying through flat; no quiet floor
+
+> "let's do -.2 to +.4 as the standard range they sway between. I want it to go through 0."
+> / "q10, it can slow to a stop during quiet music." / "STAR plan is approved, go ahead and
+> deploy as soon as it's ready" (Admiral, 2026-11-12, the star improve plan —
+> `data/star-improve-plan/plan.md`, PR fm/star-improve-plan)
+
+Flat is `star = 0` (the shaping is radius × (1 + star·cos(edges·angle)); he had assumed 0.5 until
+the −0.7..+0.7 × 3–6 edges grid showed otherwise). On STAR the `star` value sways continuously
+between −0.2 and +0.4 (`star_wave`, pace by the told section energy) and nothing on the scene —
+binding or flare kind — writes it outside that range. STAR spins from its first frame (a 1 s
+ease-in, and the fire-time sign-flip-then-clamp defect that landed Speed 0 on half of all fires is
+fixed), is capped at 3.36 rev/s (70% of the old ceiling) with no change below it, and has NO quiet
+floor by his word (`base_rotation` stays 0). Flares on the two upper bands morph the edge count to
+a new value that holds until the next flare/update ("Edge Morph", `random_other`). STAR's Melt
+carries `dark_floor 0.5`; the TV backlight carries a per-LED ring lookup so every strip effect
+turns round the screen like a sconce. House Star / House Fish untouched.
+
 ### State legend
 
 | State | Meaning |

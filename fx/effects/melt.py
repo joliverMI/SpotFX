@@ -30,6 +30,24 @@ class Melt(StripPhase, AudioReactiveEffect, HSVEffect):
                 description="Audio Reactive modifier",
                 default=0.5,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0001, max=1)),
+            # DARK FLOOR (the star improve plan, 2026-11-12 — his "more dark
+            # blobs so that the whole effect isn't as overpoweringly bright
+            # compared to other effects in dark mode"): the melt's value is a
+            # squared sine chain that is never black between blobs, so a
+            # 560-px strip ran ~61% lit against 14–28% for the particle
+            # strips. Everything below this level is cut to black and the
+            # rest re-stretched to full, so the blobs become separate
+            # islands with real gaps: 0.5 measured 33% lit, luminance 0.082
+            # (today 0.130). 0 = today, byte-identical — House Star / House
+            # Fish and every other Melt keep it; STAR's Strips entry sets 0.5.
+            vol.Optional(
+                "dark_floor",
+                description=(
+                    "Cut the melt's brightness below this level to black "
+                    "(0 = none): more dark gaps between the blobs"
+                ),
+                default=0.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.9)),
         }
     )
 
@@ -89,6 +107,14 @@ class Melt(StripPhase, AudioReactiveEffect, HSVEffect):
         np.add(self.v, t1, out=self.v)
         self.array_sin(self.v)
         np.power(self.v, 2, out=self.v)
+
+        floor = float(self._config.get("dark_floor", 0.0) or 0.0)
+        if floor > 0.0:
+            # THE DARK FLOOR: below `floor` is black, the rest stretched
+            # back to 0..1 so a blob's peak stays full
+            np.subtract(self.v, floor, out=self.v)
+            np.divide(self.v, 1.0 - floor, out=self.v)
+            np.clip(self.v, 0.0, 1.0, out=self.v)
 
         self.hsv_array[:, 0] = self.c1
         self.hsv_array[:, 1] = 1

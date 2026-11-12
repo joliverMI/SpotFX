@@ -66,6 +66,24 @@ class Device(BaseRegistry):
                     description="Number of pixels from the perceived center of the device",
                     default=0,
                 ): int,
+                # SpotFX deviation (the star improve plan, 2026-11-12, his
+                # "make the TV work more radially, like the sconces"): an
+                # optional per-LED lookup — physical LED i shows effect
+                # pixel pixel_map[i]. Built once from the fixture's real
+                # geometry (scripts/tv_ring_pixel_map.py: his TV strip's
+                # 560 LEDs by their ANGLE about the screen centre), it
+                # applies to EVERY effect the device shows. Empty = today's
+                # one-to-one order. Applied after center_offset in
+                # assemble_frame; a map of the wrong length is ignored (and
+                # logged once) rather than crashing the flush.
+                vol.Optional(
+                    "pixel_map",
+                    description=(
+                        "Per-LED lookup: physical LED i shows effect pixel "
+                        "pixel_map[i]. Empty = one-to-one."
+                    ),
+                    default=[],
+                ): [int],
                 vol.Optional(
                     "refresh_rate",
                     description="Target rate that pixels are sent to the device",
@@ -354,7 +372,33 @@ class Device(BaseRegistry):
 
         if self._config["center_offset"]:
             frame = np.roll(frame, self._config["center_offset"], axis=0)
+        pixel_map = self._config.get("pixel_map") or []
+        if pixel_map and frame is not None:
+            frame = self._apply_pixel_map(frame, pixel_map)
         return frame
+
+    def _apply_pixel_map(self, frame, pixel_map):
+        """The per-LED lookup (CONFIG_SCHEMA `pixel_map`): LED i <- effect
+        pixel pixel_map[i]. The index array is built once per config and
+        validated against the frame length; a bad map leaves the frame as
+        it is (one warning, never a crash in the flush)."""
+        n = frame.shape[0]
+        cached = getattr(self, "_pixel_map_idx", None)
+        if cached is None or cached[0] is not pixel_map or cached[1] != n:
+            idx = None
+            if len(pixel_map) == n and all(0 <= int(i) < n for i in pixel_map):
+                idx = np.asarray(pixel_map, dtype=np.intp)
+            elif not getattr(self, "_pixel_map_warned", False):
+                self._pixel_map_warned = True
+                _LOGGER.warning(
+                    "Device %s: pixel_map has %d entries for %d pixels "
+                    "(or an index out of range) — ignored",
+                    self.name, len(pixel_map), n,
+                )
+            cached = (pixel_map, n, idx)
+            self._pixel_map_idx = cached
+        idx = cached[2]
+        return frame if idx is None else frame[idx]
 
     def activate(self):
         self._pixels = np.zeros((self.pixel_count, 3))

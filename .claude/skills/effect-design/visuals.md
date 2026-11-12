@@ -129,3 +129,27 @@ numbers and the proof's numbers are one thing.
   or raw CDP); a canvas that throws on a mock-shape gap shows him a blank
   tile, not an error. Do this before publishing the Artifact, not after —
   a blank tile on his tablet is harder to debug from than one caught here.
+
+## Lessons from star-improve-plan (2026-11-12)
+
+- **Embed the sprites as data URIs.** A page opened from `file://` cannot
+  `getImageData` from a sibling PNG (tainted canvas): every tile stayed
+  blank with no visible error. Inline the PNGs (a 7–10 MB page is fine)
+  and check headless over raw CDP (`Runtime.exceptionThrown` + a count of
+  decoded sprites) before sending.
+- **He reviews on a tablet.** The local Lavish URL does not reach it.
+  Publish the explainer as an artifact page he can open, and keep plain
+  stills/GIFs beside it (`data/<plan>/tablet/`: a three-panel PNG per
+  option at low/mid/high and a ~6 s, <3 MB GIF per option).
+- **For a continuous param, render the FULL RANGE as a grid first** (his
+  ask: −0.7..+0.7 in 0.1 steps × 3–6 edges = 60 stills at 240 px, no
+  labels, plus a measure.json). He picks from the grid in one message;
+  three hand-chosen options invited a wrong assumption ("0.5 is flat").
+- **State the param's neutral value in the facts** (flat = `star` 0, the
+  shaping formula) before any range question; render a frozen row of the
+  shapes beside the waves.
+- **Real device geometry, not an assumed one.** The TV tile was drawn on
+  HyperHDR's own LED layout read off the strip's Pi (`config/
+  tv_backlight_layout.json`); the assumed single loop would have mis-shown
+  "today". Scripts: `scripts/render_star_improve_{crystal,strips,grid,
+  tablet}.py`, `scripts/build_star_improve_explainer.py`.

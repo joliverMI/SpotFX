@@ -2775,3 +2775,46 @@ against that commit.
     the lull below today's at every gap), storyboards
     `scripts/render_predrop_storyboards.py` -> `docs/evidence/
     predrop-storyboards/strip_*`. Unverified against his live room.
+
+91. `effects/radial.py` (SpotFX-authored on top of #22/#62): THE STAR IMPROVE
+    PLAN (2026-11-12, data/star-improve-plan/plan.md; the Admiral: "spin
+    from the beginning ... cap the max speed ... to 70% of what it is now,
+    but it shouldn't slow down at lower speeds ... the amount of star should
+    dynamically change with the music ... -.2 to +.4 ... I want it to go
+    through 0"). `_govern_rotation` (draw) measures each frame's TOTAL
+    advance — audio spin, base floor and charge spin-up together — as the
+    shortest signed turn from the last rendered frame's angle, scales it by
+    smoothstep(active_s / `spin_ease_in_s`) (new param, effect default 0 =
+    byte-identical; STAR's entry 1.0) and clamps it at `ROTATION_CAP_REV_S`
+    = 0.7 x 6.0 x ROTATION_SPEED_SCALE = 3.36 rev/s (identity below).
+    `_star_wave_step` (draw) overrides `self.star` per frame with a cosine
+    between `star_wave_lo`/`_hi` (new params; STAR -0.2..+0.4, through
+    flat = 0) whose period runs `star_wave_period_slow_s` -> `_fast_s` by
+    the new pushed `energy` key (the pulse feed, `fx.device_model.
+    ENERGY_FED_EFFECTS` / `ENERGY_ONLY_EFFECTS`); phase integrated, starting
+    at the fired `star`; the stored `star` is never rewritten; `star_wave`
+    off (the default) is today. No vendored line changed; the new code
+    returns before touching state when its params are at their defaults.
+    Evidence: `tests/test_star_improve.py`. The fire-time half of the ask
+    is in `spectra/services/binding_resolver.py` (a sign flip is never
+    applied to a param with `lo >= 0`).
+
+92. `effects/melt.py` (vendored Melt, one addition): `dark_floor` (0..0.9,
+    default 0 = byte-identical) — after the vendored sine chain, the value
+    below the floor is cut to black and the rest re-stretched to 0..1,
+    before the strip phase layer's output stage. The star improve plan's
+    "more dark blobs" (STAR's Strips entry carries 0.5; measured 61% of a
+    560-px strip lit -> 33%). Evidence: `tests/test_star_improve.py`.
+
+93. `devices/__init__.py` (the base Device): `pixel_map` (CONFIG_SCHEMA,
+    default []) — a per-LED lookup applied in `assemble_frame` after
+    `center_offset`: physical LED i shows effect pixel pixel_map[i], for
+    EVERY effect the device shows; a map of the wrong length or with an
+    index out of range is ignored (one warning). Built for his TV
+    backlight by `scripts/tv_ring_pixel_map.py` from the strip's real LED
+    geometry (`config/tv_backlight_layout.json`, HyperHDR's layout read off
+    the strip's Pi): each LED shows the strip pixel at its ANGLE about the
+    screen centre, so the TV turns round like a copy-mapped sconce ring
+    (the star improve plan; his "make it work more radially, like the
+    other round strips"). Empty = today. Evidence: `tests/test_star_improve.py`.
+

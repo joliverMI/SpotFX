@@ -265,7 +265,7 @@ class PulseFeed:
         config dict across a category's virtuals); writes with no one-colour
         effect, or a song not known yet, come back unchanged — the tick
         pushes as soon as it can."""
-        if not any(w.get("effect_type") in device_model.ONE_COLOUR_EFFECTS
+        if not any(w.get("effect_type") in device_model.ENERGY_FED_EFFECTS
                    for w in writes):
             return writes
         values = self.values(uri, position_ms, genres)
@@ -273,10 +273,20 @@ class PulseFeed:
             return writes
         out = []
         for w in writes:
-            if w.get("effect_type") in device_model.ONE_COLOUR_EFFECTS:
-                w = {**w, "config": {**w["config"], **values}}
+            if w.get("effect_type") in device_model.ENERGY_FED_EFFECTS:
+                w = {**w, "config": {**w["config"],
+                                     **self._values_for(w.get("effect_type"), values)}}
             out.append(w)
         return out
+
+    @staticmethod
+    def _values_for(effect_type: str, values: dict[str, float]) -> dict[str, float]:
+        """What one effect takes from the feed: the one-colour effects
+        everything (energy + beat_ms); an ENERGY_ONLY effect (Star's star
+        wave, the star improve plan 2026-11-12) the energy alone."""
+        if effect_type in device_model.ENERGY_ONLY_EFFECTS:
+            return {"energy": values["energy"]} if "energy" in values else {}
+        return values
 
     async def tick(self, uri: Optional[str], position_ms: Optional[int], *,
                    conductor, deferral: Optional[str] = None,
@@ -288,7 +298,7 @@ class PulseFeed:
             return 0
         if uri is None or position_ms is None:
             return 0
-        if not any(st.effect_type in device_model.ONE_COLOUR_EFFECTS
+        if not any(st.effect_type in device_model.ENERGY_FED_EFFECTS
                    for st in conductor.virtuals.values()):
             return 0
         if self.song(uri) is None:
@@ -302,9 +312,10 @@ class PulseFeed:
             # re-read each time: a scene fire between two awaits replaces
             # conductor.virtuals, and a stale effect type here would switch
             # the virtual back to Pulse
-            if state is None or state.effect_type not in device_model.ONE_COLOUR_EFFECTS:
+            if state is None or state.effect_type not in device_model.ENERGY_FED_EFFECTS:
                 continue
-            patch = self._patch(state.param_baseline, values)
+            patch = self._patch(state.param_baseline,
+                                self._values_for(state.effect_type, values))
             if not patch:
                 continue
             try:

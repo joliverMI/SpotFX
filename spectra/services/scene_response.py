@@ -2080,7 +2080,26 @@ class ResponseEngine:
             return target.value
         if target.mode == "offset":
             return None if base is None else base + target.offset
-        return rolled[pname]   # random — pre-rolled once, broadcast to all
+        # random — pre-rolled once, broadcast to all; random_other is rolled
+        # per virtual by the caller (_roll_other) and arrives in `rolled`
+        # under the param's name only for that virtual's pass
+        return rolled.get(pname)
+
+    def _roll_other(self, target: ParamTarget, current) -> Optional[int]:
+        """random_other (ParamTarget): a uniform integer in [lo, hi] that is
+        not `current` (the param's carried value, or its registry default).
+        None when the range leaves no other choice."""
+        lo, hi = int(round(target.lo)), int(round(target.hi))
+        choices = list(range(lo, hi + 1))
+        if current is not None:
+            try:
+                cur = int(round(float(current)))
+            except (TypeError, ValueError):
+                cur = None
+            choices = [c for c in choices if c != cur]
+        if not choices:
+            return None
+        return int(self._rng.choice(choices))
 
     def _compute_param_moves(
         self, kind: FlareKind, scale: float, carry: dict, fire_seq: int,
@@ -2175,6 +2194,26 @@ class ResponseEngine:
                 if target.mode == "offset" or scale != 1.0 \
                         or mkind == binding_resolver.KIND_TOGGLE:
                     base = self._carried_value(vid, state, pname, carry)
+                if target.mode == "random_other":
+                    # never the same twice in a row: roll against THIS
+                    # virtual's carried value (its registry default when
+                    # nothing has carried yet), and land it verbatim — an
+                    # integer pick is not a magnitude to scale
+                    cur = self._carried_value(vid, state, pname, carry)
+                    if cur is None:
+                        cur = meta.get("default")
+                    picked = self._roll_other(target, cur)
+                    if picked is None:
+                        continue
+                    moves[pname] = picked
+                    if kind.type == "permanent":
+                        carry[(vid, pname)] = picked
+                    else:
+                        self._push_release(
+                            vid, pname, hold_s, instant=True,
+                            return_to=self._resting_value(vid, state, pname, carry),
+                            fire_seq=fire_seq)
+                    continue
                 declared = self._resolve_target(target, base, rolled, pname)
                 if declared is None:
                     continue

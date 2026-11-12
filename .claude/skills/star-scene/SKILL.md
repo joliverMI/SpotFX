@@ -106,6 +106,24 @@ takes the crystal dark on the dark point by itself; the strip's charge and
 drop still ride in. No scene data changed for either. A better STAR charge
 is still pending his word.
 
+## The star improve plan (2026-11-12) — what `scripts/star_improve_scene_data.py` changes on THIS scene
+
+Approved by him from the plan artifact ("STAR plan is approved, go ahead
+and deploy as soon as it's ready"), applied by DJ at deploy, raw-dict
+surgery with backup/--revert/structural diff (the flip-script shape):
+(1) Matrix entry: `spin_ease_in_s 1.0`, `star_wave true`, `star_wave_lo
+-0.2`, `star_wave_hi 0.4`, and the `star` binding's picks moved INSIDE his
+standard range (steps {0.0->0.0, 0.5->0.3}, fallback 0, `random_sign`
+off — it was ±0.3/±0.5); (2) "Flare patch 0.7-1" and "Drop patch 0.7-1"
+lose their `star: 0.0` write (kept `spin: 0.55`); (3) a new PERMANENT kind
+"Edge Morph" (`edges`, mode `random_other`, 3..6) attached at 1.0 to the
+0.35-0.7 and 0.7-1 flare bands only; (4) Strips entry `dark_floor 0.5`.
+**-0.2 .. +0.4 is STAR's standard star range**: nothing on this scene —
+binding or kind — writes `star` outside it; add a new kind here with that
+in mind. `tests/test_star_improve.py` proves the script on his STAR shape.
+The TV ring (`scripts/tv_ring_pixel_map.py`) is a DEVICE change, not this
+scene's data. The radial-effect and melt-effect skills carry the mechanics.
+
 ## Sonic reach
 
 Scene settings and flare kinds only via the scene console; the Matrix

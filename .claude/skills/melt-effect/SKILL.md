@@ -82,6 +82,24 @@ The strip Star reads skips its lull, so it never twinkles: Star draws
 its own pre-drop outline. Melt's own blur, applied after the layer as to
 everything it draws, softens a one-pixel twinkle's peak.
 
+## `dark_floor` (the star improve plan, 2026-11-12)
+
+His "more dark blobs so that the whole effect isn't as overpoweringly
+bright compared to other effects in dark mode". Melt's value is a squared
+sine chain that is never black between blobs: measured on a 560-px strip
+in dark mode, 61% lit at mean luminance 0.130 against 14-28% / 0.011-0.032
+for blackhole1d / orbits1d / fireworks1d. `dark_floor` (0..0.9, default
+**0 = byte-identical** — House Star, House Fish and every other Melt keep
+it) cuts the value below the floor to black and re-stretches the rest, so
+the blobs become separate islands with real gaps and their peaks stay
+full. STAR's Strips entry carries **0.5** (33% lit, luminance 0.082 — still
+the brightest strip, his "okay if it is still the brightest"), written by
+`scripts/star_improve_scene_data.py`. Applied in `render_hsv` before the
+strip phase layer's output stage; Sonic reaches it per entry; help topic
+`melt-dark-floor`. STAR's crystal reads this strip, so its rings get the
+same gaps. Proof: `tests/test_star_improve.py` (0 byte-identical, 0.5
+darker with gaps, peaks kept).
+
 ## Sonic reach
 
 The layer's tunables (Charge colour fill/brightness/activity, Lull

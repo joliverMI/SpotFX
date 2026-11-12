@@ -290,6 +290,13 @@ PHASE_EFFECTS = frozenset({
 #     right during a music show (scene_response._drive_phase).
 ONE_COLOUR_EFFECTS = frozenset({"pulse"})
 
+# ... and who is FED the song's section energy by the pulse feed
+# (spectra/services/pulse_feed.py): the one-colour effects take `energy`
+# and `beat_ms`; Star (radial, the star improve plan 2026-11-12) takes
+# `energy` alone — its star wave paces itself by it.
+ENERGY_FED_EFFECTS = ONE_COLOUR_EFFECTS | frozenset({"radial"})
+ENERGY_ONLY_EFFECTS = frozenset({"radial"})
+
 # The LULL-DARK effects (2026-10-07, the Admiral: "set a max time for that
 # portion to 3 seconds ... Do just these 3 effects for now"): phase effects
 # whose lull goes dark at a DARK POINT read through the shared rule in
