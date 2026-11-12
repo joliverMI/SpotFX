@@ -8,6 +8,30 @@ the repo keeps is the render scripts and harnesses below. Copy from the
 nearest one rather than starting a rig from scratch — every rig trap
 listed here cost a real session.
 
+## Artifact constraints (every explainer, every round, the plan too)
+
+He reviews on his tablet or phone via a published claude.ai Artifact, not
+a local Lavish URL (STAR session, 2026-11-12 — see `learnings.md`). That
+shapes what the scout hands to the publishing agent:
+
+- One self-contained HTML page plus separate render PNG/GIF files —
+  publish the renders as the Artifact's supporting files, not inlined as
+  base64 inside the page. A multi-MB base64 page is the thing to avoid.
+- Total size under 16 MB; keep individual renders small (the crystal-
+  sprite recipe below already targets 50-160 KB per clip for this
+  reason).
+- Works at phone width: single column or wrapping tiles, no fixed-width
+  layouts wider than a phone screen, touch-sized controls on any scrubber.
+- No external fetches (fonts, scripts, images) — everything the page
+  needs ships as a supporting file or is already inline JS/CSS.
+- Stills and renders show the REAL fixture layout (crystal hex mask or
+  the real strip length), labelled on the page (which fixture, which
+  seed/song, today vs proposed) — never a label baked into the PNG
+  itself, so the same renders can be relabelled or recombined.
+
+A local Lavish session stays optional, for his desktop/laptop convenience
+only; it is never the only copy he can open.
+
 ## Which recipe for which kind
 
 | Kind of question | Recipe | Start from |
@@ -96,6 +120,12 @@ numbers and the proof's numbers are one thing.
   `explainer-final.html` became the spec; the design-fidelity gate in
   `docs/agents/ui-timeline-and-tv.md` grew from that). Keep a copy before
   his edits.
+- A numeric shape param gets a FULL-RANGE grid, not a 3-option row: the
+  STAR session's `edges` grid across its whole -0.7..+0.7 range, 3-6 edges
+  on the other axis, was what corrected his "0.5 is flat" assumption — a
+  narrower row of hand-picked options would not have shown the part of
+  the range that surprised him (STAR, 2026-11-12).
 - Check the page in a headless browser before sending it (`chrome-devtools-axi`
   or raw CDP); a canvas that throws on a mock-shape gap shows him a blank
-  tile, not an error.
+  tile, not an error. Do this before publishing the Artifact, not after —
+  a blank tile on his tablet is harder to debug from than one caught here.
