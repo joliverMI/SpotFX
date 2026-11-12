@@ -480,11 +480,13 @@ def test_tv_ring_script_dry_run_apply_revert(tmp_path):
     tv.run(f, apply=True, revert=False)
     after = json.loads(f.read_text())
     d = after["devices"][0]["config"]
-    assert d["center_offset"] == 0 and sorted(d["pixel_map"]) == list(range(560))
+    # the old center_offset (90) is SUPERSEDED, not folded in: the table is
+    # exactly ring_map's own pure angle order
+    assert d["center_offset"] == 0 and d["pixel_map"] == tv.ring_map(tv.load_layout())
     assert after["devices"][1] == cfg["devices"][1]
     tv.run(f, apply=True, revert=True)
     back = json.loads(f.read_text())
-    assert back["devices"][0]["config"]["center_offset"] == 90
+    assert back["devices"][0]["config"]["center_offset"] == 90   # the sidecar restores it
     assert back["devices"][0]["config"]["pixel_map"] == []
 
 

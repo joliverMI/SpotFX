@@ -165,7 +165,9 @@ one clockwise loop seen from the front, LED 0 at the bottom-right corner,
 the top, 480–559 down the right; River: DDP pixel i IS physical LED i, no
 remap) — each LED shows the strip pixel at its ANGLE about the screen
 centre (aspect-corrected), a permutation of 0..559; the old `center_offset`
-90 is folded in and set to 0. The strip is the Pi stand-in (WLED 16.0.1
+90 is SUPERSEDED and set to 0 (a ring pattern's start angle has no visible
+meaning, so there is nothing to fold in) — the old value is kept in the
+revert sidecar so undo restores it. The strip is the Pi stand-in (WLED 16.0.1
 emulation, `product tv-strip-standin`); the fixture's own geometry lives
 there, not in any SpotFX store. A `spectra` restart loads the new device
 config (the restart hazard in AGENTS.md applies). Help topic

@@ -18,9 +18,11 @@ aspect-corrected to 16:9 so angle is angle, not screen fraction). Equal
 ANGLE per pixel, not equal length: a blob is the same arc on the long and
 the short edges and turns about the centre at the effect's own pace. The
 device's `center_offset` (90 today — a roll that only made sense for a
-one-to-one loop) is folded into the table and set to 0, so the roll is not
-applied twice. `fx/devices/__init__.py` applies `pixel_map` in
-assemble_frame for EVERY effect the device shows; an empty map is today.
+one-to-one loop) is SUPERSEDED by the angle table and set to 0 — a ring
+pattern's start angle has no visible meaning, so there is nothing to fold
+in; the old value is kept in the revert sidecar so undo restores it.
+`fx/devices/__init__.py` applies `pixel_map` in assemble_frame for EVERY
+effect the device shows; an empty map is today.
 
 The map is a permutation of 0..559 (asserted), so no effect pixel is lost
 and none is shown twice.
@@ -59,11 +61,9 @@ def load_layout(path: Path = LAYOUT) -> list[tuple[float, float]]:
     return [((l[0] + l[1]) / 2.0, (l[2] + l[3]) / 2.0) for l in d["leds"]]
 
 
-def ring_map(centres: list[tuple[float, float]], roll: int = 0) -> list[int]:
+def ring_map(centres: list[tuple[float, float]]) -> list[int]:
     """effect pixel index for each physical LED, by angle about the screen
     centre (0 at the top, clockwise seen from the front), aspect-corrected.
-    `roll` folds a device center_offset in (np.roll semantics: LED p showed
-    effect pixel p - roll), so the table alone reproduces the final order.
     Ties in angle are broken by LED order; the result is a permutation."""
     n = len(centres)
     ang = []
@@ -74,7 +74,7 @@ def ring_map(centres: list[tuple[float, float]], roll: int = 0) -> list[int]:
     order = sorted(range(n), key=lambda i: ang[i])
     table = [0] * n
     for k, led in enumerate(order):
-        table[led] = (k - roll) % n
+        table[led] = k
     assert sorted(table) == list(range(n)), "the ring map must be a permutation"
     return table
 
@@ -103,7 +103,7 @@ def run(config_file: Path, *, apply: bool, revert: bool) -> dict:
         prior = json.loads(sidecar.read_text()) if sidecar.exists() else {"center_offset": 0}
         new_map, new_off = [], int(prior.get("center_offset", 0))
     else:
-        new_map, new_off = ring_map(centres, roll=0), 0
+        new_map, new_off = ring_map(centres), 0
     change = {"device": DEVICE_ID, "pixel_map": (len(cur_map), len(new_map)),
               "center_offset": (cur_off, new_off)}
     print(f"— {DEVICE_ID}: pixel_map {len(cur_map)} -> {len(new_map)} entries, "
