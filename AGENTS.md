@@ -1,3 +1,4 @@
+<!-- firstmate:maintained-by-project -->
 # SpotFX — agent notes
 
 > Size budget: keep this file under ~40 KB. It loads in full on every agent
@@ -124,7 +125,10 @@ time-related.
   param meanings, Sonic reach, non-obvious invariants) plus a handful of
   cross-cutting skills (`sonic-ops`, `house-lighting`, `house-scenes`,
   `absorb-music`, `drop-detection`, `tv-display`, `led-gif-assets`,
-  `sung-labels`).
+  `sung-labels`). `effect-design` is the design PROCESS (interview →
+  visual comparisons → confirmed plan) for building or improving any
+  effect, scene, flare kind, transition or drop-sequence effect — load it
+  when he says "I want to build a new ..." or "I want to improve ...".
   `.claude/skills/EFFECT_SCENE_MAP.json` maps which files trigger which
   skill, and `scripts/check_effect_scene_skills_current.py` (run by
   `tests/test_effect_scene_skills_current.py`) FAILS a branch that changed
@@ -141,6 +145,7 @@ time-related.
 |---|---|
 | Timing/offset/lead sign conventions anywhere | `docs/SPECTRA_TIMING_CONVENTIONS.md` |
 | Adding a new LedFX effect, the tuning gate, scene seeding order | `docs/ADDING_EFFECTS.md` |
+| Designing a NEW or IMPROVED effect/scene/flare kind/transition/drop-sequence effect with him (the interview, the explainer, the plan he confirms) | `.claude/skills/effect-design` |
 | The in-app Help page, `helpContent.ts`, deep links, orphan topics | `docs/agents/workflow-conventions.md`, `docs/agents/ui-infra-and-tests.md` |
 | SPECTRA's own capability/decision ledger | `docs/SPECTRA_SPEC.md` |
 | SceneV2, scene authorship, the two trigger-store copies, trigger authoring, transition timing/programs, the known-audio-buffer, Energy, per-song intensity scale, fire-history, feedback sessions | `docs/agents/scenes-and-flares.md` |
