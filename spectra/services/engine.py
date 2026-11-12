@@ -742,9 +742,12 @@ _pulse_task: asyncio.Task | None = None
 
 
 def pulse_fire_overlay(writes: list[dict]) -> list[dict]:
-    """A live scene fire's writes with section intensity and tempo added for
-    every one-colour effect (Pulse) it installs — scene_compiler.fire_scene
-    calls this, so the new instance starts where the song is
+    """A live scene fire's writes with the feed's current values added for
+    every energy-fed effect it installs (`fx.device_model.
+    ENERGY_FED_EFFECTS`) — section intensity and tempo for a one-colour
+    effect (Pulse), section intensity alone for an energy-only effect
+    (radial/Star's star wave, `ENERGY_ONLY_EFFECTS`) — scene_compiler.
+    fire_scene calls this, so the new instance starts where the song is
     (spectra/services/pulse_feed.py)."""
     return pulse_feed.feed.overlay(writes, bridge.track_uri(),
                                    bridge.effective_position_ms(),

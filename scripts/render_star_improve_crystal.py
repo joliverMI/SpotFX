@@ -31,7 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "tests"))
 sys.path.insert(0, os.path.join(HERE, ".."))
 
-from star_harness import star_room, COLS, ROWS, lit_cells  # noqa: E402
+from star_harness import star_room, COLS, ROWS  # noqa: E402
 from strip_phase_harness import run, DT  # noqa: E402
 
 FPS = 60

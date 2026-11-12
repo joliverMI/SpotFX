@@ -1,6 +1,10 @@
 """THE PULSE FEED — section intensity and tempo pushed into the one-colour
 effect on the Singles (Pulse, fx/effects/pulse.py; single-led-power plan,
 phase 2, approved by the Admiral 2026-10-05 "with all recommendations").
+Since the star improve plan (2026-11-12) the same push also reaches radial
+(Star's star wave, `fx.device_model.ENERGY_ONLY_EFFECTS`) with `energy`
+alone, never `beat_ms` — see `_values_for` and
+`fx.device_model.ENERGY_FED_EFFECTS` for the full set this module writes to.
 
 Pulse hears hits from live audio itself; what it cannot know is where the
 SONG is: how intense this section is (which sets its resting level, how far
@@ -49,8 +53,8 @@ mark is read when a value is computed (a section edge), so a mark set
 mid-song lands at the next edge.
 
 Not here: the room's A/V lead (one application point, the trigger clock),
-any write to a virtual not running a one-colour effect, and any light
-decision — the effect owns every brightness."""
+any write to a virtual outside `fx.device_model.ENERGY_FED_EFFECTS`, and
+any light decision — the effect owns every brightness."""
 from __future__ import annotations
 
 import asyncio
@@ -262,10 +266,12 @@ class PulseFeed:
     def overlay(self, writes: list[dict], uri: Optional[str],
                 position_ms: Optional[int],
                 genres: Callable[[], list[str]] = lambda: []) -> list[dict]:
-        """A scene fire's writes with `energy`/`beat_ms` added to every
-        one-colour effect's config, so the instance a fire creates starts
-        where the song is. Never mutates the input (compile_scene shares one
-        config dict across a category's virtuals); writes with no one-colour
+        """A scene fire's writes with the feed's values added to every
+        energy-fed effect's config (`device_model.ENERGY_FED_EFFECTS` —
+        `_values_for` trims it to `energy` alone for an ENERGY_ONLY effect
+        such as radial), so the instance a fire creates starts where the
+        song is. Never mutates the input (compile_scene shares one config
+        dict across a category's virtuals); writes with no energy-fed
         effect, or a song not known yet, come back unchanged — the tick
         pushes as soon as it can."""
         if not any(w.get("effect_type") in device_model.ENERGY_FED_EFFECTS
@@ -294,8 +300,9 @@ class PulseFeed:
     async def tick(self, uri: Optional[str], position_ms: Optional[int], *,
                    conductor, deferral: Optional[str] = None,
                    genres: Callable[[], list[str]] = lambda: []) -> int:
-        """Push the current values to every one-colour virtual of the live
-        scene whose carried values differ. Returns how many were written."""
+        """Push the current values to every energy-fed virtual
+        (`device_model.ENERGY_FED_EFFECTS`) of the live scene whose carried
+        values differ. Returns how many were written."""
         self.deferred_by = deferral
         if deferral is not None:
             return 0
@@ -313,8 +320,8 @@ class PulseFeed:
         for vid in list(conductor.virtuals):
             state = conductor.virtuals.get(vid)
             # re-read each time: a scene fire between two awaits replaces
-            # conductor.virtuals, and a stale effect type here would switch
-            # the virtual back to Pulse
+            # conductor.virtuals, and a stale effect type here would patch
+            # a virtual that has since moved off Pulse/radial entirely
             if state is None or state.effect_type not in device_model.ENERGY_FED_EFFECTS:
                 continue
             patch = self._patch(state.param_baseline,
