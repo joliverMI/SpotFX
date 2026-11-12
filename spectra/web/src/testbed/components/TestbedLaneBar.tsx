@@ -33,17 +33,19 @@
  * predrop plan step 3: a spike and a vocal intro each get the glyph the
  * Drops panel draws for them), tinted like any other mark; a suggested one
  * is drawn fainter, as a suggested drop is. */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Icon, { type IconName } from '../../components/Icon';
 import { fmtMs } from '../../lib/time';
+import { useLyricEvents } from '../../queries';
 import type {
   TestbedEstimateMark, TestbedLyrics, TestbedMetrics, TestbedReferenceMark, TestbedWaveform,
 } from '../../types';
+import { wordEvents, wordEventText, type WordEvent } from '../lyricEvents';
 import { inView, viewPct, wholeSong } from '../lyricsLane';
 import type { LaneView } from '../lyricsLane';
 import LyricEventsSection from './LyricEventsSection';
 import LyricMatchesSection from './LyricMatchesSection';
-import LyricsLane from './LyricsLane';
+import LyricsLane, { type LaneGuide } from './LyricsLane';
 
 /** A glyph-carrying mark's icon: the pre-drop kinds (the Drops panel's own). */
 export const MARK_GLYPH: Record<string, IconName> = { spike: 'preDrop', intro: 'preDropVoice' };
@@ -209,25 +211,89 @@ function ReferenceMarksLane({
   );
 }
 
-/** One of his two mark sets, on its own compact row under the Sung words
- * lane (the guide lines through that lane are the same marks). */
-function HisMarksRow({ label, marks, durationMs, view, toleranceMs }: {
-  label: string; marks: TestbedReferenceMark[]; durationMs: number; view: LaneView; toleranceMs: number;
-}) {
+/** THE WORD EVENTS ROW (2026-11-12, data/word-effect-highlight-options; the
+ * Admiral's answer to decision 5): the ENGINE'S OWN events a matched word
+ * reaches — the same `TriggerEngine.preview_lyric_events` plan the Word
+ * actions row below explains — each drawn as its kind the way the song
+ * strip draws it, with a halo in the word's colour where a word imprints
+ * on it, and a diamond in the word's colour where a word fires alone. It
+ * REPLACES the two "His scene changes" / "His flares" rows, which drew his
+ * stored marks: a different set from the events the plan can reach, so a
+ * chip saying "→ scene" had no marker under it. The guide lines through
+ * the Sung words lane above are these same events. */
+function WordEventsRow({ events, view }: { events: WordEvent[]; view: LaneView }) {
   const [hover, setHover] = useState<{ text: string; leftPct: string } | null>(null);
+  const pct = (ms: number) => `${viewPct(view, ms)}%`;
+  const shown = events.filter((e) => inView(view, e.ms));
   return (
-    <ReferenceMarksLane
-      label={label}
-      marks={marks}
-      scoredMarks={marks}
-      durationMs={durationMs}
-      view={view}
-      metrics={undefined}
-      toleranceMs={toleranceMs}
-      hover={hover}
-      setHover={setHover}
-      emptyNote={`no ${label.toLowerCase().replace('his ', '')} of yours on this song`}
-    />
+    <div className="testbed-lane-row">
+      <span className="testbed-lane-label"
+            title="The engine's own events near a matched word — haloed in the word's colour where a word gives it its colour">
+        Word events
+      </span>
+      <div className="testbed-lane-bar">
+        {hover && <div className="review-lane-tooltip" style={{ left: hover.leftPct }}>{hover.text}</div>}
+        {shown.map((e) => {
+          const text = wordEventText(e, fmtMs);
+          const halo = e.swatch ?? undefined;
+          return (
+            <span
+              key={e.id}
+              role="img"
+              aria-label={text}
+              className={`testbed-word-event ${e.kind}${e.imprinted ? ' imprinted' : ''}${e.cannot ? ' cannot' : ''}`}
+              style={{ left: pct(e.ms), ...(halo ? { '--halo': halo } as React.CSSProperties : {}) }}
+              data-ms={e.ms}
+              data-event-id={e.id}
+              onPointerEnter={() => setHover({ text, leftPct: pct(e.ms) })}
+              onPointerLeave={() => setHover(null)}
+            />
+          );
+        })}
+        {!shown.length && <span className="testbed-lane-empty-hint">No events near a matched word here</span>}
+      </div>
+    </div>
+  );
+}
+
+/** The Sung words slot: the lane, the Word events row under it, then the
+ * Word matches and Word actions sections. One `useLyricEvents` read serves
+ * the lane's guide lines and the row; LyricEventsSection shares the cache. */
+function LyricsGroup({ label, lane, lyrics, shown }: {
+  label: string;
+  lane: { estimate: TestbedEstimateMark[]; metrics: TestbedMetrics | null | undefined };
+  lyrics: LyricsLaneInput;
+  shown: LaneView;
+}) {
+  const ok = lyrics.data?.status === 'ok';
+  const uri = lyrics.data?.uri ?? null;
+  const { data: plan } = useLyricEvents(uri, ok);
+  const events = useMemo(() => wordEvents(plan?.status === 'ok' ? plan.actions : []), [plan]);
+  const guides = useMemo<LaneGuide[]>(
+    () => events.map((e) => ({ id: e.id, ms: e.ms, cls: e.kind, halo: e.imprinted || e.kind === 'word' ? e.swatch : null })),
+    [events]);
+  const flagged = !!lyrics.data?.clock.flagged;
+  return (
+    <>
+      <LyricsLane
+        label={label}
+        data={lyrics.data}
+        estimate={lane.estimate}
+        view={shown}
+        metrics={lane.metrics}
+        guides={guides}
+      />
+      {ok && !flagged && <WordEventsRow events={events} view={shown} />}
+      {ok && lyrics.data && (
+        <LyricMatchesSection
+          uri={lyrics.data.uri}
+          words={lyrics.data.words}
+          view={shown}
+          sensitivity={lyrics.sensitivity}
+        />
+      )}
+      {ok && lyrics.data && <LyricEventsSection uri={lyrics.data.uri} view={shown} />}
+    </>
   );
 }
 
@@ -285,8 +351,6 @@ export function EngineLane({
 
 export interface LyricsLaneInput {
   data: TestbedLyrics | undefined;
-  transitions: TestbedReferenceMark[];
-  flares: TestbedReferenceMark[];
   /** The page's emphasis sensitivity, which dims matches on quieter words. */
   sensitivity: number;
 }
@@ -333,34 +397,7 @@ export default function TestbedLaneBar({
       />
       {engineLanes.map((lane) => (lane.lyrics ? (
         <div key={lane.key} className="testbed-lane-stack testbed-lyrics-group">
-          <LyricsLane
-            label={lane.label}
-            data={lane.lyrics.data}
-            estimate={lane.estimate}
-            view={shown}
-            metrics={lane.metrics}
-            transitions={lane.lyrics.transitions}
-            flares={lane.lyrics.flares}
-          />
-          {!lane.lyrics.data?.clock.flagged && lane.lyrics.data?.status === 'ok' && (
-            <>
-              <HisMarksRow label="His scene changes" marks={lane.lyrics.transitions}
-                           durationMs={durationMs} view={shown} toleranceMs={toleranceMs} />
-              <HisMarksRow label="His flares" marks={lane.lyrics.flares}
-                           durationMs={durationMs} view={shown} toleranceMs={toleranceMs} />
-            </>
-          )}
-          {lane.lyrics.data?.status === 'ok' && (
-            <LyricMatchesSection
-              uri={lane.lyrics.data.uri}
-              words={lane.lyrics.data.words}
-              view={shown}
-              sensitivity={lane.lyrics.sensitivity}
-            />
-          )}
-          {lane.lyrics.data?.status === 'ok' && (
-            <LyricEventsSection uri={lane.lyrics.data.uri} view={shown} />
-          )}
+          <LyricsGroup label={lane.label} lane={lane} lyrics={lane.lyrics} shown={shown} />
         </div>
       ) : (
         <EngineLane

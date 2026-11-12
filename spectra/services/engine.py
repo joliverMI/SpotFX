@@ -332,8 +332,22 @@ def pick_lyric_colour(set_ids, scene_id: Optional[str], intensity: float) -> dic
     return responses.lyric_pick(set_ids, scene, intensity)
 
 
+def _push_word_colour(record: dict) -> None:
+    """A word just fired on its own or imprinted on an event (trigger_engine
+    ._push_lyric, lyric_events.fired_payload): tell every open page, fire-and-
+    forget, so the song strip's marker flash and the next-event box can take
+    the word's colour the moment it lands (the live pulse, 2026-11-12). The
+    `drop_played` shape: never awaited on the fire path, and the show log's
+    lyric:fire / lyric:imprint entries stay the record."""
+    try:
+        asyncio.ensure_future(ws_manager.broadcast({"type": "word_colour", **record}))
+    except Exception:                                    # noqa: BLE001
+        logger.exception("word colour: could not schedule the push")
+
+
 trigger_engine._lyric_colour = fire_lyric_colour_event
 trigger_engine._lyric_pick = pick_lyric_colour
+trigger_engine._lyric_fired = _push_word_colour
 trigger_engine._lyric_note_set = responses.note_lyric_set
 trigger_engine._lyric_release_hold = conductor.release_lyric_hold
 

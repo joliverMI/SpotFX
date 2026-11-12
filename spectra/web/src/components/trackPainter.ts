@@ -17,14 +17,19 @@
  * caller's rAF loop can fade a passed marker and flash the one that just
  * fired without re-reading the DOM. */
 import {
-  DROP_BAND_Y, dropBands, KIND_COLOR, MARKER_CY, markerOpacity, markerSizePx, TERRAIN_FILL,
-  terrainPath, TRACK_FILL, TRACK_HEIGHT, TRACK_STROKE, trackX, type UpcomingEvent,
+  diamondPath, DROP_BAND_Y, dropBands, HALO_GAP, HALO_STROKE, haloFilter, KIND_COLOR, MARKER_CY,
+  markerOpacity, markerSizePx, TERRAIN_FILL, terrainPath, TRACK_FILL, TRACK_HEIGHT, TRACK_STROKE,
+  trackX, WORD_DIAMOND_R, wordColour, type UpcomingEvent,
 } from './songStrip';
 import type { EnergySection } from '../types';
 
 const NS = 'http://www.w3.org/2000/svg';
 
-export interface MarkNode { node: SVGElement; ms: number }
+/** `id` is the row's own trigger id (spectra/api/upcoming.py) when it has
+ * one, so a fire-time push (`word_colour`) can find the marker by identity
+ * rather than by time — a flare's landing moment carries its lead, its
+ * mark does not. */
+export interface MarkNode { node: SVGElement; ms: number; id?: string | null }
 
 export interface PaintTrackInput {
   events: UpcomingEvent[];
@@ -66,6 +71,11 @@ export function paintTrack(
 
   if (durationMs <= 0) return marks;
 
+  // Drops a word gives its colour to, by mark — the band loop below draws
+  // the pill, so the halo is looked up there.
+  const wordedDrops = new Map<number, UpcomingEvent>();
+  for (const e of events) if (e.kind === 'drop' && e.word) wordedDrops.set(e.ms, e);
+
   // 3 — the drop sequences' own bottom band: gold charge bar → sky lull
   // bar → pink numbered drop pill.
   for (const band of dropBands(events)) {
@@ -91,12 +101,27 @@ export function paintTrack(
       });
     }
     if (band.dropMs != null) {
+      // THE HALO on a drop a word imprints on (option A): a ring in the
+      // word's colour around the pill, drawn first so the pill sits on it.
+      const dropEvent = wordedDrops.get(band.dropMs);
+      const dropHalo = dropEvent ? wordColour(dropEvent) : null;
+      if (dropEvent && dropHalo) {
+        marks.push({
+          node: add('rect', {
+            x: x(band.dropMs) - 6 - HALO_GAP, y: (DROP_BAND_Y - 4.5) * k - HALO_GAP,
+            width: 12 + 2 * HALO_GAP, height: 14 * k + 2 * HALO_GAP, rx: 6 + HALO_GAP, ry: 6 + HALO_GAP,
+            fill: 'none', stroke: dropHalo, 'stroke-width': HALO_STROKE,
+            class: 'song-strip-mk-halo', style: `filter:${haloFilter(dropHalo)}`,
+          }),
+          ms: band.dropMs, id: dropEvent.id,
+        });
+      }
       marks.push({
         node: add('rect', {
           x: x(band.dropMs) - 6, y: (DROP_BAND_Y - 4.5) * k,
           width: 12, height: 14 * k, rx: 6, ry: 6, fill: KIND_COLOR.drop,
         }),
-        ms: band.dropMs,
+        ms: band.dropMs, id: dropEvent?.id,
       });
       if (band.num != null) {
         const label = add('text', {
@@ -133,25 +158,53 @@ export function paintTrack(
     });
   }
 
-  // 5 — scene squares and flare dots, sized/shaded by rank.
+  // 5 — scene squares and flare dots, sized/shaded by rank — each with a
+  // HALO in its word's colour when a matched word gives it its colour
+  // (option A, data/word-effect-highlight-options: the ring sits HALO_GAP
+  // outside the marker's own edge and glows the same colour, drawn first
+  // so the marker keeps its own shape and rank on top) — and a diamond in
+  // the word's colour for a word firing on its own.
+  const halo = (e: UpcomingEvent, r: number) => {
+    const colour = wordColour(e);
+    if (!colour) return;
+    marks.push({
+      node: add('circle', {
+        cx: x(e.ms), cy: MARKER_CY * k, r: r + HALO_GAP, fill: 'none',
+        stroke: colour, 'stroke-width': HALO_STROKE, class: 'song-strip-mk-halo',
+        style: `filter:${haloFilter(colour)}`,
+      }),
+      ms: e.ms, id: e.id,
+    });
+  };
   for (const e of events) {
     if (e.kind === 'scene') {
       const r = markerSizePx('scene', e.rank, e.rank_of);
+      halo(e, r);
       marks.push({
         node: add('rect', {
           x: x(e.ms) - r, y: MARKER_CY * k - r, width: r * 2, height: r * 2,
           rx: 2, ry: 2, fill: KIND_COLOR.scene, opacity: markerOpacity(e.rank, e.rank_of),
         }),
-        ms: e.ms,
+        ms: e.ms, id: e.id,
       });
     } else if (e.kind === 'flare') {
       const r = markerSizePx('flare', e.rank, e.rank_of);
+      halo(e, r);
       marks.push({
         node: add('circle', {
           cx: x(e.ms), cy: MARKER_CY * k, r,
           fill: KIND_COLOR.flare, opacity: markerOpacity(e.rank, e.rank_of),
         }),
-        ms: e.ms,
+        ms: e.ms, id: e.id,
+      });
+    } else if (e.kind === 'word') {
+      const colour = wordColour(e) ?? KIND_COLOR.word;
+      marks.push({
+        node: add('path', {
+          d: diamondPath(x(e.ms), MARKER_CY * k, WORD_DIAMOND_R), fill: colour,
+          class: 'song-strip-mk-word', style: `filter:${haloFilter(colour)}`,
+        }),
+        ms: e.ms, id: e.id,
       });
     }
   }

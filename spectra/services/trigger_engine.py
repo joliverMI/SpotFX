@@ -602,6 +602,7 @@ class TriggerEngine:
         lyric_pick: Callable[..., dict] | None = None,
         lyric_note_set: Callable[[Optional[str]], None] | None = None,
         lyric_release_hold: Callable[[], None] | None = None,
+        lyric_fired: Callable[[dict], None] | None = None,
     ) -> None:
         self._list_triggers = list_triggers or trigger_store.list_for_song
         # ENERGY AT A TRIGGER'S OWN MOMENT (spectra/services/energy.py, the
@@ -853,6 +854,13 @@ class TriggerEngine:
         self._lyric_pick = lyric_pick or (lambda *_a, **_k: {"result": "unwired"})
         self._lyric_note_set = lyric_note_set or (lambda _set_id: None)
         self._lyric_release_hold = lyric_release_hold or (lambda: None)
+        # THE LIVE PULSE (2026-11-12, the Admiral's pick on data/word-effect-
+        # highlight-options: option A plus E's live pulse). `lyric_fired` is
+        # told lyric_events.fired_payload each time a word fires on its own
+        # or imprints on an event — a no-op unless engine.py wires it to the
+        # SPECTRA websocket ({"type": "word_colour", ...}), the drop_played
+        # shape. The show log stays the record; this is only the flash.
+        self._lyric_fired = lyric_fired or (lambda _record: None)
         self._lyric_words: Optional[lyric_events.SongWords] = None
         self._lyric_words_at: Optional[float] = None
         self._lyric_loading: Optional[str] = None
@@ -2210,13 +2218,18 @@ class TriggerEngine:
             record = {"result": "error"}
         record = record if isinstance(record, dict) else {"result": "unwired"}
         logger.info("word colour: '%s' -> %s", action.hit.phrase, record.get("result"))
+        jump = record.get("color_jump") or {}
         self._log_lyric("lyric:fire", action.hit, position_ms, {
             "verdict": lyric_events.VERDICT_FIRE, "energy": round(action.energy, 4),
             "momentary": action.momentary, "transition_ms": action.transition_ms,
             "ramp_ms": ramp_ms, "result": record.get("result"),
             "held_for": record.get("held_for"),
-            "set_id": (record.get("color_jump") or {}).get("picked_id"),
-            "set_name": (record.get("color_jump") or {}).get("set_name")})
+            "set_id": jump.get("picked_id"), "set_name": jump.get("set_name")})
+        self._push_lyric(lyric_events.fired_payload(
+            lyric_events.VERDICT_FIRE, action.hit, event=None,
+            set_id=jump.get("picked_id"), set_name=jump.get("set_name"),
+            result=record.get("result"), landed=record.get("result") == "jumped",
+            uri=self._uri, position_ms=position_ms))
 
     def _note_lyric_imprint(self, imprint: lyric_events.Imprint,
                             trig: Optional[SpectraTrigger],
@@ -2233,6 +2246,19 @@ class TriggerEngine:
             "event_label": imprint.event.label, "event_ms": imprint.event.ms,
             "at_pre_drop": trig is None, "result": imprint.result,
             "set_id": imprint.set_id, "set_name": imprint.set_name, "rung": imprint.rung})
+        self._push_lyric(lyric_events.fired_payload(
+            lyric_events.VERDICT_IMPRINT, imprint.hit, event=imprint.event,
+            set_id=imprint.set_id, set_name=imprint.set_name, result=imprint.result,
+            landed=imprint.landed, uri=self._uri,
+            position_ms=self._last_position_ms if position_ms is None else position_ms))
+
+    def _push_lyric(self, record: dict) -> None:
+        """Tell every open page a word just fired or imprinted (the live
+        pulse). Never raises into the fire path."""
+        try:
+            self._lyric_fired(record)
+        except Exception:                                # noqa: BLE001
+            logger.exception("word colours: the push failed for '%s'", record.get("phrase"))
 
     def _log_lyric(self, key: str, hit: lyric_events.WordHit,
                    position_ms: Optional[int], detail: dict) -> None:

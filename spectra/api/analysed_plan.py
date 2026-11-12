@@ -38,6 +38,7 @@ drawing against its own playhead can place a marker where the event fires.
 from __future__ import annotations
 
 import asyncio
+from typing import Optional
 
 from fastapi import APIRouter, Query
 
@@ -94,10 +95,22 @@ def _plan(uri: str, stored: list | None = None) -> dict:
         rank, rank_of = ranks.get(key, (None, None)) if key else (None, None)
         return {**event, "rank": rank, "rank_of": rank_of}
 
-    scene = [ranked({"timestamp_ms": m.timestamp_ms, "intensity": m.intensity},
-                    m.generator_key) for m in moments]
-    flares = [ranked({k: v for k, v in f.items() if k != "key"}, f["key"])
-              for f in flares]
+    # `id` is the TRIGGER ID tick() fires for the row — a stored cue's own
+    # id, else the synthetic one TriggerEngine._scene_plan_triggers /
+    # _flare_plan_triggers build (analysed_flares' two prefixes) — so a
+    # page can join a row to anything else the engine says about that same
+    # fire (a word's imprint, spectra/api/upcoming.py), never by time.
+    def scene_id(m) -> Optional[str]:
+        if m.key.startswith("planned:"):
+            return (analysed_flares.SCENE_CUE_ID_PREFIX + m.generator_key
+                    if m.generator_key else None)
+        return m.key
+
+    scene = [ranked({"timestamp_ms": m.timestamp_ms, "intensity": m.intensity,
+                     "id": scene_id(m)}, m.generator_key) for m in moments]
+    flares = [ranked({**{k: v for k, v in f.items() if k != "key"},
+                      "id": analysed_flares.FLARE_ID_PREFIX + f["key"] if f["key"] else None},
+                     f["key"]) for f in flares]
     rank_of = next((r[1] for r in ranks.values() if r[1]), None)
     return {**base, "applies": True, "reason": None, "scene_source": scene_source,
             "scene_changes": scene, "flares": flares, "rank_of": rank_of}

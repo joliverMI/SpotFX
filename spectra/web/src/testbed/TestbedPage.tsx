@@ -435,14 +435,14 @@ export default function TestbedPage() {
       estimate: (engineMarksA?.estimate ?? []) as TestbedEstimateMark[],
       metrics: metricsA,
       lyrics: engineA.engine === ENGINE_LYRICS
-        ? { data: lyrics, transitions: referenceMarks, flares: flareMarks, sensitivity: emphasisSensitivity } : undefined,
+        ? { data: lyrics, sensitivity: emphasisSensitivity } : undefined,
     },
     ...(engineB ? [{
       key: 'b', label: laneLabel(engineB),
       estimate: (engineMarksB?.estimate ?? []) as TestbedEstimateMark[],
       metrics: metricsB,
       lyrics: engineB.engine === ENGINE_LYRICS
-        ? { data: lyrics, transitions: referenceMarks, flares: flareMarks, sensitivity: emphasisSensitivity } : undefined,
+        ? { data: lyrics, sensitivity: emphasisSensitivity } : undefined,
     }] : []),
   ];
 

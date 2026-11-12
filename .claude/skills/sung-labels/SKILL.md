@@ -71,6 +71,49 @@ and a preview of what each word would do is the "Sonic reach" section below.
    `lyric_reading.run_supervised()`'s sweep entirely; a press (`POST
    /api/testbed/lyric-matches/read`) always works regardless.
 
+## The highlight: where a word's effect shows before and at fire time (2026-11-12)
+
+Option A plus E's live pulse of `/home/javi/fleet-spotfx/data/word-effect-
+highlight-options/report.md`, the Admiral's pick verbatim: "I like A, with
+E's live pulse and showing it in the countdown box ... Instead of the red dot
+swatch next to 'smoke', just highlight the blue square, like you do in the
+strip ... just put the word under the swatch ... A fire-alone word is a
+marker and can be 'next' in the box and replace the 'his scene change/his
+flares' rows". No engine timing or behaviour change; three surfaces read the
+ONE plan.
+
+- **The join is by TRIGGER ID, never by time.** `GET /api/upcoming` rows
+  now carry `id` (a stored trigger's own, `analysed_plan._plan`'s synthetic
+  `analysed-scene:`/`analysed-flare:` + generator key, or `drop-seq:<key>:
+  <class>`), and `upcoming.with_words` joins `lyric_events.word_marks(plan)`
+  onto them: an imprinted event gains `word`/`word_ms`/`swatch`, a fire-alone
+  word becomes its own `kind: "word"` row (id `lyric:<word key>`). A flare's
+  landing moment carries its lead and its mark does not, so a time join would
+  miss. Only when `lyric_events.enabled(uri)`; an unreadable plan leaves the
+  list untouched (`tests/test_upcoming_api.py`).
+- **The colour before fire time is the FIRST candidate set's swatch**
+  (`WordHit.swatches`, from `sung_labels.Target.swatch` through `reach()` —
+  the same swatch the Word matches row draws). Which set lands, and whether
+  the event can carry it, is fire time's: `lyric_events.fired_payload` →
+  `TriggerEngine._lyric_fired` → `engine._push_word_colour` → `{"type":
+  "word_colour", ...}` on SPECTRA's websocket, `swatch` = the landed set's
+  (`swatch_for`). The browser (`lib/wordColourPush.ts`) flashes the marker by
+  `event_id` and the next-event box in that colour. The show log stays the
+  record; this is only the flash.
+- **One drawing rule, three places** (`songStrip.ts`: `HALO_GAP`, `HALO_
+  STROKE`, `diamondPath`, `wordColour`, `kindGlyphSvg(kind, num, halo)`):
+  the strip and Home's shape (`trackPainter.ts`, `drawShapeMarkers`), the
+  next-event box (ring on the kind's own glyph, the word printed under it —
+  NO second swatch, NO "→ scene"), and the Test Bed's **Word events row**
+  (`TestbedLaneBar.tsx` `WordEventsRow`, `lyricEvents.ts` `wordEvents`),
+  which REPLACED the "His scene changes"/"His flares" rows and now also
+  feeds the Sung words lane's guide lines (`LyricsLane` takes `guides`).
+  Words that do nothing draw nowhere outside the Test Bed.
+- **Proofs:** `scripts/check_song_strip.mjs` §SIX, `scripts/check_testbed_
+  lyrics_lane.mjs`, `scripts/render_testbed_lyrics_lane.py` (the harness
+  `spectra/web/harness/testbedlyrics.tsx` now mocks `/testbed/lyric-events`),
+  `tests/test_lyric_events.py`'s "the highlight" section.
+
 ## Sonic reach (`spectra/services/lyric_console.py`, domain `lyrics`)
 
 Built as the coverage follow-up this skill exists to record. Load
@@ -173,9 +216,13 @@ Built as the coverage follow-up this skill exists to record. Load
   route `preview_lyric_events` below calls over HTTP).
 - `spectra/web/src/sunglabels/{SungLabelsPage.tsx,sungLabels.ts}` — the
   correction page.
-- `spectra/web/src/testbed/` — the Sung words lane, Word matches row and
-  Word actions row (`TestbedLaneBar.tsx`/`TestbedPage.tsx`/
+- `spectra/web/src/testbed/` — the Sung words lane, Word events row, Word
+  matches row and Word actions row (`TestbedLaneBar.tsx`/`TestbedPage.tsx`/
   `lyricEvents.ts`).
+- `spectra/api/upcoming.py` (`with_words`), `spectra/web/src/components/
+  {songStrip.ts,trackPainter.ts,SongNextBox.tsx,SongStrip.tsx}`,
+  `spectra/web/src/lib/wordColourPush.ts` — the highlight on the strip,
+  Home and the next-event box, and the fire-time flash.
 - `spectra/services/lyric_console.py` — Sonic's `lyrics` domain, wired into
   `spectra/services/settings_agent.py`'s `_DOMAIN_OP_DICTS`/
   `ALL_OPERATIONS`, with its MCP wrappers in `settings_mcp_server.py`.

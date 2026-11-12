@@ -1,6 +1,8 @@
 /** The Sung words lane (lyrics plan, step 2): every sung word drawn faintly,
- * the emphasized ones as marks with the word printed on them, and his flares
- * and scene changes as guide lines through it, all at their stored times on
+ * the emphasized ones as marks with the word printed on them, and the
+ * engine's own word events (the scene changes, flares and drops a matched
+ * word reaches, and the words firing alone — TestbedLaneBar's Word events
+ * row, 2026-11-12) as guide lines through it, all at their stored times on
  * the capture's label clock, so a word and a flare that happen together in
  * the room share one x. spectra/services/lyrics_timeline.py's module
  * docstring is the binding statement for the clock.
@@ -21,9 +23,7 @@
  * render its measuring effect depends on, and nothing would retry). */
 import { useEffect, useMemo, useState } from 'react';
 import { fmtMsTenths } from '../../lib/time';
-import type {
-  TestbedEstimateMark, TestbedLyrics, TestbedMetrics, TestbedReferenceMark,
-} from '../../types';
+import type { TestbedEstimateMark, TestbedLyrics, TestbedMetrics } from '../../types';
 import {
   faintWordFits, faintWordReachMs, featureWords, inView, layoutLabelRows, viewPct,
 } from '../lyricsLane';
@@ -31,6 +31,15 @@ import type { LaneView } from '../lyricsLane';
 
 const FALLBACK_LANE_WIDTH_PX = 1000;
 const LABEL_ROW_PX = 15;
+
+/** One guide line through the lane: an event's kind, where it lands, and
+ * the word's colour when a word gives it its colour (or it is a word). */
+export interface LaneGuide {
+  id: string;
+  ms: number;
+  cls: 'scene' | 'flare' | 'drop' | 'word';
+  halo?: string | null;
+}
 
 function EmptyLyricsLane({ label, note }: { label: string; note: string }) {
   return (
@@ -44,7 +53,7 @@ function EmptyLyricsLane({ label, note }: { label: string; note: string }) {
 }
 
 export default function LyricsLane({
-  label, data, estimate, view, metrics, transitions, flares,
+  label, data, estimate, view, metrics, guides: allGuides,
 }: {
   label: string;
   data: TestbedLyrics | undefined;
@@ -52,8 +61,8 @@ export default function LyricsLane({
   estimate: TestbedEstimateMark[];
   view: LaneView;
   metrics: TestbedMetrics | null | undefined;
-  transitions: TestbedReferenceMark[];
-  flares: TestbedReferenceMark[];
+  /** The word events drawn through the lane as guide lines. */
+  guides: LaneGuide[];
 }) {
   const [barEl, setBarEl] = useState<HTMLDivElement | null>(null);
   const [laneWidthPx, setLaneWidthPx] = useState(FALLBACK_LANE_WIDTH_PX);
@@ -106,10 +115,7 @@ export default function LyricsLane({
 
   const pct = (ms: number) => `${viewPct(view, ms)}%`;
   const msPerPx = (view.endMs - view.startMs) / Math.max(1, laneWidthPx);
-  const guides = flagged ? [] : [
-    ...transitions.map((m) => ({ id: m.id, ms: m.timestamp_ms, cls: 'scene' })),
-    ...flares.map((m) => ({ id: m.id, ms: m.timestamp_ms, cls: 'flare' })),
-  ].filter((g) => inView(view, g.ms));
+  const guides = flagged ? [] : allGuides.filter((g) => inView(view, g.ms));
 
   return (
     <>
@@ -128,7 +134,9 @@ export default function LyricsLane({
         {hover && <div className="review-lane-tooltip" style={{ left: hover.leftPct }}>{hover.text}</div>}
         <div className="testbed-lyrics-clip">
         {guides.map((g) => (
-          <span key={g.id} className={`testbed-lyric-guide ${g.cls}`} style={{ left: pct(g.ms) }} data-ms={g.ms} />
+          <span key={g.id} className={`testbed-lyric-guide ${g.cls}${g.halo ? ' worded' : ''}`}
+                style={{ left: pct(g.ms), ...(g.halo ? { '--halo': g.halo } as React.CSSProperties : {}) }}
+                data-ms={g.ms} />
         ))}
         {shownWords.map(({ w, reachMs, row }) => {
           const showText = faintWordFits(w.word, reachMs / msPerPx);

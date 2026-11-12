@@ -37,13 +37,14 @@ TUNING = LyricEventSettings()
 
 
 def _hit(ms=10_000, *, key=None, line=0, strength=0.9, his=False, sets=("red",), energy=0.3,
-         emphasis=0.4, why_not=None, end_ms=None, phrase="red", first=None):
+         emphasis=0.4, why_not=None, end_ms=None, phrase="red", first=None, swatches=()):
     first = first if first is not None else ms // 100
     return le.WordHit(key=key or f"{first}-{first}", first_word=first, last_word=first,
                       phrase=phrase, label="red", line=line, ms=float(ms),
                       end_ms=float(end_ms if end_ms is not None else ms + 300),
                       emphasis=emphasis, strength=strength, his=his, set_ids=tuple(sets),
-                      set_names=tuple(s.title() for s in sets), energy=energy, why_not=why_not)
+                      set_names=tuple(s.title() for s in sets), energy=energy, why_not=why_not,
+                      swatches=tuple(swatches))
 
 
 def _drop(ms, eid="d", can_carry=True):
@@ -1278,3 +1279,76 @@ def test_the_labels_and_claude_modules_stay_out_of_the_shows_imports():
                           capture_output=True, text=True, timeout=90)
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert not any(json.loads(proc.stdout.strip().splitlines()[-1]).values())
+
+
+# ── the highlight (2026-11-12): what a page draws before, and is told at, fire time ──
+
+
+def test_a_hit_carries_each_sets_swatch_and_the_landed_set_wins():
+    """`reach` may hand back (id, name, swatch); a hit keeps one swatch per
+    set, its own `swatch` is the first real one (the Word matches row's), and
+    `swatch_for` prefers the set that actually landed."""
+    [hit] = _hits([_match(1, 2, confidence=0.9, label="red"),
+                   _match(2, 2, confidence=0.88, label="sea")],
+                  reach=lambda m: [(f"set-{m['label']}", m["label"].title(),
+                                    {"red": "#ff0000", "sea": "#00aaff"}[m["label"]])])
+    assert dict(zip(hit.set_ids, hit.swatches)) == {"set-red": "#ff0000", "set-sea": "#00aaff"}
+    assert hit.swatch == "#ff0000"
+    assert le.swatch_for(hit, "set-sea") == "#00aaff"
+    assert le.swatch_for(hit, "set-unknown") == "#ff0000", "an unknown set falls back to the word's own"
+    assert le.swatch_for(hit, None) == "#ff0000"
+    [plain] = _hits([_match(1, 1)])
+    assert plain.swatches == (None,) and plain.swatch is None, "a two-tuple reach still works"
+    assert le.action_payload(_only(_plan([hit])))["swatch"] == "#ff0000"
+
+
+def test_word_marks_lend_an_imprint_its_word_and_make_a_fire_alone_word_a_marker():
+    actions = _plan([_hit(10_000, swatches=("#ff0000",)),
+                     _hit(19_000, line=1, first=190, phrase="smoke", swatches=("#5a14b4",)),
+                     _hit(30_000, line=2, first=300, strength=0.5, why_not=le.WHY_WEAK)],
+                    [_flare(10_500, "f1")])
+    imprints, fires = le.word_marks(actions)
+    assert imprints == {"f1": {"word": "red", "word_ms": 10_000, "swatch": "#ff0000",
+                               "word_key": "100-100"}}, "keyed by the event id tick() fires"
+    [fire] = fires
+    assert fire["kind"] == le.KIND_WORD and fire["ms"] == 19_000 and fire["id"] == "lyric:190-190"
+    assert fire["word"] == "smoke" and fire["swatch"] == "#5a14b4" and fire["source"] == "word"
+    assert fire["rank"] is None and fire["rank_of"] is None, "the strip's row shape"
+    # the weak word does nothing and is drawn nowhere outside the Test Bed
+    assert not any(f["ms"] == 30_000 for f in fires)
+
+
+def test_the_engine_tells_the_page_the_moment_a_word_fires_or_imprints():
+    """The live pulse: `lyric_fired` is told once per word, with the id the
+    strip's marker carries and the colour of the set that really landed."""
+    rec = Rec()
+    pushed: list[dict] = []
+    engine = _engine([_flare_trig(10_500)], rec,
+                     hits=[_hit(10_000, swatches=("#ff0000",)),
+                           _hit(19_000, line=1, first=190, energy=0.74, phrase="smoke",
+                                sets=("blue", "red"), swatches=("#0000ff", "#ff0000"))],
+                     lyric_fired=pushed.append)
+    _sweep(engine, rec)
+    by_verdict = {r["verdict"]: r for r in pushed}
+    assert set(by_verdict) == {le.VERDICT_IMPRINT, le.VERDICT_FIRE}
+    imprint = by_verdict[le.VERDICT_IMPRINT]
+    assert imprint["event_id"] == "f1" and imprint["event_kind"] == le.KIND_FLARE
+    assert imprint["event_ms"] == 10_500 and imprint["phrase"] == "red" and imprint["uri"] == URI
+    assert imprint["swatch"] == "#ff0000"
+    fire = by_verdict[le.VERDICT_FIRE]
+    assert fire["event_id"] == "lyric:190-190" and fire["event_kind"] == le.KIND_WORD
+    assert fire["event_ms"] == 19_000 and fire["landed"] is True and fire["set_id"] == "red"
+    assert fire["swatch"] == "#ff0000", "the set that landed, not the word's first candidate"
+    assert fire["position_ms"] is not None
+
+
+def test_a_failing_push_never_reaches_the_fire_path():
+    rec = Rec()
+
+    def broken(_record):
+        raise RuntimeError("socket gone")
+    engine = _engine([_flare_trig(10_500)], rec, hits=[_hit(10_000), _hit(19_000, line=1, first=190)],
+                     lyric_fired=broken)
+    _sweep(engine, rec)
+    assert len(rec.words) == 1 and ("analysed_flare",) not in rec.fires and rec.fires, \
+        "the word fired and the flare fired, the push's failure notwithstanding"
