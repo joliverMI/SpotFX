@@ -48,13 +48,18 @@ export function useNextBoxInBar(): boolean {
 }
 
 export default function SongNextBox({
-  events, durationMs, host,
+  events, durationMs, host, uri,
 }: {
   events: UpcomingEvent[];
   durationMs: number;
   /** Which of the two hosts is drawing it — styling only (the bar's own
    * copy is a bar-height slot, the row's is the 39px track-height box). */
   host: 'strip' | 'bar';
+  /** The song this box is displaying, from the same useSongTimelineView()
+   * track both callers already resolve — used to ignore a word_colour push
+   * for a different song (e.g. the engine has already moved on while this
+   * box, via `showingLast`, still shows the previous one). */
+  uri: string | null;
 }) {
   // HTMLElement, not HTMLDivElement: the same ref is attached to a <div>
   // on the timeline row and an <a> in the bar, and the rAF loop below
@@ -70,13 +75,15 @@ export default function SongNextBox({
 
   // THE LIVE PULSE (option E, the Admiral's pick 2026-11-12): the moment a
   // matched word fires or imprints the box flashes in THE WORD'S COLOUR —
-  // the set that really landed — rather than white. Any word of this song:
-  // the box is the one place on every page that says "something coloured
-  // just happened", whichever event it was counting to.
+  // the set that really landed — rather than white. Any word of THIS song
+  // (guarded the same way SongStrip.tsx's sibling listener is, since `uri`
+  // can lag to the last-played song via showingLast): the box is the one
+  // place on every page that says "something coloured just happened",
+  // whichever event it was counting to.
   useEffect(() => onWordColour((push) => {
-    if (!boxRef.current) return;
+    if (!boxRef.current || !uri || push.uri !== uri) return;
     flashInWordColour(boxRef.current, 'song-strip-next-flash-word', push.swatch);
-  }), []);
+  }), [uri]);
 
   useEffect(() => {
     let raf = 0;

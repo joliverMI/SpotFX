@@ -57,7 +57,7 @@ export default function TopBarStrip() {
       <EnergyBar />
       {nextInBar && (
         <SongNextBox events={barEvents}
-          durationMs={track?.duration_ms ?? 0} host="bar" />
+          durationMs={track?.duration_ms ?? 0} host="bar" uri={uri} />
       )}
       <LightShowStrip />
       {/* The mockup's fourth thin divider (`.sp .sepv`) — see tokens.css's

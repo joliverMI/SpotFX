@@ -387,7 +387,7 @@ export default function SongStrip() {
 
       {/* AT <=1100px THIS BOX IS IN THE BAR INSTEAD (his Q1 answer) —
         * mounted by TopBarStrip, never both at once. */}
-      {!nextInBar && <SongNextBox events={events} durationMs={durationMs} host="strip" />}
+      {!nextInBar && <SongNextBox events={events} durationMs={durationMs} host="strip" uri={uri} />}
 
       <span className="song-strip-time tabular-nums">
         <b ref={timeRef}>—:—</b> / {durationMs > 0 ? fmtMMSS(durationMs) : '—:—'}
