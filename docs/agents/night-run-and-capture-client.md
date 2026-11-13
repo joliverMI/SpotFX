@@ -90,7 +90,10 @@ already:
   powered-off WLED under a realtime stream **and what was not**: the answer
   for his fixtures could not be settled from here, so the run is correct
   under either — it turns on only what reads off, CONFIRMS by reading back,
-  restores in a `finally`, and reports per fixture. `fx/VENDOR.md` #30 fixes
+  restores in a `finally`, and reports per fixture. The one exception is a
+  TV strip: its power is Home Assistant's, so a night never switches it,
+  found off or on (2026-11-12 — see the docstring's "A TV STRIP" note).
+  `fx/VENDOR.md` #30 fixes
   `WLED.get_power_state`/`set_power_state`, which were dead and broken in
   three ways until this became their first caller.
 - **THE HONEST EXIT** (`spectra/services/night_exit.py`) — the new standard's
