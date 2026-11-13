@@ -2820,3 +2820,22 @@ against that commit.
     (the star improve plan; his "make it work more radially, like the
     other round strips"). Empty = today. Evidence: `tests/test_star_improve.py`.
 
+94. `effects/radial.py` (SpotFX-authored on top of #91): THE SPIN SMOOTH
+    PLAN (2026-11-12, data/star-spin-smooth/plan.md; the Admiral: "too
+    jerky in it's spin especially on big bass hits. the burst speed is too
+    fast and fades too fast ... hard to tell it moved. We need to cap the
+    burst speed ... it shouldn't be jerky, but it should be dynamic";
+    "snappier at higher energies and lazier at low energies. do 18 degrees
+    per frame for now"). `ROTATION_CAP_REV_S` (3.36 rev/s) is replaced by
+    `ROTATION_CAP_DEG_FRAME` = 18 deg per RENDERED frame, any dt — the
+    crystal renders at 30 fps against a 60 Hz audio callback, so the rate
+    cap was 40 deg per frame, past the 180/edges aliasing limit.
+    `_govern_rotation` gains a release between the ease and the clamp: a
+    unity-gain one-pole on the per-frame advance (total turn preserved),
+    `tau` = new params `spin_release_low_s` at pushed `energy` 0 ->
+    `spin_release_high_s` at 1, linear (`_spin_release_s`); state
+    `_spin_lp`. Both default 0 = bypass, today to the frame (every other
+    Radial scene byte-identical); STAR's entry carries 0.45 / 0.2
+    (`scripts/star_spin_smooth_scene_data.py`). No vendored line changed.
+    Evidence: `tests/test_star_spin_smooth.py`.
+

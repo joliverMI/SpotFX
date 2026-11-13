@@ -207,8 +207,10 @@ want it to go through 0". Five things not visible cold:
   writer adding its own signed revolutions into `_frame_adv` as it moves
   `spin_total`; `_govern_rotation` drains that accumulator exactly once
   per governed frame — never reduced mod 1, so it reads correctly even
-  past half a revolution), scales it by
-  `ROTATION_CAP_REV_S` = 0.7 x 6.0 x ROTATION_SPEED_SCALE = **3.36 rev/s**.
+  past half a revolution), scales it by the ease-in and clamps it. The
+  clamp shipped as `ROTATION_CAP_REV_S` = 0.7 x 6.0 x ROTATION_SPEED_SCALE
+  = 3.36 rev/s; the spin smooth plan (next section) re-expressed it per
+  rendered frame — `ROTATION_CAP_DEG_FRAME` = **18 deg per frame**.
   Identity below the cap. `spin_ease_in_s` defaults to **0** on the effect
   (every other Radial scene byte-identical); STAR's Matrix entry carries
   1.0 (`STAR_SPIN_EASE_IN_S`, written by `scripts/star_improve_scene_data.
@@ -245,6 +247,65 @@ both data scripts). Rig scripts: `scripts/render_star_improve_crystal.py`
 (the explainer's crystal tiles; the live law driven per frame),
 `scripts/render_star_improve_strips.py`, `scripts/render_star_improve_grid.py`
 (the star x edges grid he decided from), `scripts/render_star_improve_tablet.py`.
+
+## THE SPIN SMOOTH PLAN (2026-11-12, data/star-spin-smooth/plan.md) — the per-frame clamp and the energy-paced release
+
+His ask, verbatim, after the star improve plan went live: "i like it, but
+it is too jerky in it's spin especially on big bass hits. the burst speed
+is too fast and fades too fast. I think sometimes it moves so fast it's
+hard to tell it moved. We need to cap the burst speed. Do actual analysis
+on how it moves, it shouldn't be jerky, but it should be dynamic"; after
+the analysis page (side-by-side clips + velocity plots on his own bass
+songs): "the burst fade should be snappier at higher energies and lazier
+at low energies. do 18 degrees per frame for now". Four things not visible
+cold (`data/star-spin-smooth/report.md` has the evidence):
+
+- **The crystal renders at 30 fps, not 60.** The `crystal` WLED device's
+  `refresh_rate` is 30 and a virtual renders at its slowest device
+  (`fx/virtuals.py`); the audio callback still runs at 60 Hz, so one
+  rendered frame carries TWO callbacks' turn. That made the 3.36 rev/s cap
+  40 deg per frame — past the **180/edges** deg (30 deg at 6 edges) at
+  which an N-point star's turn reads BACKWARDS (temporal aliasing). His
+  "hard to tell it moved" was aliasing, not speed. Any per-frame reasoning
+  about STAR must use dt = 1/30; the rig (`tests/star_harness.py`) steps
+  at 1/60, so a per-frame cap is 2x the rev/s there.
+- **`ROTATION_CAP_DEG_FRAME` = 18 (per RENDERED frame, whatever dt — a
+  stalled frame is clamped to the same angle)** replaces `ROTATION_CAP_
+  REV_S`. 18 deg per frame = 1.5 rev/s at 30 fps, under the aliasing limit
+  of every edge count STAR rolls (3..6 -> 60..30 deg). One constant, by
+  his "for now": retune it there. A loud fire's STEADY speed (spin 0.94 on
+  Gold: 1.63 rev/s) now rides this clamp — the trade he chose over 22 deg.
+- **The jerk was the impulse SHAPE, not the cap.** `lows_power(filtered)`
+  decays 0.2 per 60 Hz frame (ExpFilter, `fx/effects/audio.py`) and the
+  drive is spin² x impulse, so a hit was a ~6-frame burst (rise ~100 ms,
+  gone in ~200 ms); at spin 0.70 nothing touched the cap and rms jerk was
+  still ~290 rev/s³. **The release** (`_govern_rotation`, between the ease
+  and the clamp) is a one-pole low-pass ON THE PER-FRAME ADVANCE —
+  `lp += (adv - lp)(1 - exp(-dt/tau))` — unity DC gain, so the total turn
+  and the mean speed of a steady passage are preserved to the frame and
+  only the burst is spread. Not a peak follower on the speed (that needed
+  a gain and lowered the floor — candidates B/C on the page). `tau` =
+  `spin_release_low_s` at told `energy` 0 -> `spin_release_high_s` at 1,
+  linear (`_spin_release_s`); only the coefficient moves, the state
+  integrates, so an energy change never steps the motion. Effect default
+  **0 / 0 = bypass**, today's motion to the frame for every other Radial
+  scene; STAR's Matrix entry carries **0.45 / 0.2** (`STAR_SPIN_RELEASE_
+  LOW_S` / `_HIGH_S`, written by `scripts/star_spin_smooth_scene_data.py`,
+  DJ applies at deploy). The release state `_spin_lp` seeds on the first
+  governed frame and is dropped when both params are 0.
+- **The analysed law IS the shipped law.** The scout rig's `GovState`
+  (`data/star-spin-smooth/scripts/motion.py`) and the real effect agreed
+  to 1e-11 deg over the page's passages; `tests/test_star_spin_smooth.py`
+  replays the same arithmetic against the effect to 1e-12. Measured at
+  the page's 0.3 s fixed release: rms jerk -85..90%, peak acceleration
+  27-49 -> 4.6-8.4 rev/s², mean speed within 3% at spin 0.70, a single hit
+  surges +70% with a 300 ms half-life. The final energy-paced numbers are
+  in `data/star-spin-smooth/plan.md` ("Final law, measured").
+
+Proofs: `tests/test_star_spin_smooth.py` (the 18 deg clamp at any dt,
+release 0 = ease+clamp alone, the law to 1e-12, burst spread with the turn
+kept, energy linear / snappier-lazier / never a step, the data script, the
+registry). Help topic `star-spin-smooth`.
 
 ## Out of Star: the bands release (transition programs)
 

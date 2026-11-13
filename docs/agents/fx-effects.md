@@ -1289,7 +1289,9 @@ line each: the "dead on entry" was a FIRE-TIME defect (a `random_sign`
 binding on a 0..1 param flipped then clamped to 0 — `binding_resolver.
 _maybe_flip_sign` now skips any param with `lo >= 0`); `_govern_rotation`
 eases the first `spin_ease_in_s` seconds (STAR 1.0, effect default 0) and
-clamps every frame's TOTAL advance at `ROTATION_CAP_REV_S` 3.36 rev/s;
+clamps every frame's TOTAL advance (shipped at `ROTATION_CAP_REV_S` 3.36
+rev/s; since the spin smooth plan below `ROTATION_CAP_DEG_FRAME` 18 deg per
+rendered frame);
 `_star_wave_step` sways `star` between `star_wave_lo`/`_hi` (STAR −0.2..
 +0.4, through flat = 0 — flat is 0, not 0.5) at a pace set by the pushed
 `energy` (the pulse feed now feeds radial, energy only); "Edge Morph" is a
@@ -1298,6 +1300,25 @@ upper flare bands; Melt's `dark_floor` (VENDOR.md #92) and the TV's
 `pixel_map` (#93, `docs/agents/devices-and-ownership.md`) are the strip
 half. Proofs: `tests/test_star_improve.py`; rig: `scripts/
 render_star_improve_*.py`.
+
+## Radial (STAR) — the spin smooth plan (2026-11-12): the per-frame clamp and the energy-paced release
+
+The radial-effect skill's "THE SPIN SMOOTH PLAN" section is the binding
+statement; `data/star-spin-smooth/plan.md` the plan, `report.md` the
+measured evidence. In one line each: the crystal renders at 30 fps (its
+WLED `refresh_rate`; a virtual renders at its slowest device) while audio
+callbacks run at 60 Hz, so the 3.36 rev/s cap was 40 deg per rendered frame
+— past the 180/edges deg at which a 6-point star's turn reads backwards,
+his "hard to tell it moved"; the cap is now `ROTATION_CAP_DEG_FRAME` = 18
+deg per rendered frame, any dt; the jerk was the lows filter's ~6-frame
+burst shape squared by `spin`, not the cap, so `_govern_rotation` now runs
+a unity-gain one-pole on the per-frame ADVANCE (total turn and mean speed
+preserved) whose time runs `spin_release_low_s` (STAR 0.45) at pushed
+`energy` 0 to `spin_release_high_s` (STAR 0.2) at 1, linear, never a step;
+effect default 0/0 is today to the frame. `scripts/star_spin_smooth_
+scene_data.py` writes the two STAR params (DJ, at deploy). Proofs:
+`tests/test_star_spin_smooth.py`. Per-frame STAR reasoning uses dt = 1/30;
+`tests/star_harness.py` steps at 1/60.
 
 ## `crystal-mapper` (the hex Matrix virtual) — read the skill before touching it
 

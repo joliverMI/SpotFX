@@ -370,6 +370,16 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'star-spin-smooth',
+        title: 'STAR / Radial — a smooth, dynamic spin (the burst release and the 18° clamp)',
+        keywords: 'star radial spin jerky bass hit burst release fade snappier lazier energy calm intense cap clamp 18 degrees per frame aliasing backwards hard to tell it moved smooth dynamic spin release',
+        body: [
+          'A bass hit turns STAR with a burst: the kick\'s low-frequency power jumps and the spin follows it squared, so the star used to leap in about six frames and stop as fast. Two things made that read as jerky. The crystal draws 30 frames a second while the music is read 60 times a second, so each drawn frame carried two readings\' worth of turn, and the old speed cap (3.36 turns a second) let a 6-point star jump 40° in one frame — more than the 30° past which a 6-point star looks like it turned backwards. That was the "it moves so fast it\'s hard to tell it moved".',
+          'The cap is now 18° per drawn frame (1.5 turns a second at 30 frames), under the backwards limit for every star STAR rolls (3 to 6 points), whatever the frame\'s length. It is a constant in the effect, not a setting — his "for now".',
+          'The burst itself is spread out by Spin Release: the turn each frame is smoothed over Spin Release seconds, so a hit still surges but eases back instead of snapping, and the TOTAL turn is kept — a steady loud passage turns exactly as far as before, only the bursts change. Spin Release has two ends, (calm) at section energy 0 and (intense) at energy 1, with a straight line between — his own addition: "the burst fade should be snappier at higher energies and lazier at low energies". STAR\'s Matrix entry carries 0.45 s calm and 0.2 s intense; 0 and 0 is the old motion exactly (the default on every other Radial scene). A change of energy only changes the pace of the fade, never the motion itself. Sonic reaches both values per scene entry ("set Spin Release, calm to 0.6 on STAR\'s Matrix entry").',
+        ],
+      },
+      {
         id: 'melt-dark-floor',
         title: 'Melt — the dark floor (more dark between the blobs)',
         keywords: 'melt dark floor dark blobs gaps bright strips tv sconce dark mode brightness star strips lit share',
