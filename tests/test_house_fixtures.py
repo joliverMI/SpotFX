@@ -170,17 +170,12 @@ def seam(monkeypatch):
             raise TimeoutError("no answer")
         return dict(w.state[did])
     w.unreachable_ips: set = set()
-    w.hyperion_live: dict = {}
-
-    async def read_live(did):
-        return w.hyperion_live.get(did)
 
     house_fixtures.deps = house_fixtures.Deps(
         post=post, get_state=get_state, host=lambda: w.host,
         relocate=relocate, reinit=reinit, reachable=reachable,
         report_refresh=report_refresh, clock=w.clock, sleep=no_sleep,
-        post_ip=post_ip, get_ip=get_ip, released=lambda: w.released[0],
-        read_live=read_live)
+        post_ip=post_ip, get_ip=get_ip, released=lambda: w.released[0])
     w.hf, w.house, w.store = house_fixtures, house, house_store
 
     def set_mode(name="Standard", fixtures=None):
@@ -210,6 +205,9 @@ def _run(coro):
 
 WLEDS = {"crystal", "tv-backlight", "sconce-kitchen-left",
          "sconce-kitchen-right", "porch-rail"}
+#: the WLEDs whose power a mode switches — never the TV strip, whose power
+#: and master brightness are Home Assistant's (2026-11-12)
+SWITCHED = WLEDS - {"tv-backlight"}
 
 
 # ═══ 1. inert ═══════════════════════════════════════════════════════════════
@@ -274,11 +272,13 @@ def test_a_mode_switches_every_in_scope_wled_on_and_never_sends_bri(seam):
     seam.set_mode()
     _run(_settle(seam.hf))
     written = {did for did, p in seam.posts}
-    assert written == WLEDS, "Hue / dummies must never be written"
+    assert written == SWITCHED, \
+        "Hue / dummies / the TV strip must never be power-switched"
     for did, payload in seam.posts:
         assert payload == {"on": True}
     for did in WLEDS:
         assert seam.state[did]["bri"] == 34       # his brightness, untouched
+    for did in SWITCHED:
         assert seam.hf._rt.applied[did].outcome == "landed"
     status = seam.hf.status()
     assert status["brightness_owner"] == "home_assistant"
@@ -439,7 +439,9 @@ def test_tv_music_off_lends_the_strip_and_leaves_the_sconces(seam):
     assert seam.hf.tv_strip_status()["owner"] == "hyperion"
 
 
-def test_reclaim_powers_on_first_and_streams_after(seam):
+def test_reclaim_writes_nothing_and_just_streams_again(seam):
+    """TV Music back on: the strip is simply streamed again — no power
+    write, its power is Home Assistant's (2026-11-12)."""
     from fx import device_output
 
     async def scenario():
@@ -447,19 +449,12 @@ def test_reclaim_powers_on_first_and_streams_after(seam):
         await _settle(seam.hf)
         seam.hf.set_tv_music(False)
         await _settle(seam.hf)
-        seam.posts.clear()
-        gate = asyncio.Event()
-        seam.gates["tv-backlight"] = gate
-        seam.hf.set_tv_music(True)
-        await seam.hf.tick()
-        await asyncio.sleep(0)
-        # the power-on write is in flight: the strip is STILL withheld
         assert "tv-backlight" in device_output.withheld()
-        gate.set()
+        seam.posts.clear()
+        seam.hf.set_tv_music(True)
         await _settle(seam.hf)
         assert "tv-backlight" not in device_output.withheld()
-        # power only — the strip comes back at Home Assistant's brightness
-        assert seam.posts == [("tv-backlight", {"on": True})]
+        assert seam.posts == []
     _run(scenario())
     assert seam.hf.tv_strip_status()["owner"] == "spectra"
 
@@ -493,52 +488,163 @@ def test_an_explicit_lend_is_honoured_and_given_back(seam):
     assert "tv-backlight" not in device_output.withheld()
 
 
-def test_a_mode_off_tv_strip_switches_off_when_hyperion_is_not_streaming(seam):
-    """Decision (2026-10-05, the TV backlight incident): when the mode's
-    plan powers the TV strip off, Spectra switches it off UNLESS Hyperion
-    is actually streaming to it — never because the lend reason (TV Music
-    off) alone says so. Unconfirmed reads as "not streaming". While the
-    mode's own fade hasn't landed it in mode_off_devices() yet, the strip
-    gets no action (never lent, never guessed on) — then, once house.py's
-    own supervisor catches up (simulated here directly), it goes off like
-    any other mode-off fixture."""
-    from fx import device_output
-    seam.set_mode("Away", fixtures=[
+def _no_tv_power(seam):
+    """No payload to the TV strip ever carries power or brightness — over
+    the device transport or the hand-back's own by-address one."""
+    for did, payload in seam.posts + seam.ip_posts:
+        if did == "tv-backlight":
+            assert "on" not in payload and "bri" not in payload, \
+                f"Spectra wrote {payload} to the TV strip — its power and " \
+                f"master brightness are Home Assistant's"
+
+
+def _tv_mode_off(seam, name="TV"):
+    seam.set_mode(name, fixtures=[
         FixtureHook(target=HouseTarget(kind="fixture", id="tv-backlight"),
                     off=True)])
-    seam.hf.set_tv_music(False)
-    _run(_settle(seam.hf))
-    assert "tv-backlight" not in device_output.withheld()
-    assert all(did != "tv-backlight" for did, _p in seam.posts)
-    # house.py's own supervisor (a no-op in this harness) has now applied
-    # the mode's fade — the fixture's fade-to-black has landed.
+    # house.py's own supervisor (a no-op in this harness) has landed the
+    # mode's fade-to-black: the strip is in mode_off_devices().
     seam.house._rt.off_ready["tv-backlight"] = seam.clock.now
     seam.house._rt.phase = seam.house.PHASE_RESTING
+
+
+def test_a_mode_off_tv_strip_stays_lent_while_hyperion_is_not_yet_streaming(seam):
+    """THE 2026-11-12 INCIDENT: mode 'TV' lists tv-backlight off, TV Music
+    is off (lent), and HyperHDR has not started streaming yet. The strip
+    must stay LENT — one {"live": false}, nothing else — never switched
+    off (the old Hyperion-gated rule posted {"on": false} under the Roku)."""
+    from fx import device_output
+    _tv_mode_off(seam)
+    seam.hf.set_tv_music(False)
+    assert seam.hf.desired()["tv-backlight"][0] == seam.hf.TARGET_LENT
     _run(_settle(seam.hf))
-    assert device_output.withheld().get("tv-backlight") == "switched off"
-    assert ("tv-backlight", {"on": False}) in seam.posts
+    assert device_output.withheld().get("tv-backlight") == \
+        "lent: TV Music is off — Hyperion drives the strip"
+    assert [p for d, p in seam.posts if d == "tv-backlight"] == [{"live": False}]
+    assert seam.state["tv-backlight"]["on"] is True
+    # …and it stays that way on later passes (the incident's 21:41:54 repeat)
+    seam.clock.now += 120
+    _run(_settle(seam.hf))
+    assert [p for d, p in seam.posts if d == "tv-backlight"] == [{"live": False}]
+    _no_tv_power(seam)
+
+
+def test_media_paused_then_playing_keeps_the_strip_lent_live_false_only(seam):
+    """THE SECOND 2026-11-12 REPRO: mode 'TV' lists tv-backlight off, TV
+    Music off, Roku paused (22:04:17) -> lent; Roku playing (22:04:57) ->
+    lent, then the old rule switched it off at 22:05:07 under the Roku.
+    Through paused -> playing, and passes after the fade has landed, the
+    strip only ever gets {"live": false} — never `on`, never `bri`."""
+    from fx import device_output
+
+    async def scenario():
+        _tv_mode_off(seam)
+        seam.hf.set_tv_music(False)
+        await seam.house.set_media(source="roku", state="paused")
+        await _settle(seam.hf)
+        assert seam.hf.desired()["tv-backlight"][0] == seam.hf.TARGET_LENT
+        seam.clock.now += 40
+        await seam.house.set_media(source="roku", state="playing")
+        await _settle(seam.hf)
+        assert seam.hf.desired()["tv-backlight"][0] == seam.hf.TARGET_LENT
+        # the mode's fade lands again after the overlay change
+        seam.house._rt.off_ready["tv-backlight"] = seam.clock.now
+        seam.clock.now += 10
+        await _settle(seam.hf)
+        assert seam.hf.desired()["tv-backlight"][0] == seam.hf.TARGET_LENT
+    _run(scenario())
+    assert "tv-backlight" in device_output.withheld()
+    tv = [p for d, p in seam.posts if d == "tv-backlight"]
+    assert tv and all(p == {"live": False} for p in tv)
+    assert seam.state["tv-backlight"]["on"] is True
+    _no_tv_power(seam)
+
+
+def test_a_mode_off_tv_strip_that_is_not_lent_is_streamed_never_switched(seam):
+    """No lend: a mode's off list does not switch the TV strip off — it is
+    streamed (the fade's black) and nothing is written to it."""
+    from fx import device_output
+    _tv_mode_off(seam)
+    _run(_settle(seam.hf))
+    assert "tv-backlight" not in seam.hf.desired()
+    assert "tv-backlight" not in device_output.withheld()
+    assert [p for d, p in seam.posts if d == "tv-backlight"] == []
+
+
+def test_a_tv_strip_off_override_is_never_written(seam):
+    seam.set_mode()
+    seam.hf.set_fixture("tv-backlight", power="off")
+    _run(_settle(seam.hf))
+    assert [p for d, p in seam.posts if d == "tv-backlight"] == []
+    _no_tv_power(seam)
+
+
+def test_the_tv_strip_is_streamed_but_never_powered_on_by_a_mode(seam):
+    """TV Music on (the Admiral's default, no mode off): the strip is
+    streamed — and Spectra does not power it on; Home Assistant does."""
+    from fx import device_output
+    seam.state["tv-backlight"]["on"] = False
+    seam.set_mode()
+    _run(_settle(seam.hf))
+    assert "tv-backlight" not in device_output.withheld()
+    assert [p for d, p in seam.posts if d == "tv-backlight"] == []
     assert seam.state["tv-backlight"]["on"] is False
 
 
-def test_a_mode_off_tv_strip_stays_lent_while_hyperion_actually_streams(seam):
-    from fx import device_output
-    seam.set_mode("Away", fixtures=[
-        FixtureHook(target=HouseTarget(kind="fixture", id="tv-backlight"),
-                    off=True)])
-    seam.hf.set_tv_music(False)
-    seam.hyperion_live["tv-backlight"] = True
-    _run(_settle(seam.hf))
-    assert device_output.withheld().get("tv-backlight") == "lent: TV Music is off — Hyperion drives the strip"
-    assert [p for d, p in seam.posts if d == "tv-backlight"] == [{"live": False}]
+def test_no_path_ever_writes_power_to_the_tv_strip(seam):
+    """Drive the strip through every state the seam knows — modes on/off,
+    lend on/off, a media overlay, an override, clearing the mode, a
+    release with a stale pre-take entry — and prove no payload to it ever
+    carries `on` or `bri`."""
+    async def scenario():
+        _tv_mode_off(seam)
+        await _settle(seam.hf)
+        seam.hf.set_tv_music(False)
+        await _settle(seam.hf)
+        await seam.house.set_media(source="roku", state="playing")
+        await _settle(seam.hf)
+        seam.hf.set_tv_music(True)
+        await seam.house.set_media(source="roku", state="stopped")
+        await _settle(seam.hf)
+        seam.hf.set_fixture("tv-backlight", power="off")
+        await _settle(seam.hf)
+        seam.hf.set_fixture("tv-backlight", power="on")
+        await _settle(seam.hf)
+        seam.hf.set_fixture("tv-backlight", power=None)
+        seam.set_mode("Standard")
+        await _settle(seam.hf)
+        # clearing the mode while a stale "we switched it off" record exists
+        st = seam.store.state()
+        st.power_applied["tv-backlight"] = {"mode": "x", "target": "off",
+                                            "on": False}
+        st.mode_id = None
+        seam.store.save_state()
+        await _settle(seam.hf)
+        # a release with a stale pre-take entry from an older build
+        st.pre_take["tv-backlight"] = {"on": True, "ip": "ip-tv-backlight",
+                                       "at_ms": 0}
+        st.power_applied["tv-backlight"] = {"mode": "x", "target": "off",
+                                            "on": False}
+        seam.store.save_state()
+        seam.refusal[0] = "the room is released"
+        seam.released[0] = True
+        await seam.hf.tick()
+        if seam.hf._rt.handback_task is not None:
+            await seam.hf._rt.handback_task
+    _run(scenario())
+    _no_tv_power(seam)
+    assert "tv-backlight" not in seam.store.state().pre_take
+    assert any(p == {"live": False} for d, p in seam.posts if d == "tv-backlight")
 
 
-def test_the_admirals_tv_default_on_preference_is_unchanged(seam):
-    """TV Music on (the Admiral's default, no mode off) still streams the
-    strip normally — this decision only narrows the LEND, never the
-    default."""
-    seam.set_mode()
-    _run(_settle(seam.hf))
-    assert ("tv-backlight", {"on": True}) in seam.posts
+def test_transition_refuses_a_power_write_to_a_tv_strip(seam):
+    """The last line of defence: even asked directly, _transition never
+    writes {"on": ...} to a TV strip."""
+    dev = seam.host.devices["tv-backlight"]
+    for target in (seam.hf.TARGET_ON, seam.hf.TARGET_OFF):
+        _run(seam.hf._transition("tv-backlight", dev, target, "test",
+                                 owned=True))
+    assert seam.posts == [] and seam.reads == []
 
 
 def test_a_generically_lent_non_tv_strip_stays_lent_even_when_a_mode_powers_it_off(seam):
@@ -579,7 +685,7 @@ def test_a_plan_off_fixture_is_never_switched_on_during_activation(seam):
     assert "crystal" not in device_output.withheld()
     # the rest of the room still comes up normally
     written = {did for did, _p in seam.posts}
-    assert written == WLEDS - {"crystal"}
+    assert written == SWITCHED - {"crystal"}
 
 
 def test_a_plan_off_fixture_that_was_already_on_is_never_re_asserted_on(seam):
@@ -696,7 +802,7 @@ def test_a_fixture_outside_the_take_is_never_written(seam):
     written = {d for d, _ in seam.posts}
     assert "crystal" not in written and "porch-rail" not in written
     assert "crystal" not in device_output.withheld()
-    assert written == {"tv-backlight", "sconce-kitchen-left", "sconce-kitchen-right"}
+    assert written == {"sconce-kitchen-left", "sconce-kitchen-right"}
 
 
 # ═══ 6. hand-back ═══════════════════════════════════════════════════════════

@@ -173,6 +173,26 @@ def test_a_fixture_already_on_is_never_written_to_and_never_restored():
         "a fixture already on was written to anyway"
 
 
+def test_a_tv_strip_found_off_is_left_off_and_named():
+    """His TV strip's power is Home Assistant's (2026-11-12): a night's
+    captures never switch it on (or back off) — it is left alone and the
+    run says so."""
+    with FakeWledServer(on=False) as server:
+        device = FakeDevice("tv-backlight", WLED(server.address))
+
+        async def go():
+            async with night_power.owned([device]) as result:
+                return result
+
+        result = asyncio.run(go())
+    assert result.actions["tv-backlight"] == "left_alone"
+    assert result.turned_on == [] and result.restored == []
+    assert [r for r in server.requests if r[0] == "POST"] == [], \
+        "Spectra wrote power to the TV strip"
+    assert server.state["on"] is False
+    assert any("Home Assistant" in p for p in result.problems)
+
+
 def test_the_switch_goes_back_even_when_the_night_raises():
     with FakeWledServer(on=False) as server:
         device = FakeDevice("strip", WLED(server.address))

@@ -64,7 +64,9 @@ swallowing it. POWER ONLY: `{"on": …}` keeps the fixture's own master
 brightness, which is Home Assistant's and which no Spectra path writes
 (2026-10-12 — `fixture_brightness.py` used to take a dim fixture to full
 for a capture; it now only reads and warns, and a night records a request
-for him to raise it in Home Assistant).
+for him to raise it in Home Assistant). A TV STRIP (house_fixtures.
+is_tv_strip) is never switched at all, not even on: its power is Home
+Assistant's too (2026-11-12) — found off, it is left off and named.
 
 IT NEVER PERSISTS ANYTHING. His power state is held for the run's duration
 and handed back; a crash between the two is covered by the report and by
@@ -121,6 +123,17 @@ def _wled(device):
     if str(getattr(device, "type", "") or "").lower() not in CONTROLLABLE_TYPES:
         return None
     return getattr(device, "wled", None)
+
+
+def _is_tv_strip(device_id: str) -> bool:
+    """A TV strip's power is Home Assistant's — see
+    house_fixtures.is_tv_strip. Never raises."""
+    try:
+        from spectra.services import house_fixtures
+        return house_fixtures.is_tv_strip(device_id)
+    except Exception:                                   # noqa: BLE001
+        logger.exception("night_power: resolving the TV strips failed")
+        return device_id == "tv-backlight"
 
 
 async def read_one(device) -> FixturePower:
@@ -216,6 +229,16 @@ async def owned(devices, readings: Optional[list[FixturePower]] = None):
             continue
         if not r.off:
             result.actions[r.device_id] = "already_on"
+            continue
+        if _is_tv_strip(r.device_id):
+            # His TV strip's power is Home Assistant's (2026-11-12): never
+            # switched by Spectra, not even for a night's captures.
+            result.actions[r.device_id] = "left_alone"
+            result.problems.append(
+                f"{r.device_id} is a TV strip and was found switched off — "
+                f"its power belongs to Home Assistant, so this run left it "
+                f"off; anything measured of it tonight is a photograph of an "
+                f"unlit fixture, not a footprint")
             continue
         device = by_id.get(r.device_id)
         helper = _wled(device) if device is not None else None
