@@ -67,10 +67,13 @@ split). Six things:
 `house_restart.py` are the binding statements. Six things:
 
 - **RECORDED ALWAYS, ACTED ON ONLY WHILE `house.layer_active()`** (a mode
-  set, SPECTRA holds the room, no standby). HA's facts (TV Music, the media
-  centre, fixture overrides) live in `house_state.json`; the seam's settings
-  (TV strip ids, voice fixtures/colours) in the library
-  file. No mode → nothing withheld, no WLED written.
+  set, SPECTRA holds the room, no standby) — **except the TV strip's own
+  lend to Hyperion, which applies unconditionally** (fixed 2026-11-12,
+  fm/tv-lend-no-mode; see `docs/HOUSE_HA_SEAM.md`'s TV strip section). HA's
+  facts (TV Music, the media centre, fixture overrides) live in
+  `house_state.json`; the seam's settings (TV strip ids, voice
+  fixtures/colours) in the library file. No mode → nothing else withheld,
+  no other WLED written.
 - **WITHHELD ≠ DARK.** A lent or switched-off fixture gets NO packet
   (`fx/device_output.set_withheld`, VENDOR #44), checked in
   `Device.update_pixels`; suspension streams it anyway. `streaming_device_ids`
