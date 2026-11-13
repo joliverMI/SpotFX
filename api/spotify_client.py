@@ -25,7 +25,8 @@ logger = logging.getLogger(__name__)
 SCOPES = (
     "user-read-playback-state user-read-currently-playing "
     "user-modify-playback-state "
-    "playlist-read-private playlist-modify-private playlist-modify-public"
+    "playlist-read-private playlist-modify-private playlist-modify-public "
+    "user-library-read"
 )
 
 _sp: Optional[spotipy.Spotify] = None
