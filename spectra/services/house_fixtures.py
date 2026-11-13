@@ -786,15 +786,28 @@ def _log_duplicate_ignored(did: str, winner: str) -> None:
         "ignoring it; %s already speaks for this fixture", did, winner, winner)
 
 
+def _tv_lend_desired(st=None) -> dict[str, tuple[str, str]]:
+    """TARGET_LENT for every TV strip `lend_reasons` says is lent — the one
+    thing this seam still acts on with no house mode driving the room.
+    `lend_reasons` is a fact about tv_music/media state, not about the
+    room's own activity, so it applies here unconditionally; every other
+    fixture stays untouched while no mode drives the room (see
+    `desired()`'s docstring)."""
+    strips = set(tv_strip_ids())
+    return {did: (TARGET_LENT, why)
+            for did, why in lend_reasons(st).items() if did in strips}
+
+
 def desired() -> dict[str, tuple[str, str]]:
     """device -> (target, why) for every in-scope fixture the seam acts on
-    RIGHT NOW. Empty when no mode drives the room."""
+    RIGHT NOW. Only the TV-strip lend (TARGET_LENT) when no mode drives the
+    room — every other fixture is untouched then, see `_tv_lend_desired`."""
     from spectra.services import house
     if not house.layer_active():
-        return {}
+        return _tv_lend_desired()
     host = deps.host()
     if host is None:
-        return {}
+        return _tv_lend_desired()
     st = house_store.state()
     lent = lend_reasons(st)
     mode_off = house.mode_off_devices()
@@ -1360,18 +1373,11 @@ def _fixture_view(did: str) -> dict:
 
 def tv_strip_status() -> dict:
     from fx import device_output
-    from spectra.services import house
     strips = tv_strip_ids()
     lent = lend_reasons()
     withheld = device_output.withheld()
-    acting = house.layer_active()
     why = next((lent[d] for d in strips if d in lent), None)
-    if why is None:
-        owner = "spectra"
-    elif acting:
-        owner = "hyperion"
-    else:
-        owner = "hyperion (recorded — no mode drives the room, so Spectra is not acting on it)"
+    owner = "hyperion" if why is not None else "spectra"
     return {"devices": strips, "owner": owner, "why": why,
             "streaming": [d for d in strips if d not in withheld]}
 

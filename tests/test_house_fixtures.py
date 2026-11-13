@@ -214,16 +214,30 @@ WLEDS = {"crystal", "tv-backlight", "sconce-kitchen-left",
 
 # ═══ 1. inert ═══════════════════════════════════════════════════════════════
 
-def test_with_no_mode_nothing_is_withheld_or_written(seam):
+def test_with_no_mode_nothing_but_the_tv_lend_is_withheld_or_written(seam):
+    """No mode drives the room: a fixture's own off request is recorded but
+    never acted on — except the TV strip's lend, which must still apply
+    (fm/tv-lend-no-mode) so Hyperion's frames to tv-backlight are never
+    dropped by Spectra's own stream."""
     from fx import device_output
     seam.hf.set_tv_music(False)
     seam.hf.set_fixture("crystal", power="off")
     _run(_settle(seam.hf))
-    assert seam.posts == []
-    assert device_output.withheld() == {}
-    # …but both facts are recorded for when a mode drives the room
+    assert seam.posts == [("tv-backlight", {"live": False})]
+    assert device_output.withheld() == {
+        "tv-backlight": "lent: TV Music is off — Hyperion drives the strip"}
+    # …and the crystal's own off request is recorded but not acted on
     st = seam.store.state()
     assert st.tv_music is False and st.fixtures["crystal"].power == "off"
+
+
+def test_with_no_mode_the_tv_strip_is_not_lent_while_tv_music_is_on(seam):
+    """Same no-mode room, but TV Music is on (its default): no lend reason
+    exists, so the strip is left alone exactly as before this fix."""
+    from fx import device_output
+    _run(_settle(seam.hf))
+    assert seam.posts == []
+    assert device_output.withheld() == {}
 
 
 def test_a_released_room_is_never_written(seam):

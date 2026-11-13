@@ -91,6 +91,11 @@ the WLEDs report `live: false`. Re-assert the mode (R1) when it comes back.
   black) and posts `{"live": false}` once. The sconces on the same effect keep
   going. A media source ACTIVE (`state` playing / paused — not `idle`,
   which is reported but inert) lends it too.
+- **The lend applies whenever Spectra holds the room, whether or not a mode
+  drives it** (fixed 2026-11-12, fm/tv-lend-no-mode): with no mode set,
+  every other fixture stays inert as before, but the TV strip is still
+  withheld and told `{"live": false}` — Hyperion's own frames must never be
+  dropped by Spectra's stream just because house lighting has no mode.
 - **The lend is honoured only while Hyperion is actually streaming to the
   strip, whenever the current mode's own plan also wants that strip
   powered off** (e.g. Away). Spectra re-checks the strip's own `live` flag
