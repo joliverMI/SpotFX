@@ -1209,7 +1209,27 @@
           "max": 5,
           "default": 0.0,
           "help_topic": "radial-base-rotation",
-          "note": "Seconds the rotation eases up to the song's own speed from the scene's first frame (the star improve plan, 2026-11-12: 'spin from the beginning'). 0 = the old behaviour (the effect default; STAR's Matrix entry carries 1.0). The 70% speed cap (fx/effects/radial.py ROTATION_CAP_REV_S, 3.36 rev/s) is a constant, not a param."
+          "note": "Seconds the rotation eases up to the song's own speed from the scene's first frame (the star improve plan, 2026-11-12: 'spin from the beginning'). 0 = the old behaviour (the effect default; STAR's Matrix entry carries 1.0). The speed cap (fx/effects/radial.py ROTATION_CAP_DEG_FRAME, 18 degrees per rendered frame since the spin smooth plan, 2026-11-12; it was 3.36 rev/s) is a constant, not a param."
+        },
+        "spin_release_low_s": {
+          "label": "Spin Release, calm (s)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 3,
+          "default": 0.0,
+          "help_topic": "star-spin-smooth",
+          "note": "Seconds a bass hit's spin burst is spread over when the section energy is 0 (the lazier end). The spin smooth plan, 2026-11-12 (his 'the burst fade should be snappier at higher energies and lazier at low energies'): a one-pole low-pass on the per-frame advance, total turn preserved, so a steady passage turns exactly as far as without it. 0 = none (the effect default; STAR's Matrix entry carries 0.45)."
+        },
+        "spin_release_high_s": {
+          "label": "Spin Release, intense (s)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 3,
+          "default": 0.0,
+          "help_topic": "star-spin-smooth",
+          "note": "Seconds a bass hit's spin burst is spread over when the section energy is 1 (the snappier end); a straight line between the two ends, and a change of energy only changes the pace of the fade, never the motion itself. 0 = none (the effect default; STAR's Matrix entry carries 0.2)."
         },
         "star_wave": {
           "label": "Star Wave",

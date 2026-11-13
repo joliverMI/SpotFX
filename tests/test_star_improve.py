@@ -147,8 +147,11 @@ def test_ease_in_zero_is_today():
 # ── 3. the cap ─────────────────────────────────────────────────────────────
 
 def test_cap_holds_the_total_advance_and_is_identity_below():
-    cap = radial.ROTATION_CAP_REV_S
-    assert abs(cap - 0.7 * CEIL) < 1e-9 and abs(cap - 3.36) < 1e-9
+    # the spin smooth plan (2026-11-12) re-expressed the cap per RENDERED
+    # FRAME (his "do 18 degrees per frame for now"); it was 3.36 rev/s
+    cap = radial.ROTATION_CAP_REV_FRAME
+    assert abs(radial.ROTATION_CAP_DEG_FRAME - 18.0) < 1e-9
+    assert abs(cap - 18.0 / 360.0) < 1e-12
 
     async def go():
         with tempfile.TemporaryDirectory() as tmp:
@@ -161,17 +164,18 @@ def test_cap_holds_the_total_advance_and_is_identity_below():
         return slow, fast, charged
     slow, fast, charged = run(go())
     assert np.allclose(slow[1:] / DT, 2.0, atol=1e-6)            # untouched below the cap
-    assert np.all(fast[1:] / DT <= cap + 1e-6)
-    assert abs(fast[5:].mean() / DT - cap) < 1e-6
-    assert np.all(charged / DT <= cap + 1e-6)
+    assert np.all(fast[1:] <= cap + 1e-9)                         # revolutions PER FRAME
+    assert abs(fast[5:].mean() - cap) < 1e-9
+    assert np.all(charged <= cap + 1e-9)
 
 
 def test_cap_clamps_forward_when_a_frame_stall_advances_more_than_half_a_turn():
     """A render stall (dt up to the 0.1s clamp in draw()) combined with a
     loud drive can advance the pattern by more than half a revolution in
-    one governed frame. The governor must still clamp FORWARD to +cap*dt —
-    never misread the advance's sign and spin the star backward."""
-    cap = radial.ROTATION_CAP_REV_S
+    one governed frame. The governor must still clamp FORWARD to +cap —
+    never misread the advance's sign and spin the star backward. The cap
+    is per rendered frame, so a long frame is clamped to the same angle."""
+    cap = radial.ROTATION_CAP_REV_FRAME
 
     async def go():
         with tempfile.TemporaryDirectory() as tmp:
@@ -190,7 +194,7 @@ def test_cap_clamps_forward_when_a_frame_stall_advances_more_than_half_a_turn():
     before, after, dt = run(go())
     adv = (after - before + 0.5) % 1.0 - 0.5
     assert adv > 0.0                                # forward, never a misread reversal
-    assert abs(adv / dt - cap) < 1e-6                # clamped to exactly the cap
+    assert abs(adv - cap) < 1e-9                    # clamped to exactly the cap (per frame)
 
 
 # ── 4. the star wave ───────────────────────────────────────────────────────

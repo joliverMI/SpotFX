@@ -124,6 +124,24 @@ in mind. `tests/test_star_improve.py` proves the script on his STAR shape.
 The TV ring (`scripts/tv_ring_pixel_map.py`) is a DEVICE change, not this
 scene's data. The radial-effect and melt-effect skills carry the mechanics.
 
+## The spin smooth plan (2026-11-12) — what `scripts/star_spin_smooth_scene_data.py` changes on THIS scene
+
+His words after the star improve plan went live: "too jerky in it's spin
+especially on big bass hits ... We need to cap the burst speed ... it
+shouldn't be jerky, but it should be dynamic"; then "the burst fade should
+be snappier at higher energies and lazier at low energies. do 18 degrees
+per frame for now". ONE change, same raw-dict discipline (backup,
+--revert, structural diff, dry run by default), DJ applies at deploy:
+Matrix entry `spin_release_low_s 0.45`, `spin_release_high_s 0.2` — the
+seconds a bass hit's spin burst is spread over at section energy 0 and 1
+(a straight line between; the effect default 0/0 is today). The 18 deg per
+rendered frame clamp is engine code (`ROTATION_CAP_DEG_FRAME`), not scene
+data. Expect a loud fire (spin 0.94 by the `spin` binding at trigger
+intensity 1) to sit AT the clamp through a steady loud passage — that is
+the trade he chose over 22 deg, revisit the constant, not the binding, if
+he wants it faster. `tests/test_star_spin_smooth.py` proves the script on
+his STAR shape. The radial-effect skill carries the mechanics.
+
 ## Sonic reach
 
 Scene settings and flare kinds only via the scene console; the Matrix

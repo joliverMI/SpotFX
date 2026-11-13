@@ -181,6 +181,38 @@ first test of the workflow: that session's entry goes here next.
   it's ready" (from the plan artifact).
 - Room verdict: pending (after deploy).
 
+### 2026-11-12 — star-spin-smooth (improve, Matrix effect motion law, STAR / Radial)
+- Rounds: 2 (one analysis page, one answer); questions asked: 4; answered
+  explicitly: 4 (Q1/Q2 "yes to both", Q3 "do 18 degrees per frame for
+  now", Q4 answered with his OWN law instead of a pick).
+- Changed the plan: Q4 release length (0.3 s rec vs 0.2 / 0.45) → "the
+  burst fade should be snappier at higher energies and lazier at low
+  energies" — an ENERGY-DEPENDENT time, not one of the three offered
+  (promote: when a timing param is offered as fixed options, also offer
+  "follows the music energy" with the two ends, the way the star wave's
+  period and Pulse's calm/intense pairs already do; he reaches for it
+  himself). Q3 clamp → 18 deg with "for now" (demote: he does not want to
+  own a constant's exact value yet; ship it as one named constant, say so).
+- Waved through / unanswered: none; Q1 (how he judges a burst) and Q2
+  (only bursts change, steady speed kept) confirmed as stated.
+- New preference: he answers well from SYNCED SIDE-BY-SIDE animations of
+  today vs each candidate on the real crystal, with the per-frame numbers
+  (peak deg/frame, rise/decay ms, cap hits) beside them and a ¼× slow-
+  motion pair of one big hit — one message back, no re-render asked.
+  "Do actual analysis on how it moves" means a motion trace, not a look.
+- Facts that were decisive and he could not know: the crystal renders at
+  30 fps (not the 60 Hz the audio runs at), so the "cap" question was an
+  aliasing question (180/edges deg per frame); the jerk was the lows
+  filter's burst shape, not the cap (no cap hits at his usual spin).
+  State the render rate and the per-frame jump limit in any motion plan.
+- Visuals: four synced cases (two songs at his two live spin levels), a
+  mean-preserving law so "steady speed unchanged" was a number (within 3%)
+  not a claim; what missed: a 22 deg variant was rendered for the loud case
+  only — he picked 18 without it, but a full-range row of clamp levels
+  would have fit his §13 preference better.
+- Confirmation: "yes to both questions"; "do 18 degrees per frame for now".
+- Room verdict: pending (after deploy).
+
 ### Template for the next entry
 ```
 ### YYYY-MM-DD — <plan name> (<new|improve>, <kind>, <effect/scene>)

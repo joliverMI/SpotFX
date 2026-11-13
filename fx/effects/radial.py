@@ -50,10 +50,48 @@ CHARGE_SPIN_REV_S = 0.9 * ROTATION_SPEED_SCALE
 # the standard range they sway between. I want it to go through 0").
 #
 # THE CAP: a hard clamp on the TOTAL per-frame advance of the pattern — the
-# audio spin, the base floor and the charge spin-up together — at 70% of
-# the old reactive ceiling (6 rev/s x ROTATION_SPEED_SCALE = 4.8 -> 3.36).
-# Identity below it: a frame that advances less is untouched.
-ROTATION_CAP_REV_S = 0.7 * 6.0 * ROTATION_SPEED_SCALE
+# audio spin, the base floor and the charge spin-up together. Identity
+# below it: a frame that advances less is untouched. First shipped as a
+# rate (ROTATION_CAP_REV_S = 70% of the old 4.8 rev/s ceiling = 3.36 rev/s);
+# re-expressed per RENDERED FRAME by the spin smooth plan below, because
+# what the eye cannot follow is a jump per frame, not a rate.
+#
+# ── THE SPIN SMOOTH PLAN (2026-11-12, data/star-spin-smooth/plan.md; the
+# Admiral, after the star improve plan went live: "it is too jerky in it's
+# spin especially on big bass hits. the burst speed is too fast and fades
+# too fast. I think sometimes it moves so fast it's hard to tell it moved.
+# We need to cap the burst speed ... it shouldn't be jerky, but it should
+# be dynamic"; after the analysis page: "the burst fade should be snappier
+# at higher energies and lazier at low energies. do 18 degrees per frame
+# for now").
+#
+# The crystal renders at 30 fps (its WLED device's refresh_rate; a virtual
+# renders at its slowest device) while the audio callback runs at 60 Hz,
+# so a rendered frame carries two callbacks' turn and the old 3.36 rev/s
+# cap was 40 deg per frame — past the 30 deg (180/edges) at which a 6-point
+# star's turn reads backwards (temporal aliasing). The cap is therefore a
+# per-frame angle: 18 deg per rendered frame = 1.5 rev/s at 30 fps, under
+# the aliasing limit of every edge count STAR rolls (3..6 edges -> 60..30
+# deg). "For now": one constant, retune here.
+ROTATION_CAP_DEG_FRAME = 18.0
+ROTATION_CAP_REV_FRAME = ROTATION_CAP_DEG_FRAME / 360.0
+# THE RELEASE: a one-pole low-pass on the per-frame ADVANCE (not on the
+# speed), so a bass hit's burst, which the lows filter (ExpFilter decay
+# 0.2 per 60 Hz frame) shapes into ~6 rendered frames and the squared spin
+# gain sharpens further, is spread over `tau` seconds instead. Unity DC
+# gain: the total turn and the mean speed are preserved (a steady loud
+# passage turns exactly as far as today), only the burst's rise and decay
+# stretch. The release time follows the told section `energy` (the same
+# pushed value the star wave paces itself by): `spin_release_low_s` at
+# energy 0 (lazier), `spin_release_high_s` at energy 1 (snappier), linear
+# between — only the filter coefficient changes, the state integrates, so
+# a change of energy never steps the motion. Effect default 0 = no filter,
+# today's motion to the frame; STAR's Matrix entry carries 0.45 / 0.2
+# (scripts/star_spin_smooth_scene_data.py). Analysis: data/star-spin-
+# smooth/report.md (rms jerk -85..90%, mean speed within 3%).
+DEFAULT_SPIN_RELEASE_S = 0.0
+STAR_SPIN_RELEASE_LOW_S = 0.45
+STAR_SPIN_RELEASE_HIGH_S = 0.2
 # THE EASE-IN: from activation the advance is scaled by a smoothstep over
 # this many seconds, so the star is already turning on its first frames and
 # reaches the song's own speed over ~1 s instead of starting at whatever
@@ -324,6 +362,23 @@ class Radial2d(Twod):
                 default=DEFAULT_SPIN_EASE_IN_S,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=5.0)),
             vol.Optional(
+                "spin_release_low_s",
+                description=(
+                    "Seconds a bass hit's spin burst is spread over when the "
+                    "music is calm (energy 0); 0 = none, the burst as the "
+                    "audio gives it"
+                ),
+                default=DEFAULT_SPIN_RELEASE_S,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=3.0)),
+            vol.Optional(
+                "spin_release_high_s",
+                description=(
+                    "Seconds a bass hit's spin burst is spread over when the "
+                    "music is intense (energy 1); straight line between"
+                ),
+                default=DEFAULT_SPIN_RELEASE_S,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=3.0)),
+            vol.Optional(
                 "star_wave",
                 description=(
                     "Sway Star between Star Wave Low and High on a slow wave "
@@ -470,6 +525,9 @@ class Radial2d(Twod):
         self._active_s = 0.0
         self._spin_frame_prev = None
         self._wave_phase = None
+        # THE SPIN SMOOTH PLAN: the release filter's state — the smoothed
+        # per-frame advance (revolutions); None = not seeded / release off
+        self._spin_lp = None
         super().__init__(ledfx, config)
 
     def config_updated(self, config):
@@ -514,6 +572,12 @@ class Radial2d(Twod):
         # value is never rewritten.
         self.spin_ease_in_s = float(
             self._config.get("spin_ease_in_s", DEFAULT_SPIN_EASE_IN_S) or 0.0)
+        # THE SPIN SMOOTH PLAN: the release's two ends (seconds at energy 0
+        # and at energy 1); the per-frame value is read in _spin_release_s
+        self.spin_release_low_s = float(
+            self._config.get("spin_release_low_s", DEFAULT_SPIN_RELEASE_S) or 0.0)
+        self.spin_release_high_s = float(
+            self._config.get("spin_release_high_s", DEFAULT_SPIN_RELEASE_S) or 0.0)
         if not self._config.get("star_wave", False):
             self._wave_phase = None
 
@@ -1277,25 +1341,44 @@ class Radial2d(Twod):
         splat_brighter(layer, x, y, cols[on] * b[on, None])
         return layer
 
+    def _spin_release_s(self):
+        """THE SPIN SMOOTH PLAN's release time this frame, seconds:
+        `spin_release_low_s` at told `energy` 0 (lazier) to
+        `spin_release_high_s` at 1 (snappier), linear between. 0 = off."""
+        lo = self.spin_release_low_s
+        hi = self.spin_release_high_s
+        if lo <= 0.0 and hi <= 0.0:
+            return 0.0
+        energy = min(max(float(self._config.get("energy", 0.5) or 0.0), 0.0), 1.0)
+        return max(lo + (hi - lo) * energy, 0.0)
+
     def _govern_rotation(self, dt):
-        """THE STAR IMPROVE PLAN's ease-in and cap, on the TOTAL advance of
-        the pattern this frame — whatever the audio callback, the base
-        floor and the charge spin-up added to `_frame_adv` since the last
-        rendered frame (an exact, never-wrapped sum — unlike `spin_total`
-        itself, kept in [0, 1), this can be larger than half a revolution
-        and still read correctly):
+        """THE STAR IMPROVE PLAN's ease-in and cap and THE SPIN SMOOTH PLAN's
+        release, on the TOTAL advance of the pattern this frame — whatever
+        the audio callback, the base floor and the charge spin-up added to
+        `_frame_adv` since the last rendered frame (an exact, never-wrapped
+        sum — unlike `spin_total` itself, kept in [0, 1), this can be
+        larger than half a revolution and still read correctly):
 
             adv  = _frame_adv                                 (exact, drained)
             adv *= smoothstep(active_s / spin_ease_in_s)      (the ease-in)
-            adv  = clamp(adv, -cap dt, +cap dt)               (the cap)
+            lp  += (adv - lp) (1 - exp(-dt / tau))            (the release)
+            adv  = clamp(lp, -cap, +cap)                      (the cap)
 
         so the first frames after activation turn gently up to the song's
-        own speed, and no frame ever turns faster than ROTATION_CAP_REV_S
-        (3.36 rev/s = 70% of the old 4.8 ceiling). Below the cap a frame
-        is untouched; with spin_ease_in_s 0 the ease is gone. The first
-        rendered frame (nothing to measure against — a hand-off may have
-        just set the angle) is never governed. The pre-drop outline keeps
-        its own spin (`_pd_spin`); it is not rotation of the pattern."""
+        own speed, a bass hit's burst is spread over `tau` =
+        _spin_release_s() seconds with its total turn preserved (unity DC
+        gain — the filter is on the advance, so a steady passage turns
+        exactly as far as without it), and no frame ever turns more than
+        ROTATION_CAP_DEG_FRAME (18 deg per rendered frame — under the
+        180/edges deg at which an N-point star's turn reads backwards).
+        Below the cap a frame is untouched; with spin_ease_in_s 0 the ease
+        is gone; with both release params 0 the filter is bypassed and the
+        motion is today's to the frame. The first rendered frame (nothing
+        to measure against — a hand-off may have just set the angle) is
+        never governed, and seeds the release state on the next. The
+        pre-drop outline keeps its own spin (`_pd_spin`); it is not
+        rotation of the pattern."""
         adv = self._frame_adv
         self._frame_adv = 0.0
         prev = self._spin_frame_prev
@@ -1304,7 +1387,16 @@ class Radial2d(Twod):
             if ease > 0.0 and self._active_s < ease:
                 x = self._active_s / ease
                 adv *= x * x * (3.0 - 2.0 * x)
-            cap = ROTATION_CAP_REV_S * dt
+            tau = self._spin_release_s()
+            if tau > 0.0:
+                if self._spin_lp is None:
+                    self._spin_lp = adv
+                else:
+                    self._spin_lp += (adv - self._spin_lp) * (1.0 - np.exp(-dt / tau))
+                adv = self._spin_lp
+            else:
+                self._spin_lp = None
+            cap = ROTATION_CAP_REV_FRAME
             if adv > cap:
                 adv = cap
             elif adv < -cap:
