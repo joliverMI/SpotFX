@@ -208,7 +208,15 @@ the −0.7..+0.7 × 3–6 edges grid showed otherwise). On STAR the `star` value
 between −0.2 and +0.4 (`star_wave`, pace by the told section energy) and nothing on the scene —
 binding or flare kind — writes it outside that range. STAR spins from its first frame (a 1 s
 ease-in, and the fire-time sign-flip-then-clamp defect that landed Speed 0 on half of all fires is
-fixed), is capped at 3.36 rev/s (70% of the old ceiling) with no change below it, and has NO quiet
+fixed); the per-frame advance is clamped at `ROTATION_CAP_DEG_FRAME` = 18 deg per rendered frame
+(replacing the original 3.36 rev/s rate cap, which proved to be 40 deg per rendered frame at the
+crystal's real 30 fps — past the 180/edges deg at which a 6-point star's turn reads backwards —
+the spin smooth plan, 2026-11-12, `data/star-spin-smooth/plan.md`, PR fm/star-spin-smooth; the
+Admiral: "too jerky in it's spin especially on big bass hits ... We need to cap the burst speed
+... do 18 degrees per frame for now"), and a bass hit's burst is now spread by a unity-gain
+release whose length runs `spin_release_low_s` (STAR 0.45) at told energy 0 to
+`spin_release_high_s` (STAR 0.2) at 1 ("the burst fade should be snappier at higher energies and
+lazier at low energies") while the total turn is preserved. It has NO quiet
 floor by his word (`base_rotation` stays 0). Flares on the two upper bands morph the edge count to
 a new value that holds until the next flare/update ("Edge Morph", `random_other`). STAR's Melt
 carries `dark_floor 0.5`; the TV backlight carries a per-LED ring lookup so every strip effect
