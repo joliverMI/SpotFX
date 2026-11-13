@@ -7,15 +7,26 @@ FIXTURES, and what Spectra then does to them:
              source (Roku, Switch, Blu-ray) is on: Spectra stops streaming to
              it (fx/device_output WITHHELD — no packet leaves) and tells the
              WLED to leave realtime once ({"live": false}), and keeps driving
-             the sconces on the same virtual. Back on return, in step. If the
-             CURRENT MODE's own plan also wants the strip powered off, the
-             lend is honoured only while Hyperion is confirmed actually
-             streaming to it (`_hyperion_streaming`/`_refresh_hyperion`) —
-             otherwise the strip is switched off like any other MODE OFF
-             fixture, never left lit on nobody's signal (found 2026-10-05,
-             the TV backlight incident).
+             the sconces on the same virtual. Back on return, in step: the
+             stream simply resumes — no power write. The lend holds whatever
+             the current mode's plan says about the strip.
+  TV STRIP POWER IS HOME ASSISTANT'S (2026-11-12, the Admiral via River,
+             after the strip went dark under a Roku: "the hand-back must be
+             live:false only - never on:false or bri on tv-backlight when
+             handing back to HyperHDR (HA owns the strip power/master
+             brightness)"). A TV strip (`tv_strip_ids()`, `is_tv_strip()`)
+             is NEVER sent `{"on": …}` or `bri` by any path here: not from a
+             mode's off list, not from a fixture override, not on a mode's
+             power-on, not on the post-release hand-back. Lent: one
+             `{"live": false}`, withheld. Not lent: streamed, nothing
+             written. (Superseded: 2026-10-05's rule that switched a
+             mode-off TV strip off unless Hyperion was confirmed streaming —
+             right after a lend Hyperion is not streaming YET, so it powered
+             the strip off under the Roku.) night_power.py holds the same
+             rule for a night's captures.
   ON / OFF   a button (the crystal's paddle, the porch button) switches a
-             WLED off: no stream, then {"live": false}, then {"on": false}.
+             WLED off (never a TV strip — above): no stream, then
+             {"live": false}, then {"on": false}.
              On: {"on": true}, THEN the stream — the order a powered-off WLED
              needs whatever its firmware does with a stream while off
              (spectra/services/night_power.py says why that is unknown).
@@ -68,7 +79,9 @@ FIXTURES, and what Spectra then does to them:
              to black, then `house.mode_off_devices()` names it and it is
              switched off exactly like a button OFF — no stream at all. A
              Light Show Steady/Freeze hold on the fixture wins (a higher
-             layer): it stays powered and streamed.
+             layer): it stays powered and streamed. A TV strip in a mode's
+             off list is not switched off: it is streamed (the fade's
+             black) unless lent.
 
 NO SOFT POWER (retired 2026-10-12). Phase 3 hid the WLED's own preset
 by dropping `bri` to 1 around every switch; with brightness Home
@@ -85,8 +98,10 @@ write to a WLED this take, Spectra reads the fixture's power
 picture); when the room is RELEASED it writes `{"on": <before>}` back
 (read back) to the address it had — and only when Spectra's own last power
 write left it different, so a fixture Spectra never switched is never
-touched. Found 2026-10-05: a take left his dining table under-glow ON — it
-had been off. The rule: a fixture that was off before a take is off after.
+touched. A TV strip is never recorded and never handed back (its power is
+Home Assistant's); a stale entry for one is dropped unwritten. Found
+2026-10-05: a take left his dining table under-glow ON — it had been off.
+The rule: a fixture that was off before a take is off after.
 Only a release hands back: a handover to the older SpotFX process needs
 the fixtures on, and a restart keeps the picture. No brightness is ever
 handed back — Spectra never changed it.
@@ -152,11 +167,6 @@ MAX_RECENT = 12
 MAINS_KNOCK_S = 600.0
 #: phase 3: HAND-BACK — attempts per fixture before it is dropped (named)
 HANDBACK_ATTEMPTS = 3
-#: how often a TV strip's own `live` flag (is Hyperion actually streaming
-#: to it right now) is re-read — one json/info per strip per this long,
-#: never per tick.
-HYPERION_CHECK_S = 5.0
-
 TARGET_ON = "on"        # streamed, powered on (brightness is HA's)
 TARGET_OFF = "off"      # withheld, {"on": false}
 TARGET_LENT = "lent"    # withheld, {"live": false} once, nothing else
@@ -264,23 +274,6 @@ async def _default_report_refresh() -> None:
     await activation_report.recheck(retry_init=False)
 
 
-async def _default_read_live(device_id: str) -> Optional[bool]:
-    """Is a non-Spectra source (Hyperion) actually streaming realtime data
-    to this device RIGHT NOW — `json/info`'s own `live` flag, read the same
-    way `probe_device_live`/dark_fixture_watch.py already do. `None` when
-    unconfirmed (unreachable, no driver yet) — the TV strip's own lend
-    decision treats that the same as "not streaming" (the decision's own
-    words: switch it off unless Hyperion is ACTUALLY streaming), never as
-    a reason to assume it is."""
-    from spectra.services.live_host import live
-    read = await live.read_emission(device_id, read_state=False,
-                                    http_timeout_s=HTTP_TIMEOUT_S,
-                                    timeout_s=HTTP_TIMEOUT_S + 1.0)
-    if not read.checkable or not read.reachable:
-        return None
-    return bool(read.live)
-
-
 @dataclass
 class Deps:
     post: Callable[[Any, dict], Awaitable[None]] = _default_post
@@ -295,7 +288,6 @@ class Deps:
     post_ip: Callable[[str, dict], Awaitable[None]] = _default_post_ip
     get_ip: Callable[[str], Awaitable[dict]] = _default_get_ip
     released: Callable[[], bool] = _default_released
-    read_live: Callable[[str], Awaitable[Optional[bool]]] = _default_read_live
 
 
 deps = Deps()
@@ -334,10 +326,6 @@ class _Runtime:
     handback_task: Optional[asyncio.Task] = None
     handback_attempts: dict = field(default_factory=dict)
     handed_back: list = field(default_factory=list)
-    #: TV strip id -> is Hyperion confirmed actually streaming to it right
-    #: now (None = never confirmed either way — treated as "not streaming")
-    hyperion_live: dict = field(default_factory=dict)
-    hyperion_checked_at: dict = field(default_factory=dict)
     #: (ignored, winner) pairs already warned about this process life — see
     #: `_log_duplicate_ignored`. A duplicate device never stops being one
     #: tick to tick, so without this the warning would re-fire every pass.
@@ -634,37 +622,20 @@ def tv_strip_ids() -> list[str]:
     return out
 
 
-def _hyperion_streaming(did: str) -> bool:
-    """Is Hyperion ACTUALLY streaming to this TV strip right now — read
-    from the cache `_refresh_hyperion` keeps (never a live read here:
-    `desired()` must stay off the event loop). Never confirmed (the cache
-    has nothing for it yet) reads as False — the decision's own direction:
-    a lend is honoured only while Hyperion is confirmed live, never on the
-    strength of "we don't know"."""
-    return bool(_rt.hyperion_live.get(did))
-
-
-async def _refresh_hyperion(host) -> None:
-    """Re-read each TV strip's own `live` flag (json/info) at most once
-    every HYPERION_CHECK_S — not per tick, and only for strips that exist
-    on the live host. Never raises; a failed read leaves the cache as it
-    was (stale, not reset to "not streaming")."""
-    now = deps.clock()
-    for did in tv_strip_ids():
-        dev = host.devices.get(did)
-        if dev is None or not _controllable(dev):
-            continue
-        last = _rt.hyperion_checked_at.get(did, float("-inf"))
-        if now - last < HYPERION_CHECK_S:
-            continue
-        _rt.hyperion_checked_at[did] = now
-        try:
-            live = await deps.read_live(did)
-        except Exception:                                    # noqa: BLE001
-            logger.exception("house fixtures: reading %s's live state failed", did)
-            continue
-        if live is not None:
-            _rt.hyperion_live[did] = live
+def is_tv_strip(did: str) -> bool:
+    """Is `did` one of his TV strips — by resolved id OR by its configured
+    name (so the check still holds when the host is down and a name cannot
+    be resolved). A TV strip's power and master brightness are Home
+    Assistant's: no path in Spectra may ever write `on` or `bri` to it.
+    The only write it ever gets is `{"live": false}` when lent to Hyperion.
+    Never raises: settings that cannot be read fall back to the shipped
+    default strip name."""
+    try:
+        names = {str(n) for n in _settings().tv_strips}
+        return did in names or did in tv_strip_ids()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("house fixtures: resolving the TV strips failed")
+        return did == "tv-backlight"
 
 
 def lend_reasons(st=None) -> dict[str, str]:
@@ -825,13 +796,17 @@ def desired() -> dict[str, tuple[str, str]]:
             continue
         dev = host.devices.get(did)
         ov = st.fixtures.get(did)
-        wants_off = did in mode_off or did in power_off_pending
         if did in st.mains_off:
             out[did] = (TARGET_UNPOWERED, "Home Assistant reports its mains off "
                                           "— not streamed to, not searched for")
-        elif did in lent and (not wants_off or did not in strips
-                               or _hyperion_streaming(did)):
+        elif did in lent:
             out[did] = (TARGET_LENT, lent[did])
+        elif did in strips:
+            # A TV strip that is not lent is simply streamed: its power and
+            # master brightness are Home Assistant's, so no mode off list,
+            # override or power-on ever produces a write to it (2026-11-12,
+            # the Admiral via River: "never on:false or bri on tv-backlight").
+            continue
         elif ov is not None and ov.power == "off" and _controllable(dev):
             out[did] = (TARGET_OFF, f"switched off ({ov.source or 'request'})")
         elif did in mode_off and _controllable(dev) and not _show_holds_visible(did):
@@ -928,7 +903,6 @@ async def _tick() -> None:
         _rt.last_reason = house.inactive_reason()
         _maybe_hand_back()
         return
-    await _refresh_hyperion(host)
     want = desired()
     _rt.last_reason = house.inactive_reason()
     now = deps.clock()
@@ -944,7 +918,8 @@ async def _tick() -> None:
         rec = _forget_power(did)
         was_off = ((prev is not None and prev.target == TARGET_OFF)
                    or (isinstance(rec, dict) and rec.get("target") == TARGET_OFF))
-        if was_off and did in scope and did not in pending_off:
+        if (was_off and did in scope and did not in pending_off
+                and not is_tv_strip(did)):
             dev = host.devices.get(did)
             if dev is not None and _controllable(dev):
                 _start(did, TARGET_ON, "handed back on — no mode drives it now",
@@ -1069,6 +1044,17 @@ async def _transition(did: str, dev, target: str, why: str, *, owned: bool,
     — `{"on": …}` / `{"live": false}`; a WLED's master brightness is Home
     Assistant's and is never in a payload here (module docstring)."""
     outcome, detail = "sent", ""
+    if target in (TARGET_ON, TARGET_OFF) and is_tv_strip(did):
+        # Last line of defence: a TV strip's power is Home Assistant's.
+        # desired() never asks for this; if anything ever does, refuse it
+        # loudly rather than write {"on": ...} to the strip.
+        cur = _rt.inflight.get(did)
+        if cur is not None and cur[1] is asyncio.current_task():
+            _rt.inflight.pop(did, None)
+        _rt.pending_on.discard(did)
+        logger.warning("house fixtures: refused to switch TV strip %s %s (%s) "
+                       "— its power is Home Assistant's", did, target, why)
+        return
     if owned and target in (TARGET_ON, TARGET_OFF):
         await _remember_before(did, dev)
     try:
@@ -1141,7 +1127,7 @@ async def _remember_before(did: str, dev) -> None:
     Its brightness is not recorded: Spectra never changes it, so there is
     nothing of it to give back."""
     st = house_store.state()
-    if did in st.pre_take or not _controllable(dev):
+    if did in st.pre_take or not _controllable(dev) or is_tv_strip(did):
         return
     ip = getattr(getattr(dev, "wled", None), "ip_address", None)
     if not ip:
@@ -1186,6 +1172,16 @@ async def _hand_back() -> None:
     for did, before in sorted(st.pre_take.items()):
         if not deps.released():
             return
+        if is_tv_strip(did):
+            # A TV strip's power is Home Assistant's: never handed back with
+            # {"on": ...}. An entry left from an older build (or a stray
+            # one) is dropped unwritten.
+            st.pre_take.pop(did, None)
+            st.power_applied.pop(did, None)
+            _rt.handback_attempts.pop(did, None)
+            logger.info("house fixtures: %s is a TV strip — its power is Home "
+                        "Assistant's, nothing handed back", did)
+            continue
         ip = before.get("ip")
         payload: dict = {"on": bool(before.get("on"))}
         rec = st.power_applied.get(did)

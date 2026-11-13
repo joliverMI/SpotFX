@@ -173,6 +173,33 @@ there, not in any SpotFX store. A `spectra` restart loads the new device
 config (the restart hazard in AGENTS.md applies). Help topic
 `tv-ring-mapping`; proof `tests/test_star_improve.py`.
 
+## The TV strip's power is Home Assistant's — Spectra only ever sends `{"live": false}` (2026-11-12)
+
+The Admiral via River, after `tv-backlight` went dark under a playing Roku:
+"the hand-back must be live:false only - never on:false or bri on
+tv-backlight when handing back to HyperHDR (HA owns the strip power/master
+brightness)". Every TV strip (`HouseSettings.tv_strips`,
+`house_fixtures.is_tv_strip`) gets exactly one kind of Spectra write: lent to
+Hyperion, a `{"live": false}`; not lent, it is only streamed. Closed paths,
+each with a test: `house_fixtures.desired()` (a mode's off list, a fixture
+override, a mode power-on), `_tick`'s "switched back on after the mode is
+cleared", `_transition` (refuses ON/OFF for a TV strip outright),
+`_remember_before`/`_hand_back` (never recorded, a stale pre-take entry is
+dropped unwritten), and `night_power.owned()` (a TV strip found off is left
+off and named — so a night's capture of it while HA has it off measures an
+unlit strip). `bri` cannot reach any WLED from this codebase at all:
+`fx/utils.py::WLED._wled_request` refuses it (VENDOR #78). So a `bri` POST
+the stand-in logs while the strip is lent is NOT Spectra's. The only thing
+Spectra sent a lent strip on a ~5 s clock was the retired Hyperion check's
+`json/info` GET (`HYPERION_CHECK_S`, removed with the gate), so after the
+one `{"live": false}` a lent strip now gets no Spectra traffic at all. The same night
+(22:04:23–44) neither `spectra`'s nor `spotfx`'s journal showed any write
+and no LedFX was running on this host. Our unconfirmed guess is HyperHDR's
+own WLED driver switching the strip on with its "overwrite brightness"
+default; check the source address in the stand-in's own log. Binding
+statement: the `house_fixtures.py` module docstring, "TV STRIP POWER IS HOME
+ASSISTANT'S".
+
 ## SPECTRA phone A/V-sync instrument (`/avsync`) — MEASURE the audio/visual offset, don't argue it
 
 `spectra/services/av_sync_{correlate,audio_ref,pattern,session}.py` +

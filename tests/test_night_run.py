@@ -464,12 +464,14 @@ def _whole_night(monkeypatch, *, blow_up=False, on=False):
     measuring_session(monkeypatch)
 
     helper = _Wled(on=on)
-    device = _Device("tv-backlight", helper)
+    # NOT the TV strip: its power is Home Assistant's and a night never
+    # switches it (night_power._is_tv_strip, 2026-11-12).
+    device = _Device("dining-table", helper)
 
     async def listing():
-        return [{"id": "tv-backlight", "type": "wled",
-                 "config": {"name": "TV Backlight", "ip_address": "10.0.0.5"},
-                 "virtuals": ["tv-mapper"]}]
+        return [{"id": "dining-table", "type": "wled",
+                 "config": {"name": "Dining Table", "ip_address": "10.0.0.5"},
+                 "virtuals": ["dining-mapper"]}]
 
     async def price(items, now=None):
         return {"items": [{"name": i.name, "seconds": 30.0} for i in items],
@@ -493,7 +495,7 @@ def _whole_night(monkeypatch, *, blow_up=False, on=False):
     monkeypatch.setattr(night_run, "_live_devices", live_devices)
     monkeypatch.setattr(night_run, "run_fixture_rows",
                         lambda items, entries: [
-                            {"id": "tv-backlight", "name": "TV Backlight",
+                            {"id": "dining-table", "name": "Dining Table",
                              "address": "10.0.0.5"}])
     monkeypatch.setattr(capture_queue, "run_queue", run_queue)
     monkeypatch.setattr(flare_preview_hold, "close_hold", close_hold)
@@ -517,13 +519,13 @@ def test_a_whole_night_turns_the_fixture_on_puts_it_back_and_reads_it_back(
     assert helper.writes == [True, False], \
         "the fixture was not turned on for the captures, or not put back"
     assert helper.on is False
-    assert run.power["turned_on"] == ["tv-backlight"]
-    assert run.power["restored"] == ["tv-backlight"], \
+    assert run.power["turned_on"] == ["dining-table"]
+    assert run.power["restored"] == ["dining-table"], \
         "the record stopped at the pre-restore snapshot"
 
     exit_report = run.exit_report
     assert exit_report["verified_at_the_light"] is True
-    assert exit_report["dark"] == ["tv-backlight"]
+    assert exit_report["dark"] == ["dining-table"]
     assert exit_report["problems"] == []
     # The witness said nothing, so nothing claims these captures were clean.
     assert exit_report["witness"]["configured"] is False
@@ -531,7 +533,7 @@ def test_a_whole_night_turns_the_fixture_on_puts_it_back_and_reads_it_back(
 
     stored = night_run.load_nights()[-1]
     assert stored["state"] == night_run.STATE_COMPLETE
-    assert stored["exit"]["dark"] == ["tv-backlight"]
+    assert stored["exit"]["dark"] == ["dining-table"]
 
 
 def test_a_night_that_blows_up_still_puts_his_switch_back_and_says_so(
@@ -543,11 +545,11 @@ def test_a_night_that_blows_up_still_puts_his_switch_back_and_says_so(
     assert run.state == night_run.STATE_FAILED
     assert "stopped on an unexpected error" in run.detail
     assert helper.on is False, "a failed night left the fixture on"
-    assert run.power["restored"] == ["tv-backlight"]
+    assert run.power["restored"] == ["dining-table"]
     # THE EXIT REPORT IS NOT OPTIONAL: it is produced on the failing path
     # too, which is the path somebody actually needs it on.
     assert run.exit_report["verified_at_the_light"] is True
-    assert run.exit_report["dark"] == ["tv-backlight"]
+    assert run.exit_report["dark"] == ["dining-table"]
 
 
 def test_a_fixture_already_on_is_left_alone_and_named_as_still_emitting(
@@ -558,8 +560,8 @@ def test_a_fixture_already_on_is_left_alone_and_named_as_still_emitting(
     run, helper = _whole_night(monkeypatch, on=True)
 
     assert helper.writes == [], "a fixture already on was written to anyway"
-    assert run.power["actions"]["tv-backlight"] == "already_on"
-    assert run.exit_report["emitting"] == ["tv-backlight"]
+    assert run.power["actions"]["dining-table"] == "already_on"
+    assert run.exit_report["emitting"] == ["dining-table"]
     assert run.exit_report["dark"] == []
     assert run.exit_report["problems"], \
         "a run fixture still lit at exit was not named"

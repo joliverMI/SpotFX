@@ -96,18 +96,20 @@ the WLEDs report `live: false`. Re-assert the mode (R1) when it comes back.
   every other fixture stays inert as before, but the TV strip is still
   withheld and told `{"live": false}` — Hyperion's own frames must never be
   dropped by Spectra's stream just because house lighting has no mode.
-- **The lend is honoured only while Hyperion is actually streaming to the
-  strip, whenever the current mode's own plan also wants that strip
-  powered off** (e.g. Away). Spectra re-checks the strip's own `live` flag
-  every few seconds; while the mode wants it off and Hyperion is not
-  confirmed streaming, Spectra switches the strip off instead of leaving
-  it lit on nobody's signal (fixed 2026-10-05 — Away previously left a
-  static dim amber on the TV backlight with Hyperion not running). A mode
-  that does not want the strip off is unaffected: "TV Music default on,
-  off only for Hyperion" still holds.
-- It comes back when TV Music is ON **and** no media source is on: Spectra
-  writes `{"on": true}` (power only — see Brightness below), then lets the
-  stream resume.
+- **Spectra never writes the TV strip's power or brightness** (2026-11-12,
+  fm/tv-handback-no-off — the Admiral via River: "the hand-back must be
+  live:false only - never on:false or bri on tv-backlight when handing back
+  to HyperHDR (HA owns the strip power/master brightness)"). Lent, the only
+  write is `{"live": false}`; not lent, Spectra just streams to it. No
+  mode's off list, fixture override (`PUT /house/fixture/tv-backlight
+  {"state": ...}` is recorded but never acted on), mode power-on,
+  post-release hand-back or night run ever sends it `{"on": ...}` or `bri`.
+  SUPERSEDED: the 2026-10-05 rule that switched a mode-off strip off unless
+  Hyperion was confirmed streaming — straight after a lend Hyperion is not
+  streaming yet, so it powered the strip off under a playing Roku. HA owns
+  switching the strip off when nothing should light it.
+- It comes back when TV Music is ON **and** no media source is on: the
+  stream simply resumes — no power write.
 - Recommended HA order: TV Music ON → call `tv-music {"on": true}`; TV Music
   OFF → call it with `false`. The data-line switch is physical either way;
   the call is what stops Spectra streaming to a strip nobody sees.

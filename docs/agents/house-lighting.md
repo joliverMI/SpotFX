@@ -69,7 +69,10 @@ split). Six things:
 - **RECORDED ALWAYS, ACTED ON ONLY WHILE `house.layer_active()`** (a mode
   set, SPECTRA holds the room, no standby) — **except the TV strip's own
   lend to Hyperion, which applies unconditionally** (fixed 2026-11-12,
-  fm/tv-lend-no-mode; see `docs/HOUSE_HA_SEAM.md`'s TV strip section). HA's
+  fm/tv-lend-no-mode; see `docs/HOUSE_HA_SEAM.md`'s TV strip section). A TV
+  strip (`settings.tv_strips`) is never sent `on` or `bri` by any path —
+  lent it gets `{"live": false}` only, otherwise it is just streamed
+  (fm/tv-handback-no-off, 2026-11-12). HA's
   facts (TV Music, the media centre, fixture overrides) live in
   `house_state.json`; the seam's settings (TV strip ids, voice
   fixtures/colours) in the library file. No mode → nothing else withheld,
@@ -435,17 +438,15 @@ fm/house-handover-polish)** — all found the same cutover afternoon:
   `build_plan(current_mode())`, with no dependency on `house.py`'s own
   tick cadence at all. `desired()` now treats any device in that scope as
   "no action yet" (never guessed ON) until `mode_off_devices()` itself
-  claims it. Same fix covers the TV strip's own "lend" branch: when the
-  mode's plan is off AND the strip isn't actually confirmed receiving
-  Hyperion's own realtime stream (`house_fixtures._hyperion_streaming`,
-  cached from `live_host.live.read_emission(..., read_state=False).live`,
-  refreshed at most every `HYPERION_CHECK_S` — never a live read inside
-  `desired()` itself, which must stay off the event loop), it is switched
-  off like any other mode-off fixture instead of staying "lent" on the
-  strength of "TV Music is off" alone. His "TV Music default on, off only
-  for Hyperion" preference is otherwise unchanged. Spec:
-  `tests/test_house_fixtures.py` (the Hyperion-gated lend, both ways, and
-  the never-guess-on race for a fixture that was off AND one that was on).
+  claims it. (This fix once also gated the TV strip's lend on Hyperion
+  actually streaming and switched a mode-off strip off otherwise — RETIRED
+  2026-11-12, fm/tv-handback-no-off: that rule powered a just-lent strip
+  off under a playing Roku before HyperHDR had started. A TV strip's power
+  and master brightness are Home Assistant's; `house_fixtures.is_tv_strip`
+  guards every power path — see the module docstring's "TV STRIP POWER IS
+  HOME ASSISTANT'S".) Spec: `tests/test_house_fixtures.py` (the
+  never-guess-on race for a fixture that was off AND one that was on; the
+  TV-strip incident tests and `test_no_path_ever_writes_power_to_the_tv_strip`).
 - **`POST /ownership/handover` can answer `wait: false`** (default `true`
   — the exact old blocking shape every caller before this field existed,
   including the Spectra UI's own "Take back" button, keeps getting):

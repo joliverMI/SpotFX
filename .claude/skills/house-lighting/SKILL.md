@@ -16,7 +16,7 @@ description: >
 # House lighting engine
 
 `spectra/services/house.py`'s module docstring (and docs/agents/house-lighting.md's "HOUSE
-LIGHTING" sections, phases 1-4) are the binding statements. Five things
+LIGHTING" sections, phases 1-4) are the binding statements. Eight things
 worth knowing cold:
 
 1. **INERT UNLESS THREE THINGS ARE ALL TRUE**: a mode is set, SPECTRA
@@ -110,6 +110,16 @@ worth knowing cold:
    `house.RETIRED_SETTINGS`). Mode `level`/`music_level` are pixel
    brightness and MULTIPLY with HA's brightness. Don't add a brightness
    write back to "fix" a dim fixture — ask HA (River) instead.
+8. **A TV STRIP'S POWER IS HOME ASSISTANT'S TOO (2026-11-12,
+   fm/tv-handback-no-off)** — the one exception to "power follows the
+   mode": a TV strip (`HouseSettings.tv_strips`,
+   `house_fixtures.is_tv_strip`) is never sent `{"on": ...}` by any path
+   (mode off list, override, mode power-on, post-release hand-back,
+   `night_power.owned()`). Lent: `{"live": false}` only. Not lent: just
+   streamed. The 2026-10-05 "switch a mode-off strip off unless Hyperion is
+   confirmed streaming" gate is retired — it darkened the strip under a
+   playing Roku. `tests/test_house_fixtures.py::
+   test_no_path_ever_writes_power_to_the_tv_strip` holds it.
 
 ## Sonic reach
 
