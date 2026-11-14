@@ -186,7 +186,10 @@ export default function SettingsConsolePage() {
         * (design-fidelity pass, 2026-10-14 — audit S1: the live page had
         * no title and put the Sonic console first, so the two direct
         * cards the plan put on this page were below the fold). */}
-      <div className="settings-page-title"><Icon name="settings" size={20} /> Settings</div>
+      <div className="settings-page-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Icon name="settings" size={20} /> Settings
+        <HelpLink topic="install-on-phone" title="Install Spectra on your phone" />
+      </div>
 
       {/* Two direct-control cards (UI declutter plan §3/§9, decided yes) —
         * a stated exception to "talk to Sonic, no forms": these are

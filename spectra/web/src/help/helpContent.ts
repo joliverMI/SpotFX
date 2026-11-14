@@ -2862,6 +2862,15 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Every settings change Sonic makes — and every undo — appears in "Recent changes" with its old and new value, so a misheard word is easy to spot. "Undo last" reverts the most recent settings change (voice or typed) back to its previous value; undoing is itself a logged change, not a deletion, so the history stays honest. Scene/flare changes from the Scenes page popover have their own separate history and their own "↺ Undo last" button (see "Backups, undo, and preview for scene edits" above) — the two undo buttons are independent, one per domain.',
         ],
       },
+      {
+        id: 'install-on-phone',
+        title: 'Install Spectra on your phone',
+        keywords: 'install app home screen pwa progressive web app android chrome manifest icon add to home screen',
+        body: [
+          'Open Spectra in Chrome on your Android phone, then use the ⋮ menu in the top right and tap "Install app" (some versions of Chrome show "Add to Home screen" instead). Spectra gets its own icon on your home screen and opens full-screen, with no browser address bar, the same way Collie installs.',
+          "A deploy always shows up the next time you open the installed app — Spectra's page itself is never cached, only its already-downloaded code, and that code is named by a fingerprint that changes whenever it does, so an old fingerprint is never reused for new code.",
+        ],
+      },
     ],
   },
   {
