@@ -159,7 +159,7 @@ time-related.
 | Per-device timing equalization, the device page, A/V-sync instrument (`/avsync`), the dark-fixture watch, the param orphan watchdog, dynamic colour, the 2D drift gradient + rainbow select, Sonic's token-usage record, S3 light ownership/handover | `docs/agents/devices-and-ownership.md` |
 | `fx/` (vendored LedFX pipeline), any Matrix/Strip effect's cross-cutting mechanics (config-load ordering, background mode, the lull dark point, the strip phase layer, lull hand-off, drop shockwave, the crystal-mapper hex grid) | `docs/agents/fx-effects.md`, and the per-effect skill named in "Orientation" above |
 | An individual effect (Black Hole, Fish, Sauron, Pulse, Radial/STAR, Orbits, Squiggles, Eye, Fireworks, Dancer, Pacman, Melt, Power, Gradient) | the matching `.claude/skills/<effect>-effect` skill first, then `docs/agents/fx-effects.md` for anything cross-cutting |
-| SPA cache headers, SPECTRA icons, the Release-to-HA button, `/spectra/spec`, the shared TopBar, the LedFX write-plane gate, test-harness gotchas | `docs/agents/ui-infra-and-tests.md` |
+| SPA cache headers, SPECTRA icons, the PWA install manifest, the Release-to-HA button, `/spectra/spec`, the shared TopBar, the LedFX write-plane gate, test-harness gotchas | `docs/agents/ui-infra-and-tests.md` |
 | The root xcorr/lock engine's song identity, the whole-song check, `librosa_offset_ms`, backfilling trigger intensity from section energy | `docs/agents/audio-analysis.md` |
 | Absorb Music | `docs/agents/absorb-and-jukebox.md`, `.claude/skills/absorb-music` |
 | The Jukebox (sets, credits, guests, the capture lane, the TV relay) | `docs/agents/absorb-and-jukebox.md` |
