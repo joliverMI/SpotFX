@@ -36,6 +36,20 @@ reading the proxy's `_pass_headers`, not assumed. Regression coverage:
 `tests/test_spa_cache_headers.py` (parametrized over both mounts; proven
 red against the pre-fix code, green after).
 
+## SPECTRA PWA install (manifest, icons) — deliberately no service worker
+
+SPECTRA is installable on Android/Chrome as a home-screen app: `spectra/web/
+public/manifest.webmanifest` + `icon-192.png`/`icon-512.png`/`icon-512-
+maskable.png` (derived from `favicon.svg`'s bolt motif), linked from `spectra/
+web/index.html`'s `<head>`. `start_url`/`scope` are `/spectra/` to match the
+app's actual mount prefix (see the section above). No service worker: the
+SPA-cache-headers fix above already guarantees `index.html` (and the SPA
+fallback) are `Cache-Control: no-cache` and `/assets/*` is content-hashed, so
+a deploy is always picked up on next open with zero added caching surface —
+adding a service worker here would only reintroduce the staleness risk the
+section above exists to prevent. Help entry: `install-on-phone` in
+`helpContent.ts`, linked from the Settings page's own "?".
+
 ## SPECTRA icons are inline SVG, never a raw Unicode character — his "appears as an X" report (2026-10-06)
 
 Found 2026-10-06: "Force colour" and "Snap generated cues to beat" both
