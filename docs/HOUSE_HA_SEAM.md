@@ -52,7 +52,7 @@ Standard in the middle of the night.
 
 | Call | Body | Answer | Replaces (R#) |
 |---|---|---|---|
-| `GET /house/heartbeat` | — | `{"state", "lighting_ok", "house_enabled", "mode", "clock_mode", "ha_value", "phase", "media", "tv_music", "tv_strip", "voice", "withheld", "owner", "uptime_s", "at_ms"}` | R17's fallback read |
+| `GET /house/heartbeat` | — | `{"state", "lighting_ok", "house_enabled", "mode", "clock_mode", "ha_value", "phase", "media", "tv_music", "tv_strip", "tv_strip_borrowed_by_voice", "voice", "voice_borrow", "withheld", "owner", "uptime_s", "at_ms"}` | R17's fallback read |
 | `PUT /house/mode` *(phase 1)* | `{"ha_mode": "<lighting_mode>", "source": "ha"}` | `status`: applied / unchanged / held_manual / unmapped | R1 |
 | `PUT /house/tv-music` | `{"on": true \| false}` | `status`: recorded / unchanged; `tv_strip` | R6 |
 | `PUT /house/media` | `{"source": "roku" \| "switch" \| "bluray" \| …, "state": "playing" \| "paused" \| "idle" \| "stopped"}` | `status`: applied / recorded / unchanged; `note` when no mode answers | R7 |
@@ -113,6 +113,9 @@ the WLEDs report `live: false`. Re-assert the mode (R1) when it comes back.
 - Recommended HA order: TV Music ON → call `tv-music {"on": true}`; TV Music
   OFF → call it with `false`. The data-line switch is physical either way;
   the call is what stops Spectra streaming to a strip nobody sees.
+- **One exception** (2026-11-15, fm/spectra-voice-indicators): a lent TV
+  strip in `settings.voice_fixtures` can be borrowed by the voice overlay
+  instead of left to Hyperion/HyperHDR — see Voice (R8) below.
 
 ### Media / TV mode (R7)
 
@@ -186,6 +189,20 @@ streams.
 - Skipped per fixture when the Light Show holds it, it is lent or off, or the
   room is on standby; skipped entirely with no mode. A colour nobody cleared
   lets go after 120 s.
+- **The one exception to "lent is skipped"** (2026-11-15,
+  fm/spectra-voice-indicators, voice-tuning-plan §7/§9.3 2.2): a TV strip
+  lent to Hyperion/HyperHDR — never one lent to an explicit scene/override —
+  is borrowed back for the voice colour instead, if it is one of
+  `settings.voice_fixtures`. It paints at 60% while a media source is active
+  (`house.media_active()`), else at the state's own level, and is capped at
+  its own 20 s (`VOICE_BORROW_MAX_S`, independent of the 120 s cap above) —
+  a stuck borrow lets go of the strip long before a stuck overlay on the
+  other fixtures would expire. Release (idle, the cap, or the mode stopping)
+  sends the one `{"live": false}` through the ordinary TV-strip lend path
+  above — never a second hand-back call, never a Hyperion/HyperHDR restart.
+  `GET /house/heartbeat`'s `tv_strip_borrowed_by_voice` (the borrowed
+  device id or null) and `voice_borrow` (`{"device", "since_ms", "cap_s",
+  "level"}` or null) report it in progress.
 
 ### Sconce mains (R16)
 

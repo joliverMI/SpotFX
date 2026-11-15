@@ -186,3 +186,95 @@ def test_the_call_never_waits():
 
 def test_an_invalid_state_is_refused(voice):
     assert voice.v.set_voice("shouting")["status"] == "invalid"
+
+
+# ═══ borrowing a TV strip lent to Hyperion/HyperHDR (voice-tuning-plan,
+# §7/§9.3 2.2) ════════════════════════════════════════════════════════════
+
+def _lend_to_hyperion(voice, *, media=True):
+    """Make `house_fixtures.lend_reasons()` name tv-backlight lent for a
+    Hyperion/HyperHDR reason, and put it in settings.voice_fixtures."""
+    st = voice.store.state()
+    if media:
+        st.media_source, st.media_state = "roku", "playing"
+    else:
+        st.tv_music = False
+    lib = voice.store.load_library()
+    lib.settings.voice_fixtures = list(VOICE) + ["tv-backlight"]
+    voice.store.save_library(lib)
+    return lib
+
+
+def test_borrow_on_listening_paints_the_strip_at_60_percent_while_media_active(voice):
+    _lend_to_hyperion(voice, media=True)
+    res = voice.v.set_voice("listening")
+    assert "tv-backlight" in res["fixtures"]
+    assert res["borrowed_tv_strip"] == "tv-backlight"
+    assert voice.v.borrowed_device() == "tv-backlight"
+    assert _state("tv-backlight") == ("steady", (0.0, 0.0, 255.0), 0.6)
+    assert voice.v.status()["borrow"]["device"] == "tv-backlight"
+    assert voice.v.status()["borrow"]["cap_s"] == voice.v.VOICE_BORROW_MAX_S
+
+
+def test_borrow_releases_on_idle_and_hands_back_to_hyperion(voice):
+    _lend_to_hyperion(voice, media=True)
+    voice.v.set_voice("listening")
+    assert voice.v.borrowed_device() == "tv-backlight"
+    res = voice.v.set_voice("idle")
+    assert res["status"] == "cleared"
+    assert voice.v.borrowed_device() is None
+    assert device_output.is_withheld("tv-backlight"), (
+        "handed back — Hyperion/HyperHDR owns the stream again")
+    assert voice.v.status()["borrow"] is None
+
+
+def test_borrow_releases_at_the_20s_cap_without_ending_the_voice_state(voice):
+    _lend_to_hyperion(voice, media=True)
+    voice.v.set_voice("listening")
+    assert voice.v.borrowed_device() == "tv-backlight"
+    voice.clock.now += voice.v.VOICE_BORROW_MAX_S - 1
+    assert voice.v.expire() is None
+    voice.clock.now += 2
+    res = voice.v.expire()
+    assert res["status"] == "borrow_expired"
+    assert res["device"] == "tv-backlight"
+    assert voice.v.borrowed_device() is None
+    assert device_output.is_withheld("tv-backlight")
+    # The rest of the voice overlay is untouched by the strip's own cap.
+    assert voice.v.status()["state"] == "listening"
+    assert _state("crystal")[1] == (0.0, 0.0, 255.0)
+
+
+def test_heartbeat_reports_the_borrow_additively(voice):
+    """heartbeat() keeps its existing `tv_strip`/`voice` keys and adds the
+    borrow state alongside them (fm/spectra-voice-indicators item 2)."""
+    from spectra.services import house
+    before = house.heartbeat()
+    assert before["tv_strip_borrowed_by_voice"] is None
+    assert before["voice_borrow"] is None
+    _lend_to_hyperion(voice, media=True)
+    voice.v.set_voice("listening")
+    hb = house.heartbeat()
+    assert hb["tv_strip"] == "spectra"
+    assert hb["voice"] == "listening"
+    assert hb["tv_strip_borrowed_by_voice"] == "tv-backlight"
+    assert hb["voice_borrow"]["device"] == "tv-backlight"
+    assert hb["voice_borrow"]["cap_s"] == voice.v.VOICE_BORROW_MAX_S
+    voice.v.set_voice("idle")
+    hb = house.heartbeat()
+    assert hb["tv_strip_borrowed_by_voice"] is None
+    assert hb["voice_borrow"] is None
+
+
+def test_no_borrow_when_the_lend_reason_is_not_hyperhdr(voice):
+    from spectra.models.house_mode import FixtureOverride
+    st = voice.store.state()
+    st.fixtures["tv-backlight"] = FixtureOverride(lent_to="a preview")
+    lib = voice.store.load_library()
+    lib.settings.voice_fixtures = list(VOICE) + ["tv-backlight"]
+    voice.store.save_library(lib)
+    res = voice.v.set_voice("listening")
+    assert "tv-backlight" not in res["fixtures"]
+    assert voice.v.borrowed_device() is None
+    reasons = {s["fixture"]: s["reason"] for s in res["skipped"]}
+    assert "lent to a preview" in reasons["tv-backlight"]

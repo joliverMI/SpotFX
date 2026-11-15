@@ -129,6 +129,20 @@ split). Six things:
   `overlay_clear`): precedence voice > show hold > base, except a show hold
   landing mid-utterance takes the fixture outright. Base pushes and every
   release path consult `_overlay`; a new show_output writer must too.
+- **THE VOICE MAY BORROW A TV STRIP LENT TO HYPERION/HYPERHDR** (2026-11-15,
+  voice-tuning-plan §7/§9.3 2.2), only when the lend reason names
+  Hyperion/HyperHDR (never an explicit scene/override lend) and the strip is
+  in `settings.voice_fixtures`. `house_voice` decides start/stop and
+  un/re-withholds `fx.device_output` directly (still sync, still no I/O —
+  the same structural test covers it); `house_fixtures.desired()` reads
+  `house_voice.borrowed_device()` so its own tick agrees and, on release,
+  sends the one `{"live": false}` through the ordinary `TARGET_LENT` path —
+  no second hand-back call exists. `house_voice.kick()`s `house_fixtures`
+  on every borrow start/stop so the tick that matters runs sooner than its
+  1 s cadence. The borrow has its OWN cap, `VOICE_BORROW_MAX_S` (20 s,
+  independent of `VOICE_MAX_S`'s 120 s) — releasing the strip never ends
+  the rest of the voice overlay. Level is `VOICE_BORROW_LEVEL` (60%) while
+  `house.media_active()`, else the state's own look level.
 - **A RESTART KEEPS THE LAST PICTURE** while a mode drives the room: the
   shutdown decides `hold_on_shutdown()` BEFORE `go_dark()` and tears down
   with `live.deactivate(hold_last_frame=True)` (no WLED release, VENDOR #45);
