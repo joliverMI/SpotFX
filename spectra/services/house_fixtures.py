@@ -757,6 +757,16 @@ def _log_duplicate_ignored(did: str, winner: str) -> None:
         "ignoring it; %s already speaks for this fixture", did, winner, winner)
 
 
+def _voice_borrowed(did: str) -> bool:
+    """Is `did` the TV strip house_voice is currently borrowing from
+    Hyperion/HyperHDR? Lazy import — house_voice imports this module too."""
+    try:
+        from spectra.services import house_voice
+        return house_voice.borrowed_device() == did
+    except Exception:                                      # noqa: BLE001
+        return False
+
+
 def _tv_lend_desired(st=None) -> dict[str, tuple[str, str]]:
     """TARGET_LENT for every TV strip `lend_reasons` says is lent — the one
     thing this seam still acts on with no house mode driving the room.
@@ -800,6 +810,13 @@ def desired() -> dict[str, tuple[str, str]]:
             out[did] = (TARGET_UNPOWERED, "Home Assistant reports its mains off "
                                           "— not streamed to, not searched for")
         elif did in lent:
+            if did in strips and _voice_borrowed(did):
+                # The voice overlay is painting this strip right now
+                # (house_voice._targets()) — leave it alone exactly like
+                # any other not-lent TV strip; the lend resumes, and the
+                # one {"live": false} hand-back fires, the moment the
+                # borrow ends (house_voice releases it and kicks us).
+                continue
             out[did] = (TARGET_LENT, lent[did])
         elif did in strips:
             # A TV strip that is not lent is simply streamed: its power and
@@ -1372,9 +1389,12 @@ def tv_strip_status() -> dict:
     strips = tv_strip_ids()
     lent = lend_reasons()
     withheld = device_output.withheld()
-    why = next((lent[d] for d in strips if d in lent), None)
-    owner = "hyperion" if why is not None else "spectra"
+    borrowed = next((d for d in strips if _voice_borrowed(d)), None)
+    why = next((lent[d] for d in strips if d in lent and d != borrowed), None)
+    owner = "spectra" if borrowed is not None else (
+        "hyperion" if why is not None else "spectra")
     return {"devices": strips, "owner": owner, "why": why,
+            "borrowed_by_voice": borrowed,
             "streaming": [d for d in strips if d not in withheld]}
 
 
