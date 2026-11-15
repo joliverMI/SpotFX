@@ -52,7 +52,7 @@ Standard in the middle of the night.
 
 | Call | Body | Answer | Replaces (R#) |
 |---|---|---|---|
-| `GET /house/heartbeat` | — | `{"state", "lighting_ok", "house_enabled", "mode", "clock_mode", "ha_value", "phase", "media", "tv_music", "tv_strip", "voice", "withheld", "owner", "uptime_s", "at_ms"}` | R17's fallback read |
+| `GET /house/heartbeat` | — | `{"state", "lighting_ok", "house_enabled", "mode", "clock_mode", "ha_value", "phase", "media", "tv_music", "tv_strip", "tv_strip_borrowed_by_voice", "voice", "voice_borrow", "withheld", "owner", "uptime_s", "at_ms"}` | R17's fallback read |
 | `PUT /house/mode` *(phase 1)* | `{"ha_mode": "<lighting_mode>", "source": "ha"}` | `status`: applied / unchanged / held_manual / unmapped | R1 |
 | `PUT /house/tv-music` | `{"on": true \| false}` | `status`: recorded / unchanged; `tv_strip` | R6 |
 | `PUT /house/media` | `{"source": "roku" \| "switch" \| "bluray" \| …, "state": "playing" \| "paused" \| "idle" \| "stopped"}` | `status`: applied / recorded / unchanged; `note` when no mode answers | R7 |

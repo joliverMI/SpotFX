@@ -560,6 +560,41 @@ def test_media_paused_then_playing_keeps_the_strip_lent_live_false_only(seam):
     _no_tv_power(seam)
 
 
+def test_a_borrowed_tv_strip_is_skipped_then_relent_on_release(seam, monkeypatch):
+    """The cross-module borrow handshake (fm/spectra-voice-indicators):
+    while house_voice is borrowing the lent TV strip, desired() skips it
+    entirely, so tick()'s "no longer acted on" cleanup forgets its
+    power_applied record via _forget_power. The moment the borrow ends,
+    _power_due sees a fresh take and the one {"live": false} hand-back is
+    reissued through _transition — the existing lend path, not a second
+    one invented for the borrow."""
+    from fx import device_output
+    from spectra.services import house_voice
+    seam.set_mode()
+    seam.hf.set_tv_music(False)
+    _run(_settle(seam.hf))
+    assert [p for d, p in seam.posts if d == "tv-backlight"] == [{"live": False}]
+    assert "tv-backlight" in seam.store.state().power_applied
+    seam.posts.clear()
+
+    monkeypatch.setattr(house_voice, "borrowed_device", lambda: "tv-backlight")
+    _run(seam.hf.tick())
+    assert "tv-backlight" not in seam.hf.desired()
+    assert "tv-backlight" not in seam.store.state().power_applied, (
+        "the borrow's own un-withhold tick must forget the lend's power "
+        "record, or the hand-back write below would be silently suppressed")
+    assert "tv-backlight" not in device_output.withheld()
+    assert seam.posts == []
+
+    monkeypatch.setattr(house_voice, "borrowed_device", lambda: None)
+    _run(_settle(seam.hf))
+    assert seam.hf.desired()["tv-backlight"][0] == seam.hf.TARGET_LENT
+    assert [p for d, p in seam.posts if d == "tv-backlight"] == [{"live": False}], (
+        "the borrow ending must re-issue the ordinary lend hand-back")
+    assert device_output.withheld().get("tv-backlight") == \
+        "lent: TV Music is off — Hyperion drives the strip"
+
+
 def test_a_mode_off_tv_strip_that_is_not_lent_is_streamed_never_switched(seam):
     """No lend: a mode's off list does not switch the TV strip off — it is
     streamed (the fade's black) and nothing is written to it."""

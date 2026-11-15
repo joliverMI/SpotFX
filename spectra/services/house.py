@@ -2069,8 +2069,12 @@ def heartbeat() -> dict:
         out["mains_off"] = sorted(st.mains_off)
         try:
             from spectra.services import house_fixtures, house_voice
-            out["tv_strip"] = house_fixtures.tv_strip_status()["owner"]
-            out["voice"] = house_voice.status()["state"]
+            tv_status = house_fixtures.tv_strip_status()
+            voice_status = house_voice.status()
+            out["tv_strip"] = tv_status["owner"]
+            out["tv_strip_borrowed_by_voice"] = tv_status["borrowed_by_voice"]
+            out["voice"] = voice_status["state"]
+            out["voice_borrow"] = voice_status["borrow"]
         except Exception:                                # noqa: BLE001
             pass
     except Exception as exc:                             # noqa: BLE001

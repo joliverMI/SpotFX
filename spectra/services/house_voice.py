@@ -159,7 +159,8 @@ def _release_borrow() -> None:
         w = device_output.withheld()
         if did not in w:
             lent = house_fixtures.lend_reasons()
-            w[did] = lent.get(did, "lent: Hyperion/HyperHDR drives the strip")
+            why = lent.get(did, "Hyperion/HyperHDR drives the strip")
+            w[did] = f"lent: {why}"
             device_output.set_withheld(w)
         house_fixtures.kick()
 

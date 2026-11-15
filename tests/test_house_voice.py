@@ -245,6 +245,27 @@ def test_borrow_releases_at_the_20s_cap_without_ending_the_voice_state(voice):
     assert _state("crystal")[1] == (0.0, 0.0, 255.0)
 
 
+def test_heartbeat_reports_the_borrow_additively(voice):
+    """heartbeat() keeps its existing `tv_strip`/`voice` keys and adds the
+    borrow state alongside them (fm/spectra-voice-indicators item 2)."""
+    from spectra.services import house
+    before = house.heartbeat()
+    assert before["tv_strip_borrowed_by_voice"] is None
+    assert before["voice_borrow"] is None
+    _lend_to_hyperion(voice, media=True)
+    voice.v.set_voice("listening")
+    hb = house.heartbeat()
+    assert hb["tv_strip"] == "spectra"
+    assert hb["voice"] == "listening"
+    assert hb["tv_strip_borrowed_by_voice"] == "tv-backlight"
+    assert hb["voice_borrow"]["device"] == "tv-backlight"
+    assert hb["voice_borrow"]["cap_s"] == voice.v.VOICE_BORROW_MAX_S
+    voice.v.set_voice("idle")
+    hb = house.heartbeat()
+    assert hb["tv_strip_borrowed_by_voice"] is None
+    assert hb["voice_borrow"] is None
+
+
 def test_no_borrow_when_the_lend_reason_is_not_hyperhdr(voice):
     from spectra.models.house_mode import FixtureOverride
     st = voice.store.state()
