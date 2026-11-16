@@ -105,6 +105,7 @@ from spectra.services import (  # noqa: E402
     settings_console,
     show_console,
 )
+from spectra.models import scene as scene_model  # noqa: E402
 from fx import device_schema  # noqa: E402
 
 _KeyEnum = Literal[tuple(sorted(settings_console.SETTINGS_REGISTRY))]
@@ -113,6 +114,9 @@ _FlareTypeEnum = Literal["drift_jump", "momentary", "permanent",
                          "pulse_flash", "pulse_flip", "big_fish",
                          "sauron_surge", "word_shape"]
 _JumpEnum = Literal["color_set", "dice"]
+# Built from the model's own closed tuple, never re-typed (sonic-ops skill,
+# step 6): a fifth class arriving in models/scene.py reaches Sonic for free.
+_ResponseClassEnum = Literal[tuple(scene_model.RESPONSE_CLASSES)]
 _PreDropKindEnum = Literal[tuple(scene_console._PRE_DROP_KINDS)]
 _CopyFieldEnum = Literal[tuple(scene_console.COPYABLE_DEVICE_ENTRY_FIELDS)]
 _DeviceTypeEnum = Literal[tuple(device_schema.device_types())]
@@ -277,13 +281,17 @@ async def get_scene_settings(scene_id: str) -> dict:
 
 @mcp.tool()
 async def list_flare_kinds(scene_id: str) -> dict:
-    """List a scene's named flare kinds (summary only, not full parameter detail)."""
+    """List a scene's named flare kinds (summary only, not full parameter
+    detail). Each carries `attached_to`, the response classes whose bands
+    reference it -- empty means declared and never fires."""
     return await _call("list_flare_kinds", scene_id=scene_id)
 
 
 @mcp.tool()
 async def get_flare_kind(scene_id: str, name: str) -> dict:
-    """Read one named flare kind's full definition on one scene."""
+    """Read one named flare kind's full definition on one scene, plus
+    `attachments` (every band referencing it: class, Energy window, scale,
+    lane) and the scene's own advisory `warnings`."""
     return await _call("get_flare_kind", scene_id=scene_id, name=name)
 
 
@@ -385,6 +393,37 @@ async def set_flare_kind(scene_id: str, name: str, type: _FlareTypeEnum,  # noqa
 async def remove_flare_kind(scene_id: str, name: str) -> dict:
     """Remove one named flare kind from one scene. Refused if still referenced."""
     return await _call("remove_flare_kind", scene_id=scene_id, name=name)
+
+
+@mcp.tool()
+async def attach_flare_kind(scene: str, kind: str,
+                            response_class: _ResponseClassEnum,
+                            intensity_min: float, intensity_max: float,
+                            lane: Optional[str] = None) -> dict:
+    """Attach an already-declared flare kind to one response section's
+    Energy band (flare/charge/lull/drop/word). "word" is the Words section,
+    the only one that fires a word_shape kind -- attaching one there is how
+    a Word Shape is switched on for a scene. intensity_min/max are the
+    band's own 0..1 window; an exact match joins that band, no overlap
+    creates it (and the section when the scene has none), a PARTIAL overlap
+    is refused naming the real band. lane pools kinds the engine picks one
+    of per fire. The result's `warnings` names a legal-but-inert
+    attachment."""
+    return await _call("attach_flare_kind", scene=scene, kind=kind,
+                       response_class=response_class, intensity_min=intensity_min,
+                       intensity_max=intensity_max, lane=lane)
+
+
+@mcp.tool()
+async def detach_flare_kind(scene: str, kind: str,
+                            response_class: _ResponseClassEnum) -> dict:
+    """Take a flare kind off EVERY band of one response section -- how a
+    Word Shape is switched off. Drops a band left with no kinds, and the
+    section once it has no bands. The kind stays DECLARED on the scene
+    (remove_flare_kind undeclares it). Refused if it is attached to no band
+    of that section."""
+    return await _call("detach_flare_kind", scene=scene, kind=kind,
+                       response_class=response_class)
 
 
 @mcp.tool()

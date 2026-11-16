@@ -548,6 +548,46 @@ def test_preview_lyric_events_defaults_to_whatever_is_playing(lyric_events_route
     assert out["uri"] == URI
 
 
+def test_preview_lyric_events_carries_the_shape_verdict_and_its_times(lyric_events_route):
+    """Word Shapes row W2.4's audit of what W0.3 landed on THIS side of the
+    seam: a word Sonic itself matched to a shape comes back through the
+    preview op as the shape it is — verdict, shape id/name and the form/
+    hold/release the room's own settings resolved — not as a plain colour
+    word. The planner's own branch is proven in test_word_shape_contract.py;
+    this proves the op RELAYS it, since `preview_lyric_events` is the only
+    lyrics op that crosses the HTTP seam and could lose a field on the way."""
+    from spectra.services import lyric_events
+
+    assert _run("add_lyric_match", target_kind="shape", target_name="Heart",
+                phrase="know", song=STEM)["status"] == "applied"
+    lyric_events.set_show(URI, True)
+
+    out = _run("preview_lyric_events", song=STEM)
+    shaped = [a for a in out["actions"] if a["verdict"] == "shape"]
+    assert shaped, out["actions"]
+    action = shaped[0]
+    assert action["shape"] == "heart" and action["shape_name"] == "Heart"
+    assert action["shape_skipped"] is None
+    assert action["form_s"] > 0 and action["hold_s"] > 0 and action["release_s"] > 0
+    # the lead IS the form (the word-shapes skill's own rule), in ms
+    assert action["transition_ms"] == pytest.approx(action["form_s"] * 1000, abs=1)
+    assert "shape" in action["words"].lower()
+
+
+def test_the_preview_ops_instructions_name_every_shape_outcome_it_can_return():
+    """W2.4 spec item 4. The three words a shape word can come back as are
+    `shape_skipped` = drop_wins / nothing_can_draw (the planner's two
+    skips) and the show log's `fell_back_to_colour` (the fire-time net) —
+    all three read off lyric_events' own constants rather than re-typed
+    here, so a renamed constant fails this instead of silently leaving
+    Sonic describing an outcome that no longer exists."""
+    from spectra.services import lyric_events as le
+
+    text = lyric_console.OPERATIONS["preview_lyric_events"].instructions
+    for token in (le.WHY_DROP_WINS, le.WHY_CANNOT_DRAW, le.RESULT_FELL_BACK):
+        assert token in text, token
+
+
 def test_preview_lyric_events_refuses_a_song_with_no_timeline(monkeypatch):
     from spectra.services import show_arms
     monkeypatch.setattr(show_arms, "current_uri", lambda: None)

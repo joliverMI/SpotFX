@@ -938,8 +938,16 @@ OPERATIONS: dict[str, SonicOperation] = {
             "A word that reaches a SHAPE has verdict `shape` and carries that shape plus "
             "its forming/hold/release times: a shape word draws instead of changing "
             "colour, even when it also reaches a colour set, and it only reaches the "
-            "lights on a scene with a Words band. Why `drop_wins` means a drop landed "
-            "inside the window and the shape was skipped."),
+            "lights on a scene with a Words band (attach_flare_kind is what gives a "
+            "scene one). A shape word shown doing its COLOUR instead says why in "
+            "`shape_skipped`: `drop_wins` (a drop landed inside the window and the drop "
+            "is the bigger moment) or `nothing_can_draw` (no scene showing has a Words "
+            "band with an enabled Word Shape kind covering that word's Energy) — in "
+            "both the word still fires its own colour, so say \"it would have drawn the "
+            "heart, but ...\" rather than calling it a plain colour word. One more "
+            "outcome exists only on the show log, never here: `fell_back_to_colour`, a "
+            "word planned as a shape whose scene changed in the last second before it, "
+            "which then took the colour path with the shape's own lead behind it."),
         input_schema={"type": "object", "properties": {"song": _SONG_PROP},
                      "additionalProperties": False},
         handler=_op_preview_lyric_events,

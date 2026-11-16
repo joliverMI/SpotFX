@@ -1892,3 +1892,368 @@ def test_strip_phase_strength_room_master_is_sonic_reachable():
     assert "strip_phase_strength" in sc.SETTINGS_REGISTRY
     spec = sc.SETTINGS_REGISTRY["strip_phase_strength"]
     assert spec.min == 0.0 and spec.max == 1.5
+
+
+# ═══ Word Shapes W2.4 — Sonic's reach into the feature ══════════════════
+# Two halves, in order:
+#   (a) THE AUDIT. Wave 0 (PRs 519/520/521) already gave Sonic most of
+#       what plan §4 asks for; the row's deliverable is the test that says
+#       so by NAME, in one place, so a later change that quietly drops one
+#       of these reaches fails here rather than being noticed in the room.
+#       Each claim names where its BEHAVIOUR is proven rather than
+#       re-proving it: the shape target kind in tests/test_lyric_console.py,
+#       the five room settings and the word_shape type in
+#       tests/test_word_shape_contract.py, the preview op's shape verdict in
+#       tests/test_lyric_console.py.
+#   (b) THE ONE NEW OP PAIR, attach_flare_kind / detach_flare_kind — the
+#       switch itself, since THE BAND IS THE SWITCH (plan Q6 A) and nothing
+#       in this console could reach a band before this row.
+
+def test_the_word_shapes_sonic_reach_is_complete():
+    """(a) The audit, as one ledger. Every Sonic surface plan §4 names,
+    asserted to EXIST here; the behaviour behind each is proven in the
+    file named in its comment."""
+    from spectra.services import lyric_console, scene_console as sc
+    from spectra.services import settings_agent as sa
+    from spectra.services import settings_console as stc
+    from spectra.services import settings_mcp_server as mcp
+
+    # the lyrics domain reads and edits shape labels like the other two
+    # kinds (W0.2) — tests/test_lyric_console.py
+    assert "shape" in lyric_console.TARGET_KINDS
+    for op in ("edit_sung_label", "get_sung_labels", "list_sung_label_targets",
+               "add_lyric_match", "preview_lyric_events"):
+        assert op in sa.ALL_OPERATIONS
+
+    # the scene console's set_flare_kind accepts the new type (W0.3) —
+    # tests/test_word_shape_contract.py
+    schema = sc.OPERATIONS["set_flare_kind"].input_schema
+    assert "word_shape" in schema["properties"]["type"]["enum"]
+    assert "word_shape" in mcp._FlareTypeEnum.__args__
+
+    # the five timing settings are ordinary settings, each on the
+    # `word-shapes` Help topic (W0.3) — tests/test_word_shape_contract.py
+    for key in ("word_shape_form_slow_s", "word_shape_form_fast_s",
+                "word_shape_hold_min_s", "word_shape_hold_max_s",
+                "word_shape_release_ratio"):
+        assert stc.SETTINGS_REGISTRY[key].help_topic == "word-shapes"
+
+    # ... and the switch this row adds, on the scene domain
+    for op in ("attach_flare_kind", "detach_flare_kind"):
+        assert sa.ALL_OPERATIONS[op].domain == "scene"
+        assert sa.ALL_OPERATIONS[op].kind == "write"
+        assert "word" in sc.OPERATIONS[op].input_schema[
+            "properties"]["response_class"]["enum"]
+
+
+def test_the_response_class_enum_is_read_off_the_model_not_retyped():
+    """The sonic-ops checklist's step 6. A sixth response class arriving in
+    models/scene.py must reach Sonic without a second list being edited —
+    both the API schema and the MCP wrapper's enum are built from
+    RESPONSE_CLASSES itself."""
+    from spectra.models.scene import RESPONSE_CLASSES
+    from spectra.services import scene_console as sc
+    from spectra.services import settings_mcp_server as mcp
+
+    assert set(mcp._ResponseClassEnum.__args__) == set(RESPONSE_CLASSES)
+    for op in ("attach_flare_kind", "detach_flare_kind"):
+        enum = sc.OPERATIONS[op].input_schema["properties"]["response_class"]["enum"]
+        assert set(enum) == set(RESPONSE_CLASSES)
+
+
+def _shape_scene(name="Words Test"):
+    """A scene with a Word Shape kind DECLARED and nothing attached — the
+    state set_flare_kind alone can reach, in which the scene draws no
+    shape at all."""
+    from spectra.models.scene import FlareKind
+    return _seed_scene(name, flare_kinds=[FlareKind(name="Heart", type="word_shape")])
+
+
+def test_attach_creates_the_words_section_and_detach_takes_it_away():
+    """The row's own acceptance: attach a Word Shape kind to a Words band,
+    read it back, detach it, undo — a verified backup at every step."""
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene = _shape_scene()
+    assert scene_store.get_by_id(scene.id).responses == {}
+    assert sc.list_flare_kinds(scene.id)["flare_kinds"][0]["attached_to"] == []
+
+    attached = _run(sc.apply_attach_flare_kind(
+        scene.id, "Heart", "word", 0.0, 1.0))
+    assert attached["status"] == "applied"
+    assert attached["section_created"] is True and attached["band_created"] is True
+    assert attached["already_attached"] is False
+    assert attached["warnings"] == []          # a word_shape in the Words section
+    assert "Words section" in attached["summary"]
+
+    # ... read it back
+    saved = scene_store.get_by_id(scene.id)
+    [band] = saved.responses["word"].bands
+    assert band.kinds == {"Heart": 1.0} and band.kind_lanes == {}
+    assert band.intensity_min == 0.0 and band.intensity_max == 1.0
+    read = sc.get_flare_kind(scene.id, "Heart")
+    assert read["attachments"] == [
+        {"response_class": "word", "intensity_min": 0.0, "intensity_max": 1.0,
+         "scale": 1.0, "lane": None}]
+    assert sc.list_flare_kinds(scene.id)["flare_kinds"][0]["attached_to"] == ["word"]
+    # the backup holds the PRE-attach scene (no Words section at all)
+    pre = sc._load_backups()[scene.id][-1]["scene"]
+    assert pre["responses"] == {}
+
+    # ... detach: the band goes with it, and so does the empty section
+    detached = _run(sc.apply_detach_flare_kind(scene.id, "Heart", "word"))
+    assert detached["status"] == "applied"
+    assert detached["section_dropped"] is True
+    assert detached["bands_dropped"] == [[0.0, 1.0]]
+    assert "word" not in scene_store.get_by_id(scene.id).responses
+    # the kind is still DECLARED — detaching switches it off, it doesn't
+    # undeclare it (plan §7's own undo path)
+    assert [k.name for k in scene_store.get_by_id(scene.id).flare_kinds] == ["Heart"]
+
+    # ... and undo puts the Words band back, because the detach stamped a
+    # backup_id like every other edit in this module
+    undone = _run(sc.apply_undo_last_scene_change())
+    assert undone["status"] == "applied"
+    back = scene_store.get_by_id(scene.id)
+    assert [b.kinds for b in back.responses["word"].bands] == [{"Heart": 1.0}]
+
+
+def test_attach_joins_an_existing_band_exactly_and_can_pool_it_into_a_lane():
+    from spectra.models.scene import FlareBand, FlareKind, ResponseSpec
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene = _seed_scene(
+        "Words Test",
+        flare_kinds=[FlareKind(name="Heart", type="word_shape"),
+                     FlareKind(name="Colour Jump", type="drift_jump", jump="color_set")],
+        responses={"word": ResponseSpec(bands=[
+            FlareBand(intensity_min=0.0, intensity_max=1.0,
+                      kinds={"Colour Jump": 0.5})])})
+
+    out = _run(sc.apply_attach_flare_kind(
+        scene.id, "Heart", "word", 0.0, 1.0, lane="shape"))
+    assert out["band_created"] is False and out["section_created"] is False
+    [band] = scene_store.get_by_id(scene.id).responses["word"].bands
+    assert band.kinds == {"Colour Jump": 0.5, "Heart": 1.0}   # his scale untouched
+    assert band.kind_lanes == {"Heart": "shape"}
+
+
+def test_attach_refuses_a_window_that_only_partly_overlaps_an_authored_band():
+    """ResponseSpec._no_overlap would refuse the save anyway; silently
+    retargeting his authored band instead is not Sonic's call, so the
+    refusal names the real window and writes nothing."""
+    from spectra.models.scene import FlareBand, FlareKind, ResponseSpec
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene = _seed_scene(
+        "Words Test",
+        flare_kinds=[FlareKind(name="Heart", type="word_shape")],
+        responses={"word": ResponseSpec(bands=[
+            FlareBand(intensity_min=0.0, intensity_max=0.6,
+                      kinds={"Heart": 1.0})])})
+
+    out = _run(sc._op_attach_flare_kind(scene.id, "Heart", "word", 0.3, 0.9))
+    assert out["status"] == "rejected"
+    assert "[0.0, 0.6)" in out["reason"]
+    assert out["bands"] == [{"intensity_min": 0.0, "intensity_max": 0.6,
+                             "kinds": ["Heart"]}]
+    assert sc._load_backups() == {}            # nothing written, nothing backed up
+    assert [b.intensity_max for b in
+            scene_store.get_by_id(scene.id).responses["word"].bands] == [0.6]
+
+
+@pytest.mark.parametrize("args,needle", [
+    (("Diamond", "word", 0.0, 1.0), "no flare kind named"),
+    (("Heart", "words", 0.0, 1.0), "not a response class"),
+    (("Heart", "word", 0.7, 0.3), "0 ≤ min < max ≤ 1"),
+    (("Heart", "word", 0.0, 1.5), "0 ≤ min < max ≤ 1"),
+])
+def test_attach_refuses_a_bad_argument_without_writing(args, needle):
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene = _shape_scene()
+    out = _run(sc._op_attach_flare_kind(scene.id, *args))
+    assert out["status"] == "rejected" and needle in out["reason"]
+    assert sc._load_backups() == {}
+    assert scene_store.get_by_id(scene.id).responses == {}
+
+
+def test_attach_relays_the_stores_own_warning_for_a_shape_on_the_flares_rack():
+    """A word_shape kind on a flare band is LEGAL and inert (scene_store.
+    scene_warnings' own case). The attach is accepted — refusing it would
+    make a drag into the Flares rack an error — and the reply carries the
+    store's warning verbatim rather than leaving it only in the log."""
+    from spectra.services import scene_console as sc
+
+    scene = _shape_scene()
+    out = _run(sc.apply_attach_flare_kind(scene.id, "Heart", "flare", 0.5, 1.0))
+    assert out["status"] == "applied"
+    assert any("only the Words section fires a shape" in w for w in out["warnings"])
+
+
+def test_attach_relays_the_ignored_offset_warning_in_the_words_section():
+    from spectra.models.scene import FlareKind
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene("Words Test", flare_kinds=[
+        FlareKind(name="Heart", type="word_shape", trigger_offset_ms=-250)])
+    out = _run(sc.apply_attach_flare_kind(scene.id, "Heart", "word", 0.0, 1.0))
+    assert out["status"] == "applied"
+    assert any("not applied there" in w for w in out["warnings"])
+
+
+def test_detach_only_touches_the_named_class_and_keeps_a_shared_band():
+    from spectra.models.scene import FlareBand, FlareKind, ResponseSpec
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    scene = _seed_scene(
+        "Words Test",
+        flare_kinds=[FlareKind(name="Heart", type="word_shape"),
+                     FlareKind(name="Colour Jump", type="drift_jump", jump="color_set")],
+        responses={
+            "word": ResponseSpec(bands=[
+                FlareBand(intensity_min=0.0, intensity_max=0.5,
+                          kinds={"Heart": 1.0}),
+                FlareBand(intensity_min=0.5, intensity_max=1.0,
+                          kinds={"Heart": 1.0, "Colour Jump": 1.0})]),
+            "flare": ResponseSpec(bands=[
+                FlareBand(intensity_min=0.0, intensity_max=1.0,
+                          kinds={"Heart": 1.0})])})
+
+    out = _run(sc.apply_detach_flare_kind(scene.id, "Heart", "word"))
+    assert out["detached_from"] == [[0.0, 0.5], [0.5, 1.0]]
+    assert out["bands_dropped"] == [[0.0, 0.5]]      # only the one left empty
+    assert out["section_dropped"] is False
+    saved = scene_store.get_by_id(scene.id)
+    assert [b.kinds for b in saved.responses["word"].bands] == [{"Colour Jump": 1.0}]
+    # the flare class still has it — detach is per-section
+    assert [b.kinds for b in saved.responses["flare"].bands] == [{"Heart": 1.0}]
+
+
+def test_detach_refuses_when_the_kind_is_attached_to_no_band_of_that_class():
+    from spectra.models.scene import FlareBand, FlareKind, ResponseSpec
+    from spectra.services import scene_console as sc
+
+    scene = _seed_scene(
+        "Words Test",
+        flare_kinds=[FlareKind(name="Heart", type="word_shape")],
+        responses={"flare": ResponseSpec(bands=[
+            FlareBand(intensity_min=0.0, intensity_max=1.0, kinds={"Heart": 1.0})])})
+
+    out = _run(sc._op_detach_flare_kind(scene.id, "Heart", "word"))
+    assert out["status"] == "rejected"
+    assert out["attached_to"] == ["flare"]          # names where it IS attached
+    assert sc._load_backups() == {}
+
+
+def test_remove_flare_kind_still_refuses_an_attached_kind():
+    """attach/detach never loosen the existing guard: undeclaring a kind a
+    band still references is refused, so detach is the step that comes
+    first."""
+    from spectra.services import scene_console as sc
+
+    scene = _shape_scene()
+    _run(sc.apply_attach_flare_kind(scene.id, "Heart", "word", 0.0, 1.0))
+    out = _run(sc._op_remove_flare_kind(scene.id, "Heart"))
+    assert out["status"] == "rejected"
+    assert _run(sc.apply_detach_flare_kind(scene.id, "Heart", "word"))["status"] == "applied"
+    assert _run(sc._op_remove_flare_kind(scene.id, "Heart"))["status"] == "applied"
+
+
+def test_attach_resolves_a_scene_by_name_and_never_touches_another_scene():
+    from spectra.services import scene_console as sc
+    from spectra.services import scene_store
+
+    ids = _seed_his_real_scenes()
+    scene = _shape_scene("Words Test")
+    before = {sid: scene_store.get_by_id(sid).model_dump(mode="json")
+              for sid in ids.values()}
+
+    out = _run(sc.apply_attach_flare_kind("Words Test", "Heart", "word", 0.0, 1.0))
+    assert out["status"] == "applied" and out["scene_id"] == scene.id
+    for sid, snapshot in before.items():
+        assert scene_store.get_by_id(sid).model_dump(mode="json") == snapshot
+
+
+# ── (c) the per-effect Word Shape params, reached with no code at all ────
+# plan §4: "the per-effect size and threshold are ordinary settings". A
+# `word_shape_*` param registered in config/effect_params.json by a wave-1
+# row is Sonic-tellable for free through set_scene_entry_param /
+# get_param_info — there is nothing for THIS row to build, only something
+# to prove. WORD_SHAPE_EFFECTS is empty on master until the first wave-1
+# row merges, so this test SKIPS itself until the registry has the params
+# rather than being left out and forgotten; it needs no edit to start
+# running — it discovers every registered `word_shape_*` param rather than
+# naming the plan's own list (word_shape_size on every shaped effect,
+# word_shape_few for Orbits, word_shape_pupil for Sauron, Fireworks' own
+# four), so a row that ships one under a different name is still covered.
+
+
+
+def _registered_shape_params():
+    from fx import device_model
+    out = {}
+    for effect_type in device_model.effect_types():
+        names = {n for n in device_model.effect_params(effect_type)
+                 if n.startswith("word_shape_")}
+        if names:
+            out[effect_type] = names
+    return out
+
+
+def test_every_registered_word_shape_param_is_reachable_through_sonic():
+    from fx import device_model
+    from spectra.services import scene_console as sc
+
+    registered = _registered_shape_params()
+    if not registered:
+        pytest.skip("no wave-1 row has registered a word_shape_* param yet "
+                    "(fx.device_model.WORD_SHAPE_EFFECTS is empty on master)")
+    for effect_type, names in sorted(registered.items()):
+        scene, _ = _seed_scene_with_entry(
+            f"Shape Params {effect_type}", target_kind="category", target="Matrix",
+            effect_type=effect_type)
+        reachable = sc.get_scene_entry_params(scene.id, "Matrix")["params"]
+        for name in sorted(names):
+            # discoverable, with its real range read off the effect's schema
+            info = sc.get_param_info(effect_type, name)
+            assert info["type"] in sc._SIMPLE_PARAM_TYPES, (effect_type, name)
+            assert name in reachable
+            # ... and writable, in range, through the ordinary param op
+            value = info.get("default")
+            assert value is not None, (effect_type, name)
+            applied = _run(sc.apply_scene_entry_param(
+                scene.id, "Matrix", name, value))
+            assert applied["status"] == "applied", (effect_type, name)
+        # and the effect that declares them is a shape-drawing effect
+        assert effect_type in device_model.WORD_SHAPE_EFFECTS, effect_type
+
+
+def test_attach_refuses_a_write_that_would_change_nothing():
+    """Every write takes a backup, and the ring holds only
+    SCENE_BACKUP_RING_SIZE entries — a repeated no-op attach would evict
+    real pre-edit snapshots with copies of the same state. Re-attaching
+    the SAME kind to the SAME band in the SAME lane is therefore refused,
+    saying the scene is already how he asked for it; a lane CHANGE on an
+    existing attachment still applies."""
+    from spectra.services import scene_console as sc
+
+    scene = _shape_scene()
+    assert _run(sc.apply_attach_flare_kind(
+        scene.id, "Heart", "word", 0.0, 1.0))["status"] == "applied"
+    rings = len(sc._load_backups()[scene.id])
+
+    again = _run(sc._op_attach_flare_kind(scene.id, "Heart", "word", 0.0, 1.0))
+    assert again["status"] == "rejected" and again["already_attached"] is True
+    assert "nothing to change" in again["reason"]
+    assert len(sc._load_backups()[scene.id]) == rings     # the ring is untouched
+
+    moved = _run(sc.apply_attach_flare_kind(
+        scene.id, "Heart", "word", 0.0, 1.0, lane="shape"))
+    assert moved["status"] == "applied" and moved["already_attached"] is True
+    assert moved["lane"] == "shape"

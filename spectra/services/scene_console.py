@@ -30,7 +30,8 @@ STRUCTURAL, none of them the agent's to skip:
   1. BACKUP BEFORE ANY EDIT, TAKEN BY THE MECHANISM, VERIFIED NOT MERELY
      ATTEMPTED. _write_and_verify_backup() runs before EVERY write that
      touches an EXISTING scene (set_scene_setting, set_flare_kind,
-     remove_flare_kind, overwrite_scene, restore_scene_backup) — it
+     remove_flare_kind, attach_flare_kind, detach_flare_kind,
+     overwrite_scene, restore_scene_backup) — it
      writes the pre-edit snapshot into the scene's backup ring, then
      RE-READS THE FILE FROM DISK and compares against what was intended;
      a successful os.replace() alone is never trusted. If the reread
@@ -136,9 +137,10 @@ from pydantic import BaseModel, ValidationError
 from fx import device_model
 from spectra import config
 from spectra.models.binding import is_binding
-from spectra.models.scene import (DEFAULT_MIN_INTENSITY, FlareKind, PhaseChoreography,
-                                  PreDropIntroWindow, PreDropSpikeWindow,
-                                  SceneColorJourney, SceneDeviceConfig, SceneV2)
+from spectra.models.scene import (DEFAULT_MIN_INTENSITY, RESPONSE_CLASSES, FlareBand,
+                                  FlareKind, PhaseChoreography, PreDropIntroWindow,
+                                  PreDropSpikeWindow, ResponseSpec, SceneColorJourney,
+                                  SceneDeviceConfig, SceneV2)
 from spectra.services import scene_store
 from spectra.services.sonic_ops import SonicOperation
 
@@ -546,6 +548,26 @@ def get_scene_settings(scene_id: str) -> dict:
     return {"scene_id": scene.id, "name": scene.name, "settings": settings}
 
 
+def _attachments(scene: SceneV2, kind_name: str) -> list[dict]:
+    """Every band, in every response class, that this kind is attached to —
+    the ONE answer to "is it switched on for this scene". Declared and
+    attached are different facts (W2.4): a `word_shape` kind declared on a
+    scene with no Words band draws nothing at all, so a reader that only
+    ever saw `flare_kinds` could not tell a live Word Shape from a dormant
+    one. Band order is the stored order, which is the engine's own."""
+    out: list[dict] = []
+    for event_class in RESPONSE_CLASSES:
+        spec = (scene.responses or {}).get(event_class)
+        for band in (spec.bands if spec is not None else []):
+            if kind_name in band.kinds:
+                out.append({"response_class": event_class,
+                            "intensity_min": band.intensity_min,
+                            "intensity_max": band.intensity_max,
+                            "scale": band.kinds[kind_name],
+                            "lane": band.kind_lanes.get(kind_name)})
+    return out
+
+
 def list_flare_kinds(scene_id: str) -> dict:
     scene = scene_store.get_by_id(scene_id)
     if scene is None:
@@ -554,7 +576,11 @@ def list_flare_kinds(scene_id: str) -> dict:
         {"name": k.name, "type": k.type, "jump": k.jump, "gain": k.gain,
          "hold_ms": k.hold_ms, "enabled": k.enabled,
          "min_intensity": k.min_intensity,
-         "param_names": sorted(k.params)}
+         "param_names": sorted(k.params),
+         # the classes it is attached to, in band order — the compact half
+         # of _attachments(); get_flare_kind carries the windows and lanes
+         "attached_to": sorted({a["response_class"]
+                                for a in _attachments(scene, k.name)})}
         for k in scene.flare_kinds
     ]}
 
@@ -568,7 +594,10 @@ def get_flare_kind(scene_id: str, name: str) -> dict:
         raise SceneOpError(
             f"scene {scene.name!r} has no flare kind named {name!r}",
             known_kinds=sorted(k.name for k in scene.flare_kinds))
-    return {"scene_id": scene.id, "name": scene.name, "flare_kind": kind.model_dump()}
+    return {"scene_id": scene.id, "name": scene.name,
+            "flare_kind": kind.model_dump(),
+            "attachments": _attachments(scene, kind.name),
+            "warnings": scene_store.scene_warnings(scene)}
 
 
 # ═══ scene parameter discovery — his own ask ("visibility into parameters
@@ -1098,6 +1127,232 @@ async def apply_remove_flare_kind(scene_id: str, name: str, source: str = "agent
     return {"status": "applied", **entry}
 
 
+# ═══ attach_flare_kind / detach_flare_kind — a DECLARED kind onto (or
+# off) one response class's band ════════════════════════════════════════
+# THE GAP THESE CLOSE (Word Shapes plan W2.4, the squadron leader's
+# addition on top of plan §4's "Sonic" list): set_flare_kind DECLARES a
+# kind on a scene and remove_flare_kind undeclares it, but nothing here
+# could ATTACH a declared kind to a band — the attachment was the Scenes
+# page's alone. For every other type that was merely inconvenient; for
+# `word_shape` it is the whole feature, because THE BAND IS THE SWITCH
+# (the plan's Q6 A: a scene with no Words band writes nothing at all).
+# His own words for the row are "Sonic reaches them" and "all
+# Sonic-tunable", and plan §7's undo path is "detaching it from the Words
+# band does the same [switches it off]" — so switching a Word Shape on and
+# off is exactly this pair of operations.
+#
+# DELIBERATELY NARROW, three ways:
+#   * the kind must ALREADY be declared on the scene (set_flare_kind's
+#     job) — this only ever edits `responses[class].bands[*].kinds` and
+#     `.kind_lanes`, never a kind's own definition, and never `devices`;
+#   * a band is addressed by its OWN Energy window, and an INEXACT
+#     overlap is REFUSED rather than resolved by guessing: a request for
+#     [0.3, 0.7) against an authored [0.0, 1.0) band names that band and
+#     stops, because ResponseSpec._no_overlap would refuse the save
+#     anyway and silently retargeting his authored band is not Sonic's
+#     call to make;
+#   * the scale is always 1.0 on a create — a band's per-kind scale stays
+#     the Scenes page's own tuning surface (and an existing attachment
+#     keeps whatever scale he authored).
+# Both return scene_store.scene_warnings() so the ADVISORY cases the
+# plan names arrive with the write rather than only in the log: a
+# `word_shape` attached to a flare/charge/lull/drop band (legal, inert)
+# and a kind carrying a trigger_offset_ms attached to the Words section
+# (legal, ignored there).
+
+#: 1.0 — a plain, unscaled attachment. The per-kind scale is the Scenes
+#: page's tuning surface, not something to invent from a chat sentence.
+_ATTACH_SCALE = 1.0
+
+#: What each response class is CALLED on the Scenes page, for a summary he
+#: reads. "the Words section" is the plan's own name for responses["word"].
+_CLASS_NOUNS = {"flare": "the Flares section", "charge": "the Charge section",
+                "lull": "the Lull section", "drop": "the Drop section",
+                "word": "the Words section"}
+
+
+def _bands_of(scene: SceneV2, event_class: str) -> list[FlareBand]:
+    spec = (scene.responses or {}).get(event_class)
+    return list(spec.bands) if spec is not None else []
+
+
+def _check_class_and_kind(scene: SceneV2, kind: str, event_class: str) -> None:
+    if event_class not in RESPONSE_CLASSES:
+        raise SceneOpError(
+            f"{event_class!r} is not a response class",
+            response_classes=list(RESPONSE_CLASSES))
+    if kind not in {k.name for k in scene.flare_kinds}:
+        raise SceneOpError(
+            f"scene {scene.name!r} has no flare kind named {kind!r} — declare "
+            f"it with set_flare_kind first",
+            known_kinds=sorted(k.name for k in scene.flare_kinds))
+
+
+def _revalidated(candidate: SceneV2, before: SceneV2, what: str) -> SceneV2:
+    """The model's rules then the store's, on the WHOLE candidate scene —
+    the two gates every write in this module passes before
+    scene_store.save(). Named once because attach and detach build their
+    candidate the same way."""
+    try:
+        out = SceneV2.model_validate(candidate.model_dump(mode="json"))
+    except ValidationError as exc:
+        raise SceneOpError(f"{what} would make scene {before.name!r} invalid: {_errs(exc)}",
+                           pydantic_errors=_errs(exc)) from exc
+    try:
+        scene_store.validate_for_save(out)
+    except ValueError as exc:
+        raise SceneOpError(str(exc)) from exc
+    return out
+
+
+def _validate_attach_flare_kind(scene_ref: str, kind: str, response_class: str,
+                                intensity_min: float, intensity_max: float,
+                                lane: Optional[str]) -> tuple[SceneV2, SceneV2, dict]:
+    sc = _resolve_scene_ref(scene_ref)
+    _check_class_and_kind(sc, kind, response_class)
+    if lane is not None and not lane.strip():
+        raise SceneOpError(
+            "lane must be a name, or omitted for a kind in its own lane")
+    if not (0.0 <= intensity_min < intensity_max <= 1.0):
+        raise SceneOpError(
+            f"the Energy window must be 0 ≤ min < max ≤ 1 "
+            f"(got [{intensity_min}, {intensity_max}))")
+    candidate = sc.model_copy(deep=True)
+    spec = (candidate.responses or {}).get(response_class)
+    bands = list(spec.bands) if spec is not None else []
+    exact = next((b for b in bands
+                  if b.intensity_min == intensity_min and b.intensity_max == intensity_max),
+                 None)
+    if exact is None:
+        clash = [b for b in bands
+                 if b.intensity_min < intensity_max and intensity_min < b.intensity_max]
+        if clash:
+            raise SceneOpError(
+                f"{response_class!r} on {sc.name!r} already has a band overlapping "
+                f"[{intensity_min}, {intensity_max}) — "
+                f"{', '.join(f'[{b.intensity_min}, {b.intensity_max})' for b in clash)}. "
+                f"Attach to one of those windows exactly, or change the band on "
+                f"the Scenes page.",
+                bands=[{"intensity_min": b.intensity_min, "intensity_max": b.intensity_max,
+                        "kinds": sorted(b.kinds)} for b in clash])
+        band = FlareBand(intensity_min=intensity_min, intensity_max=intensity_max)
+        bands.append(band)
+        band_created = True
+    else:
+        band = exact
+        band_created = False
+    already = kind in band.kinds
+    band.kinds = {**band.kinds, kind: band.kinds.get(kind, _ATTACH_SCALE)}
+    lanes = dict(band.kind_lanes)
+    if lane is not None:
+        lanes[kind] = lane.strip()
+    band.kind_lanes = lanes
+    section_created = spec is None
+    candidate.responses = {**(candidate.responses or {}),
+                           response_class: ResponseSpec(
+                               bands=bands,
+                               reroll_dice=spec.reroll_dice if spec is not None else False,
+                               color_set_jump=spec.color_set_jump if spec is not None else False)}
+    candidate = _revalidated(candidate, sc, f"attaching {kind!r} to {response_class!r}")
+    # A write that would change NOTHING is refused rather than performed.
+    # It is not pedantry: every write takes a backup, and the ring holds
+    # only SCENE_BACKUP_RING_SIZE entries — a no-op attach repeated a few
+    # times would evict real pre-edit snapshots with copies of the same
+    # state. The refusal says the room is already how he asked for it.
+    if candidate.responses == sc.responses:
+        raise SceneOpError(
+            f"{kind!r} is already attached to {_CLASS_NOUNS.get(response_class, response_class)} "
+            f"[{intensity_min}, {intensity_max})"
+            f"{f' in lane {lane.strip()!r}' if lane else ''} on {sc.name!r} — "
+            f"nothing to change",
+            already_attached=True)
+    facts = {"band_created": band_created, "section_created": section_created,
+             "already_attached": already, "lane": None if lane is None else lane.strip()}
+    return sc, candidate, facts
+
+
+async def apply_attach_flare_kind(scene: str, kind: str, response_class: str,
+                                  intensity_min: float, intensity_max: float,
+                                  lane: Optional[str] = None,
+                                  source: str = "agent") -> dict:
+    sc, candidate, facts = _validate_attach_flare_kind(
+        scene, kind, response_class, intensity_min, intensity_max, lane)
+    backup = _write_and_verify_backup(sc.id, sc, op="flare_kind_attached")
+    scene_store.save(candidate)
+    where = _CLASS_NOUNS.get(response_class, response_class)
+    lane_note = f" in lane \"{facts['lane']}\"" if facts["lane"] else ""
+    verb = "Re-attached" if facts["already_attached"] else "Attached"
+    entry = {"id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
+             "op": "flare_kind_attached", "scene_id": sc.id, "scene_name": candidate.name,
+             "flare_kind": kind, "response_class": response_class,
+             "intensity_min": intensity_min, "intensity_max": intensity_max,
+             **facts,
+             "summary": f'{verb} "{kind}" to {where} '
+                        f'[{intensity_min}, {intensity_max}) on "{candidate.name}"'
+                        f'{lane_note}.',
+             "backup_id": backup["id"],
+             "warnings": scene_store.scene_warnings(candidate),
+             "preview": _diff_scenes(sc, candidate), "source": source}
+    _append_log(entry)
+    return {"status": "applied", **entry}
+
+
+def _validate_detach_flare_kind(scene_ref: str, kind: str, response_class: str
+                                ) -> tuple[SceneV2, SceneV2, dict]:
+    sc = _resolve_scene_ref(scene_ref)
+    _check_class_and_kind(sc, kind, response_class)
+    windows = [[b.intensity_min, b.intensity_max] for b in _bands_of(sc, response_class)
+               if kind in b.kinds]
+    if not windows:
+        raise SceneOpError(
+            f"{kind!r} is not attached to any {response_class!r} band on {sc.name!r}",
+            attached_to=sorted({cls for cls in RESPONSE_CLASSES
+                                for b in _bands_of(sc, cls) if kind in b.kinds}))
+    candidate = sc.model_copy(deep=True)
+    spec = candidate.responses[response_class]
+    kept: list[FlareBand] = []
+    bands_dropped: list[list[float]] = []
+    for band in spec.bands:
+        if kind in band.kinds:
+            band.kinds = {n: s for n, s in band.kinds.items() if n != kind}
+            band.kind_lanes = {n: l for n, l in band.kind_lanes.items() if n != kind}
+            if not band.kinds:
+                bands_dropped.append([band.intensity_min, band.intensity_max])
+                continue
+        kept.append(band)
+    responses = {**candidate.responses}
+    if kept:
+        responses[response_class] = ResponseSpec(
+            bands=kept, reroll_dice=spec.reroll_dice, color_set_jump=spec.color_set_jump)
+        section_dropped = False
+    else:
+        responses.pop(response_class, None)
+        section_dropped = True
+    candidate.responses = responses
+    candidate = _revalidated(candidate, sc, f"detaching {kind!r} from {response_class!r}")
+    return sc, candidate, {"detached_from": windows, "bands_dropped": bands_dropped,
+                           "section_dropped": section_dropped}
+
+
+async def apply_detach_flare_kind(scene: str, kind: str, response_class: str,
+                                  source: str = "agent") -> dict:
+    sc, candidate, facts = _validate_detach_flare_kind(scene, kind, response_class)
+    backup = _write_and_verify_backup(sc.id, sc, op="flare_kind_detached")
+    scene_store.save(candidate)
+    where = _CLASS_NOUNS.get(response_class, response_class)
+    tail = " — the section is now empty and gone" if facts["section_dropped"] else ""
+    entry = {"id": str(uuid.uuid4()), "ts_ms": int(time.time() * 1000),
+             "op": "flare_kind_detached", "scene_id": sc.id, "scene_name": candidate.name,
+             "flare_kind": kind, "response_class": response_class, **facts,
+             "summary": f'Detached "{kind}" from {where} on "{candidate.name}"{tail}. '
+                        f'The kind is still declared on the scene.',
+             "backup_id": backup["id"],
+             "warnings": scene_store.scene_warnings(candidate),
+             "preview": _diff_scenes(sc, candidate), "source": source}
+    _append_log(entry)
+    return {"status": "applied", **entry}
+
+
 # ═══ overwrite_scene — wholesale replace of name/labels/settings/flare_kinds
 # (never `devices` — that boundary is unchanged, not reversed by this ask) ═
 
@@ -1520,6 +1775,23 @@ async def _op_remove_flare_kind(scene_id: str, name: str) -> dict:
         return exc.payload()
 
 
+async def _op_attach_flare_kind(scene: str, kind: str, response_class: str,
+                                intensity_min: float, intensity_max: float,
+                                lane: Optional[str] = None) -> dict:
+    try:
+        return await apply_attach_flare_kind(
+            scene, kind, response_class, intensity_min, intensity_max, lane=lane)
+    except SceneOpError as exc:
+        return exc.payload()
+
+
+async def _op_detach_flare_kind(scene: str, kind: str, response_class: str) -> dict:
+    try:
+        return await apply_detach_flare_kind(scene, kind, response_class)
+    except SceneOpError as exc:
+        return exc.payload()
+
+
 async def _op_overwrite_scene(scene_id: str, name: Optional[str] = None,
                               labels: Optional[list[str]] = None,
                               settings: Optional[dict] = None,
@@ -1598,8 +1870,16 @@ OPERATIONS: dict[str, SonicOperation] = {
     "list_flare_kinds": SonicOperation(
         name="list_flare_kinds", domain="scene", kind="read",
         summary="List a scene's named flare kinds (name/type/jump/gain/"
-                "hold_ms/param names) without their full parameter detail.",
-        instructions="scene_id from list_scenes. Call get_flare_kind for one kind's full parameter detail before editing it.",
+                "hold_ms/param names, and which response sections each is "
+                "attached to) without their full parameter detail.",
+        instructions=(
+            "scene_id from list_scenes. Call get_flare_kind for one kind's "
+            "full parameter detail before editing it. `attached_to` is the "
+            "response classes whose bands reference the kind — DECLARED and "
+            "ATTACHED are different facts: an empty `attached_to` means the "
+            "kind exists on the scene and never fires, which for a "
+            "word_shape kind means the scene draws no shapes at all. "
+            "attach_flare_kind / detach_flare_kind change it."),
         input_schema={
             "type": "object",
             "properties": {"scene_id": {"type": "string"}},
@@ -1607,8 +1887,16 @@ OPERATIONS: dict[str, SonicOperation] = {
         handler=_op_list_flare_kinds),
     "get_flare_kind": SonicOperation(
         name="get_flare_kind", domain="scene", kind="read",
-        summary="Read one named flare kind's full definition on one scene.",
-        instructions="scene_id + name from list_flare_kinds.",
+        summary="Read one named flare kind's full definition on one scene, "
+                "plus every band it is attached to and the scene's own "
+                "advisory warnings.",
+        instructions=(
+            "scene_id + name from list_flare_kinds. `attachments` is one row "
+            "per band referencing the kind — its response class, Energy "
+            "window, per-band scale and lane — and is what to read before "
+            "calling attach_flare_kind, since a window that only partly "
+            "overlaps an existing band is refused. `warnings` names anything "
+            "on this scene that is legal and quietly does nothing."),
         input_schema={
             "type": "object",
             "properties": {"scene_id": {"type": "string"}, "name": {"type": "string"}},
@@ -1899,6 +2187,79 @@ OPERATIONS: dict[str, SonicOperation] = {
             "properties": {"scene_id": {"type": "string"}, "name": {"type": "string"}},
             "required": ["scene_id", "name"], "additionalProperties": False},
         handler=_op_remove_flare_kind),
+    "attach_flare_kind": SonicOperation(
+        name="attach_flare_kind", domain="scene", kind="write",
+        summary="Attach an already-declared flare kind to one response "
+                "section's Energy band — Flares, Charge, Lull, Drop or "
+                "Words. THIS is what switches a Word Shape on for a scene.",
+        instructions=(
+            "scene is an id or name. kind must already be declared on that "
+            "scene (set_flare_kind declares it; list_flare_kinds shows "
+            "what's there). response_class is flare, charge, lull, drop or "
+            "word — \"word\" is the Words section, the only one that fires a "
+            "word_shape kind: a scene with no Words band draws no shape at "
+            "all, so attaching a word_shape kind to a Words band covering "
+            "the Energy range you want IS how a Word Shape is switched on, "
+            "and detach_flare_kind is how it is switched off. "
+            "intensity_min/intensity_max are the band's own Energy window, "
+            "0..1, min < max — [0, 1] for the whole range. If a band with "
+            "EXACTLY that window already exists the kind joins it (keeping "
+            "any scale he authored); if none exists the band is created, "
+            "and the whole section is created with it when the scene has "
+            "none. A request that only PARTLY overlaps an existing band is "
+            "REFUSED, naming that band's real window — attach to it "
+            "exactly rather than guessing. lane is optional: kinds sharing "
+            "a lane name are a pool the engine picks exactly ONE of per "
+            "fire; omit it for a kind that always fires on its own. An "
+            "attach that would change NOTHING (same kind, same band, same "
+            "lane) is refused rather than performed, so re-asking for a "
+            "state he already has never spends a backup slot. "
+            "Relay the result's `warnings` back to him verbatim — a legal "
+            "attachment that quietly does nothing (a word_shape on a "
+            "Flares band, or a kind whose trigger_offset_ms the Words "
+            "section ignores) says so there. Backed up before the write, "
+            "so undo_last_scene_change reverses it."),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "scene": {"type": "string"},
+                "kind": {"type": "string"},
+                "response_class": {"type": "string", "enum": list(RESPONSE_CLASSES)},
+                "intensity_min": {"type": "number", "minimum": 0, "maximum": 1},
+                "intensity_max": {"type": "number", "minimum": 0, "maximum": 1},
+                "lane": {"type": "string"},
+            },
+            "required": ["scene", "kind", "response_class",
+                         "intensity_min", "intensity_max"],
+            "additionalProperties": False},
+        handler=_op_attach_flare_kind),
+    "detach_flare_kind": SonicOperation(
+        name="detach_flare_kind", domain="scene", kind="write",
+        summary="Take a flare kind off every band of one response section "
+                "— the way a Word Shape is switched off for a scene. The "
+                "kind stays declared.",
+        instructions=(
+            "scene/kind/response_class as in attach_flare_kind. Removes "
+            "the kind from EVERY band of that one section (other sections "
+            "keep it), drops a band that is left with no kinds at all, and "
+            "drops the section itself once it has no bands left — which "
+            "for \"word\" is exactly how a scene stops drawing shapes. The "
+            "kind is still DECLARED on the scene afterwards (use "
+            "remove_flare_kind to undeclare it, which is refused while any "
+            "band still references it). Refused, changing nothing, if the "
+            "kind is attached to no band of that section — the error names "
+            "the sections it IS attached to. Backed up before the write, so "
+            "undo_last_scene_change reverses it."),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "scene": {"type": "string"},
+                "kind": {"type": "string"},
+                "response_class": {"type": "string", "enum": list(RESPONSE_CLASSES)},
+            },
+            "required": ["scene", "kind", "response_class"],
+            "additionalProperties": False},
+        handler=_op_detach_flare_kind),
     "overwrite_scene": SonicOperation(
         name="overwrite_scene", domain="scene", kind="write",
         summary="Wholesale-replace an EXISTING scene's name/labels/"
