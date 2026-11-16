@@ -375,6 +375,57 @@ must never flow into the show log looking like a real word), default shape
 heart, and `POST /api/flare-preview/open` takes an optional `shape` the
 W2.1 picker will pass.
 
+## Sonic reach (row W2.4, built 2026-11-15)
+
+Everything in this feature is Sonic-tellable, and the `sonic-ops` skill's
+checklist is the binding process for changing any of it. What exists:
+
+| what he can say | the operation | domain |
+|---|---|---|
+| read or edit a shape's sung words | `list_sung_label_targets` / `get_sung_labels` / `edit_sung_label`, `kind="shape"` | lyrics |
+| match a word or phrase to a shape | `add_lyric_match`, `target_kind="shape"` | lyrics |
+| what each word of a song would do | `preview_lyric_events` (verdict `shape`, plus `shape_skipped` = `drop_wins` / `nothing_can_draw`) | lyrics |
+| the five room timings | `set_setting` / `get_settings` on the five `word_shape_*` keys (Help topic `word-shapes`) | settings |
+| declare a `word_shape` kind on a scene | `set_flare_kind`, `type="word_shape"` | scene |
+| **switch it on / off for a scene** | **`attach_flare_kind` / `detach_flare_kind`** | scene |
+| any per-effect `word_shape_*` param | `get_param_info` / `set_scene_entry_param`, for free once a wave-1 row REGISTERS it in `config/effect_params.json` | scene |
+
+**DECLARED AND ATTACHED ARE DIFFERENT FACTS, and this is the one that
+bites.** `set_flare_kind` only declares a kind; THE BAND IS THE SWITCH
+(his Q6 A), so a `word_shape` kind on a scene with no Words band draws
+nothing at all. `attach_flare_kind(scene, kind, response_class,
+intensity_min, intensity_max, lane=None)` is what gives the scene that
+band — creating the band, and the whole Words section, when none exists —
+and `detach_flare_kind(scene, kind, response_class)` is plan §7's own undo
+path ("detaching it from the Words band does the same"): it drops the kind
+from every band of that class, drops a band left empty, drops the section
+once it has no bands, and leaves the kind DECLARED. Three things worth
+knowing before using them:
+
+- a window that only PARTLY overlaps an existing band is REFUSED, naming
+  that band's real window — `ResponseSpec._no_overlap` would refuse the
+  save anyway, and silently retargeting his authored band is not Sonic's
+  call. Read `get_flare_kind`'s `attachments` first (its `attached_to` on
+  `list_flare_kinds` is the compact form);
+- both replies carry `scene_store.scene_warnings()` verbatim, which is
+  how the two legal-but-inert cases reach him rather than only the log: a
+  `word_shape` attached to a Flares/Charge/Lull/Drop band, and a kind
+  whose `trigger_offset_ms` the Words section ignores;
+- both are backed up and verified before the write like every other
+  scene edit, so `undo_last_scene_change` reverses either one — which is
+  also why an attach that would change NOTHING (same kind, same band,
+  same lane) is REFUSED rather than performed: a repeated no-op would
+  evict real pre-edit snapshots from the ten-entry ring with copies of
+  the same state.
+
+The same row gave the two READS the matching half, since declared and
+attached could not be told apart before it: `list_flare_kinds` carries
+`attached_to` (the classes, compact) and `get_flare_kind` carries
+`attachments` (class, window, scale, lane per band) plus the scene's own
+`warnings`. The audit of the whole table above is
+`tests/test_scene_console.py::test_the_word_shapes_sonic_reach_is_complete`,
+which names where each claim's behaviour is proven.
+
 ## Related
 
 - `.claude/skills/crystal-hex-grid/SKILL.md` — the panel this is all

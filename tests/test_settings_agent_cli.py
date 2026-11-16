@@ -845,3 +845,28 @@ def test_record_usage_tags_the_manifest_outcome(tmp_path):
     total = su.summary()
     assert total["day"]["query_count"] == 3
     assert total["day"]["total_tokens"] == 6
+
+
+# ═══ 8. the Word Shapes W2.4 widening (the two band-attachment ops) ══════
+# attach_flare_kind/detach_flare_kind are the first write in this backend
+# that edits a scene's RESPONSE BANDS (responses[class].bands[*].kinds) —
+# a meaningfully new write shape, so the sonic-ops checklist's step 7
+# applies: one synthetic fixture on the CURRENT manifest, parsed from its
+# structured tool_result rather than the model's own reply prose. It is
+# also the op that switches a Word Shape on for a scene (the plan's "the
+# band is the switch"), so "the model said it attached it" and "the
+# attachment landed" must stay different claims here too. ════════════════
+
+def test_the_band_attachment_widening_parses_from_its_structured_tool_result():
+    from spectra.services import settings_agent_cli as sac
+
+    result = sac._parse_transcript(
+        _load("cli_transcript_synthetic_attach_flare_kind_applied.json"))
+    assert result.get("degraded") is None
+    assert [c["op"] for c in result["changes"]] == ["flare_kind_attached"]
+    change = result["changes"][0]
+    assert change["summary"] == (
+        'Attached "Word Shape" to the Words section [0.0, 1.0) on "Fish".')
+    assert change["response_class"] == "word"
+    assert change["backup_id"] == "synthetic-backup-1"
+    assert not result["rejected"]
