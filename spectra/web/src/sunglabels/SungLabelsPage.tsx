@@ -1,16 +1,19 @@
-/** One page for correcting what every colour set and effect answers to when it
- * is sung (lyrics plan step 3, his ruling: "Claude drafts meanings ... he
- * corrects on one page, his edits kept"). Nothing here reaches the lights.
+/** One page for correcting what every colour set, effect and SHAPE answers to
+ * when it is sung (lyrics plan step 3, his ruling: "Claude drafts meanings ...
+ * he corrects on one page, his edits kept"; the Shapes row is the Word Shapes
+ * plan's W2.2). Nothing here reaches the lights.
  * spectra/services/sung_labels.py is the binding statement. */
 import { useMemo, useState } from 'react';
 import PowerButton from '../components/PowerButton';
 import { useToast } from '../components/Toast';
 import HelpLink from '../help/HelpLink';
 import { useDraftMeanings, useSungLabelEdit, useSungLabelSettings, useSungLabels } from '../queries';
-import type { SungChip, SungColorSet, SungEffect, SungListName, SungMeaningKind } from '../types';
+import type {
+  SungChip, SungColorSet, SungEffect, SungListName, SungMeaningKind, SungShape,
+} from '../types';
 import {
   SOURCE_WORDS, draftButtonWords, draftOutcomeMessage, draftableIds, filterCards, filterEffects,
-  runDraftQueue, undraftedIds,
+  filterShapes, runDraftQueue, shapeClashNote, shapeClashWords, shapeGlyph, undraftedIds,
 } from './sungLabels';
 
 const MEANINGS: { key: SungMeaningKind; title: string }[] = [
@@ -104,6 +107,28 @@ function EffectCard({ effect, edit }: {
   );
 }
 
+/** One shape the show can draw, its glyph and the words it answers to. `clash`
+ * is the words an effect answers to as well, so the card can say which of the
+ * two the show follows (spectra/services/sung_labels.py's PRECEDENCE). */
+function ShapeCard({ shape, clash, edit }: {
+  shape: SungShape;
+  clash: string[];
+  edit: (op: 'add' | 'remove', text: string) => void;
+}) {
+  const note = shapeClashNote(clash);
+  return (
+    <div className="card sung-card">
+      <div className="sung-card-head">
+        <span className="sung-glyph" aria-hidden="true">{shapeGlyph(shape.id)}</span>
+        <strong>{shape.name}</strong>
+      </div>
+      <WordList title="Sung labels" chips={shape.labels}
+                onAdd={(t) => edit('add', t)} onRemove={(t) => edit('remove', t)} />
+      {note && <p className="sung-note">{note}</p>}
+    </div>
+  );
+}
+
 export default function SungLabelsPage() {
   const toast = useToast();
   const { data, error } = useSungLabels();
@@ -118,12 +143,14 @@ export default function SungLabelsPage() {
   const cards = useMemo(() => filterCards(data?.color_sets ?? [], query, onlyUndrafted),
     [data, query, onlyUndrafted]);
   const effects = useMemo(() => filterEffects(data?.effects ?? [], query), [data, query]);
+  const shapes = useMemo(() => filterShapes(data?.shapes ?? [], query), [data, query]);
 
   if (error) return <div className="card"><p className="empty-note">{(error as Error).message}</p></div>;
   if (!data) return <div className="card"><p className="empty-note">Loading…</p></div>;
 
   const report = (err: unknown) => toast((err as Error)?.message ?? 'That did not work', 'error');
-  const edit = (kind: 'color_set' | 'effect', id: string, list: SungListName, op: 'add' | 'remove', text: string) =>
+  const edit = (kind: 'color_set' | 'effect' | 'shape', id: string,
+                list: SungListName, op: 'add' | 'remove', text: string) =>
     editLabel.mutate({ kind, id, list, op, text }, { onError: report });
 
   const draftIds = async (ids: string[]) => {
@@ -159,8 +186,8 @@ export default function SungLabelsPage() {
           Sung labels <HelpLink topic="sung-labels" />
         </div>
         <p className="sung-intro">
-          What each colour set and effect answers to when it is sung. Claude reads a song's lyrics against
-          this list and guesses which words are about what. Nothing here reaches your lights yet.
+          What each colour set, effect and shape answers to when it is sung. Claude reads a song's lyrics
+          against this list and guesses which words are about what. Nothing on this page reaches your lights.
         </p>
         <div className="sung-toolbar">
           <input
@@ -219,6 +246,15 @@ export default function SungLabelsPage() {
       {effects.map((effect) => (
         <EffectCard key={effect.id} effect={effect}
                     edit={(op, text) => edit('effect', effect.id, 'labels', op, text)} />
+      ))}
+
+      <h2 className="sung-heading" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        Shapes ({shapes.length}) <HelpLink topic="sung-labels-shapes" title="The Shapes row" />
+      </h2>
+      {shapes.map((shape) => (
+        <ShapeCard key={shape.id} shape={shape}
+                   clash={shapeClashWords(shape, data.effects)}
+                   edit={(op, text) => edit('shape', shape.id, 'labels', op, text)} />
       ))}
     </div>
   );

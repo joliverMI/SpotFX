@@ -151,11 +151,26 @@ the road."
   a target is its `kind` and its `id`.
 - **An old `sung_labels.json` with no `shapes` key loads unchanged** and
   gains only that one empty field on the next save.
-- **The page's Shapes row is W2.2**, not W0.2: this row is the model, the
-  service, the prompt, the API field and Sonic. `spectra/web/src/types.ts`
-  carries `SungShape` and `SungLabelsPageData.shapes` already so `tsc` stays
-  clean; the help paragraph in `sung-labels-page` is written ahead of the
-  row and says so.
+- **THE PAGE'S SHAPES ROW IS W2.2 (2026-11-15, shipped).** `/sung-labels`
+  now ends in a Shapes row — one `ShapeCard` per `shapes` row of the page
+  payload, its glyph from `sungLabels.ts`'s `SHAPE_GLYPHS` (a shape the
+  library grows later still gets `SHAPE_FALLBACK_GLYPH` and a card, so
+  adding one stays one `build(...)` entry), the same `WordList` add box
+  and × chips as a colour set's and an effect's, calling the W0.2 edit
+  endpoint with `kind: "shape"`. The search box filters it
+  (`filterShapes`). The PRECEDENCE above is printed on the card itself:
+  `shapeClashWords` compares this shape's words against EVERY effect's
+  (never the filtered list) through `wordKey`, a TS mirror of
+  `colour_words.word_key`, and `shapeClashNote` states "the shape is the
+  one the show follows". Proofs:
+  `scripts/check_sung_labels_page.mjs`'s "the shapes row" section (the
+  pure parts plus the real page rendered with react-dom/server),
+  `scripts/render_sung_labels.py` (the browser half — the glyphs, the one
+  note, a word added to the Heart and a seed word taken off both
+  surviving, the search), and `tests/test_sung_labels.py`'s payload/round-
+  trip pair. Help: `sung-labels-shapes`, linked from the row's heading,
+  and the `sung-labels-page` paragraph is present tense now. Nothing on
+  this page reaches the room, as before.
 
 ## The highlight: where a word's effect shows before and at fire time (2026-11-12)
 

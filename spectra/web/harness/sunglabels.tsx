@@ -35,12 +35,21 @@ const cards = [
 const effects = [
   { id: 'blackhole', name: 'Black Hole', labels: chips('seed', ['black hole', 'agujero negro', 'void', 'abyss', 'gravity']) },
   { id: 'fish', name: 'Fish', labels: chips('seed', ['fish', 'pez', 'swim']) },
+  { id: 'radial', name: 'STAR', labels: chips('seed', ['star', 'stars', 'estrella']) },
+];
+// The shape library's own three, with its own words (fx/effects/word_shapes.py):
+// "star" sits on the Star shape AND on the radial effect above, which is the
+// precedence note's one real case.
+const shapes = [
+  { id: 'heart', name: 'Heart', labels: chips('seed', ['love', 'heart', 'corazón', 'amor', 'kiss', 'beso']) },
+  { id: 'star', name: 'Star', labels: chips('seed', ['star', 'stars', 'estrella', 'shine', 'twinkle', 'night sky']) },
+  { id: 'diamond', name: 'Diamond', labels: chips('seed', ['diamond', 'diamante', 'jewel', 'ring', 'sparkle', 'crystal']) },
 ];
 
 const state = { auto_read: false, drafted: [] as string[][], claude: true };
 
 const page = () => ({
-  color_sets: cards, effects, labels_hash: 'h', auto_read: state.auto_read,
+  color_sets: cards, effects, shapes, labels_hash: 'h', auto_read: state.auto_read,
   n_labels: new Set([...cards.flatMap((c) => c.labels.map((l) => l.text))]).size,
   claude: state.claude ? { available: true, reason: null, backend: 'api', model: 'harness-model' }
     : { available: false, reason: 'No Claude API key is set up on this machine.', backend: 'api', model: 'x' },
@@ -49,7 +58,8 @@ const page = () => ({
 
 function applyEdit(body: { kind: string; id: string; list: string; op: string; text: string }) {
   const row: { labels: Chip[]; meanings?: Record<string, Chip[]> } | undefined = body.kind === 'effect'
-    ? effects.find((e) => e.id === body.id) : cards.find((c) => c.id === body.id);
+    ? effects.find((e) => e.id === body.id)
+    : body.kind === 'shape' ? shapes.find((x) => x.id === body.id) : cards.find((c) => c.id === body.id);
   if (!row) return;
   const key = body.list as string;
   const list = key === 'labels' ? row.labels : row.meanings![key];

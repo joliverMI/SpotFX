@@ -522,6 +522,41 @@ def test_the_page_route_carries_the_three_shapes_and_an_edit_round_trips():
     assert refused.status_code == 422
 
 
+def test_the_payload_carries_exactly_what_the_shapes_row_reads():
+    """The Shapes row (Word Shapes W2.2) reads `id`, `name` and `labels` (each
+    chip's `text` and `source`) off a shape row, and prints its precedence note
+    from a word an effect answers to as well. Both come off this one payload —
+    the page never asks the shape library anything itself."""
+    body = _client().get("/api/sung-labels").json()
+    star = _shape_row(body, "star")
+    assert set(star) == {"id", "name", "labels"}
+    assert star["name"] == "Star"
+    assert {c["source"] for c in star["labels"]} <= {"seed", "his"}
+    assert all(set(chip) == {"text", "source"} for chip in star["labels"])
+
+    radial = next(r for r in body["effects"] if r["id"] == "radial")
+    shared = set(_texts(star["labels"])) & set(_texts(radial["labels"]))
+    assert shared, "the note the Star card prints has to have a real case"
+    assert "star" in shared
+
+
+def test_a_word_added_to_the_heart_and_a_seed_word_taken_off_both_outlast_a_reload():
+    """The row's own acceptance: the deltas are W0.2's, this is the page's
+    round trip over them — the answer an edit hands straight back, and the page
+    read fresh afterwards, agree."""
+    client = _client()
+    for op, text in (("add", "sweetheart"), ("remove", "kiss")):
+        answered = client.post("/api/sung-labels/edit", json={
+            "kind": "shape", "id": "heart", "list": "labels", "op": op, "text": text}).json()
+    heart = _shape_row(answered, "heart")                   # the edit's own answer
+    assert _source(heart["labels"], "sweetheart") == "his"
+    assert "kiss" not in _texts(heart["labels"])
+
+    reloaded = _shape_row(client.get("/api/sung-labels").json(), "heart")
+    assert _texts(reloaded["labels"]) == _texts(heart["labels"])
+    assert _source(reloaded["labels"], "love") == "seed"
+
+
 def test_the_draft_route_says_why_when_claude_is_not_set_up(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     response = _client().post("/api/sung-labels/draft", json={"ids": ["red1"]})

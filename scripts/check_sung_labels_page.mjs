@@ -1,6 +1,7 @@
 /** Executable spec for the Sung labels page and the Word matches row's pure
  * parts: spectra/web/src/sunglabels/sungLabels.ts and testbed/lyricMatches.ts,
- * and the real LyricMatchesRow component rendered with react-dom/server. No
+ * and the real LyricMatchesRow component and the real page itself rendered with
+ * react-dom/server (the page against one cached payload, reaching nothing). No
  * network, no browser (scripts/render_sung_labels.py does the browser half).
  *
  * Run: node scripts/check_sung_labels_page.mjs
@@ -24,11 +25,27 @@ const ok = (cond, msg) => {
 const entry = `
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { StaticRouter } from 'react-router-dom/server';
 import LyricMatchesRow from './spectra/web/src/testbed/components/LyricMatchesRow';
+import { ToastProvider } from './spectra/web/src/components/Toast';
+import SungLabelsPage from './spectra/web/src/sunglabels/SungLabelsPage';
 export * as labels from './spectra/web/src/sunglabels/sungLabels';
 export * as matches from './spectra/web/src/testbed/lyricMatches';
 export { wholeSong } from './spectra/web/src/testbed/lyricsLane';
 export function renderRow(props) { return renderToStaticMarkup(React.createElement(LyricMatchesRow, props)); }
+/** The real page, rendered against one payload: no network (every query is
+ * fed from the cache), no toast of its own, and StaticRouter rather than
+ * MemoryRouter so react-router's own useLayoutEffect does not warn here. */
+export function renderPage(data) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  qc.setQueryData(['sung-labels'], data);
+  return renderToStaticMarkup(React.createElement(
+    QueryClientProvider, { client: qc },
+    React.createElement(StaticRouter, { location: '/sung-labels' },
+      React.createElement(ToastProvider, null, React.createElement(SungLabelsPage, null))),
+  ));
+}
 `;
 const built = await esbuild.build({
   stdin: { contents: entry, resolveDir: repo, loader: 'tsx' },
@@ -57,6 +74,64 @@ ok(JSON.stringify(labels.batches([1, 2, 3, 4, 5], 2)) === '[[1,2],[3,4],[5]]', '
 ok(labels.draftButtonWords(1, 3) === 'Draft meanings for 1 colour set', 'the button says how many are waiting');
 ok(labels.draftButtonWords(0, 3) === 'Draft all 3 again', 'and offers a re-draft when none are');
 ok(labels.draftButtonWords(5, 10, 2) === 'Retry 2 colour sets that failed', 'a pending retry takes priority over either other wording');
+
+console.log('the shapes row (Word Shapes W2.2)');
+{
+  const chips = (source, words) => words.map((text) => ({ text, source }));
+  const heart = { id: 'heart', name: 'Heart', labels: chips('seed', ['love', 'heart', 'corazón']) };
+  const star = { id: 'star', name: 'Star', labels: chips('seed', ['star', 'stars', 'shine']) };
+  const diamond = { id: 'diamond', name: 'Diamond', labels: chips('seed', ['diamond', 'jewel']) };
+  const effects = [
+    { id: 'radial', name: 'STAR', labels: chips('seed', ['star', 'stars', 'estrella']) },
+    { id: 'fish', name: 'Fish', labels: chips('seed', ['fish', 'swim']) },
+  ];
+  const shapes = [heart, star, diamond];
+
+  ok(labels.filterShapes(shapes, 'JEW').map((s) => s.id).join() === 'diamond', 'the search box reaches a shape\'s words');
+  ok(labels.filterShapes(shapes, 'hear').map((s) => s.id).join() === 'heart', 'and a shape\'s name');
+  ok(labels.filterShapes(shapes, '').length === 3, 'an empty search leaves every shape');
+  ok(labels.filterShapes(shapes, 'octagon').length === 0, 'a miss leaves none');
+
+  ok(labels.shapeGlyph('heart') === '♥' && labels.shapeGlyph('star') === '★'
+     && labels.shapeGlyph('diamond') === '◆', 'each shape has its glyph');
+  ok(labels.shapeGlyph('octagon') === labels.SHAPE_FALLBACK_GLYPH,
+     'a shape the library grows later still gets a mark, so adding one stays one entry in the library');
+
+  ok(labels.wordKey('Corazón!') === 'corazon' && labels.wordKey("don't") === 'dont',
+     'words compare the way the service compares them (colour_words.word_key)');
+
+  ok(labels.shapeClashWords(star, effects).join() === 'star,stars',
+     'the words an effect answers to as well are the note\'s subject');
+  ok(labels.shapeClashWords(heart, effects).length === 0, 'a shape no effect shares a word with has no note');
+  ok(labels.shapeClashWords({ id: 'x', name: 'X', labels: chips('his', ['Estrella']) }, effects).join() === 'Estrella',
+     'the clash is found through accents and case, and prints his own spelling');
+
+  const note = labels.shapeClashNote(labels.shapeClashWords(star, effects));
+  ok(/the shape is the one the show follows\.$/.test(note), `the note states the precedence (${note})`);
+  ok(note.includes('“star” and “stars”') && note.includes('also name an effect'),
+     'and names the words, plural');
+  ok(labels.shapeClashNote(['star']) === '“star” also names an effect — the shape is the one the show follows.',
+     'one word reads as one word');
+  ok(labels.shapeClashNote([]) === null, 'no shared word, no line');
+
+  const data = {
+    color_sets: [], effects, shapes, labels_hash: 'h', n_labels: 9, auto_read: false,
+    claude: { available: false, reason: 'no key', backend: 'api', model: 'm' }, draft_batch_size: 2,
+  };
+  const html = lib.renderPage(data);
+  ok(/Shapes \(3\)/.test(html), 'the page heads the row with how many shapes there are');
+  ok(html.includes('sung-labels-shapes'), 'the heading carries its own help link');
+  for (const [id, glyph] of [['heart', '♥'], ['star', '★'], ['diamond', '◆']]) {
+    ok(html.includes(`<span class="sung-glyph" aria-hidden="true">${glyph}</span>`), `the ${id} card draws its glyph`);
+  }
+  ok(html.includes('Heart') && html.includes('corazón'), 'a shape card prints its name and its words');
+  ok(html.includes('Remove love'), 'every word has an ×, and the add box is the colour sets\' own');
+  ok((html.match(/class="sung-note"/g) || []).length === 1,
+     'exactly the one shape sharing a word with an effect carries the note');
+  ok(/class="sung-note">“star” and “stars” also name an effect — the shape is the one the show follows\./.test(html),
+     'and it is the Star card');
+  ok(!/sung-swatch/.test(html.slice(html.indexOf('Shapes (3)'))), 'a shape has no colour swatch, only its glyph');
+}
 
 console.log('drafting through a failed batch');
 {
@@ -142,7 +217,7 @@ console.log('the wiring');
 const help = readFileSync(join(repo, 'spectra/web/src/help/helpContent.ts'), 'utf8');
 const page = readFileSync(join(repo, 'spectra/web/src/sunglabels/SungLabelsPage.tsx'), 'utf8');
 const section = readFileSync(join(repo, 'spectra/web/src/testbed/components/LyricMatchesSection.tsx'), 'utf8');
-for (const topic of ['sung-labels', 'sung-labels-page', 'sung-labels-reading']) {
+for (const topic of ['sung-labels', 'sung-labels-page', 'sung-labels-reading', 'sung-labels-shapes']) {
   ok(help.includes(`id: '${topic}'`) && page.includes(`topic="${topic}"`), `help topic ${topic} exists and is linked from the page`);
 }
 ok(help.includes("id: 'testbed-lyric-matches'") && section.includes('topic="testbed-lyric-matches"'), 'the lane\'s help topic exists and is linked');

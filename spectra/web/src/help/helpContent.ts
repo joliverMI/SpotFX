@@ -791,7 +791,17 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Drafting goes a few colour sets at a time so each request stays short. If one of those batches takes too long and fails, the rest keep going rather than stopping there, and the button reports truthfully how many drafted and offers to retry only the ones that failed — anything that did succeed is never redrafted.',
           'A word so generic it could belong anywhere (ocean, calm) is kept off most sets on purpose, so the words actually tell sets apart: at most a handful of sets share one, a bit more for a plain colour name like red or gold.',
           'Effects have sung labels too, so a word like fish or stars can point at an effect rather than a colour.',
-          'Shapes row (coming next): the shapes the show can draw — heart, star, diamond — get their own cards, with the same × and add box as the colour sets and effects. A shape\'s words are words the show would draw that shape for, so the heart answers to love, corazón and kiss as well as heart. Each shape starts with its own words and your edits sit on top of them, exactly as they do everywhere else on this page. When a word belongs to a shape and an effect, like star, the shape is the one the show follows — the effect keeps the word on its own card until you take it off.',
+          'The Shapes row at the bottom is the shapes the show can draw — Heart ♥, Star ★, Diamond ◆ — each with its own card and the same × and add box as the colour sets and effects. A shape\'s words are words the show would draw that shape for, so the heart answers to love, corazón and kiss as well as heart. Each shape starts with its own words and your edits sit on top of them, exactly as they do everywhere else on this page. When a word belongs to a shape and an effect, like star, the card says so: the shape is the one the show follows — the effect keeps the word on its own card until you take it off.',
+        ],
+      },
+      {
+        id: 'sung-labels-shapes',
+        title: 'The Shapes row',
+        keywords: 'shape shapes heart star diamond glyph row card words draw precedence effect radial library',
+        body: [
+          'One card per shape the show can draw, in the shape library\'s own order: Heart ♥, Star ★, Diamond ◆. The words on a card are the words the show would draw that shape for, with the same × to take one off and box to add one of your own as every other card on this page. A shape\'s starting words live with the shape itself, so a shape added later arrives with its own words already on its card.',
+          'Where one of a shape\'s words is an effect\'s word too, like star, the card says so in a line of its own: the shape is the one the show follows. The effect keeps the word until you take it off the effect\'s own card.',
+          'Search filters these cards by name and word along with the rest of the page.',
         ],
       },
       {
