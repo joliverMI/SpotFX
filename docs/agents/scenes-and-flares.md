@@ -334,10 +334,13 @@ gap; a preview, Absorb or a house mode holds the room; or **a charge, lull
 or drop is happening on the showing scene** (P3 A, `held_for: "phase"`). A
 shape NEVER imprints on an event, and nothing imprints on a shape.
 
-**NOTHING REACHES A FIXTURE YET.** `fx.device_model.WORD_SHAPE_EFFECTS` is
-empty, so the told write lands on no virtual until wave 1 wires its first
-effect — each one behind the Admiral's own tuning gate
-(`docs/ADDING_EFFECTS.md`). Proofs: `tests/test_word_shape_contract.py`
+**WHICH FIXTURES IT REACHES** is `fx.device_model.WORD_SHAPE_EFFECTS` —
+wave 1 adds one effect per row, each behind the Admiral's own tuning gate
+(`docs/ADDING_EFFECTS.md`), and the told write lands on those virtuals and
+no others — STAR since row W1.6 (`.claude/skills/radial-effect`) and
+Sauron since row W1.5 (its iris's edge and its slit pupil both bend into
+the shape; `.claude/skills/sauron-effect`).
+Proofs: `tests/test_word_shape_contract.py`
 (the whole contract) and `tests/test_lyric_events.py` (the boundary: a shape
 word adds exactly one output to the engine and changes nothing else).
 

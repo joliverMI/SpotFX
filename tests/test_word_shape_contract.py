@@ -157,8 +157,11 @@ def _words_scene(name="Shape Scene", *, kinds=None, lanes=None,
 # rather than discovered later (W0.3 shipped this as "the set is empty"; the
 # first wave-1 row to merge turned it into this tuple).
 #   W1.6 — STAR, fx/effects/radial.py (the shape divisor, spin to rest)
+#   W1.5 — Sauron, fx/effects/sauron.py (the shaped iris and its shaped
+#          pupil, his Q8 C)
 WIRED = (
     "radial",
+    "sauron",
 )
 
 

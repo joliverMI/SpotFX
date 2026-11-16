@@ -4,10 +4,13 @@ description: >
   fx/effects/sauron.py (Matrix, crystal-mapper) — the Eye of Sauron: a copy
   of Eye with a vertical slit pupil, a white-hot rim, a heat-mapped iris of
   fire streaks, noise-field flames reaching toward the crystal's hex edge,
-  an ember sky, a `palette_sort` switch and the `sauron_surge` flare poke.
+  an ember sky, a `palette_sort` switch and the `sauron_surge` flare poke
+  — and, since row W1.5, a sung word's WORD SHAPE: the iris's edge and the
+  slit pupil both bend into a heart, star or diamond and round back.
   Load before touching the slit, the flames' reach, the palette sort, the
-  surge flare, or anything Sauron inherited from Eye (gaze, hand-off,
-  charge/lull/drop).
+  surge flare, the word shape (its two blended distance fields, its two
+  registered params, the pupil's bite and its dark-core floor), or
+  anything Sauron inherited from Eye (gaze, hand-off, charge/lull/drop).
 ---
 
 # Sauron
@@ -175,11 +178,108 @@ Four invariants not visible cold:
   step-8 base; the rig reseeds `noise` and `_wander_seed`, which Sauron
   draws from an unseeded generator at construction).
 
+## WORD SHAPES — the shaped iris and its shaped pupil (row W1.5, 2026-11-15)
+
+The Admiral's words for the row: *"Sauron: have it's pupil or something
+chagne into that shape"*, and his Q8 **C**: **both the pupil and the iris
+become the shape at once**. Load `.claude/skills/word-shapes` first — it is
+the binding statement for the library, the six told keys and the engine
+contract; this section is only what Sauron does with them.
+
+**The mechanism is two blends, nothing else.** This eye is already drawn
+from two signed-distance fields — the iris boundary (`d = dist - iris_r`)
+and the slit lens (`sd`) — so with the envelope `m`:
+
+```
+d  = (1 - m) * (dist - iris_r) + m * shape_sdf(iris_r * word_shape_size)
+sd = (1 - m) * slit_sdf        + m * shape_sdf(that * word_shape_pupil)
+```
+
+both in the eye's OWN gazed, foreshortened coordinates (`tx/ty` for the
+iris, the slit's leading `qx/qy` for the pupil). Everything downstream
+reads those two fields, so one blend bends all of it at once: the
+perimeter ring, the flames' root (`_edge_gap` is handed the shaped edge's
+own radius per ray), the heat, `radial_coord`'s colour bands, the inside
+test, the white-hot rim. **Nothing in the phase code changed** — a charge
+still grows `iris_r` (and the shape with it), a surge still erupts the
+flames from the edge as drawn, the lids still close over it, the pre-drop
+still holds the flames down.
+
+**Four things that are not obvious from the code:**
+
+1. **The shape inherits the EYE's aspect, deliberately.** Sauron divides
+   BOTH axes by `s_min`, so its iris "circle" is already about 1.7x taller
+   than wide on the crystal, and the shape is exactly as elongated — it IS
+   that edge bent, so it has to live in that frame. Drawn physically square
+   instead it reaches 0.68 of the panel's half-width (measured) and the
+   flames have nowhere left to lick. `word_shape_size` is therefore a
+   MULTIPLIER of the iris radius (1.0 = the eye's own edge), not the
+   plan's fraction-of-the-panel — with his `iris_size` 0.62 the two happen
+   to coincide, which is why the clarity bars are measured at SIZE 0.62.
+2. **`sdf_fast`'s far field is clamped, not used raw** (`SHAPE_FAST_LIMIT`,
+   `_shape_field`). Past its grid box `sdf_fast` is a lower-bound estimate
+   that steps down at the boundary — 0.055 eye units, a whole rendered
+   pixel, measured — and at these sizes that boundary lands inside the
+   panel, in the flames the shaped edge feeds. The field is evaluated at
+   the point where the ray leaves the box and the radial step added back:
+   exact inside, continuous across, still one `sdf_fast` call.
+3. **The pupil is drawn `PUPIL_BITE_PX` (0.5 px) fatter.** The slit's
+   anti-alias costs it its edge cells by design (fine for a lens 18 px
+   tall); a shaped pupil is about five real cells across and measured only
+   50-73% fully dark without the bite. With it, 100% of its own cells are
+   fully dark at every gaze. Its size is ALSO floored by the shape's own
+   inradius so `SLIT_MIN_DARK_PX` (tune-up 1's three-pixel core) still
+   holds however small `word_shape_pupil` is set.
+4. **`_last_iris` / `program_rim` keep the CIRCLE.** The drop's Shockwave
+   and a transition's ignition are built round a radius. P3 A means a shape
+   is never told while a drop is armed, so the only way they meet is a drop
+   ARRIVING on a standing shape: the shockwave's ring is then born on the
+   round rim while the eye underneath is shaped. That is the documented
+   "what wrong looks like" for this effect — it reads as the eye snapping
+   back round under the blast, not as a defect. A transition's IGNITION
+   is the same story from the other side: `_lens_gain` opens the LENS from
+   a hairline, and a shape standing at full `m` has replaced the lens, so
+   the pupil simply shows as the shape — the ring and the rim still arrive
+   by the program's own fill.
+
+**Its two registered params** (Sonic-tellable like any other):
+`word_shape_size` (1.0, 0.6-1.3) and `word_shape_pupil` (0.40, 0.2-0.6).
+The six told keys are NOT registered — they ride only the Words band's one
+write.
+
+**The clarity bar and what it measures** (plan §3.5, measured by
+`scripts/check_sauron_word_shape.py` on the real mask, all three shapes,
+Energy 0.2 and 0.8, at the word and mid-hold, gaze centred and at its four
+extremes): at least 85% of the shaped iris's area cells outside the pupil
+lit, 80% of its outline cells carrying the ring, 70% of the pupil's cells
+black — **measured 100% / 100% / 100% everywhere**, the plan's own
+simulation reproduced. Beside it: the pupil's dark core never below 6 px
+over a moving-gaze sweep (floor 3), the largest frame-to-frame change in
+lit cells 6.3% (bar 8%), no white at all beyond today's busy frames, a
+surge mid-hold still erupting (423 -> 927 flame cells), and **+0.2 to
++0.7 ms** for the two fields on a quiet host (bar 1 ms, on a 3.8 ms
+frame).
+
+**Measuring that cost needs the paired loop the script uses**, not two
+clips in turn: this host runs several agents at once, and timing one and
+then the other measures the load between them (it failed the bar that way
+at load average 13 and at 20). A told eye and an untold one render
+ALTERNATE frames in one loop, swapping order each iteration, and the cost
+is the median of the per-pair differences. The bar is checked as a SHARE
+of this effect's own frame always (the plan's 1 ms over its 3.8 ms
+reference = 26%; measured 12-18% quiet, 20-22% at load average 20) and in
+absolute milliseconds only when the host is quiet enough to mean it.
+
+Untold, the effect renders today's frames byte for byte — proven against
+the pinned pre-row module over 320 frames of busy and quiet audio
+(`tests/test_sauron_word_shape.py`).
+
 ## Sonic reach
 
 Every registered param through `set_scene_entry_param` (registry-driven,
 including `palette_sort`); the `sauron_surge` kind through
-`set_flare_kind`. Help topics: `sauron-effect`, `sauron-surge`.
+`set_flare_kind`. Help topics: `sauron-effect`, `sauron-surge`,
+`word-shapes` (the two word-shape params point there).
 
 ## Executable proofs
 
@@ -192,7 +292,13 @@ beat dilation, palette sort, angle mode, the radial mapping following the
 slit and breaking a rainbow into far fewer patches than the heat map, a
 60 s soak, frame cost ~2.9 ms p50 here) — run by `tests/test_sauron.py`, which also covers the registry,
 the device-model sets, the flare kind, the engine write (incl. flares-off),
-the preview ruler and Sonic's enum. Offline GIFs:
+the preview ruler and Sonic's enum.
+`scripts/check_sauron_word_shape.py` (the word shape: the three clarity
+bars at every gaze, the pupil's dark core, nothing jumping, no new white,
+a surge mid-hold, the cost and the far-field clamp) — run by
+`tests/test_sauron_word_shape.py`, which also holds the byte-identity
+proof against the pinned pre-row module, the engine-driven "complete on
+the word", and the SEQ edge rules. Offline GIFs:
 `scripts/render_sauron.py` -> `docs/evidence/sauron/`; tune-up 1's
 before/after (the merged effect read out of git beside the working tree,
 his scene's own values, the eye moving): `scripts/render_sauron_tuneup.py`

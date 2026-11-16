@@ -33,11 +33,13 @@ effects would form an outline that represents those. ... Make it easy to
 add more shapes and associations down the road."* and *"Remember to use the
 crystal hex skill/info so that things look representational."*
 
-Nothing renders differently yet, and that is still true after W0.3: W0.1 is
-the library plus the told-key helper plus the check, W0.3 is the whole
-engine contract above it, and NO EFFECT IS WIRED until wave 1 —
-`fx.device_model.WORD_SHAPE_EFFECTS` is empty, so even a scene with a Words
-band and a Word Shape kind writes to no fixture.
+W0.1 is the library plus the told-key helper plus the check, W0.3 is the
+whole engine contract above it, and WAVE 1 wires the effects one at a time
+— `fx.device_model.WORD_SHAPE_EFFECTS` names exactly those, so a scene
+with a Words band and a Word Shape kind writes to those fixtures and no
+others. "The effects that draw one", below, is the live list; the Admiral's
+tuning gate (`docs/ADDING_EFFECTS.md`) stands in front of each of them, and
+nothing is in his room until the row is deployed.
 
 ## What the library is
 
@@ -454,9 +456,12 @@ which names where each claim's behaviour is proven.
 
 ## Wave 1, effect by effect
 
-Each row below is one effect WIRED to the told keys. The effect's own
-`SKILL.md` is the binding statement for how it draws the shape; this is the
-one-paragraph index, plus the clarity numbers it actually measured.
+Each row below is one effect WIRED to the told keys:
+`fx.device_model.WORD_SHAPE_EFFECTS` is the membership, and
+`tests/test_word_shape_contract.py`'s own `WIRED` tuple must equal it. The
+effect's own `SKILL.md` is the binding statement for how it draws the
+shape; this is the one-paragraph index, plus the clarity numbers it
+actually measured.
 
 ### STAR / `radial` (row W1.6, 2026-11-15) — the third divisor, spin to rest
 
@@ -491,6 +496,43 @@ than moved, both printed by the check script:
   at 30 fps. Measured with the strip frozen: 6.9-14.4% (60 fps) /
   9.4-25.4% (30 fps), against the effect's own UNTOLD worst of 18.2% /
   26.6%. The hold itself does not move at all.
+
+### Sauron / `sauron` (row W1.5, 2026-11-15) — the shaped iris and pupil
+
+His Q8 **C**: both at once. Sauron already draws itself from two signed
+distance fields, so the shape is a blend of each with the shape's own —
+the iris boundary with `shape_sdf(iris_r x word_shape_size)` and the slit
+lens with `shape_sdf(that x word_shape_pupil)` — in the eye's own gazed,
+foreshortened coordinates. The ring, the flames' root, the heat, the
+radial colour bands and the white-hot rim all read those two fields, so
+one blend bends the whole picture and every phase composes unchanged.
+
+Three facts a later row should not re-derive:
+
+- **`word_shape_size` is a MULTIPLIER of the iris radius here**, not the
+  plan's fraction of the panel: the shape is the eye's own edge bent, so
+  it lives in the eye's own frame (both axes divided by `s_min`, so it
+  inherits the eye's 1.7:1 aspect, deliberately). With his `iris_size`
+  0.62 the two coincide, which is why the bars are measured at SIZE 0.62.
+- **`sdf_fast`'s far field needs clamping at these sizes.** Past its grid
+  box the estimate steps down by 0.055 eye units — a whole rendered pixel,
+  measured — and at a pupil's size that boundary is inside the panel.
+  `sauron._shape_field` evaluates at the point where the ray leaves the
+  box and adds the radial step back: exact inside, continuous across, one
+  `sdf_fast` call, +0.2 to +0.7 ms for both fields together on a quiet
+  host (and see that skill on measuring it on a busy one).
+- **A small dark shape needs a bite.** A cell lands fully dark only once
+  it is 0.4 x the anti-alias inside the edge; a pupil about five real
+  cells across measured 50-73% fully dark because of it. Sauron draws the
+  pupil shape that much fatter (`PUPIL_BITE_PX`) and reaches 100%.
+
+Bars (plan §3.5): 85% of the shaped iris's area cells outside the pupil
+lit, 80% of its outline cells ringed, 70% of the pupil's cells black —
+**measured 100% / 100% / 100%** for all three shapes at Energy 0.2 and
+0.8, at the word and mid-hold, gaze centred and at its four extremes
+(`scripts/check_sauron_word_shape.py`). `.claude/skills/sauron-effect`
+holds the rest, including what a drop arriving on a standing shape looks
+like.
 
 ## Related
 
