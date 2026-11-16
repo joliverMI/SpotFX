@@ -2946,3 +2946,53 @@ against that commit.
     `scripts/check_fireworks_word_shape.py`, pinned by
     `tests/test_fireworks_word_shape.py::
     test_the_live_show_white_is_recorded_above_the_plans_letter`.
+97. `effects/orbits.py` (SpotFX-authored on top of #82/#88) + `effects/
+    word_shapes.py` / `word_shape_keys.py` (NEW, SpotFX-authored, Word
+    Shapes rows W0.1/W0.3): WORD SHAPES ON ORBITS (row W1.3, 2026-11-16;
+    the Admiral: "Orbits: if there are few and they are large, they can
+    change shape from circles to the shape. If there are a lot, they can
+    move in a path together that forms the shape", and "for particles that
+    flow to move in that shape, like fish and orbits, they need to smoothly
+    accelerate and not have sudden velocity shifts"; Q10 A made the
+    threshold a setting, P1 A decided the few-blob case — the tethers
+    gather so the blobs trace ONE shape). TWO MODES, LATCHED at the edge
+    from the live blob count (`_word_shape_latch`, `<= word_shape_few`) and
+    held for the whole shape: his scene drives `particle_count` 1-8 by
+    Energy, so without the latch a rising Energy would flip three blobs
+    tracing one heart into eight beads on it mid-word. FEW blends each
+    blob's position by the envelope between its ordinary point and
+    `SIZE x at(walk + slot)` — the outline BY ARC LENGTH at the blob's own
+    orbit rate — while the tether ring itself scales by `1 - m`; the walk
+    is anchored at the edge to the blob's own EVEN slot (`p_ws0`, a new SoA
+    array), without which three random spawn phases trace one third of the
+    heart between them (58% of the outline against 85-99%, measured over
+    five seeds). MANY blends slot `k`'s tether to `SIZE x at(ring_phase +
+    k/n)`, so the beads circulate at the ring's own speed evenly spaced by
+    the slots, each orbit shrunk to `word_shape_wobble` of itself and
+    `tether_scatter` blended out. Both are POSITION blends on the
+    envelope's smoothstep: Orbits is position-driven, so there is no
+    velocity state to graft a shape onto (#82's VELOCITY GRAFT's own
+    reason) and continuity is a property of the blend. `SIZE` is
+    `word_shape_size / radius_scale` (`_word_shape_scale`) because this
+    effect's `sx`/`sy` carry `radius_scale`, so 1.0 here is 1.8 panel
+    half-heights — undivided, a heart at 0.62 drew at 1.12 of the panel and
+    spilled off three sides. The comet trail's PER-FRAME DECAY (never its
+    half-life, which the decay is hyperbolic in) is blended toward a
+    `WORD_SHAPE_TRAIL_S` 0.9 s longer half-life, so the trails draw the
+    outline's edge and come back to today's with no step. Three registered
+    params (`word_shape_size` 0.62, `word_shape_few` 3,
+    `word_shape_wobble` 0.15); the six `word_shape_*` told keys ride only
+    the Words band's write. The blend is applied to the REST geometry
+    before the phase math composes onto the same expressions, so the drop's
+    ejecta, the drop Shockwave, the pre-drop's jitter and the lull's fall
+    keep their precedence; a phase ARRIVING mid-shape releases the shape
+    from its own fraction (`_inv_smoothstep`, which every edge uses so
+    nothing snaps). `fx.device_model.WORD_SHAPE_EFFECTS` gains `orbits` —
+    the 2-D Matrix effect only, since `orbits1d` has no outline to draw a
+    shape on. Untold (no keys, a cleared write, an older SpotFX, a LedFX UI
+    scrub) every branch returns before touching state and the effect
+    renders byte for byte what it rendered before — proven against the
+    PINNED module hosted beside today's over 300 frames of quiet and of
+    busy audio. No vendored line changed. Evidence:
+    `scripts/check_orbits_word_shape.py`,
+    `tests/test_orbits_word_shape.py`.

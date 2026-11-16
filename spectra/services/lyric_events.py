@@ -101,8 +101,8 @@ THE BAND IS THE SWITCH (his Q6 A): a shape word does something only if the
 showing scene has a Words band with a Word Shape kind in it. A scene
 without one is byte-identical to today — which is why this planner's shape
 branch is unreachable for every song whose labels reach no shape, and why
-`WORD_SHAPE_EFFECTS` being empty means even a Words band writes to no
-fixture until wave 1.
+a Words band still writes to no fixture unless the showing scene's own live
+effect is one of the `WORD_SHAPE_EFFECTS` wave 1 has wired so far.
 
 HOW A WORD IS WEIGHED. Among the words that play, the strongest goes first (his
 own matches ahead of every guess, then Claude's confidence, then the emphasis

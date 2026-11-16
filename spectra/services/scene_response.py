@@ -182,9 +182,9 @@ Per event, fed by the bridge with the fire's intensity:
                   with ONE difference: it has a LEAD, the form time, so the
                   shape completes ON the word (the trigger clock fires the
                   band `form_s` early; kind_lead_ms reports it for the
-                  preview). WORD_SHAPE_EFFECTS is EMPTY until wave 1, so
-                  even a Words band writes to no fixture yet. See
-                  _word_shape.
+                  preview). A Words band writes to no fixture unless
+                  something showing is one of the WORD_SHAPE_EFFECTS wave 1
+                  has wired. See _word_shape.
   MINIMUM INTENSITY (FlareKind.min_intensity, any type; pulse_flip defaults
   to 0.4): a kind fires only ABOVE its minimum. Below it the kind leaves its
   lane's pool for that fire, exactly as a disabled kind does

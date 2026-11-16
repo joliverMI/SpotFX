@@ -236,6 +236,127 @@ arrays set every frame from the drawn displacement, render byte-identical)
 and `gesture: "orbit"`. An incoming Orbits starts FRESH under a program
 (the program owns the outgoing particles). `fx/effects/transition_program.py`'s docstring is the binding statement; `tests/test_transition_programs.py` measures it on the real pipeline.
 
+## WORD SHAPES — few trace it, many become it (2026-11-16, row W1.3)
+
+Load `.claude/skills/word-shapes` first: it owns the shape library, the six
+told keys, the form/hold/release envelope and the outline-cell denominators
+every number below is a fraction of. This section is only what ORBITS does
+with them. `fx.device_model.WORD_SHAPE_EFFECTS` now names `orbits` — the
+2-D Matrix effect ONLY; **`orbits1d` knows no shapes** (a strip has no
+outline to draw one on) and nothing about the strip changed.
+
+His words for the row: *"Orbits: if there are few and they are large, they
+can change shape from circles to the shape. If there are a lot, they can
+move in a path together that forms the shape."* and *"For particles that
+flow to move in that shape, like fish and orbits, they need to smoothly
+accelerate and not have sudden velocity shifts."* His Q10 A set the
+threshold as a setting; his **P1 A** decided the few-blob case: the
+tethers gather to the centre so the blobs trace ONE shape together —
+*"one heart reads; three overlapping ones read as a tangle on 976 cells"*.
+
+**TWO MODES, LATCHED AT THE EDGE** (`_word_shape_latch`). The live tracked
+blob count at the moment the shape starts decides it: `<= word_shape_few`
+(3) is FEW, more is MANY, and the verdict is **held for the whole shape**.
+That is not tidiness — his scene drives `particle_count` 1-8 by Energy, so
+without the latch a rising Energy would flip three blobs tracing one heart
+into eight beads on it halfway through the word. Proof:
+`tests/test_orbits_word_shape.py::test_the_latch_holds_when_energy_changes_the_count_mid_shape`.
+
+- **FEW** blends each blob's position by `m` between its ordinary point
+  (its tether plus its orbit circle at its own phase) and the outline, AND
+  scales the tether ring itself by `(1 - m)` so the tethers gather to the
+  centre. The blob walks the outline **by arc length at its own orbit
+  rate** — the same fraction of its cycle is the same fraction of the
+  outline — which is where the continuity comes from.
+- **MANY** blends the tether for slot `k` between the ring point at its
+  slot angle and the outline at `ring_phase + k/n`, so the string of beads
+  circulates along the outline at the RING's own speed, evenly spaced by
+  the slots; each bead's orbit radius shrinks to `word_shape_wobble` of
+  itself so it still wobbles a little. `tether_scatter` blends out with
+  `m` (the even spacing is the whole point of this mode).
+
+**THREE THINGS THAT ARE EASY TO GET WRONG HERE, each one measured:**
+
+1. **SIZE IS DIVIDED BY `radius_scale`** (`_word_shape_scale`).
+   `word_shape_size` is the plan's convention — a fraction of THE PANEL's
+   half-height — but Orbits' normalized space is not the panel's: `sx`/`sy`
+   carry `radius_scale` (1.8 on his scene) to stretch the circular physics
+   into a panel-filling ellipse. Drawn without dividing it out, a heart
+   comes out at 1.12 of the panel and spills off three sides: measured, 6
+   of the 45 real cells the blobs visited were anywhere near the outline
+   and the clarity bar read 15%. Any new reader of a shape view in this
+   module owes the same division.
+2. **FEW ANCHORS EACH BLOB'S WALK TO ITS OWN EVEN SLOT** (`p_ws0`, an SoA
+   array holding the blob's orbit phase in revolutions at the edge). The
+   blob's own phase drives the RATE; its slot decides WHERE on the outline
+   it starts. Three blobs spawn with random phases, so without the anchor
+   they trace whichever third of the heart they happened to spawn in —
+   measured 58% of the outline lit at mid-hold on the unluckiest of five
+   seeds, against 85-99% with it. A blob born mid-shape has no anchor
+   (NaN) and walks from its raw phase.
+3. **THE TRAIL'S PER-FRAME DECAY IS WHAT IS BLENDED, NOT ITS HALF-LIFE**
+   (`WORD_SHAPE_TRAIL_S`, 0.9 s). The trails are what draw the outline's
+   edge, so they linger under a shape; the fraction a trail loses per
+   frame is hyperbolic in the half-life, so ramping the half-life leaves
+   the decay flat for most of the release and then collapses it from 1.2%
+   to 11% of the smear per frame over the last few frames — a whole faded
+   outline crossing the lit threshold at once, 23-28% of the lit cells in
+   ONE frame. Blended as a decay it is linear in `m`, and `m` is a
+   smoothstep with zero slope at both ends. At `m` 1 and `m` 0 the two
+   formulations are identical, so the hold is the same picture either way.
+
+**PRECEDENCE** — it is a blend on the REST geometry, applied where the
+tether, the ring radius and the orbit radius are built, BEFORE the phase
+math composes onto the same expressions and before the entering/leaving
+branches. So the drop's ejecta (ballistic, their position is overwritten),
+the drop Shockwave (painted by `Twod.render` after `draw()`), the
+pre-drop's jitter (it moves the render CENTRE, not the model) and the
+lull's fall all keep their precedence with no change. P3 A means a shape is
+never TOLD during a charge, lull or drop; **one ARRIVING mid-shape wins and
+the shape releases from exactly the fraction it is at** — what wrong looks
+like is the shape vanishing on that frame, or the drop's explosion coming
+out of a half-formed heart. Every edge in `_word_shape_step` starts from
+the fraction already standing (`_inv_smoothstep`): a second word in the
+release picks the shape back up, a clearing write lets it go, a stale
+persisted SEQ on a fresh instance never fires at all.
+
+**A TRANSITION OWNS THE FRAME.** `draw()`'s early returns — the outgoing
+collapse into Radial, the held eruption, the held pacman adoption — return
+before `_word_shape_step` runs, so a shape told across one of those pauses
+its own clock and resumes where it left off rather than running out
+invisibly. A transition program's matched birth (`_program_birth`) leaves
+`p_ws0` NaN on the born blobs, so a shape told right after one walks from
+each blob's raw phase instead of its slot: evenly spread is the next
+shape's business, not this one's.
+
+**THE CLARITY BAR, AND WHERE IT IS ASSERTED.** `scripts/check_orbits_word_shape.py`
+measures on his real `crystal-mapper` mask at SIZE 0.62, against
+`scripts/check_word_shapes.py`'s own pinned outline counts (heart 168, star
+176, diamond 119). The bar is at THE HOLD: >= 60% of the outline lit with
+FEW, >= 75% with MANY. The word's own number is reported beside it and is
+deliberately NOT the bar — at the word the shape has only just completed,
+so the trail behind each blob is still the forming sweep, and no blob-based
+effect can light 60% of an outline the instant it arrives on it.
+
+Measured 2026-11-16 (seed 7, his live Matrix entry, phrase 1.2 s), at the
+hold / at the word, Energy 0.2 and 0.8 — the plan's simulation numbers in
+brackets:
+
+| | heart (168) | star (176) | diamond (119) |
+|---|---|---|---|
+| FEW, Energy 0.2 | **92%** / 29% (sim 98%) | **93%** / 36% (99%) | **93%** / 31% (100%) |
+| FEW, Energy 0.8 | **79%** / 32% (95%) | **74%** / 31% (98%) | **78%** / 42% (96%) |
+| MANY, Energy 0.2 | **77%** / 68% (83%) | **87%** / 77% (92%) | **83%** / 79% (95%) |
+| MANY, Energy 0.8 | **87%** / 57% (76%) | **86%** / 69% (90%) | **88%** / 66% (89%) |
+
+Every bar is met and the whole outline is lit by the hold's END (100% with
+FEW). The loud-Energy FEW numbers sit below the simulation's because the
+form is shorter there (0.5 s against 0.79 s), so less of the outline has
+been walked by the hold's MIDDLE; across five seeds FEW at Energy 0.8 runs
+74-100%. Cost: +0.00 to +0.33 ms p50 per frame with a shape holding (bar
+1 ms). White: 0 cells of 976, except 1 on many-diamond at Energy 0.8, where
+eight beads of different colours crowd one small outline.
+
 ## Sonic reach
 
 Same rule as every effect here: no direct param edit. Sonic reaches these
@@ -243,10 +364,18 @@ params only through an existing `FlareKind` on whichever scene binds this
 effect — except that a registered param's current value on one scene
 entry is reachable through `set_scene_entry_param`, which includes the
 strip's strip-phase tunables (`charge_fill` … `flare_punch_glow`,
-registered on `orbits1d`).
+registered on `orbits1d`) and the crystal's three Word Shape settings
+(`word_shape_size`, `word_shape_few`, `word_shape_wobble`). The six
+`word_shape_*` TOLD keys are deliberately NOT registered — they ride only
+the Words band's own write, so no kind, drift mechanism or Sonic op can
+reach them.
 
 ## Executable proofs
 
+`scripts/check_orbits_word_shape.py` + `tests/test_orbits_word_shape.py`
+(the Word Shape section above: both modes, the latch, the clarity bar on the
+real mask, the continuity numbers, the cost, and untold byte-identity
+against the pinned pre-change module),
 `scripts/check_orbits_drop_burst_and_persistence.py`,
 `scripts/smoke_orbits_params.py`, `tests/test_orbits_drop_persistence.py`,
 `tests/test_fireworks_melds.py` (keep-N ring, the keepers flag, untold

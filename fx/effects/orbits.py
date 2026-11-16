@@ -1,4 +1,5 @@
 import logging
+import math
 
 import numpy as np
 import voluptuous as vol
@@ -7,7 +8,8 @@ from PIL import Image
 import fx.effects.particle_handoff as particle_handoff
 import fx.effects.pre_drop as pre_drop
 from fx.color import validate_gradient
-from fx.effects import lull_handoff, phase_grammar
+from fx.effects import (lull_handoff, phase_grammar, word_shape_keys,
+                       word_shapes)
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
 from fx.effects.twod import Twod
@@ -89,6 +91,51 @@ DROP_EJECTA_X = 2        # ejecta per kept blob (3× total spawn)
 DROP_EJECTA_SPEED = (0.49, 0.87)
 OM_TAU_S = 0.08   # p_om's smoothing (transition_cloud.py's SHOALING peel)
 
+# ── WORD SHAPES: FEW TRACE IT, MANY BECOME IT ───────────────────────────────
+# Word Shapes plan row W1.3 (`fx/effects/word_shape_keys.py` is the binding
+# statement for the six told keys and the one envelope; `fx/effects/
+# word_shapes.py` for the geometry). The Admiral's words for the row:
+# "Orbits: if there are few and they are large, they can change shape from
+# circles to the shape. If there are a lot, they can move in a path together
+# that forms the shape." / "For particles that flow to move in that shape,
+# like fish and orbits, they need to smoothly accelerate and not have sudden
+# velocity shifts." His Q10 A: 3 or fewer, each its own shape; 4 or more, one
+# shared outline evenly spaced, circulating — the threshold a setting. His
+# P1 A, which supersedes the "each its own shape" half: with FEW blobs the
+# TETHERS GATHER TO THE CENTRE so the blobs trace ONE shape together ("one
+# heart reads; three overlapping ones read as a tangle on 976 cells").
+#
+# BOTH MODES ARE POSITION BLENDS ON THE ENVELOPE'S S-CURVE, which is the
+# whole continuity argument: Orbits is position-driven (a tether on a
+# spinning ring, a blob orbiting the tether — THE VELOCITY GRAFT's own
+# reason, below), so there is no velocity state to graft a shape onto.
+# Continuity is a property of the blend instead — the envelope is a
+# smoothstep with zero slope at both ends of both ramps, and in FEW the same
+# fraction of a blob's orbit cycle is the same fraction of the outline BY ARC
+# LENGTH (`shape.at(phase / 2pi)`), so speed and heading stay continuous
+# through the form, the hold's edges and the release.
+WORD_SHAPE_FEW = "few"
+WORD_SHAPE_MANY = "many"
+# Under a shape the comet trail lingers as though its half-life were this
+# much longer, so the trails themselves DRAW the outline's edge behind the
+# blobs (the sim's rule, the same idea as Fish). At the hold it is exactly
+# that: half-life `0.02 + trail_decay * 0.5 + WORD_SHAPE_TRAIL_S`. It is back
+# to today's by the release's end, because `m` is.
+#
+# WHAT IS BLENDED BY `m` IS THE PER-FRAME DECAY, NOT THE HALF-LIFE, and that
+# is not a detail: the fraction a trail loses per frame is `1 - 0.5 ** (dt /
+# half_life)`, which is HYPERBOLIC in the half-life. Ramping the half-life
+# itself leaves the decay almost flat for most of the release and then
+# collapses it over the last few frames — from 1.2% of the smear per frame
+# to 11% at his `trail_decay` 0.15 — and a whole faded outline's worth of
+# cells crosses the lit threshold at once: measured 23-28% of the lit cells
+# in ONE frame at the release's end, against 13% for the same frames untold.
+# Blending the decay makes it linear in `m`, and `m` is a smoothstep with
+# zero slope at both ends, so the trail comes back to today's with no step
+# anywhere. At `m` 1 and `m` 0 the two formulations are identical, so the
+# hold is the same picture either way.
+WORD_SHAPE_TRAIL_S = 0.9
+
 # Every per-particle SoA array, in one place so compaction and the particle
 # handoff native snapshot can never drift out of sync with each other.
 _SOA_NAMES = (
@@ -101,7 +148,26 @@ _SOA_NAMES = (
     # plan): which released object this blob was born from, and the
     # velocity graft it leaves on
     "p_pid", "p_resx", "p_resy", "p_resage",
+    # WORD SHAPES, FEW mode: the blob's own orbit phase (in revolutions) at
+    # the shape's edge, so its walk along the outline starts from its own
+    # EVEN slot. NaN = no anchor (a blob born mid-shape).
+    "p_ws0",
 )
+
+
+def _inv_smoothstep(y: float) -> float:
+    """The u in [0, 1] with `u*u*(3 - 2u) == y` — the inverse of the one
+    smoothstep `word_shape_keys.envelope` ramps on.
+
+    This is what lets every word-shape edge start from the fraction already
+    standing instead of from zero: place the shape clock at
+    `form_s * _inv_smoothstep(m)` and the envelope's very first value is
+    exactly `m`, so a second word arriving mid-release, or a release
+    beginning mid-form, moves the picture not at all on the frame it
+    happens.
+    """
+    y = min(1.0, max(0.0, float(y)))
+    return 0.5 - math.sin(math.asin(1.0 - 2.0 * y) / 3.0)
 
 
 class Orbits2d(Twod, GradientEffect):
@@ -135,6 +201,8 @@ class Orbits2d(Twod, GradientEffect):
         *lull_handoff.KEYS,
         *phase_grammar.BREATH_KEYS,
         *pre_drop.KEYS,
+        # WORD SHAPES: the six told keys ride ONLY the dedicated write
+        *word_shape_keys.KEYS,
         phase_grammar.SHOCK_ON_KEY,
         lull_handoff.DROP_KEY,
     ]
@@ -251,6 +319,26 @@ class Orbits2d(Twod, GradientEffect):
                 description="Rotate the particle→color assignment by this many slots (nudge +1 to make colors jump A,B,C → C,A,B)",
                 default=0,
             ): vol.All(vol.Coerce(int), vol.Range(min=0, max=96)),
+            # ── WORD SHAPES (the block above) — registered params, so
+            # Sonic reaches them through set_scene_entry_param for free
+            vol.Optional(
+                "word_shape_size",
+                description="Word shape size: the shape's half-height as a "
+                            "fraction of the panel's",
+                default=0.62,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=1.0)),
+            vol.Optional(
+                "word_shape_few",
+                description="Word shape: this many blobs or fewer trace one "
+                            "shape together; more become its outline",
+                default=3,
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=8)),
+            vol.Optional(
+                "word_shape_wobble",
+                description="Word shape: how far each bead still wobbles on "
+                            "the outline, as a fraction of its orbit radius",
+                default=0.15,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
             vol.Optional(
                 "frequency_range",
                 description="Audio band driving the reactivity",
@@ -288,6 +376,9 @@ class Orbits2d(Twod, GradientEffect):
             # THE PRE-DROP's told keys (ride ONLY the lull arm write, and
             # only on a lull that plays one) — fx/effects/pre_drop.py
             **pre_drop.schema_fields(),
+            # THE WORD SHAPE told keys (ride ONLY the Words band's own
+            # `word_shape` kind write) — fx/effects/word_shape_keys.py
+            **word_shape_keys.schema_fields(),
             **lull_handoff.drop_schema_fields(),
         }
     )
@@ -351,6 +442,15 @@ class Orbits2d(Twod, GradientEffect):
         self.p_resx = np.zeros(CAP, dtype=np.float32)
         self.p_resy = np.zeros(CAP, dtype=np.float32)
         self.p_resage = np.full(CAP, np.nan, dtype=np.float32)
+        # WORD SHAPES (FEW): each blob's orbit phase in REVOLUTIONS at the
+        # shape's edge — what makes "the same fraction of its cycle is the
+        # same fraction of the outline" start from the blob's own EVEN slot
+        # instead of from wherever its random spawn phase happens to be.
+        # Three blobs spawned within a quarter of a turn of each other would
+        # otherwise trace one quarter of the heart between them; measured,
+        # that is the difference between 58% and 83% of the outline lit at
+        # mid-hold on the unluckiest seed. NaN = not anchored.
+        self.p_ws0 = np.full(CAP, np.nan, dtype=np.float32)
         self._graft_tau = 0.25
         # a pending matched birth (set by the program's begin(), consumed on
         # the first draw, where the geometry is known) and its results
@@ -416,6 +516,10 @@ class Orbits2d(Twod, GradientEffect):
         self.trail_decay = self._config["trail_decay"]
         self.gradient_spin = self._config["gradient_spin"]
         self.color_shift = self._config["color_shift"]
+        # WORD SHAPES (the block at the top of this module)
+        self.word_shape_size = float(self._config["word_shape_size"])
+        self.word_shape_few = int(self._config["word_shape_few"])
+        self.word_shape_wobble = float(self._config["word_shape_wobble"])
 
         self.power_func = self.POWER_FUNCS_MAPPING[
             self._config["frequency_range"]
@@ -453,6 +557,26 @@ class Orbits2d(Twod, GradientEffect):
         else:
             # non-creation pass: a changed phase key arms the edge
             self._phase_pending = new_phase if new_phase != self._phase else None
+
+        # WORD SHAPES: edge-detect the SEQ, never the shape id, so two words
+        # of the SAME shape back to back both edge (word_shape_keys' own
+        # rule). CREATION BASELINE, the `burst_rockets` phase-key rule
+        # (fx/effects/fireworks.py): a fresh instance built from a persisted
+        # config carrying a stale SEQ must NOT fire, so the first SEQ this
+        # instance ever sees is its baseline rather than an edge.
+        ws_seq = int(self._config.get(word_shape_keys.SEQ_KEY, 0) or 0)
+        if not hasattr(self, "_ws_seq"):
+            self._ws_seq = ws_seq
+            self._ws_pending = False
+            self._ws_told = None     # the WordShapeTold being run, or None
+            self._ws_t = 0.0         # seconds on this shape's OWN clock
+            self._ws_m = 0.0         # the envelope, this frame
+            self._ws_mode = None     # WORD_SHAPE_FEW / _MANY, latched
+            self._ws_shape = None    # the live fx.effects.word_shapes.Shape
+            self._ws_releasing = False
+        elif ws_seq != self._ws_seq:
+            self._ws_seq = ws_seq
+            self._ws_pending = True
 
     def audio_data_updated(self, data):
         power = getattr(data, self.power_func)()
@@ -518,6 +642,7 @@ class Orbits2d(Twod, GradientEffect):
         self.p_resx[s] = 0.0
         self.p_resy[s] = 0.0
         self.p_resage[s] = np.nan
+        self.p_ws0[s] = np.nan
         self.p_grad_from[s] = np.nan
         self.p_erate[s] = 1.0
         self.p_lfade[s] = LEAVE_FADE_S
@@ -1085,6 +1210,113 @@ class Orbits2d(Twod, GradientEffect):
                                          floor=self.BREATH_FLOOR)
         return min(1.0, want / max(base, 1e-6))
 
+    # ── WORD SHAPES (the module's own WORD SHAPES block) ────────────────
+
+    def _word_shape_latch(self):
+        """FEW or MANY, from the LIVE blob count at the edge. Latched for
+        the whole shape: an Energy-driven `particle_count` change mid-shape
+        must not flip the geometry under a held shape, which would be a
+        visible snap from "three tracing one heart" to "eight beads on it".
+        Falls back to the authored count before the first population
+        exists (a shape told on the very first frame)."""
+        live = int(np.count_nonzero(self.p_mode[: self.n] < 2))
+        if live <= 0:
+            live = int(self.particle_count)
+        few = max(1, int(self.word_shape_few))
+        return WORD_SHAPE_FEW if live <= few else WORD_SHAPE_MANY
+
+    def _word_shape_scale(self):
+        """SIZE in THIS effect's OWN normalized units — the one conversion
+        this effect owes the shape library, and the easiest thing here to
+        get wrong.
+
+        `word_shape_size` is the plan's convention: the shape's half-height
+        as a fraction of THE PANEL's half-height (fx/effects/word_shapes.py's
+        "THE CONVENTION AN EFFECT USES"). Orbits' normalized space is NOT the
+        panel's — `do_once` builds `sx`/`sy` as `radius_scale * (r_width - 1)
+        / 2`, because the physics is circular in normalized space and
+        `radius_scale` (1.8 on his live scene) stretches it into a
+        panel-filling ellipse. So 1.0 here is 1.8 panel half-heights, and a
+        heart drawn at 0.62 without dividing that out comes out at 1.12 of
+        the panel and spills off three sides of it — measured: 6 of the 45
+        real cells the blobs visited were anywhere near the outline, and the
+        coverage bar read 15%. Divide.
+        """
+        return self.word_shape_size / max(float(self.radius_scale), 1e-6)
+
+    def _word_shape_step(self, dt):
+        """Run the told shape's own clock and set `_ws_m` (the envelope) and
+        `_ws_shape` for this frame. Nothing told: both stay at 0 / None and
+        every geometry branch below returns before touching anything, so an
+        untold frame is byte for byte what this effect renders today
+        (word_shape_keys' rule 3).
+
+        FOUR EDGES, all of them continuous in `_ws_m`:
+          * a NEW shape (the SEQ changed) starts the form FROM THE CURRENT
+            fraction rather than snapping to zero — a second word arriving
+            mid-release picks the shape back up where it had let go;
+          * a CLEARING write (`told()` None with a shape running) releases
+            from the current fraction over that shape's own release;
+          * A PHASE ARRIVING MID-SHAPE releases the same way, and the phase
+            geometry then wins (see the precedence note in draw()): P3 A
+            means a shape is never TOLD during a charge, lull or drop, but a
+            phase can still ARRIVE on a half-formed one;
+          * the shape RESETS ITSELF once its clock passes `total_s` — SpotFX
+            writes once and says nothing more, and nothing is ever written
+            back.
+        """
+        told = word_shape_keys.told(self._config)
+        pend = self._ws_pending
+        self._ws_pending = False
+        if pend and told is not None:
+            self._ws_told = told
+            self._ws_releasing = False
+            # envelope(t0) == the fraction standing right now: the form
+            # restarts from it, so nothing snaps (acceptance 7)
+            self._ws_t = max(0.0, told.form_s) * _inv_smoothstep(self._ws_m)
+            self._ws_mode = self._word_shape_latch()
+            # FEW anchors every blob's walk along the outline to its own
+            # EVEN slot (p_ws0's own note in __init__)
+            self.p_ws0[: self.n] = (self.p_phase[: self.n]
+                                    / np.float32(2.0 * np.pi))
+        elif self._ws_told is not None and not self._ws_releasing and (
+                told is None or self._phase != "none"):
+            self._word_shape_release_now()
+        if self._ws_told is None:
+            self._ws_m = 0.0
+            self._ws_shape = None
+            return
+        self._ws_t += dt
+        w = self._ws_told
+        if self._ws_t > w.total_s:
+            self._ws_told = None
+            self._ws_releasing = False
+            self._ws_m = 0.0
+            self._ws_shape = None
+            return
+        self._ws_m = float(word_shape_keys.envelope(
+            self._ws_t, w.form_s, w.hold_s, w.release_s))
+        try:
+            self._ws_shape = word_shapes.get(w.shape)
+        except KeyError:                                     # pragma: no cover
+            # told() already refused an unknown id; a library that lost one
+            # between the write and this frame ends the shape rather than
+            # raising on the render thread
+            self._ws_told = None
+            self._ws_m = 0.0
+            self._ws_shape = None
+
+    def _word_shape_release_now(self):
+        """Let the standing shape go from EXACTLY the fraction it is at,
+        over its own told release. Nothing here is a jump: the rewritten
+        envelope has no form and no hold, and the clock is placed so its
+        first value is the fraction already on the panel."""
+        w = self._ws_told
+        rel = max(float(w.release_s), 1e-3)
+        self._ws_told = w._replace(form_s=0.0, hold_s=0.0, release_s=rel)
+        self._ws_t = rel * _inv_smoothstep(1.0 - self._ws_m)
+        self._ws_releasing = True
+
     def _phase_step(self, dt):
         """Advance the charge/lull/drop state machine. Runs every draw,
         before population management; sets the per-frame overrides
@@ -1443,6 +1675,10 @@ class Orbits2d(Twod, GradientEffect):
 
         self._phase_step(dt)
         self._pre_drop_step(dt)
+        # WORD SHAPES: after the phase step, so a phase ARRIVING on a
+        # half-formed shape releases it this same frame (the precedence note
+        # on the geometry below)
+        self._word_shape_step(dt)
         # THE COUNT RULE (the shoal-burst plan §5.4): a matched birth's
         # count holds until `transition_count_hold_ms` after the program
         # ends, then the authored count wins and _manage_population flies
@@ -1516,16 +1752,45 @@ class Orbits2d(Twod, GradientEffect):
         self.p_ro[:n] *= np.float32(0.5 ** (dt / 0.25))
 
         # ── positions (normalized space) ────────────────────────────────
+        # ── WORD SHAPES: THE POSITION BLEND (the module's WORD SHAPES
+        # block; `ws_m` is 0 and `shape` None on every untold frame, so every
+        # branch here is skipped and the frame is byte for byte today's).
+        #
+        # PRECEDENCE. This is a blend on the REST geometry, applied where the
+        # tether, the ring radius and the orbit radius are built — BEFORE the
+        # phase math composes onto the same expressions (`_pos_scale`,
+        # `_orbit_scale`) and before the entering/leaving branches below. So
+        # the drop's ejecta (mode 2, ballistic — their x/y is overwritten),
+        # the drop Shockwave (painted by Twod.render after draw()), the
+        # pre-drop's jitter (it moves the render CENTRE, not the model) and
+        # the lull's fall all keep their precedence unchanged. P3 A means a
+        # shape is never TOLD during a phase; one ARRIVING mid-shape releases
+        # the shape from its fraction (_word_shape_step) and the phase
+        # geometry wins from there.
+        ws_m = self._ws_m   # NOT `m`: that name is the tracked COUNT above
+        shape = self._ws_shape
+        drawing = ws_m > 0.0 and shape is not None
+        few = drawing and self._ws_mode == WORD_SHAPE_FEW
+        many = drawing and self._ws_mode == WORD_SHAPE_MANY
         # tether_scatter blends each tether from its even slot toward a fixed
         # per-particle random ring position (wrapped shortest way around)
         ring_frac = self.p_slot_frac[:n]
-        if self.tether_scatter > 0.0:
+        # MANY: the even spacing comes from the slots, so the scatter blends
+        # OUT with the shape — beads on a string, not a crowd on one
+        scatter = (self.tether_scatter * (1.0 - ws_m) if many
+                   else self.tether_scatter)
+        if scatter > 0.0:
             scatter_diff = (self.p_scatter[:n] - ring_frac + 0.5) % 1.0 - 0.5
-            ring_frac = ring_frac + scatter_diff * self.tether_scatter
+            ring_frac = ring_frac + scatter_diff * scatter
         ring_ang = (self.ring_phase + ring_frac) * 2 * np.pi
         # _pos_scale collapses the whole orbital geometry into the center
         # during a lull and releases it again on the drop
         ring_r = self.horizon_scale * self._pos_scale
+        # FEW (his P1 A): the tether RING itself gathers to the centre, so the
+        # two or three blobs trace ONE shape together instead of three
+        # overlapping ones
+        if few:
+            ring_r = ring_r * (1.0 - ws_m)
         tx = ring_r * np.cos(ring_ang)
         ty = ring_r * np.sin(ring_ang)
         r_orb = (
@@ -1538,8 +1803,39 @@ class Orbits2d(Twod, GradientEffect):
             * self._pos_scale
             * self._orbit_scale
         )
+        if many:
+            # MANY: the beads shrink onto the outline, each still wobbling a
+            # little (word_shape_wobble of its own orbit radius)
+            r_orb = r_orb * (1.0 - ws_m + ws_m * self.word_shape_wobble)
+            # the tether for slot k is blended to the outline at
+            # (ring_phase + k/n) — so the string of beads CIRCULATES along the
+            # outline at the ring's own speed, evenly spaced by the slots
+            sxp, syp = shape.at(self.ring_phase + self.p_slot_frac[:n])
+            size = self._word_shape_scale()
+            ws_k = np.float32(ws_m * size)
+            tx = tx * (1.0 - ws_m) + ws_k * sxp.astype(np.float32)
+            ty = ty * (1.0 - ws_m) + ws_k * syp.astype(np.float32)
         x = tx + r_orb * np.cos(self.p_phase[:n])
         y = ty + r_orb * np.sin(self.p_phase[:n])
+        if few:
+            # FEW: the same fraction of a blob's own orbit cycle is the same
+            # fraction of the outline BY ARC LENGTH, which is what keeps speed
+            # and heading continuous through the blend — no velocity state to
+            # graft, exactly as THE VELOCITY GRAFT describes
+            # the blob's own cycle drives the walk (the rate is its own
+            # omega, so the speed and heading it arrives on are its own),
+            # and its EVEN SLOT decides where on the outline it starts —
+            # which is what makes three blobs trace ONE whole heart rather
+            # than whichever third of it they happened to spawn in. A blob
+            # born mid-shape has no anchor and walks from its raw phase.
+            turns = self.p_phase[:n] / np.float32(2.0 * np.pi)
+            anchor = self.p_ws0[:n]
+            walk = np.where(np.isfinite(anchor), turns - anchor, turns)
+            sxp, syp = shape.at(walk + self.p_slot_frac[:n])
+            size = self._word_shape_scale()
+            ws_k = np.float32(ws_m * size)
+            x = x * (1.0 - ws_m) + ws_k * sxp.astype(np.float32)
+            y = y * (1.0 - ws_m) + ws_k * syp.astype(np.float32)
 
         entering = mode == 1
         if entering.any():
@@ -1677,7 +1973,15 @@ class Orbits2d(Twod, GradientEffect):
 
         # ── render ──────────────────────────────────────────────────────
         half_life = 0.02 + self.trail_decay * 0.5
-        self.trail *= np.float32(0.5 ** (dt / half_life))
+        decay = 0.5 ** (dt / half_life)
+        # WORD SHAPES: under a shape the comet trails LINGER, so they draw
+        # the outline's edge behind the blobs — and they come back to today's
+        # by the release's end, because `m` does. The DECAY is what is
+        # blended, never the half-life (WORD_SHAPE_TRAIL_S's own note).
+        if ws_m > 0.0:
+            slow = 0.5 ** (dt / (half_life + WORD_SHAPE_TRAIL_S))
+            decay += (slow - decay) * ws_m
+        self.trail *= np.float32(decay)
         jit = self._pd_jit if grow is not None else None
         if jit is not None:
             self.trail *= np.float32(PRE_DROP_TRAIL_KEEP)
