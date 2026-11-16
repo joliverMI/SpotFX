@@ -2388,6 +2388,13 @@ kbd {
   width: 8px; height: 8px; border-radius: 1px; background: var(--halo, var(--accent2));
   transform: translate(-50%, -50%) rotate(45deg);
 }
+/* WORD SHAPES (W2.3): a shaped word draws the shape's own glyph in place of
+   the colour diamond — the glyph IS the mark, so no box and no rotation. */
+.testbed-word-event.word.shaped {
+  width: auto; height: auto; background: none; border-radius: 0;
+  transform: translate(-50%, -50%); font-size: 12px; line-height: 1;
+  color: var(--halo, var(--accent2)); text-shadow: 0 0 6px var(--halo, transparent);
+}
 .testbed-word-event.imprinted {
   opacity: 1; box-shadow: 0 0 0 2px var(--surface2), 0 0 0 3.5px var(--halo), 0 0 7px var(--halo);
 }
@@ -2466,6 +2473,9 @@ kbd {
 }
 .testbed-word-action.fire { border: 1px solid var(--ok); font-weight: 600; }
 .testbed-word-action.imprint { border: 1px solid var(--accent); font-weight: 600; }
+/* WORD SHAPES (W2.3): a word that DRAWS is its own kind of chip — the
+   second accent, so it reads apart from a fired colour and an imprint. */
+.testbed-word-action.shape { border: 1px solid var(--accent2); font-weight: 600; }
 .testbed-word-action.nothing { opacity: 0.55; }
 /* THE ROLL (lyric_events.py): a word sitting out this play is quieter
    still, and dotted, so the words that play stand out. */
@@ -3364,6 +3374,9 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   text-transform: lowercase; color: var(--text-muted);
 }
 .song-strip-next-worded .song-strip-next-word { display: block; }
+/* WORD SHAPES (W2.3): the shaped line prints "love \2192 \2665", so it needs
+   a little more room than a bare word; the shape's NAME is in the hover. */
+.song-strip-next-shaped .song-strip-next-word { max-width: 46px; font-size: 7.5px; }
 .song-strip-next-worded .song-strip-next-icon { width: 18px; height: 18px; }
 /* THE LIVE PULSE on the box: the word's own colour (`--word-flash`, set by
  * lib/wordColourPush.ts) where the plain fire flash is white. */

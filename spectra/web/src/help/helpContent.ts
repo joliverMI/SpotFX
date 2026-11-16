@@ -2394,6 +2394,19 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Only one word per sung line does something, and lyric events stay at least the Minimum gap apart. Your own matches always beat Claude\'s guesses, and only the words that won this play take part (see Which words play). Nothing fires unless the scene showing allows at least one of the word\'s colours, or if the event cannot carry colour (a flare with no colour jump, your own colour on a scene change). It only happens in the Scene change modes that react to music, and it stops for everything else that holds the room\'s colours, like a preview or a house mode.',
           'Which scene is showing at a word is decided when the song plays, so this row can say "gives its colour to the flare" while the scene at that moment turns out not to allow it. The Review page\'s show log records what each word really did, and why it did nothing.',
           'Sonic reaches all of this by voice too: read whether word colours are on for a song and the three tuning settings, change the energy cut-off, minimum gap and imprint window, and ask what each matched word would do — the exact same Word actions row, spoken. Turning word colours on for a show asks first, since it is what lets a matched word start changing your room\'s colours while that song plays; turning it off, or changing only the tuning, does not.',
+          'Some words draw a SHAPE on the crystal instead of changing a colour — "love" a heart, "star" a star — and those chips read "love → ♥ heart" with the shape\'s own glyph on the strip (see Word shapes).',
+        ],
+      },
+      {
+        id: 'testbed-word-shapes',
+        title: 'Word shapes: a word that draws',
+        keywords: 'word shape shapes heart star diamond draw drawn glyph love corazon estrella form hold release words band word shape kind skipped no words band drop wins chip strip next event box pulse show log',
+        body: [
+          'A matched word can point at a SHAPE as well as at a colour set: "love" at the heart, "star" at the star, "diamond" at the diamond. Where a scene can draw one, the word draws it instead of changing a colour — the shape forms so that it is complete exactly on the word, holds, and releases.',
+          'On the Test Bed a drawing word\'s chip reads "love → ♥ heart" with its chance, and the Word events row draws the shape\'s own glyph (♥ ★ ◆) where the colour diamond would be. Click the chip for the full sentence: how long it forms, holds and releases.',
+          'A word that reaches a shape but is doing its COLOUR says why, as a small tail on its chip: "♥ skipped: drop" (a drop lands inside the imprint window, and the drop is the bigger moment, so the word tints the drop as it always did) or "♥ skipped: no Words band" (no scene showing can draw one at that Energy). A shape never imprints on anything, and a word that reaches a shape and no colour set does nothing at all when its shape cannot be drawn.',
+          'Everywhere else the song is drawn, the same glyph follows it: the song timeline and Home draw the shape where the word is sung, and the next-event box prints the word and the shape and counts down to it. As each one lands the marker and the box flash in the word\'s colour, and the pulse says what happened — drew, held, colour instead, or nothing could draw. The Review page\'s show log keeps the record, one row per shaped word.',
+          'Which words reach which shape is set on the Sung labels page, the same way a colour set\'s words are; a word on both a shape and an effect is the shape\'s. Whether a scene can draw one at all is its Words response band (see the Scenes page).',
         ],
       },
       {

@@ -2,6 +2,7 @@
  * is the server half and says the rules; the same plan drives the show). Every
  * chip is placed through lyricsLane's layoutLabelRows, so it sits under the word
  * it belongs to at any zoom. */
+import { shapeGlyph, shapeName, shapeWords } from '../components/songStrip';
 import type { LyricEventAction, LyricPin, LyricRoll } from '../types';
 import { inView, layoutLabelRows } from './lyricsLane';
 import type { LabelPlacement, LaneView } from './lyricsLane';
@@ -13,6 +14,15 @@ export const MIN_GAP_S = { min: 0, max: 30, step: 0.5 };
 export const IMPRINT_WINDOW_S = { min: 0, max: 5, step: 0.25 };
 
 const EVENT_WORDS: Record<string, string> = { drop: 'drop', scene: 'scene', flare: 'flare' };
+
+/** WORD SHAPES (W2.3): why a word that reaches a shape is doing its COLOUR
+ * instead (`WordAction.shape_skipped`, lyric_events.py) — the short tail a
+ * colour/imprint chip wears so a shaped word never silently looks like a
+ * plain one. The full sentence is already in `action.words`. */
+const SKIPPED_WORDS: Record<string, string> = {
+  drop_wins: 'drop',
+  nothing_can_draw: 'no Words band',
+};
 
 /** A share of plays as a page prints it. */
 export function percentWords(chance: number | null): string {
@@ -32,15 +42,34 @@ export function satOut(action: Pick<LyricEventAction, 'why'>): boolean {
   return action.why === 'sat_out';
 }
 
+/** WORD SHAPES (W2.3): the tail a chip wears when its word reaches a shape
+ * and is NOT drawing one — "♥ skipped: drop" / "♥ skipped: no Words band".
+ * Empty for a word that is drawing, or that reaches no shape at all. */
+export function skippedShapeTag(
+  action: Pick<LyricEventAction, 'shape' | 'shape_skipped'>,
+): string | null {
+  if (!action.shape_skipped) return null;
+  const why = SKIPPED_WORDS[action.shape_skipped] ?? action.shape_skipped;
+  const glyph = shapeGlyph(action.shape);
+  return `${glyph ? `${glyph} ` : ''}skipped: ${why}`;
+}
+
 /** What a chip prints. */
 export function actionChipText(action: LyricEventAction): string {
+  // WORD SHAPES (W2.3): a drawing word is "love → ♥ heart" — the word and
+  // the shape, the same words the next-event box and the pulse use.
+  if (action.verdict === 'shape') {
+    return shapeWords(action.phrase, action.shape, action.shape_name) ?? action.phrase;
+  }
+  const skipped = skippedShapeTag(action);
+  const tail = skipped ? ` · ${skipped}` : '';
   if (action.verdict === 'imprint' && action.event) {
-    return `${action.phrase} → ${EVENT_WORDS[action.event.kind] ?? action.event.kind}`;
+    return `${action.phrase} → ${EVENT_WORDS[action.event.kind] ?? action.event.kind}${tail}`;
   }
   if (action.verdict === 'fire') {
-    return `${action.phrase} · ${action.momentary ? 'momentary' : 'held'}`;
+    return `${action.phrase} · ${action.momentary ? 'momentary' : 'held'}${tail}`;
   }
-  return action.phrase;
+  return `${action.phrase}${tail}`;
 }
 
 /** Which play the plan shows, in one sentence. */
@@ -114,7 +143,11 @@ export function summaryWords(actions: LyricEventAction[]): string {
     actions.filter((a) => a.verdict === verdict && !satOut(a)).length;
   const out = actions.filter(satOut).length;
   const words = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const drawing = count('shape');
   return [
+    // WORD SHAPES (W2.3): counted first and only when there are any, so a
+    // song whose words reach no shape reads exactly as it does today.
+    ...(drawing ? [words(drawing, 'word draws a shape', 'words draw a shape')] : []),
     words(count('fire'), 'word fires alone', 'words fire alone'),
     words(count('imprint'), 'word imprints', 'words imprint'),
     words(count('nothing'), 'word does nothing', 'words do nothing'),
@@ -146,15 +179,31 @@ export interface WordEvent {
   imprinted: boolean;
   /** an event that cannot carry colour, and why */
   cannot: string | null;
+  /** WORD SHAPES (W2.3): on a `kind: "word"` row whose word DRAWS a shape,
+   * the shape's id and name — the row then draws the shape's own glyph in
+   * place of the colour diamond. Null on every other row. */
+  shape: string | null;
+  shape_name: string | null;
 }
 
 export function wordEvents(actions: LyricEventAction[]): WordEvent[] {
   const byId = new Map<string, WordEvent>();
   for (const a of actions) {
-    if (a.verdict === 'fire') {
+    // A SHAPE WORD IS THE SAME KIND OF MARK (W0.3's own `word_marks` rule):
+    // one row, one idea — "a word did something here" — whether the
+    // something was a colour or a shape; only the glyph differs.
+    if (a.verdict === 'fire' || a.verdict === 'shape') {
+      const drawing = a.verdict === 'shape';
       byId.set(`lyric:${a.key}`, {
-        id: `lyric:${a.key}`, kind: 'word', ms: a.ms, label: `“${a.phrase}” fires alone`,
+        id: `lyric:${a.key}`,
+        kind: 'word',
+        ms: a.ms,
+        label: drawing
+          ? `“${a.phrase}” draws the ${shapeName(a.shape, a.shape_name) ?? 'shape'} shape`
+          : `“${a.phrase}” fires alone`,
         word: a.phrase, swatch: a.swatch, imprinted: false, cannot: null,
+        shape: drawing ? a.shape : null,
+        shape_name: drawing ? a.shape_name : null,
       });
       continue;
     }
@@ -167,6 +216,7 @@ export function wordEvents(actions: LyricEventAction[]): WordEvent[] {
       id: ev.id, kind: ev.kind, ms: ev.ms, label: ev.label,
       word: imprinted ? a.phrase : null, swatch: imprinted ? a.swatch : null, imprinted,
       cannot: ev.can_carry ? null : (ev.why_not ?? 'cannot carry colour'),
+      shape: null, shape_name: null,
     });
   }
   return [...byId.values()].sort((a, b) => a.ms - b.ms);
@@ -175,6 +225,8 @@ export function wordEvents(actions: LyricEventAction[]): WordEvent[] {
 /** The tooltip for one event on the row. */
 export function wordEventText(e: WordEvent, fmt: (ms: number) => string): string {
   const where = `${fmt(e.ms)} · ${e.label}`;
+  // A word's own mark says what it does in its label (a colour fired alone,
+  // or — W2.3 — the shape it draws), so it needs no tail of its own.
   if (e.kind === 'word') return where;
   if (e.imprinted && e.word) return `${where} — gets the colour of “${e.word}”`;
   if (e.cannot) return `${where} — cannot carry colour (${e.cannot})`;

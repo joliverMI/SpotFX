@@ -35,6 +35,7 @@
  * is drawn fainter, as a suggested drop is. */
 import { useEffect, useMemo, useState } from 'react';
 import Icon, { type IconName } from '../../components/Icon';
+import { shapeGlyph } from '../../components/songStrip';
 import { fmtMs } from '../../lib/time';
 import { useLyricEvents } from '../../queries';
 import type {
@@ -236,18 +237,27 @@ function WordEventsRow({ events, view }: { events: WordEvent[]; view: LaneView }
         {shown.map((e) => {
           const text = wordEventText(e, fmtMs);
           const halo = e.swatch ?? undefined;
+          // WORD SHAPES (W2.3): a word that DRAWS is the shape's own glyph
+          // in place of the colour diamond, in the word's swatch when it
+          // has one (songStrip.ts's SHAPE_GLYPH — the same character the
+          // song strip and the next-event box draw).
+          const glyph = shapeGlyph(e.shape);
           return (
             <span
               key={e.id}
               role="img"
               aria-label={text}
-              className={`testbed-word-event ${e.kind}${e.imprinted ? ' imprinted' : ''}${e.cannot ? ' cannot' : ''}`}
+              className={`testbed-word-event ${e.kind}${e.imprinted ? ' imprinted' : ''}`
+                + `${e.cannot ? ' cannot' : ''}${glyph ? ' shaped' : ''}`}
               style={{ left: pct(e.ms), ...(halo ? { '--halo': halo } as React.CSSProperties : {}) }}
               data-ms={e.ms}
               data-event-id={e.id}
+              data-shape={e.shape ?? undefined}
               onPointerEnter={() => setHover({ text, leftPct: pct(e.ms) })}
               onPointerLeave={() => setHover(null)}
-            />
+            >
+              {glyph}
+            </span>
           );
         })}
         {!shown.length && <span className="testbed-lane-empty-hint">No events near a matched word here</span>}

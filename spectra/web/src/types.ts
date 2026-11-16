@@ -2164,12 +2164,25 @@ export interface LyricEventAction {
    * swatch) — what the strip lends an event ahead of fire time; null when
    * the set has no swatch */
   swatch: string | null;
-  verdict: 'fire' | 'imprint' | 'nothing';
+  verdict: 'fire' | 'imprint' | 'nothing' | 'shape';
   why: string | null;
   words: string;
   energy: number;
   momentary: boolean;
   transition_ms: number;
+  /** WORD SHAPES (W0.3, spectra/services/lyric_events.py `action_payload`):
+   * the shape this word reaches and its name — set whatever the verdict is,
+   * since a shaped word doing its colour still carries the shape it
+   * skipped. `shape_skipped` is WHY it is doing that colour (`drop_wins` /
+   * `nothing_can_draw`), null when it is drawing or reaches no shape. */
+  shape: string | null;
+  shape_name: string | null;
+  shape_skipped: string | null;
+  /** the told envelope, in seconds — the form is the lead (`transition_ms /
+   * 1000` exactly); all three are 0 on anything but a drawing shape */
+  form_s: number;
+  hold_s: number;
+  release_s: number;
   blocked_by: string | null;
   event: {
     id: string; kind: 'drop' | 'scene' | 'flare'; ms: number; label: string;
@@ -2213,7 +2226,7 @@ export interface LyricRoll {
 export interface WordColourPush {
   type: 'word_colour';
   uri: string | null;
-  verdict: 'fire' | 'imprint';
+  verdict: 'fire' | 'imprint' | 'shape';
   phrase: string;
   label: string;
   word_ms: number;
@@ -2227,6 +2240,12 @@ export interface WordColourPush {
   set_name: string | null;
   swatch: string | null;
   position_ms: number | null;
+  /** WORD SHAPES (W0.3): the shape that just formed, or null. `verdict`
+   * is `"shape"` on a shape word, so the two kinds of fire-alone are told
+   * apart without reading this at all; `result` then says what became of
+   * it (`applied` / `held` / `fell_back_to_colour` / one of the
+   * nothing-drew reasons). */
+  shape: string | null;
 }
 
 export type LyricReadingState = 'none' | 'fresh' | 'labels_changed' | 'words_changed';

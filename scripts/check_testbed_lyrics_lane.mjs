@@ -17,6 +17,10 @@
  *   5. The roll (spectra/web/src/testbed/lyricEvents.ts, 2026-11-12): a chip
  *      carries its chance, a word sitting out says so, the roll line names
  *      the play, and the Always / Chance / Never control marks the one on.
+ *   6. WORD SHAPES (row W2.3): a drawing word's chip is "love -> heart" with
+ *      its chance, a shaped word doing its colour says why it is, the Word
+ *      events row carries the shape so it can draw the glyph, and the live
+ *      pulse says what became of the shape.
  *
  * Run: node scripts/check_testbed_lyrics_lane.mjs
  */
@@ -43,12 +47,20 @@ import LyricsLane from './spectra/web/src/testbed/components/LyricsLane';
 import PinControl from './spectra/web/src/testbed/components/PinControl';
 export * from './spectra/web/src/testbed/lyricsLane';
 export * as events from './spectra/web/src/testbed/lyricEvents';
+export * as strip from './spectra/web/src/components/songStrip';
+export * as pulse from './spectra/web/src/lib/wordColourPush';
 export function render(props) { return renderToStaticMarkup(React.createElement(LyricsLane, props)); }
 export function renderPin(props) { return renderToStaticMarkup(React.createElement(PinControl, props)); }
 `;
 const built = await esbuild.build({
   stdin: { contents: entry, resolveDir: repo, loader: 'tsx' },
   bundle: true, format: 'cjs', platform: 'node', write: false, jsx: 'automatic',
+  // `.ts` BEFORE `.tsx`, deliberately: `components/songStrip.ts` (the
+  // drawing rules the chips and the pulse now share) sits beside
+  // `components/SongStrip.tsx`, and esbuild's own directory cache matches
+  // `songStrip.tsx` to that component's file before failing to read it.
+  // Vite resolves the same import fine; this is the bundler used here only.
+  resolveExtensions: ['.ts', '.tsx', '.mjs', '.js', '.jsx', '.json'],
   nodePaths: [join(repo, 'spectra/web/node_modules')],
   logLevel: 'error',
 });
@@ -200,6 +212,81 @@ console.log('§5 the roll');
     && /aria-pressed="true"[^>]*>Chance 35%/.test(pin), 'the pin control is on Chance, with its share');
   const never = lib.renderPin({ pin: 'never', chance: 0.35, busy: false, onPin: () => {} });
   ok(/aria-pressed="true"[^>]*>Never/.test(never), 'and on Never when pinned');
+}
+
+console.log('§6 word shapes (row W2.3)');
+{
+  const ev = lib.events;
+  const pulse = lib.pulse;
+  const strip = lib.strip;
+  const action = (over = {}) => ({
+    key: '2-2', first_word: 2, last_word: 2, phrase: 'love', label: 'love', ms: 2000, end_ms: 2400,
+    source: 'claude', strength: 0.8, match_id: 'l1', pin: null, chance: 0.8, draw: 0.1, won: true,
+    chance_words: '', set_names: ['Rose'], set_ids: ['rose'], swatch: '#ff0000',
+    shape: 'heart', shape_name: 'Heart', shape_skipped: null,
+    form_s: 0.74, hold_s: 0.8, release_s: 1.11,
+    verdict: 'shape', why: null, words: '', energy: 0.3, momentary: false,
+    transition_ms: 740, blocked_by: null, event: null, ...over,
+  });
+
+  // THE CHIP (spec 1): the word and the shape, with the chance tag every
+  // other chip carries, and the `shape` class the CSS colours it by.
+  ok(ev.actionChipText(action()) === 'love → ♥ heart', 'a drawing word\'s chip is the word and the shape');
+  ok(ev.actionChipLabel(action()) === 'love → ♥ heart · 80%', 'with its chance like every chip');
+  ok(ev.actionChipText(action({ shape: 'star', shape_name: 'Star' })) === 'love → ★ star'
+    && ev.actionChipText(action({ shape: 'diamond', shape_name: 'Diamond' })) === 'love → ◆ diamond',
+    'each shape has its own glyph, from the id');
+  ok(ev.actionChipText(action({ shape: 'cloud', shape_name: null })) === 'love → cloud',
+    'a shape with no glyph yet still prints its name');
+
+  // A SHAPED WORD DOING ITS COLOUR (spec 1's tail): it says why.
+  const skippedDrop = action({ verdict: 'imprint', shape_skipped: 'drop_wins',
+    event: { id: 'drop-seq:k:drop', kind: 'drop', ms: 2100, label: 'drop 1', away_ms: 100,
+             can_carry: true, why_not: null } });
+  ok(ev.actionChipText(skippedDrop) === 'love → drop · ♥ skipped: drop',
+    'a word that imprints instead says the shape was skipped for the drop');
+  const skippedBand = action({ verdict: 'fire', shape_skipped: 'nothing_can_draw' });
+  ok(ev.actionChipText(skippedBand) === 'love · held · ♥ skipped: no Words band',
+    'and one firing its colour says no scene could draw one');
+  ok(ev.skippedShapeTag(action()) === null, 'a word that is drawing wears no skipped tail');
+  ok(ev.summaryWords([action(), skippedBand]).startsWith('1 word draws a shape'),
+    'the summary counts the words that draw');
+  ok(!ev.summaryWords([skippedBand]).includes('draws a shape'),
+    'and says nothing of them when none do');
+
+  // THE MARKER (spec 2): the Word events row carries the shape, so it can
+  // draw the glyph in place of the colour diamond.
+  const [mark] = ev.wordEvents([action()]);
+  ok(mark.kind === 'word' && mark.shape === 'heart' && mark.shape_name === 'Heart',
+    'a drawing word is a word mark carrying its shape');
+  ok(mark.label === '“love” draws the heart shape', 'whose label names the shape');
+  ok(strip.shapeGlyph('heart') === '♥' && strip.shapeGlyph(null) === null
+    && strip.shapeGlyph('cloud') === null,
+    'the glyph comes from the id, and an unknown id falls back to the diamond');
+  ok(ev.wordEvents([skippedBand])[0].shape === null,
+    'a word doing its colour draws the colour diamond, not a glyph it will not draw');
+  ok(strip.kindGlyphSvg('word', null, '#ff0000', 'heart').includes('♥')
+    && !strip.kindGlyphSvg('word', null, '#ff0000', null).includes('♥'),
+    'the next-event box glyph is the shape\'s character, else the diamond');
+  ok(strip.eventLabel({ kind: 'word', rank: null, rank_of: null, word: 'love',
+                        shape: 'heart', shape_name: 'Heart' }) === 'Word “love” → heart',
+    'and the box\'s hover label names the shape');
+
+  // THE LIVE PULSE (spec 3).
+  const push = (over = {}) => ({ verdict: 'shape', phrase: 'love', shape: 'heart',
+                                 result: 'applied', landed: true, set_name: null, ...over });
+  ok(pulse.pulseWords(push()) === 'love → ♥ heart · drew', 'the pulse says it drew');
+  ok(pulse.pulseWords(push({ result: 'held' })) === 'love → ♥ heart · held',
+    'that it was held');
+  ok(pulse.pulseWords(push({ result: 'fell_back_to_colour' })) === 'love → ♥ heart · colour instead',
+    'that it took its colour instead');
+  for (const why of ['no_class', 'no_band', 'no_active_scene']) {
+    ok(pulse.pulseWords(push({ result: why })) === 'love → ♥ heart · nothing could draw',
+      `and that nothing could draw it (${why})`);
+  }
+  ok(pulse.pulseWords({ verdict: 'fire', phrase: 'roses', shape: null, result: 'jumped',
+                        landed: true, set_name: 'Rose' }) === 'roses · Rose',
+    'a colour word\'s pulse still names the set that landed');
 }
 
 if (failures) {

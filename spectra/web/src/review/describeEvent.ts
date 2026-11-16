@@ -61,6 +61,61 @@ const WORD_STOPPED: Record<string, string> = {
   error: 'it failed',
 };
 
+/** WORD SHAPES (W2.3): why nothing in the room drew a shape
+ * (`lyric_events.SHAPE_NOTHING_DREW`, logged as `nothing_drew` on a
+ * `lyric:shape` row), as a reader says it. An unlisted reason is shown
+ * verbatim rather than guessed at. */
+const SHAPE_NOTHING_DREW: Record<string, string> = {
+  no_class: 'the scene showing has no Words band for it',
+  no_band: 'no Words band reached its Energy',
+  no_active_scene: 'no scene was showing',
+};
+
+/** ...and what held it instead: `held_for` on the same row, which names a
+ * phase (P3 A's charge / lull / drop, with the armed one in `reason`) or
+ * one of the room-wide holds a colour word meets too. */
+function shapeHeldWords(heldFor: string | undefined, reason: string | undefined): string {
+  if (!heldFor) return 'it was held';
+  if (heldFor === 'phase') return `a ${reason ?? 'phase'} was armed`;
+  const known = DROP_COLOUR_HOLD[heldFor];
+  if (known) return known;
+  return reason ? `${heldFor} (${reason})` : heldFor;
+}
+
+/** A `lyric:shape` row, in one sentence: the word, the shape, and what
+ * became of it. `trigger_engine._fire_lyric_shape` writes the detail. */
+function describeShapeWord(d: Record<string, unknown>): string {
+  const phrase = `"${(d.phrase as string | undefined) ?? '?'}"`;
+  const shape = (d.shape as string | undefined) ?? 'shape';
+  const result = d.result as string | undefined;
+  const form = d.told_form_s as number | undefined;
+  const over = form != null ? `, formed over ${form.toFixed(2)}s` : '';
+  if (result === 'applied') return `Word ${phrase}: drew the ${shape}${over}`;
+  if (result === 'fell_back_to_colour') {
+    // The one race the plan cannot see: the showing scene changed inside
+    // the replan window, so the word took the colour path instead.
+    const why = (d.nothing_drew as string | undefined) ?? '';
+    const because = SHAPE_NOTHING_DREW[why] ?? why ?? 'nothing could draw it';
+    const set = (d.set_name as string | undefined) ?? (d.set_id as string | undefined);
+    const colour = d.colour === 'jumped'
+      ? `its colour${set ? ` (${set})` : ''} instead`
+      : `and its colour did not land either (${shapeHeldWords(d.held_for as string | undefined,
+        d.reason as string | undefined)})`;
+    return `Word ${phrase}: ${because}, so the ${shape} was skipped — ${colour}`;
+  }
+  if (d.nothing_drew) {
+    const why = d.nothing_drew as string;
+    const because = SHAPE_NOTHING_DREW[why] ?? why;
+    return `Word ${phrase}: the ${shape} did not draw (${because}),`
+      + ' and it reaches no colour set to show instead';
+  }
+  if (result === 'held') {
+    return `Word ${phrase}: the ${shape} did not draw (`
+      + `${shapeHeldWords(d.held_for as string | undefined, d.reason as string | undefined)})`;
+  }
+  return `Word ${phrase}: the ${shape} did not draw (${result ?? 'unknown'})`;
+}
+
 /** ...and why the set it landed was the one picked (the pick's rung). */
 const DROP_COLOUR_RUNG: Record<string, string> = {
   band: '',
@@ -170,6 +225,11 @@ export function describeEvent(item: ReviewEventItem): string {
         const nWords = (d.n_words as number | undefined) ?? 0;
         const how = d.kept ? ', your kept roll' : d.restored ? ', carried on after a restart' : '';
         return `Words rolled for this play #${(d.tag as string | undefined) ?? '?'}: ${nWon} of ${nWords} play${how}`;
+      }
+      if (d.lyric && d.verdict === 'shape') {
+        // WORD SHAPES (W0.3/W2.3): a `lyric:shape` row — the shape, the
+        // result, and `nothing_drew` / `held_for` where there are any.
+        return describeShapeWord(d);
       }
       if (d.lyric) {
         // WORD COLOURS (spectra/services/lyric_events.py): what a matched word

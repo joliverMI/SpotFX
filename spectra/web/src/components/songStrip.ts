@@ -44,6 +44,50 @@ export interface UpcomingEvent {
   word?: string;
   word_ms?: number;
   swatch?: string | null;
+  /** WORD SHAPES (W2.3): on a `kind: "word"` row whose word DRAWS a shape —
+   * the shape's id (`heart`/`star`/`diamond`), its name, and the Test Bed's
+   * own sentence for it (spectra/api/upcoming.py's `with_words`). The
+   * marker is then the shape's glyph instead of the colour diamond, and the
+   * next-event box prints the word and the shape. */
+  shape?: string | null;
+  shape_name?: string | null;
+  words?: string | null;
+}
+
+/** THE SHAPE GLYPHS (Word Shapes W2.3): one character per shape id in
+ * `fx/effects/word_shapes.py`'s library — what a page draws where a shaped
+ * word is sung, in place of the colour diamond. An id with no glyph here
+ * (a shape added to the library and not yet to this map) falls back to the
+ * diamond, so a new shape is never an invisible marker. */
+export const SHAPE_GLYPH: Record<string, string> = {
+  heart: '♥', star: '★', diamond: '◆',
+};
+
+/** ...and its printed name, for a row that carries no `shape_name` (the
+ * fire-time push carries only the id). The library's own names. */
+export const SHAPE_LABEL: Record<string, string> = {
+  heart: 'heart', star: 'star', diamond: 'diamond',
+};
+
+export function shapeGlyph(shape: string | null | undefined): string | null {
+  return shape ? SHAPE_GLYPH[shape] ?? null : null;
+}
+
+export function shapeName(shape: string | null | undefined,
+                          name?: string | null): string | null {
+  if (name) return name.toLowerCase();
+  return shape ? SHAPE_LABEL[shape] ?? shape : null;
+}
+
+/** "love → ♥ heart" — the word and the shape, one string, for the
+ * next-event box's own word line and every tooltip that names both. */
+export function shapeWords(word: string | null | undefined, shape: string | null | undefined,
+                           name?: string | null): string | null {
+  const glyph = shapeGlyph(shape);
+  const printed = shapeName(shape, name);
+  if (!printed) return null;
+  const tail = glyph ? `${glyph} ${printed}` : printed;
+  return word ? `${word} → ${tail}` : tail;
 }
 
 /** The colour a worded marker lends: the word's own swatch, else the kind's
@@ -103,10 +147,19 @@ const KIND_LABEL: Record<UpcomingKind, string> = {
  * — the next-event box's full label (shown on hover; the box itself
  * shows only the type icon + countdown, decision: no label text in the
  * box). */
-export function eventLabel(e: Pick<UpcomingEvent, 'kind' | 'rank' | 'rank_of' | 'num' | 'word'>): string {
+export function eventLabel(
+  e: Pick<UpcomingEvent, 'kind' | 'rank' | 'rank_of' | 'num' | 'word' | 'shape' | 'shape_name'>,
+): string {
   const base = KIND_LABEL[e.kind];
   // a word firing alone names itself; an event a word imprints on says so
-  if (e.kind === 'word') return e.word ? `${base} “${e.word}”` : base;
+  if (e.kind === 'word') {
+    if (!e.word) return base;
+    // WORD SHAPES (W2.3): a shaped word says which shape it draws, so the
+    // box's own hover never reads the same as a plain colour word's.
+    const shape = shapeName(e.shape, e.shape_name);
+    return shape ? `${base} “${e.word}” → ${shape}`
+      : `${base} “${e.word}”`;
+  }
   const worded = e.word ? ` · word “${e.word}”` : '';
   if ((e.kind === 'charge' || e.kind === 'lull') && e.num != null) return `${base} · drop ${e.num}${worded}`;
   if (e.kind === 'drop' && e.num != null) return `${base} ${e.num}${worded}`;
@@ -132,6 +185,10 @@ export const HALO_GAP = 3.5;
 export const HALO_STROKE = 1.5;
 /** The fire-alone word's own marker: a diamond this far from centre to tip. */
 export const WORD_DIAMOND_R = 4.5;
+/** ...and the type size a shaped word's glyph is drawn at, on the canvas
+ * and in the SVG track alike, so the two never disagree. Sized to cover
+ * about the same area as the diamond it replaces. */
+export const SHAPE_GLYPH_PX = 11;
 
 export function haloFilter(colour: string): string {
   return `drop-shadow(0 0 3px ${colour})`;
@@ -252,16 +309,26 @@ export function drawShapeMarkers(
       ctx.fillStyle = color;
       ctx.fillRect(x - bw / 2, 13, bw, 6);
     } else if (e.kind === 'word') {
-      // a word firing alone: a diamond in the word's own colour
+      // a word firing alone: a diamond in the word's own colour — or, when
+      // the word DRAWS A SHAPE (W2.3), that shape's own glyph in the same
+      // colour, so "a heart is drawn here" is legible at a glance.
       ctx.globalAlpha = 1;
       ctx.fillStyle = wordColour(e) ?? color;
-      ctx.beginPath();
-      ctx.moveTo(x, 12 - WORD_DIAMOND_R);
-      ctx.lineTo(x + WORD_DIAMOND_R, 12);
-      ctx.lineTo(x, 12 + WORD_DIAMOND_R);
-      ctx.lineTo(x - WORD_DIAMOND_R, 12);
-      ctx.closePath();
-      ctx.fill();
+      const glyph = shapeGlyph(e.shape);
+      if (glyph) {
+        ctx.font = `${SHAPE_GLYPH_PX}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(glyph, x, 12);
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(x, 12 - WORD_DIAMOND_R);
+        ctx.lineTo(x + WORD_DIAMOND_R, 12);
+        ctx.lineTo(x, 12 + WORD_DIAMOND_R);
+        ctx.lineTo(x - WORD_DIAMOND_R, 12);
+        ctx.closePath();
+        ctx.fill();
+      }
     } else if (e.kind === 'high' || e.kind === 'low') {
       ctx.globalAlpha = 1;
       ctx.strokeStyle = color;
@@ -430,7 +497,8 @@ export function countdownParts(ms: number): { value: string; unit: string | null
  *
  * Returns SVG markup for a `viewBox="0 0 16 16"` element, so the caller's
  * rAF loop can swap it with one `innerHTML` write and no React render. */
-export function kindGlyphSvg(kind: UpcomingKind, num?: number | null, halo?: string | null): string {
+export function kindGlyphSvg(kind: UpcomingKind, num?: number | null, halo?: string | null,
+                             shape?: string | null): string {
   const c = KIND_COLOR[kind];
   // THE HALO ON THE GLYPH (the Admiral, 2026-11-12: "just highlight the blue
   // square, like you do in the strip"): a ring in the word's colour around
@@ -440,8 +508,17 @@ export function kindGlyphSvg(kind: UpcomingKind, num?: number | null, halo?: str
       + ` stroke="${halo}" stroke-width="${HALO_STROKE}" style="filter:${haloFilter(halo)}"/>`
     : '';
   switch (kind) {
-    case 'word':
+    case 'word': {
+      // WORD SHAPES (W2.3): a shaped word's glyph in place of the diamond,
+      // in the word's own colour either way.
+      const glyph = shapeGlyph(shape);
+      if (glyph) {
+        return `<text x="8" y="8" font-size="14" text-anchor="middle"`
+          + ` dominant-baseline="central" fill="${halo || c}"`
+          + ` font-family="inherit">${glyph}</text>`;
+      }
       return `<path d="${diamondPath(8, 8, 6.5)}" fill="${halo || c}"/>`;
+    }
     case 'scene':
       return `${ring}<rect x="2" y="2" width="12" height="12" rx="2.5" fill="${c}"/>`;
     case 'flare':

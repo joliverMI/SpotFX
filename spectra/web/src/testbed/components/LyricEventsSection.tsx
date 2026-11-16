@@ -122,6 +122,11 @@ export default function LyricEventsSection({
             </span>
           )}
           <HelpLink topic="testbed-word-colours" title="Word colours" />
+          {/* WORD SHAPES (W2.3): only on a song that actually has one, so a
+            * song whose words reach no shape reads exactly as it does today. */}
+          {data.actions.some((a) => a.shape) && (
+            <HelpLink topic="testbed-word-shapes" title="Word shapes" />
+          )}
         </div>
       </div>
       <div className="testbed-lane-row">

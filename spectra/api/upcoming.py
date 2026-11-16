@@ -69,6 +69,18 @@ roll, so only the words that won it are lent to an event or drawn. No new gating
 plan, read once per request on this worker thread, and a failure to read
 the words leaves the list exactly as it was (the strip must never go blank
 because the lyrics are unreadable).
+
+WORD SHAPES (W2.3). A word that DRAWS A SHAPE is the same `kind: "word"`
+row a colour word firing alone is — one row, one idea, "a word did
+something here" (`lyric_events.word_marks`'s own rule, W0.3) — and it
+carries three more fields so a page can say WHICH shape without a second
+request: `shape` (the library id, straight off the mark), plus `shape_name`
+and `words` (that word's own describe sentence, `lyric_events.describe`)
+joined on here from the same plan by the mark's own id. The strip and
+Home then draw the shape's glyph in place of the colour diamond, and the
+next-event box prints the word and the shape. A colour word's row is
+untouched, so a song whose words reach no shape sends exactly the bytes it
+sends today.
 """
 from __future__ import annotations
 
@@ -183,9 +195,26 @@ def word_plan(uri: str) -> lyric_events.Preview | None:
     return trigger_engine.preview_lyric_events(uri)
 
 
+def _shape_rows(actions: list[lyric_events.WordAction]) -> dict[str, dict]:
+    """The shape a drawing word's marker names, by that marker's own id
+    (WORD SHAPES, W2.3): its printed name and the Test Bed's own sentence
+    for it, so the next-event box can print the word and the shape without
+    asking the plan a second time. Empty for a plan with no shape in it."""
+    rows: dict[str, dict] = {}
+    for action in actions:
+        if action.verdict != lyric_events.VERDICT_SHAPE:
+            continue
+        rows[lyric_events.fire_id(action.hit)] = {
+            "shape_name": action.hit.shape_name,
+            "words": lyric_events.describe(action),
+        }
+    return rows
+
+
 def with_words(uri: str, events: list[dict]) -> list[dict]:
     """Lend each imprinted event its word, and add a marker per word firing
-    alone (lyric_events.word_marks). Any failure leaves `events` untouched."""
+    alone (lyric_events.word_marks) — a colour word's or a shaped word's,
+    the latter named by its shape. Any failure leaves `events` untouched."""
     try:
         preview = word_plan(uri)
     except Exception:                                    # noqa: BLE001
@@ -194,11 +223,14 @@ def with_words(uri: str, events: list[dict]) -> list[dict]:
     if preview is None or not preview.actions:
         return events
     imprints, fires = lyric_events.word_marks(preview.actions)
+    shapes = _shape_rows(preview.actions)
     out: list[dict] = []
     for ev in events:
         word = imprints.get(ev.get("id") or "")
         out.append({**ev, **word} if word else ev)
-    out.extend(fires)
+    for fire in fires:
+        shape = shapes.get(str(fire.get("id"))) if fire.get("shape") else None
+        out.append({**fire, **shape} if shape else fire)
     return out
 
 

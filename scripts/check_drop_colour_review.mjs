@@ -17,6 +17,9 @@
  *      drop_colour detail reads exactly as before.
  *   4. The pre-drop fade's own entry, and the drop that rode it.
  *   5. The colour-set count line names the drop colour change.
+ *   6. WORD SHAPES (row W2.3): a `lyric:shape` row — the word, the shape,
+ *      and what became of it (drew, held, nothing drew, fell back to its
+ *      colour), and a plain `lyric:fire` row unchanged beside it.
  *
  * Run: node scripts/check_drop_colour_review.mjs
  */
@@ -151,6 +154,65 @@ console.log('§5 the colour-set count');
   const a = describeEvent({ bucket: 'color_sets', key: 'c1', wall_ms: 0, position_ms: 1,
     detail: { set_name: 'Mid - Fire', via: 'analysed_cue' } });
   ok(a === 'Colour set: Mid - Fire (analysed moment)', `the analysed moment is unchanged: ${a}`);
+}
+
+// WORD SHAPES (Word Shapes plan row W2.3): the show log keeps the record of
+// every shaped word — `trigger_engine._fire_lyric_shape` writes the detail.
+console.log('§6 a word that drew a shape');
+{
+  const shapeRow = (detail) => describeEvent({
+    bucket: 'triggers', key: 'lyric:shape', wall_ms: 0, position_ms: 45_000,
+    detail: { lyric: true, phrase: 'love', label: 'love', word_ms: 45_000,
+              verdict: 'shape', shape: 'heart', energy: 0.3,
+              form_s: 0.74, hold_s: 0.8, release_s: 1.11, ramp_ms: 740, ...detail },
+  });
+
+  const drew = shapeRow({ result: 'applied', told_form_s: 0.74, virtuals: 1 });
+  ok(drew === 'Word "love": drew the heart, formed over 0.74s', drew);
+  ok(shapeRow({ result: 'applied' }) === 'Word "love": drew the heart',
+     'a record from before the told form was logged still reads');
+
+  const held = shapeRow({ result: 'held', held_for: 'phase', reason: 'lull' });
+  ok(held === 'Word "love": the heart did not draw (a lull was armed)', held);
+  ok(shapeRow({ result: 'held', held_for: 'phase' })
+     === 'Word "love": the heart did not draw (a phase was armed)',
+     'a phase hold with no armed name still says it was a phase');
+  ok(shapeRow({ result: 'held', held_for: 'preview' })
+     === 'Word "love": the heart did not draw (a Preview held the room)',
+     'and a room-wide hold is named in his words');
+  const odd = shapeRow({ result: 'held', held_for: 'something_new' });
+  ok(odd.endsWith('(something_new)'), `an unlisted hold is shown verbatim: ${odd}`);
+
+  // Nothing could draw it and it reached no colour set: there was genuinely
+  // nothing else to do, and the row says so rather than reading as a hold.
+  const nothing = shapeRow({ result: 'no_class', nothing_drew: 'no_class', colour: null });
+  ok(nothing === 'Word "love": the heart did not draw (the scene showing has no Words band'
+     + ' for it), and it reaches no colour set to show instead', nothing);
+  for (const [why, words] of [['no_band', 'no Words band reached its Energy'],
+                              ['no_active_scene', 'no scene was showing']]) {
+    const row = shapeRow({ result: why, nothing_drew: why, colour: null });
+    ok(row.includes(`(${words})`), `${why} reads as "${words}"`);
+  }
+
+  // THE NET, not the mechanism: the showing scene changed inside the replan
+  // window, so the word took the colour path with the shape's own lead.
+  const fell = shapeRow({ result: 'fell_back_to_colour', nothing_drew: 'no_class',
+                          colour: 'jumped', set_id: 'red1', set_name: 'Blood Red',
+                          momentary: false, transition_ms: 1800 });
+  ok(fell === 'Word "love": the scene showing has no Words band for it, so the heart was'
+     + ' skipped — its colour (Blood Red) instead', fell);
+  const fellHeld = shapeRow({ result: 'fell_back_to_colour', nothing_drew: 'no_band',
+                              colour: 'held', held_for: 'house_mode' });
+  ok(fellHeld.endsWith('and its colour did not land either (a house mode keeps its own look)'),
+     fellHeld);
+
+  // A colour word's own row is untouched by any of this.
+  const colourWord = describeEvent({
+    bucket: 'triggers', key: 'lyric:fire', wall_ms: 0, position_ms: 25_000,
+    detail: { lyric: true, phrase: 'blue', label: 'blue', word_ms: 25_000, verdict: 'fire',
+              momentary: false, transition_ms: 1800, result: 'jumped', set_name: 'Deep Blue' },
+  });
+  ok(colourWord === 'Word "blue": fired on its own, Deep Blue (held)', colourWord);
 }
 
 if (failures) {
