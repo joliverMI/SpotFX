@@ -98,7 +98,8 @@ scene's data does not apply there without checking.
 ## Words band — one `Word Shape` kind, full range (Word Shapes W2.5)
 
 `scripts/add_word_shapes.py` is the one thing that turns Word Shapes on in
-his room. On this scene it writes exactly two keys:
+his room. On this scene it writes exactly two keys (plus, on a
+legacy-format scene, the one load-preserving flag below):
 
 - `flare_kinds` gains ONE entry, `{"name": "Word Shape", "type":
   "word_shape", ...}` — offset 0, no minimum intensity, enabled. The type
@@ -120,6 +121,23 @@ to the colour path. **No colour kind is pooled beside it**: his Q5 A allows
 one and a Words band is an ordinary `ResponseSpec`, but he did not ask for
 one and it is his to add from the Scenes page.
 
+**ONE MORE WRITE ON A LEGACY SCENE, and it is load-preserving.** His
+stored scenes are in the LEGACY format — no `flare_kinds` key at all, kinds
+auto-named on load (`models/scene.py _migrate_flare_kinds`) — and THE
+ABSENCE OF THAT KEY IS THE LEGACY FLAG: without it, a response class
+carrying no explicit `reroll_dice` loads with the historical default TRUE
+and gains a "Dice Re-roll" kind on every band; with it, that class loads
+FALSE and the kind silently DETACHES. Declaring the Word Shape kind
+introduces the key, so before doing it the script writes the explicit
+legacy default (`reroll_dice: true`) into every spec that has none — the
+loaded scene is then exactly what it was. Its `verify_diff` compares the
+LOADED models (`SceneV2(**raw).model_dump()`, our kind and section
+stripped) as well as the raw dicts, so this class of mistake cannot be
+invisible to it again. `--revert` drops the now-empty `flare_kinds` key too
+(restoring the legacy reading) but leaves that one explicit flag, which is
+load-neutral: **the backup is the byte-exact restore.** Found by running
+the script end to end on a real-shaped store — W2.5 review, 2026-11-16.
+
 **UNDO, and why a re-run is not one.** Plan §7: the kind's power button
 switches it off on this scene, detaching it from the band does the same,
 and `--revert` removes both from all six. Each of the first two leaves data
@@ -129,7 +147,10 @@ one is never re-enabled) and a Words section that differs aborts with the
 difference printed. Raw-dict patch, never `scene_store.save()`; dry-run by
 default; `--apply` backs the store up to
 `storage/spectra/backups/scenes-word-shapes-<stamp>.json` first and
-re-reads the written file to verify nothing else moved.
+re-reads the written file to verify nothing else moved. A run with nothing
+to do writes nothing and takes NO backup, and a stamp already taken (the
+stamp is seconds-resolution) takes the next free name — so the backup of
+the original store can never be clobbered by a backup of a patched one.
 
 **WHO RUNS IT, AND WHEN:** DJ, at W3, only after the W1 code is deployed
 and `spectra.service` restarted (an older process cannot load a `word`
