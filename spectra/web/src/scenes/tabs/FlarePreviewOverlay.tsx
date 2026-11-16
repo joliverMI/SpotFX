@@ -56,6 +56,27 @@
  * (closed browser, dropped connection) reverts his room automatically,
  * not just un-pauses the trigger engine.
  *
+ * THE WORD SHAPE KIND (Word Shapes row W2.1) draws its own three marks
+ * instead of the start/end pair above, from the SAME server numbers: the
+ * write at `fire_at_s` (a form before the word), the TRIGGER mark on the
+ * word itself, and the hold + release past it, read off the timeline's
+ * `word_shape` envelope (wordShapePreview.wordShapeMarks). Two deliberate
+ * differences from every other kind:
+ *   - the spans are read from the ENVELOPE, not from the writes, because a
+ *     shape produces no writes at all until wave 1 wires an effect into
+ *     fx.device_model.WORD_SHAPE_EFFECTS — the shape's timing is the
+ *     ROOM's, not the fixture's, so the ruler must tell him the truth
+ *     about it either way (flare_preview.word_shape_effect_ms's reasoning);
+ *   - the trigger mark DOES NOT DRAG. The Words section fires its band
+ *     atomically, so a per-kind `trigger_offset_ms` never moves the real
+ *     fire (scene_response.on_word_shape; the save warns about one, and
+ *     flare_preview forces the drawn offset to 0 for this type). A
+ *     draggable mark here would author a number the engine ignores.
+ * The SHAPE PICKER beside the Energy slider reads its options from the
+ * shape library itself (GET /api/sung-labels' `shapes` rows — never three
+ * hard-coded ids) and re-opens the timeline on a change, carrying the
+ * choice into the live fire too so the room draws what the ruler draws.
+ *
  * MAXIMUM HOLD CEILING (2026-08-21): the server also enforces an ABSOLUTE
  * cap on one continuous hold (spectra/services/flare_preview_hold.py,
  * MAX_HOLD_DURATION_S = 180s) that heartbeats/re-fires can never push
@@ -64,14 +85,18 @@
  * both start coming back with `expired: true` — the loop below stops
  * itself and shows exactly why, rather than silently continuing to poll
  * a room that has already released itself. */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import HelpLink from '../../help/HelpLink';
 import {
   closeFlarePreview, closeFlarePreviewBeacon, fireFlarePreview, heartbeatFlarePreview,
-  openFlarePreview,
+  openFlarePreview, useSungLabels,
 } from '../../queries';
 import type { FlarePreviewTimeline, FlarePreviewWrite } from '../../queries';
 import type { FlareKind } from '../../types';
+import {
+  PREFERRED_PREVIEW_SHAPE, pickDefaultShape, shapePickerOptions, wordShapeMarks,
+  wordShapeSentence,
+} from './wordShapePreview';
 
 const HEARTBEAT_MS = 5000;
 const EXTEND_STEP_S = 2;
@@ -104,6 +129,25 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
   onTriggerOffsetChange: (ms: number) => void;
 }) {
   const [intensity, setIntensity] = useState(1.0);
+  // THE SHAPE PICKER (Word Shapes row W2.1). Only a `word_shape` kind has
+  // one; every other type sends no shape and the server ignores the field.
+  // The options come from the shape LIBRARY (fx/effects/word_shapes.py via
+  // GET /api/sung-labels' `shapes`), so a shape added there appears here
+  // with no frontend change — the three ids are never written down.
+  const isWordShape = kind.type === 'word_shape';
+  const { data: sungLabels } = useSungLabels(isWordShape);
+  const shapeOptions = useMemo(
+    () => shapePickerOptions(sungLabels?.shapes), [sungLabels]);
+  const [shape, setShape] = useState<string | null>(
+    isWordShape ? PREFERRED_PREVIEW_SHAPE : null);
+  // Heart is preselected and is also the server's own default, so the
+  // first /open needs no library read. This only corrects a choice the
+  // library does not actually have (a renamed or removed shape).
+  useEffect(() => {
+    if (!isWordShape || !shapeOptions.length) return;
+    setShape((prev) => (prev && shapeOptions.some((o) => o.id === prev)
+      ? prev : pickDefaultShape(shapeOptions)));
+  }, [isWordShape, shapeOptions]);
   const [timeline, setTimeline] = useState<FlarePreviewTimeline | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Set once the server's absolute MAX_HOLD_DURATION_S ceiling has fired
@@ -147,12 +191,15 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
   // Read by the fire loop without needing to be a RAF-effect dependency —
   // an intensity slider drag must not restart the loop/fire schedule on
   // every tick, only the debounced timeline-refetch effect below does that.
-  const fireParamsRef = useRef({ sceneId, kindName: kind.name, intensity });
+  const fireParamsRef = useRef<{ sceneId: string; kindName: string; intensity: number;
+                                 shape: string | null }>(
+    { sceneId, kindName: kind.name, intensity, shape });
   useEffect(() => {
-    fireParamsRef.current = { sceneId, kindName: kind.name, intensity };
-  }, [sceneId, kind.name, intensity]);
+    fireParamsRef.current = { sceneId, kindName: kind.name, intensity, shape };
+  }, [sceneId, kind.name, intensity, shape]);
 
-  // ── fetch a fresh (dark) timeline whenever intensity changes (debounced)
+  // ── fetch a fresh (dark) timeline whenever the intensity — or, for a
+  // word shape, the picked shape — changes (debounced)
   // — also (re)arms preview_pause on the server. NEVER fires live here —
   // his report was that the live fire used to happen "almost as soon as
   // the preview started" instead of waiting for the mark, so even the
@@ -164,7 +211,7 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
   useEffect(() => {
     let cancelled = false;
     const t = setTimeout(() => {
-      openFlarePreview(sceneId, kind.name, intensity)
+      openFlarePreview(sceneId, kind.name, intensity, shape)
         .then((tl) => {
           if (cancelled) return;
           setTimeline(tl);
@@ -181,7 +228,13 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
           setHoldExpired(false);
           setAnimAnchorS(tl.animation_anchor_s);
           setFireAtS(tl.fire_at_s);
-          setDurationS((prev) => (initializedMarksRef.current ? Math.max(prev, tl.duration_s) : tl.duration_s));
+          // A word shape's envelope can run past the server's own
+          // duration_s (which is the bare minimum when the kind produced
+          // no writes), so the ruler grows to hold the whole form + hold +
+          // release — the same widening "⇥ Extend" does, never a second
+          // source for the moments themselves.
+          const needed = Math.max(tl.duration_s, wordShapeMarks(tl)?.needed_duration_s ?? 0);
+          setDurationS((prev) => (initializedMarksRef.current ? Math.max(prev, needed) : needed));
           if (!initializedMarksRef.current) {
             setTriggerMarkS(tl.trigger_mark_s);
             initializedMarksRef.current = true;
@@ -194,7 +247,7 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
     }, 200);
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sceneId, kind.name, intensity]);
+  }, [sceneId, kind.name, intensity, shape]);
 
   // ── heartbeat + release-on-close (auto-pauses the trigger engine for
   // as long as this overlay is open) ────────────────────────────────────
@@ -237,8 +290,8 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
       : durationS - playheadRef.current + normalizedFireAtS;
     nextFireAtRef.current = performance.now() + delayToFireS * 1000;
     const fireLive = () => {
-      const { sceneId: sid, kindName, intensity: it } = fireParamsRef.current;
-      fireFlarePreview(sid, kindName, it)
+      const { sceneId: sid, kindName, intensity: it, shape: sh } = fireParamsRef.current;
+      fireFlarePreview(sid, kindName, it, sh)
         .then((res) => { if (res.expired) onHoldExpired(); })
         .catch((e) => setError(String(e)));
     };
@@ -323,6 +376,12 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
   // when the real live /fire call goes out. animation_start_s is always
   // exactly 0 (every recorded write is normalized to its own earliest
   // write), so animStartAbs === fireAtS whenever there are any writes.
+  //
+  // THE WORD SHAPE's own marks (null for every other kind) — read off the
+  // server's envelope, so the three spans and the "the word" mark cannot
+  // disagree with the write.
+  const marks = wordShapeMarks(timeline);
+  const shapeName = shapeOptions.find((o) => o.id === marks?.shape)?.name;
   const gapMs = Math.round((triggerMarkS - fireAtS) * 1000);
   const animStartAbs = timeline?.animation_start_s != null ? fireAtS + timeline.animation_start_s : null;
   const animEndAbs = timeline?.animation_end_s != null ? fireAtS + timeline.animation_end_s : null;
@@ -349,6 +408,26 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
           <span style={{ fontVariantNumeric: 'tabular-nums', width: 36 }}>{intensity.toFixed(2)}</span>
         </label>
 
+        {isWordShape && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12,
+                        margin: '0 0 8px', flexWrap: 'wrap' }}>
+            <span style={{ color: 'var(--text-muted)' }}>Shape</span>
+            {shapeOptions.length === 0 ? (
+              <span style={{ color: 'var(--text-muted)' }}>
+                reading the shape library…
+              </span>
+            ) : shapeOptions.map((o) => (
+              <button key={o.id} className={o.id === shape ? 'primary' : ''}
+                style={{ fontSize: 12, padding: '3px 10px' }}
+                title={`Draw ${o.name} — the preview re-opens and the live fire draws this shape`}
+                onClick={() => setShape(o.id)}>
+                {o.name}
+              </button>
+            ))}
+            <HelpLink topic="word-shapes" title="Word shapes" />
+          </div>
+        )}
+
         {holdExpired && (
           <div style={{ fontSize: 12, padding: '6px 8px', borderRadius: 6, marginBottom: 4,
                         background: 'var(--accent)', color: '#1a1024' }}>
@@ -371,7 +450,15 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
           </div>
         )}
 
-        {timeline && timeline.writes.length === 0 && (
+        {timeline && timeline.writes.length === 0 && marks && (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            Nothing in your room draws shapes yet — no live effect in this scene is one that
+            knows them, so this fires no writes. The ruler below is still the real timing:
+            it is the room's own Word shape settings, not a fixture's.
+          </div>
+        )}
+
+        {timeline && timeline.writes.length === 0 && !marks && (
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             This kind produces no writes at this intensity — {timeline.result === 'no_visible_effect'
               ? 'its params don\'t match any live virtual\'s registered params (or its gain is 1.0 with no params at all).'
@@ -387,10 +474,24 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
               style={{ width: '100%', height: RULER_H, touchAction: 'none', cursor: 'pointer' }}
               onPointerDown={scrubRuler}>
               <rect x={0} y={0} width={RULER_W} height={RULER_H} fill="var(--panel-bg, #1a1024)" />
-              {animStartAbs != null && animEndAbs != null && (
+              {animStartAbs != null && animEndAbs != null && !marks && (
                 <rect x={sToX(animStartAbs)} y={20} width={Math.max(1, sToX(animEndAbs) - sToX(animStartAbs))}
                   height={RULER_H - 40} fill="var(--accent)" opacity={0.18} />
               )}
+              {/* A WORD SHAPE's three spans, in his words: it forms, it
+                  holds, it releases. Brightest while it forms, because that
+                  is the stretch the whole design is about — it ends ON the
+                  word. */}
+              {marks?.spans.map((span, i) => (
+                <g key={span.label}>
+                  <rect x={sToX(span.from_s)} y={20}
+                    width={Math.max(1, sToX(span.to_s) - sToX(span.from_s))}
+                    height={RULER_H - 40} fill="var(--accent)"
+                    opacity={[0.28, 0.17, 0.09][i] ?? 0.12} />
+                  <text x={(sToX(span.from_s) + sToX(span.to_s)) / 2} y={12} fontSize={9}
+                    fill="var(--accent)" textAnchor="middle">{span.label}</text>
+                </g>
+              ))}
               {ticks.map((t) => (
                 <g key={t}>
                   <line x1={sToX(t)} x2={sToX(t)} y1={RULER_H - 18} y2={RULER_H - 12} stroke="var(--text-muted)" />
@@ -399,29 +500,45 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
                   </text>
                 </g>
               ))}
-              {animStartAbs != null && (
+              {animStartAbs != null && !marks && (
                 <g>
                   <line x1={sToX(animStartAbs)} x2={sToX(animStartAbs)} y1={16} y2={RULER_H - 20}
                     stroke="var(--accent)" strokeWidth={2} />
                   <text x={sToX(animStartAbs)} y={12} fontSize={9} fill="var(--accent)" textAnchor="middle">start</text>
                 </g>
               )}
-              {animEndAbs != null && (
+              {animEndAbs != null && !marks && (
                 <g>
                   <line x1={sToX(animEndAbs)} x2={sToX(animEndAbs)} y1={16} y2={RULER_H - 20}
                     stroke="var(--accent)" strokeWidth={2} strokeDasharray="3,2" />
                   <text x={sToX(animEndAbs)} y={12} fontSize={9} fill="var(--accent)" textAnchor="middle">end</text>
                 </g>
               )}
+              {marks && (
+                <g>
+                  <line x1={sToX(marks.start_s)} x2={sToX(marks.start_s)} y1={16} y2={RULER_H - 20}
+                    stroke="var(--accent)" strokeWidth={2} />
+                  <line x1={sToX(marks.end_s)} x2={sToX(marks.end_s)} y1={16} y2={RULER_H - 20}
+                    stroke="var(--accent)" strokeWidth={2} strokeDasharray="3,2" />
+                </g>
+              )}
               <line x1={sToX(playheadS)} x2={sToX(playheadS)} y1={0} y2={RULER_H}
                 stroke="#fff" strokeWidth={1.5} opacity={0.9} />
-              <g onPointerDown={dragTrigger} style={{ cursor: 'ew-resize' }}>
+              {/* THE WORD does not drag (see the module docstring): the
+                  Words section fires its band atomically, so an authored
+                  offset would be a number the engine ignores. Every other
+                  kind's trigger mark is the draggable alignment tool it has
+                  always been. */}
+              <g onPointerDown={marks ? undefined : dragTrigger}
+                style={{ cursor: marks ? 'default' : 'ew-resize' }}>
                 <line x1={sToX(triggerMarkS)} x2={sToX(triggerMarkS)} y1={0} y2={RULER_H}
                   stroke="#ff5a3c" strokeWidth={2} />
-                <polygon points={`${sToX(triggerMarkS) - 6},0 ${sToX(triggerMarkS) + 6},0 ${sToX(triggerMarkS)},10`}
-                  fill="#ff5a3c" />
+                {!marks && (
+                  <polygon points={`${sToX(triggerMarkS) - 6},0 ${sToX(triggerMarkS) + 6},0 ${sToX(triggerMarkS)},10`}
+                    fill="#ff5a3c" />
+                )}
                 <text x={sToX(triggerMarkS)} y={RULER_H - 24} fontSize={9} fill="#ff5a3c" textAnchor="middle">
-                  trigger
+                  {marks ? 'the word' : 'trigger'}
                 </text>
               </g>
             </svg>
@@ -440,7 +557,20 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
               </span>
             </div>
 
-            {animStartAbs != null && (
+            {marks && (
+              <div style={{ fontSize: 12, marginTop: 6, padding: '6px 8px', borderRadius: 6,
+                            background: 'var(--panel-bg, #1a1024)' }}>
+                {wordShapeSentence(marks, shapeName)} The forming time <strong>IS</strong> the
+                lead: the band fires {Math.round(marks.form_s * 1000)} ms early so the shape
+                stands complete on the word, and the live fire waits for the white playhead to
+                reach the left edge of “forms”, every loop. The red line is the word itself and
+                does not drag — a Words band fires on the word, so a per-kind trigger offset is
+                not applied there (save the scene and it says so). Only a sung word fires this
+                in your show; nothing here is a trigger.
+              </div>
+            )}
+
+            {animStartAbs != null && !marks && (
               <div style={{ fontSize: 12, marginTop: 6, padding: '6px 8px', borderRadius: 6,
                             background: 'var(--panel-bg, #1a1024)' }}>
                 Trigger is <strong>{gapMs === 0 ? 'exactly on' : `${Math.abs(gapMs)}ms ${gapMs > 0 ? 'after' : 'before'}`}</strong>{' '}

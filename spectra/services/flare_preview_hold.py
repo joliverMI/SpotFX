@@ -682,17 +682,29 @@ class FlareKindProgram(PreviewProgram):
     """The original program, unchanged in behaviour: hold the scene, fire
     ONE declared flare kind on top of it. Every /fire re-lands the scene
     first, which is what lets a mid-session intensity change re-fire both
-    at the new value (see open_hold's docstring)."""
+    at the new value (see open_hold's docstring).
+
+    `shape` (Word Shapes row W2.1) is the one value a `word_shape` kind's
+    preview carries beyond its intensity: which shape the overlay's picker
+    is showing. It rides the same per-call path the intensity does — a
+    change re-fires at the new value — and every other kind type ignores it
+    (scene_response.fire_kind only synthesises an action for `word_shape`).
+    Without it the picker would move the RULER and the room would keep
+    drawing the default heart: the preview lying about what it is firing,
+    which is the one thing this whole preview stack exists to prevent."""
 
     steps = ("fire",)
 
-    def __init__(self, scene: SceneV2, kind: FlareKind) -> None:
+    def __init__(self, scene: SceneV2, kind: FlareKind,
+                 shape: str | None = None) -> None:
         self.hold_scene = scene
         self.kind = kind
+        self.shape = shape
 
     async def execute(self, step: str, ctx: PreviewContext) -> dict:
         await ctx.apply_scene()
-        return await ctx.responder.fire_kind(self.kind, ctx.intensity)
+        return await ctx.responder.fire_kind(self.kind, ctx.intensity,
+                                             shape=self.shape)
 
 
 async def open_program_hold(program: PreviewProgram, intensity: float, *,
@@ -801,7 +813,8 @@ async def open_program_hold(program: PreviewProgram, intensity: float, *,
 
 
 async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
-                    heartbeat_timeout_s: float) -> dict:
+                    heartbeat_timeout_s: float,
+                    shape: str | None = None) -> dict:
     """The FLARE preview's entry point — hold `scene`, fire `kind` on top.
     Unchanged in behaviour; it is now the thinnest possible program
     (FlareKindProgram) over the general hold above, so the flare preview,
@@ -809,7 +822,7 @@ async def open_hold(scene: SceneV2, kind: FlareKind, intensity: float, *,
     snapshot/deadline/sweep/ceiling/restart-recovery implementation rather
     than growing a second bespoke hold each."""
     return await open_program_hold(
-        FlareKindProgram(scene, kind), intensity, step="fire",
+        FlareKindProgram(scene, kind, shape), intensity, step="fire",
         heartbeat_timeout_s=heartbeat_timeout_s)
 
 

@@ -372,8 +372,34 @@ existing ruler already draws the three marks: start = word − form,
 trigger = word, end = word + hold + release. `fire_kind` synthesises a
 `PreviewWordShape` (deliberately NOT a fabricated `WordHit` — a preview
 must never flow into the show log looking like a real word), default shape
-heart, and `POST /api/flare-preview/open` takes an optional `shape` the
-W2.1 picker will pass.
+heart, and `POST /api/flare-preview/open` takes an optional `shape`.
+
+Since **W2.1** (merged) that picker exists: the Scenes page's **Words**
+tab mounts the ordinary response editor on the `word` class, and a
+`word_shape` kind's ▶ Preview carries a heart/star/diamond choice read
+from the shape library itself (`GET /api/sung-labels`' `shapes` rows —
+never three hard-coded ids). Three things that row settled and a later
+change must keep:
+
+- **`POST /api/flare-preview/fire` takes `shape` too**, through
+  `flare_preview_hold.open_hold(..., shape=)` →
+  `FlareKindProgram(scene, kind, shape)` → `fire_kind(shape=)`. Open alone
+  would have moved the RULER while the room kept drawing heart — the
+  preview lying about what it fires.
+- **the overlay reads its spans off the ENVELOPE, not the writes**
+  (`word_shape` on the timeline, via
+  `spectra/web/src/scenes/tabs/wordShapePreview.ts`), because a shape
+  produces NO writes while `WORD_SHAPE_EFFECTS` is empty; it labels them
+  "forms" / "holds" / "releases" and the trigger mark "the word".
+- **that mark does not drag** — the Words section ignores a per-kind
+  offset, so authoring one here would be a number the engine ignores.
+
+The kind itself is declared with **no knobs** (`flareKindOps.
+newWordShapeKind`) and adding the Words section seeds one attached across
+the whole Energy range; `types.ts` keeps TWO class lists —
+`RESPONSE_CLASSES` (the four a trigger may name) and
+`SCENE_RESPONSE_CLASSES` (the five a scene may declare). The save's
+`warnings` surface as inline notes on the kind each one names.
 
 ## Sonic reach (row W2.4, built 2026-11-15)
 
@@ -439,7 +465,12 @@ which names where each claim's behaviour is proven.
 - `docs/agents/scenes-and-flares.md` — the Words section beside the other
   four, from the scene-authoring side.
 - `tests/test_word_shape_contract.py` — the engine contract's own proofs;
-  `tests/test_word_shapes.py` the library's.
+  `tests/test_word_shapes.py` the library's;
+  `tests/test_scenes_words_tab.py` + `scripts/check_scenes_words_tab.mjs`
+  the Words tab's, the picker's and the two class lists';
+  `scripts/render_words_tab.py` (+ `spectra/web/harness/wordstab.html`)
+  drives the real tab and preview in a browser and measures that the
+  "forms" span ends ON the word — shots in `docs/evidence/words-tab/`.
 - The plan: https://claude.ai/artifact/FdeYJz4kXLt2QamYR8wSDB (section 2.1
   is the library; 2.3 and 2.4 are the keys and the timing; 2.3-2.5 are the
   engine contract).

@@ -3,7 +3,15 @@
  * type/jump/params/gain/hold_ms — those stay agent-adjustable (ResponseTab's
  * existing "tell the agent to change it" convention); rename/delete/copy are
  * STRUCTURAL/identity operations, not program-behavior tuning, so a small
- * direct control here doesn't reopen the no-settings-form-sprawl question. */
+ * direct control here doesn't reopen the no-settings-form-sprawl question.
+ *
+ * ONE TYPE HAS NOTHING TO TUNE (Word Shapes row W2.1): a `word_shape` kind's
+ * form, hold and release are the ROOM's own `word_shape_*` settings, paced by
+ * the sung word's Energy, and the model REFUSES params/gain/hold_ms on it
+ * (spectra/models/scene.py FlareKind._shape). So this box says that plainly
+ * instead of offering "tell the agent to retune those", which would send him
+ * after a knob that does not exist — and the Words tab's own "+ Word Shape
+ * kind" button (flareKindOps.newWordShapeKind) is where one is declared. */
 import { useState } from 'react';
 import HelpLink from '../../help/HelpLink';
 import { copyFlareKind } from '../../lib/flareClipboard';
@@ -68,8 +76,16 @@ export default function FlareKindEditDialog({
         </label>
         {error && <div style={{ fontSize: 11, color: 'var(--danger)', marginBottom: 6 }}>{error}</div>}
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>
-          Attached in {usages} band{usages === 1 ? '' : 's'} right now. Type/params/gain/hold stay
-          agent-adjustable — tell the agent to retune those.
+          Attached in {usages} band{usages === 1 ? '' : 's'} right now.{' '}
+          {kind.type === 'word_shape' ? (
+            <>
+              A Word Shape kind has <b>no knobs</b> — the form, hold and release are the
+              room's own Word shape settings, paced by the sung word's Energy. Only a
+              Words band fires it. <HelpLink topic="word-shapes" title="Word shapes" />
+            </>
+          ) : (
+            <>Type/params/gain/hold stay agent-adjustable — tell the agent to retune those.</>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

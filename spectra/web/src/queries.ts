@@ -17,12 +17,12 @@ import type {
   EnergyTimeline, EngineStatus, FeedbackCapture, FeedbackEntry, FireResult, IntensityScaleMark,
   PreDropLooks, PreDropWindow, Registry,
   ReviewSession, ReviewTimeline, RoomColorState, RoomControlState, RoomControlsSaveResult,
-  SceneV2, SecondAccountState, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
+  SceneSaveResult, SceneV2, SecondAccountState, SettingChangeEntry, SettingsMessageResult, SettingsRegistry, SonicAppliedChange,
   Liveness, SonicUsageSummary, SpectraTrigger, SpotColorSetCard, TestSessionStatus,
   LyricEventSettings, LyricEvents, LyricMatches, SungLabelEdit, SungLabelsPageData,
   TestbedDropReferenceSet, TestbedEngineMarks, TestbedLyrics, TestbedMarks, TestbedPromoteRequest, TestbedPromoteResult,
   TestbedPromotionLogEntry, TestbedReferenceSet, TestbedSong, TestbedWaveform,
-  TranscribeResult, UndoResult,
+  TranscribeResult, UndoResult, WordShapePreview,
 } from './types';
 
 /* ── scenes ── */
@@ -37,7 +37,10 @@ export function useScenes() {
 export function useSaveScene() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (scene: SceneV2) => apiPost('/scenes', scene),
+    // Typed because the answer CARRIES something the editor shows: the
+    // save's advisory `warnings` (types.ts SceneSaveResult) — legal,
+    // stored, and inert, never a refusal.
+    mutationFn: (scene: SceneV2) => apiPost<SceneSaveResult>('/scenes', scene),
     onSuccess: (_d, scene) => {
       qc.setQueryData<SceneV2[]>(['spectra-scenes'], (old) => {
         if (!old) return old;
@@ -232,6 +235,22 @@ export interface FlarePreviewTimeline {
    * contradiction is NAMED rather than silently honoured (the Force-Scene
    * / colour-set Preview precedent). The overlay shows a banner. */
   overrode_disabled?: boolean;
+  /** How long the EFFECT's own animation lasts past the write, in ms, for
+   * the kinds whose write is one instant poke (a Pulse flash's fade, a big
+   * fish's crossing, a Sauron surge's burn-back) — and, for `word_shape`,
+   * the whole form + hold + release envelope. null when the kind has no
+   * animation of its own beyond its writes. Already folded into
+   * animation_end_s whenever the kind produced writes; a `word_shape`
+   * carries it even with NO writes, because the shape's timing is the
+   * room's and not the fixture's (spectra/services/flare_preview.
+   * word_shape_effect_ms). */
+  effect_animation_ms?: number | null;
+  /** THE SHAPE AND ITS ENVELOPE — set only for a `word_shape` kind (Word
+   * Shapes row W2.1). The overlay's ruler draws "forms" from
+   * fire_at_s to the trigger mark, then "holds" and "releases" from these
+   * three times, and the shape picker sends the chosen one back as
+   * openFlarePreview's `shape`. */
+  word_shape?: WordShapePreview | null;
   writes: FlarePreviewWrite[];
 }
 
@@ -252,16 +271,28 @@ export interface FlarePreviewFireResult {
  * intensity changes; the live fire is a separate call (fireFlarePreview),
  * timed by the frontend's own playhead loop to land on animation_anchor_s
  * each cycle, never here (see spectra/api/flare_preview.py's module
- * docstring for why open/fire split apart). */
-export const openFlarePreview = (sceneId: string, kindName: string, intensity: number) =>
+ * docstring for why open/fire split apart).
+ *
+ * `shape` (Word Shapes row W2.1) names which shape a `word_shape` kind
+ * previews — the overlay's heart/star/diamond picker, read from the shape
+ * library itself (GET /api/sung-labels' `shapes`). Omitted/undefined
+ * previews the server's own default (scene_response.PREVIEW_SHAPE, heart);
+ * every other kind type ignores it (spectra/api/flare_preview.
+ * OpenRequest.shape). */
+export const openFlarePreview = (sceneId: string, kindName: string, intensity: number,
+                                 shape?: string | null) =>
   apiPost<FlarePreviewTimeline>('/flare-preview/open',
-    { scene_id: sceneId, kind_name: kindName, intensity });
+    { scene_id: sceneId, kind_name: kindName, intensity, shape: shape ?? null });
 
 /** The live half — fires scene+kind for real and holds it. Called once
- * per loop cycle by FlarePreviewOverlay's playhead effect, not on open. */
-export const fireFlarePreview = (sceneId: string, kindName: string, intensity: number) =>
+ * per loop cycle by FlarePreviewOverlay's playhead effect, not on open.
+ * `shape` carries the Words picker's current choice (Word Shapes row W2.1)
+ * so the room draws the shape the ruler is drawing, not the server's
+ * default; ignored by every other kind type. */
+export const fireFlarePreview = (sceneId: string, kindName: string, intensity: number,
+                                 shape?: string | null) =>
   apiPost<FlarePreviewFireResult>('/flare-preview/fire',
-    { scene_id: sceneId, kind_name: kindName, intensity });
+    { scene_id: sceneId, kind_name: kindName, intensity, shape: shape ?? null });
 
 export const heartbeatFlarePreview = () =>
   apiPost<{ active: boolean; remaining_s: number; expired?: boolean; reason?: string }>(

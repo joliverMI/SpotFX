@@ -13,7 +13,9 @@ import { resolve } from 'node:path';
 // and homedrops.html Home's quick-run cards with the Drops panel (predrop
 // plan step 1 — scripts/check_home_drops_layout.py), and testbedlyrics.html
 // the test bed's Sung words lane (scripts/render_testbed_lyrics_lane.py), and
-// sunglabels.html the Sung labels page (scripts/render_sung_labels.py).
+// sunglabels.html the Sung labels page (scripts/render_sung_labels.py), and
+// wordstab.html the Scenes page's Words response editor and its flare
+// preview overlay (scripts/render_words_tab.py).
 export default defineConfig({
   plugins: [react()], root: 'harness', base: '/spectra/',
   build: {
@@ -30,6 +32,7 @@ export default defineConfig({
       homedrops: resolve(__dirname, 'harness/homedrops.html'),
       testbedlyrics: resolve(__dirname, 'harness/testbedlyrics.html'),
       sunglabels: resolve(__dirname, 'harness/sunglabels.html'),
+      wordstab: resolve(__dirname, 'harness/wordstab.html'),
     } },
   },
 });

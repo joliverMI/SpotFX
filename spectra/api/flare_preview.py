@@ -11,7 +11,8 @@ the playhead was crossing a trigger"). Before this, /open did both in one
 call — computed the timeline AND fired live, instantly, regardless of
 where the drawn trigger mark sat. Now:
 
-  POST /api/flare-preview/open       {scene_id, kind_name, intensity} —
+  POST /api/flare-preview/open       {scene_id, kind_name, intensity,
+                                      shape?} —
       computes the isolated single-kind timeline ONLY (spectra/services/
       flare_preview.build_timeline — the browser's scrub/markers, incl.
       the new animation_anchor_s/trigger_mark_s fields) and arms the
@@ -24,8 +25,11 @@ where the drawn trigger mark sat. Now:
       slider changes — recomputes the timeline at the new value (still no
       live fire; the frontend resets its playhead and waits for the mark
       like a fresh open).
-  POST /api/flare-preview/fire       {scene_id, kind_name, intensity} —
-      the live half: fires the scene + kind for real
+  POST /api/flare-preview/fire       {scene_id, kind_name, intensity,
+                                      shape?} —
+      the live half: fires the scene + kind for real (`shape` carries the
+      Words picker's current choice through to the write, so the room draws
+      what the ruler is drawing — Word Shapes row W2.1)
       (flare_preview_hold.open_hold) so his fixtures show what the
       timeline predicts, and re-arms the pause. The frontend calls this
       once per loop cycle, timed to land exactly when its own simulated
@@ -127,8 +131,13 @@ async def open_preview(body: OpenRequest):
 async def fire_preview(body: OpenRequest):
     scene, kind = _resolve_scene_and_kind(body.scene_id, body.kind_name)
     try:
+        # `shape` rides the same OpenRequest the ruler's own /open uses, so
+        # the live fire draws the shape his picker is SHOWING rather than
+        # the server's default (Word Shapes row W2.1). Ignored by every
+        # other kind type.
         hold = await flare_preview_hold.open_hold(
-            scene, kind, body.intensity, heartbeat_timeout_s=HEARTBEAT_TIMEOUT_S)
+            scene, kind, body.intensity, heartbeat_timeout_s=HEARTBEAT_TIMEOUT_S,
+            shape=body.shape)
     except Exception as exc:
         raise HTTPException(502, f"live preview fire failed: {exc}")
     if hold.get("expired"):

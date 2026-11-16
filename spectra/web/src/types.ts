@@ -226,6 +226,46 @@ export type ResponseClass = 'flare' | 'charge' | 'lull' | 'drop' | 'word';
  * without widening this list is the whole shape of W0.3's frontend half. */
 export const RESPONSE_CLASSES: ResponseClass[] = ['flare', 'charge', 'lull', 'drop'];
 export const WORD_RESPONSE_CLASS: ResponseClass = 'word';
+/** THE FIVE SECTIONS A SCENE MAY DECLARE — what a surface that LISTS a
+ * scene's own responses iterates (SummaryTab's Responses card, and anything
+ * else counting bands per section). Deliberately a SECOND list rather than
+ * a widened RESPONSE_CLASSES: that one is the four a TRIGGER may name, and
+ * the two trigger pickers (SpectraTriggerDialog, PromotionReviewDialog)
+ * must keep offering exactly those four — a sung word is the only way into
+ * the Words section (models/scene.py's TRIGGER_RESPONSE_CLASSES, proven by
+ * tests/test_word_shape_contract.py::
+ * test_a_trigger_can_never_name_the_word_class). Word Shapes row W2.1. */
+export const SCENE_RESPONSE_CLASSES: ResponseClass[] = [
+  ...RESPONSE_CLASSES, WORD_RESPONSE_CLASS,
+];
+
+/** THE PREVIEW'S SHAPE AND ENVELOPE (Word Shapes row W2.1) — what
+ * `POST /api/flare-preview/open` returns as `word_shape` for a `word_shape`
+ * kind, and nothing else (spectra/services/scene_response.
+ * preview_word_shape, carried through flare_preview.build_timeline). The
+ * three times are the ROOM's own, Energy-paced for the previewed intensity,
+ * so the overlay's ruler draws form / hold / release from the same numbers
+ * the write itself carries — the one-source-of-truth rule every preview
+ * marker in this app already follows. See queries.ts's
+ * FlarePreviewTimeline.word_shape. */
+export interface WordShapePreview {
+  shape: string;
+  form_s: number;
+  hold_s: number;
+  release_s: number;
+}
+
+/** What `POST /api/scenes` answers (spectra/api/scenes.py::upsert_scene).
+ * `warnings` is ADVISORY and never a refusal — a save that returns one was
+ * still stored faithfully (scene_store.scene_warnings): today, a
+ * `word_shape` kind attached outside the Words section, and a per-kind
+ * trigger offset on a kind the Words section attaches. The editor shows
+ * them as inline notes on the kinds they name. */
+export interface SceneSaveResult {
+  status: string;
+  id: string;
+  warnings: string[];
+}
 
 export interface ColorJourneySpec { degrees_per_min: number; }
 
