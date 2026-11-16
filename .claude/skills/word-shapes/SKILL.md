@@ -426,6 +426,46 @@ attached could not be told apart before it: `list_flare_kinds` carries
 `tests/test_scene_console.py::test_the_word_shapes_sonic_reach_is_complete`,
 which names where each claim's behaviour is proven.
 
+## Wave 1, effect by effect
+
+Each row below is one effect WIRED to the told keys. The effect's own
+`SKILL.md` is the binding statement for how it draws the shape; this is the
+one-paragraph index, plus the clarity numbers it actually measured.
+
+### STAR / `radial` (row W1.6, 2026-11-15) — the third divisor, spin to rest
+
+`.claude/skills/radial-effect/SKILL.md`'s "WORD SHAPES" section;
+`fx/effects/radial.py`'s WORD SHAPES block comment; evidence
+`scripts/check_star_word_shape.py`, proofs `tests/test_star_word_shape.py`.
+One registered param, `word_shape_size` (0.62); no
+`WORD_SHAPE_FORM_MIN_S` entry (the approved Energy-paced 0.5-0.9 s form).
+
+Star samples a strip at a SHAPED RADIUS, so the shape is a third angle
+DIVISOR in the harmonic blend an `edges` change already used — read at the
+SCREEN angle, so the polygon turns under it and the shape stands upright —
+plus a soft CUT at `u = 1` without which the strip simply repeats outward
+and the panel stays lit. The rotation governor scales the whole per-frame
+advance by `1 - m`, so the turn is exactly zero through the hold and
+resumes from the music on the release; the star wave is held by freezing
+its phase; an Edge Morph arriving mid-shape is deferred to the release.
+
+Measured: lit cells inside the shape **97.1-100%** (bar 95%), the outline
+within **0.000 cells** of `SIZE x polar(theta)` on 360 angles (bar half a
+cell), no white, **+0.22 ms** p50 (bar 1 ms). Two bars read honestly rather
+than moved, both printed by the check script:
+
+- **"90% of the area cells lit" is read against the cells the STRIP
+  lights** (97.3-100%). Star has no light of its own — Melt's own lit share
+  swings between about a third and three quarters, and a dark band of the
+  strip is a dark band of the heart. The absolute figure (32-45%) tracks
+  the strip's share and is reported.
+- **the 8%-per-frame jump bar is arithmetically out of reach here**: STAR's
+  rest state lights the whole panel and a shape is a fifth to a third of
+  it, so a 0.5 s form has to cut the lit count 4.3x in 15 rendered frames
+  at 30 fps. Measured with the strip frozen: 6.9-14.4% (60 fps) /
+  9.4-25.4% (30 fps), against the effect's own UNTOLD worst of 18.2% /
+  26.6%. The hold itself does not move at all.
+
 ## Related
 
 - `.claude/skills/crystal-hex-grid/SKILL.md` — the panel this is all

@@ -2839,3 +2839,37 @@ against that commit.
     (`scripts/star_spin_smooth_scene_data.py`). No vendored line changed.
     Evidence: `tests/test_star_spin_smooth.py`.
 
+
+95. `effects/radial.py` (SpotFX-authored on top of #91/#94) + `effects/
+    word_shapes.py` / `word_shape_keys.py` (NEW, SpotFX-authored, Word
+    Shapes rows W0.1/W0.3): WORD SHAPES ON STAR (row W1.6, 2026-11-15; the
+    Admiral: "STAR: change the radial shape so it matches the shape if
+    possible", Q7 A "include — the outline morphs into the shape, the spin
+    eases to a stop so the shape stands upright, resumes on release"). A
+    sung word's shape is a THIRD angle DIVISOR in the harmonic blend the
+    shape morph (#22's `shape_morph_s`) already ran: `div_shape(psi) =
+    SIZE x polar(theta_n) / (max_radius x k(psi))`, read at the SCREEN
+    angle so the polygon turns under it and the shape stands upright, with
+    `SIZE` the new `word_shape_size` param (0.62, the only registered one;
+    the six `word_shape_*` told keys ride only the Words band's write).
+    `_word_shape_shaped` is the per-cell field (cached per shape and size),
+    `_word_shape_div` the same law in angles, which `_shape_div(phi,
+    theta)` feeds so a lull piece and a transition program ride the shape
+    too. Because `u` keeps rising past the outline and the strip repeats, a
+    soft CUT sweeps inward to `u = 1` (feather `WORD_SHAPE_EDGE_U` 0.09 u,
+    about one cell pitch), paced by CELLS and falling GEOMETRICALLY —
+    `u_cut` is the `share ** m` quantile of the frame's own `u` field (both
+    halves measured: a radius-paced or an even-share cut spent 15-22% of
+    the lit cells in one frame). `_govern_rotation` scales the whole
+    governed advance by `1 - m` after the #94 release and before the clamp,
+    so the turn is exactly zero through the hold and resumes from the music
+    on the release — unless a phase is armed, which takes the governor
+    back; `_star_wave_step` holds the wave by freezing `_wave_phase`; an
+    `edges` change arriving mid-shape is deferred to the release
+    (`_shape_edges_defer`). `fx.device_model.WORD_SHAPE_EFFECTS` gains
+    `radial`. Untold (no keys, a cleared write, an older SpotFX, a LedFX UI
+    scrub) every line returns before touching state and the effect renders
+    byte for byte what it rendered before — proven against the PINNED
+    module hosted beside today's on the same strip. No vendored line
+    changed. Evidence: `scripts/check_star_word_shape.py`,
+    `tests/test_star_word_shape.py`.

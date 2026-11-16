@@ -1,4 +1,5 @@
 import logging
+import math
 
 import numpy as np
 import voluptuous as vol
@@ -7,7 +8,7 @@ from PIL import Image
 import fx.effects.particle_handoff as particle_handoff
 import fx.effects.pre_drop as pre_drop
 from fx.effects import drop_colour_resample, lull_dark, lull_handoff, \
-    phase_grammar, strip_phase
+    phase_grammar, strip_phase, word_shape_keys, word_shapes
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.twod import Twod
 from fx.utils import nonlinear_log
@@ -115,6 +116,59 @@ DEFAULT_STAR_WAVE_LO = -0.2
 DEFAULT_STAR_WAVE_HI = 0.4
 DEFAULT_STAR_WAVE_PERIOD_SLOW_S = 7.0
 DEFAULT_STAR_WAVE_PERIOD_FAST_S = 3.0
+
+# ── WORD SHAPES (the Word Shapes plan row W1.6, 2026-11-15; the Admiral:
+# "STAR: change the radial shape so it matches the shape if possible. This
+# one might be excluded or need some thought", and his Q7 A: "include — the
+# outline morphs into the shape, the spin eases to a stop so the shape
+# stands upright, resumes on release").
+#
+# A sung word with a shape writes fx/effects/word_shape_keys.py's six told
+# keys in ONE jump; Star edge-detects the SEQ and runs the whole form, hold
+# and release on its own clock (`_shape_step`). Untold — no keys, a cleared
+# write, an older SpotFX, a LedFX UI scrub — every line below is skipped and
+# the effect renders byte for byte what it renders today.
+#
+# THE THIRD DIVISOR. Star's picture is the source strip sampled at a SHAPED
+# RADIUS: `u = r / (max_radius x div(angle))`, so the `u = 1` contour IS the
+# visible outline and `div` is the one thing that decides its form. The
+# vendored effect has two divisors — the polygon/star lobes (`edges` >= 3)
+# and the degenerate 1/2-edge cases — and already blends between two of them
+# on an `edges` change (`shape_morph_s`, 0.6 s), harmonically, because the
+# shaped radius `r / div` is what blends linearly. The word shape is simply a
+# THIRD divisor in that same blend:
+#
+#     div_shape(psi) = SIZE x polar(theta_n) / (max_radius x k(psi))
+#
+# where `psi` is the SCREEN angle, `theta_n`/`k` carry it into the effect's
+# normalized space (`nx = dx / ax`, `ny = dy / ay`, the shape placed on
+# Star's own centre) and `polar` is the library's radius per angle. Two
+# consequences, both deliberate:
+#   * the divisor is a function of the SCREEN angle, not Star's rotating
+#     frame, so THE POLYGON TURNS AND THE SHAPE DOES NOT — which is what
+#     makes the heart stand upright at the hold however fast Star was
+#     spinning when the word arrived (word_shapes' `Shape.upright`);
+#   * `SIZE x polar` is in NORMALIZED units (1.0 = the panel's half-height),
+#     so the shape comes out ~14% wider than tall in his room exactly as
+#     every circle here does — the panel's own anisotropy, never corrected
+#     in cells (`.claude/skills/word-shapes`).
+#
+# THE SHAPE'S EDGE. The divisor alone is not the shape: `u` keeps rising
+# past 1 and the strip REPEATS (`twist_index % 1.0`), so the whole panel
+# stays lit and the plan's clarity bar ("at the hold, >= 95% of the lit cells
+# lie inside the shape") cannot be met by any divisor. The shape therefore
+# also feathers the picture out just past its own outline — `alpha = 1 - m x
+# clip((u - 1) / WORD_SHAPE_EDGE_U, 0, 1)`, scaled by the SAME envelope, so
+# at the hold the panel holds one solid shape of flowing bands and nothing
+# else, and untold (m = 0) the multiply is skipped entirely. Nothing INSIDE
+# the shape is ever touched, which is what makes "the shape's area cells are
+# lit" the strip's business and not the shape's.
+DEFAULT_WORD_SHAPE_SIZE = 0.62
+# the feather just outside the outline, in shaped-radius units — about one
+# cell pitch on his crystal at the default size (measured in
+# scripts/check_star_word_shape.py), so a lit cell is never further than the
+# library's own "outline cells" band from the outline.
+WORD_SHAPE_EDGE_U = 0.09
 LULL_IMPLODE_S = 1.2     # implode fallback when no lull ramp arrives
 DROP_BLOOM_S = 0.5       # bloom fallback when no drop ramp arrives
 
@@ -212,6 +266,17 @@ def _smooth(s):
     return s * s * (3.0 - 2.0 * s)
 
 
+def _inv_smooth(y):
+    """The smoothstep's own inverse: the x in [0, 1] with
+    `x^2 (3 - 2x) == y`. WORD SHAPES uses it to place a shape's clock so the
+    envelope RESUMES at a fraction the picture already shows — a second word
+    landing inside the first's release re-forms from where it is, and a
+    clearing write lets go from where it is, neither ever snapping (the
+    plan's acceptance 7)."""
+    y = float(np.clip(y, 0.0, 1.0))
+    return 0.5 - math.sin(math.asin(1.0 - 2.0 * y) / 3.0)
+
+
 def splat_brighter(layer, x, y, rgb, size=1.1):
     """Soft dots composed BRIGHTER-WINS into `layer` (H, W, 3) float: where
     a dot is brighter (perceived luminance) than the cell, the cell takes the
@@ -271,7 +336,7 @@ class Radial2d(Twod):
     ADVANCED_KEYS = Twod.ADVANCED_KEYS + [
         "phase", "phase_progress", *lull_dark.KEYS, *phase_grammar.BREATH_KEYS,
         lull_handoff.DROP_KEY, phase_grammar.SHOCK_ON_KEY, *pre_drop.KEYS,
-        drop_colour_resample.KEY,
+        drop_colour_resample.KEY, *word_shape_keys.KEYS,
     ]
     # Star takes the BREATH-HOLD itself (in its own draw, like Pulse) and
     # never the shared Shockwave overlay — its drop is D3, the bands
@@ -478,6 +543,16 @@ class Radial2d(Twod):
             # THE DROP COLOUR RE-SAMPLE's told key (rides only the drop
             # arm) — fx/effects/drop_colour_resample.py
             **drop_colour_resample.schema_field(),
+            vol.Optional(
+                "word_shape_size",
+                description="Word Shapes: the shape's half-height as a "
+                            "fraction of the panel's (the heart, star or "
+                            "diamond a sung word draws)",
+                default=DEFAULT_WORD_SHAPE_SIZE,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=1.0)),
+            # THE WORD SHAPE's six told keys (ride only the Words band's own
+            # write) — fx/effects/word_shape_keys.py
+            **word_shape_keys.schema_fields(),
         }
     )
 
@@ -528,6 +603,18 @@ class Radial2d(Twod):
         # THE SPIN SMOOTH PLAN: the release filter's state — the smoothed
         # per-frame advance (revolutions); None = not seeded / release off
         self._spin_lp = None
+        # WORD SHAPES: the standing shape ({"t": s, "told": WordShapeTold,
+        # "shape": Shape, "released": bool}; None = none), this frame's form
+        # fraction, an Edge Morph that arrived DURING a shape and is waiting
+        # for its release, and the two caches the shaped field is built from
+        # (both keyed, both off the frame path). `_shape_seq` is deliberately
+        # NOT created here: config_updated's own `hasattr` baseline is what
+        # keeps a fresh instance built from a persisted stale SEQ from firing.
+        self._shape = None
+        self._shape_m = 0.0
+        self._shape_edges_defer = None
+        self._ws_norm = None
+        self._ws_field = None
         super().__init__(ledfx, config)
 
     def config_updated(self, config):
@@ -540,12 +627,29 @@ class Radial2d(Twod):
         old_edges = getattr(self, "edges", None)
         morph_s = float(self._config.get("shape_morph_s",
                                          DEFAULT_SHAPE_MORPH_S) or 0.0)
-        if (old_edges is not None and new_edges != old_edges
+        if old_edges is not None and self._shape is not None:
+            # WORD SHAPES: an Edge Morph arriving DURING a shape is DEFERRED
+            # to the release (the plan's W1.6 spec 3). The polygon carries
+            # almost no weight at the hold, so applying it now would be a
+            # step nobody sees and then a second morph on the way out; held
+            # here, the release morphs back into the NEW edge count instead.
+            # `self.edges` therefore stays the SHOWING count while a shape
+            # stands, and the deferral is re-read from the config on every
+            # write — so a change and a change BACK leaves nothing pending,
+            # rather than landing the first one at the release.
+            if morph_s <= 0.0:
+                self._morph = None
+            self._shape_edges_defer = (
+                int(new_edges) if new_edges is not None
+                and new_edges != old_edges else None)
+        elif (old_edges is not None and new_edges != old_edges
                 and morph_s > 0.0):
             self._morph = {"from": int(old_edges), "t": 0.0}
-        elif morph_s <= 0.0:
-            self._morph = None
-        self.edges = new_edges
+            self.edges = new_edges
+        else:
+            if morph_s <= 0.0:
+                self._morph = None
+            self.edges = new_edges
         self.x_offset = self._config.get("x_offset")
         self.y_offset = self._config.get("y_offset")
         self.twist = self._config.get("twist")
@@ -580,6 +684,24 @@ class Radial2d(Twod):
             self._config.get("spin_release_high_s", DEFAULT_SPIN_RELEASE_S) or 0.0)
         if not self._config.get("star_wave", False):
             self._wave_phase = None
+
+        # WORD SHAPES: edge-detect the told SEQ, never the shape id, so two
+        # words of the SAME shape back to back both start a shape (the
+        # `burst_rockets` / `surge` pattern). CREATION BASELINE: a fresh
+        # instance built from a persisted config that still carries a stale
+        # SEQ must NOT fire (fireworks' own "phase-key creation-baseline
+        # rule"), so the first pass only records what it found.
+        told = word_shape_keys.told(self._config)
+        if not hasattr(self, "_shape_seq"):
+            self._shape_seq = told.seq if told is not None else 0
+        elif told is not None and told.seq != self._shape_seq:
+            self._shape_seq = told.seq
+            self._shape_begin(told)
+        elif told is None and self._shape is not None:
+            # a CLEARING write mid-shape: let go from where the shape is
+            # now, never a snap (the plan's acceptance 7)
+            self._shape_let_go()
+            self._shape_seq = 0
 
         # charge/lull/drop: edge-detect the phase key. State is created here
         # (not __init__) because config_updated runs first, during
@@ -624,6 +746,12 @@ class Radial2d(Twod):
         # Add a small epsilon to avoid division by zero or crossing zero artifacts
         radius_stretch = 1.0 + epsilon
         self.max_radius = np.max(self.radius_base) * radius_stretch
+
+        # WORD SHAPES: both caches are built from dx/dy/max_radius, which
+        # this method has just rebuilt (a config-patch grid rebuild runs it
+        # again), so they go with them.
+        self._ws_norm = None
+        self._ws_field = None
 
     def _ensure_source(self):
         if not self.source_virtual:
@@ -803,6 +931,12 @@ class Radial2d(Twod):
             pass
         # the strip Star read goes back to doing its own lull
         strip_phase.unmark_radial_source(self.source_virtual)
+        # WORD SHAPES: a shape never survives the scene it was sung into —
+        # the next activation starts from the polygon, and a deferred Edge
+        # Morph that never got its release lands now.
+        self._shape = None
+        self._shape_m = 0.0
+        self._shape_apply_deferred_edges()
         super().deactivate()
 
     def _adopt_handoff(self):
@@ -1089,7 +1223,7 @@ class Radial2d(Twod):
             return np.maximum(pr, 1e-3)
         return np.ones_like(phi)
 
-    def _shape_div(self, phi):
+    def _shape_div(self, phi, theta=None):
         f = self._shape_div_for(phi, self.edges)
         m = self._morph_mix()
         if m is not None:
@@ -1097,10 +1231,23 @@ class Radial2d(Twod):
             # the shaped radius blends linearly (r/f), so the divisor blends
             # harmonically
             f = 1.0 / ((1.0 - m) / fb + m / f)
+        # WORD SHAPES: the third divisor, in the SAME harmonic blend. `phi`
+        # is Star's ROTATING frame and the shape stands in the screen's, so
+        # this needs the frame's own angle — a caller with none (there is
+        # none left in the module) keeps the polygon, which is what Star
+        # looked like before this row.
+        ms = float(self._shape_m)
+        if ms > 0.0 and theta is not None:
+            ds = self._word_shape_div(np.asarray(phi, np.float32)
+                                      + float(theta))
+            if ds is not None:
+                f = 1.0 / ((1.0 - ms) / np.maximum(f, 1e-6)
+                           + ms / np.maximum(ds, 1e-6))
         return f
 
     def _piece_xy(self, u, phi, theta):
-        r = np.asarray(u, np.float32) * self.max_radius * self._shape_div(phi)
+        r = (np.asarray(u, np.float32) * self.max_radius
+             * self._shape_div(phi, theta))
         ang = np.asarray(phi, np.float32) + theta
         return (self.cx + r * np.cos(ang)).astype(np.float32), \
             (self.cy + r * np.sin(ang)).astype(np.float32)
@@ -1112,6 +1259,154 @@ class Radial2d(Twod):
         if s <= 0.0:
             return None
         return float(_smooth(self._morph["t"] / s))
+
+    # ── WORD SHAPES (the block comment above DEFAULT_WORD_SHAPE_SIZE) ────
+
+    def _shape_active(self):
+        """Whether a told shape is standing (anywhere in its form, hold or
+        release). `_shape_m` is this frame's form fraction."""
+        return self._shape is not None
+
+    def _word_shape_size(self):
+        return float(self._config.get("word_shape_size",
+                                      DEFAULT_WORD_SHAPE_SIZE)
+                     or DEFAULT_WORD_SHAPE_SIZE)
+
+    def _shape_begin(self, told):
+        """A told SEQ edge: start the form. A shape arriving while another
+        is still standing (two words back to back, the second inside the
+        first's release) starts from WHERE THE PICTURE IS, not from zero —
+        the clock is placed so the envelope resumes at the current form
+        fraction, which is the plan's acceptance 7 (no snap).
+
+        `prime()` builds the library's lazy views HERE, on the config
+        write's own thread, so the first rendered frame never pays for
+        them."""
+        try:
+            shape = word_shapes.get(told.shape).prime()
+        except Exception:                                   # noqa: BLE001
+            # an id this build cannot build is "not told" (word_shape_keys'
+            # own rule); told() already filters it, this is the belt
+            _LOGGER.warning("radial: unknown word shape %r", told.shape)
+            self._shape = None
+            self._shape_m = 0.0
+            return
+        m = float(self._shape_m) if self._shape is not None else 0.0
+        t0 = told.form_s * _inv_smooth(m) if told.form_s > 0.0 else 0.0
+        self._shape = {"t": float(t0), "told": told, "shape": shape,
+                       "released": False}
+        self._shape_m = m
+
+    def _shape_let_go(self):
+        """A clearing write (`told() is None`) while a shape stands: convert
+        what is left into a pure RELEASE from the current fraction, on the
+        time the shape was told. Nothing snaps and nothing is re-formed."""
+        sh = self._shape
+        if sh is None:
+            return
+        told = sh["told"]
+        rel = float(told.release_s)
+        m = float(self._shape_m)
+        if rel <= 0.0 or m <= 0.0:
+            self._shape = None
+            self._shape_m = 0.0
+            self._shape_apply_deferred_edges()
+            return
+        self._shape = {
+            "t": rel * _inv_smooth(1.0 - m),
+            "told": told._replace(form_s=0.0, hold_s=0.0),
+            "shape": sh["shape"], "released": True}
+        self._shape_apply_deferred_edges()
+
+    def _shape_apply_deferred_edges(self):
+        """The Edge Morph held back while the shape stood (config_updated):
+        start it now, as the ordinary `shape_morph_s` glide, so the release
+        morphs back into the NEW edge count."""
+        want = self._shape_edges_defer
+        self._shape_edges_defer = None
+        if want is None or want == self.edges:
+            return
+        morph_s = float(self._config.get("shape_morph_s",
+                                         DEFAULT_SHAPE_MORPH_S) or 0.0)
+        if morph_s > 0.0:
+            self._morph = {"from": int(self.edges), "t": 0.0}
+        else:
+            self._morph = None
+        self.edges = want
+
+    def _shape_step(self, dt):
+        """One frame of the standing shape's own clock: advance it, read the
+        form fraction off the ONE envelope every effect shares
+        (`word_shape_keys.envelope`), hand a deferred Edge Morph to the
+        release as it starts, and reset when the release is over. The effect
+        never writes a told key back."""
+        sh = self._shape
+        if sh is None:
+            self._shape_m = 0.0
+            return
+        told = sh["told"]
+        sh["t"] += dt
+        if sh["t"] > told.total_s:
+            self._shape = None
+            self._shape_m = 0.0
+            self._shape_apply_deferred_edges()
+            return
+        if not sh["released"] and sh["t"] > told.form_s + told.hold_s:
+            sh["released"] = True
+            self._shape_apply_deferred_edges()
+        self._shape_m = float(word_shape_keys.envelope(
+            sh["t"], told.form_s, told.hold_s, told.release_s))
+
+    def _ws_normalized(self):
+        """Every cell in the effect's NORMALIZED space, cached: the radius
+        and the angle the shape's own `polar` is read at. `nx = dx / ax`,
+        `ny = dy / ay` with ax/ay the panel's half-width/half-height in
+        columns/rows — the `sx`/`sy` convention every Twod effect and the
+        shape library share — placed on STAR'S OWN centre (`cx`, `cy`),
+        which is where the polygon it morphs out of is centred."""
+        if self._ws_norm is None:
+            ax = max((self.r_width - 1) * 0.5, 1.0)
+            ay = max((self.r_height - 1) * 0.5, 1.0)
+            nx = (self.dx / ax).astype(np.float32)
+            ny = (self.dy / ay).astype(np.float32)
+            self._ws_norm = (np.hypot(nx, ny).astype(np.float32),
+                             np.arctan2(ny, nx).astype(np.float32))
+        return self._ws_norm
+
+    def _word_shape_shaped(self, shape, size):
+        """The shape's own SHAPED RADIUS field — `max_radius x u` where
+        `u = |n| / (SIZE x polar(theta_n))`, so `u = 1` is exactly the
+        library's outline. Cached per (shape, size): both are constant for
+        a whole word, so a holding shape costs one divide a frame."""
+        key = (shape.id, round(float(size), 6), int(self.r_width),
+               int(self.r_height))
+        if self._ws_field is None or self._ws_field[0] != key:
+            rn, th = self._ws_normalized()
+            rr = np.asarray(shape.polar(th), dtype=np.float32) * float(size)
+            field = (rn / np.maximum(rr, 1e-4)
+                     * float(self.max_radius)).astype(np.float32)
+            self._ws_field = (key, field)
+        return self._ws_field[1]
+
+    def _word_shape_div(self, psi):
+        """The shape's divisor at SCREEN angle(s) `psi` — the same law the
+        field above carries, for the one place that works in angles rather
+        than cells (a lull piece, a transition program: `_shape_div`).
+        None when no shape stands."""
+        sh = self._shape
+        if sh is None:
+            return None
+        size = self._word_shape_size()
+        ax = max((self.r_width - 1) * 0.5, 1.0)
+        ay = max((self.r_height - 1) * 0.5, 1.0)
+        psi = np.asarray(psi, dtype=np.float32)
+        nx = np.cos(psi) / ax
+        ny = np.sin(psi) / ay
+        k = np.hypot(nx, ny)
+        theta_n = np.arctan2(ny, nx)
+        rr = np.asarray(sh["shape"].polar(theta_n), dtype=np.float32) * size
+        return (rr / np.maximum(k * float(self.max_radius), 1e-6)
+                ).astype(np.float32)
 
     def _shed_region(self):
         w2 = max(self.r_width / 2.0, 1.0)
@@ -1396,6 +1691,23 @@ class Radial2d(Twod):
                 adv = self._spin_lp
             else:
                 self._spin_lp = None
+            # WORD SHAPES: THE SHAPE EASES THE TURN TO A STOP. The whole
+            # governed advance is scaled by `1 - m`, so the reactive spin,
+            # the base floor and anything else that moved the pattern this
+            # frame all fade out together over the form, are EXACTLY zero
+            # through the hold (the shape stands upright and still) and come
+            # back from the music over the release. Applied AFTER the release
+            # filter on purpose: the filter's state keeps integrating the
+            # music's own advance while the shape stands, so the resume is
+            # the song's current speed rather than a lag, and `m = 1` is a
+            # true zero rather than a decaying tail.
+            # A PHASE TAKES THE GOVERNOR BACK (the plan's W1.6 spec 5): a
+            # charge's spin-up, a lull or a drop landing mid-shape owns the
+            # motion unscaled — a shape is never TOLD during a phase (P3 A),
+            # so this is only the arrive-mid-shape case.
+            ms = float(self._shape_m)
+            if ms > 0.0 and self._phase == "none":
+                adv *= 1.0 - ms
             cap = ROTATION_CAP_REV_FRAME
             if adv > cap:
                 adv = cap
@@ -1441,7 +1753,13 @@ class Radial2d(Twod):
                              DEFAULT_STAR_WAVE_PERIOD_FAST_S) or 0.5)
         energy = min(max(float(cfg.get("energy", 0.5) or 0.0), 0.0), 1.0)
         period = max(slow + (fast - slow) * energy, 0.05)
-        self._wave_phase = (self._wave_phase + dt / period) % 1.0
+        # WORD SHAPES: the wave is HELD at its value for the whole shape
+        # (the plan's W1.6 spec 3) — the PHASE is what freezes, and the
+        # value is still recomputed from it, so a config write landing
+        # mid-shape (which re-reads the stored `star`) cannot step the
+        # picture either. It carries on from the same point on the release.
+        if not self._shape_active():
+            self._wave_phase = (self._wave_phase + dt / period) % 1.0
         self.star = lo + (hi - lo) * (0.5 - 0.5 * np.cos(2.0 * np.pi * self._wave_phase))
 
     def _track_rotation(self, dt):
@@ -1469,6 +1787,9 @@ class Radial2d(Twod):
         dt = min(max(dt, 0.0), 0.1)
         self._phase_step(dt)
         self._pre_drop_step(dt)
+        # WORD SHAPES: before the rotation, which the form eases to a stop,
+        # and before the star wave, which it holds
+        self._shape_step(dt)
         self._base_rotation_step(dt)
         self._govern_rotation(dt)
         self._star_wave_step(dt)
@@ -1645,6 +1966,16 @@ class Radial2d(Twod):
                 old = self._shaped_radius(
                     self.radius_base.copy(), angle, theta, self._morph["from"])
                 shaped = old * (1.0 - m) + shaped * m
+            # WORD SHAPES: the third divisor, blended in by the SAME rule —
+            # a shaped radius blends linearly, which is the harmonic blend of
+            # the divisors (`1/div = (1-ms)/div_poly + ms/div_shape`). The
+            # shape's field is a function of the SCREEN position only, so the
+            # polygon keeps turning under it and the shape stands upright.
+            ms = float(self._shape_m)
+            if ms > 0.0 and self._shape is not None:
+                want = self._word_shape_shaped(self._shape["shape"],
+                                               self._word_shape_size())
+                shaped = shaped * (1.0 - ms) + want * ms
             radius = shaped
 
             # Normalize and apply twist
@@ -1689,6 +2020,58 @@ class Radial2d(Twod):
                     + bg[None, None, :] * (1.0 - edge) * bg_alpha
                 ).astype(np.uint8)
                 self.bg_color_use = False
+            elif ms > 0.0:
+                # WORD SHAPES: THE SHAPE'S EDGE (the block comment above
+                # DEFAULT_WORD_SHAPE_SIZE). `u` keeps rising past the outline
+                # and the strip REPEATS (`twist_index % 1.0`), so without
+                # this the panel stays lit all over and the shape is an
+                # iso-contour rather than a shape. A soft CUT sweeps inward
+                # from past the panel's own farthest `u` to exactly `u = 1`,
+                # linearly in the envelope, with a feather of one cell pitch:
+                # at m = 0 the cut sits at that farthest value and nothing is
+                # touched (byte-identical, and this branch is skipped anyway);
+                # at the hold the panel holds one solid shape of flowing
+                # bands and nothing else. Swept rather than DIMMED on purpose
+                # — fading the whole outside by `1 - m` takes every cell out
+                # there across the lit threshold in the same frame, which
+                # measured as a 115% single-frame change in lit cells
+                # (scripts/check_star_word_shape.py); a cut that passes them
+                # a few at a time is what makes the form and the release
+                # smooth. Nothing INSIDE the outline is ever touched, which is
+                # what leaves "is the shape lit" the strip's business.
+                # Skipped while a WARP owns the picture (a transition
+                # hand-off, the implode lull, the drop bloom): the warp's own
+                # feather is already the edge of the pattern there, and a
+                # phase keeps precedence.
+                #
+                # THE CUT IS PACED BY CELLS, NOT BY RADIUS — the RingFormer's
+                # own lesson, re-learnt here (transition_cloud's "INTO STAR":
+                # "Star's cells crowd into a narrow band of shaped radius, so
+                # a front at a steady radial speed lit the whole middle in
+                # ~0.1 s"). Swept linearly in `u`, the form held still for
+                # half its length and then took two thirds of the panel out
+                # in six frames (22% of the lit cells in one frame, measured
+                # with the strip frozen). So the cut sits at the QUANTILE of
+                # this frame's own `u` field that leaves an even share of the
+                # cells uncovered per unit of the envelope: all of them at
+                # m = 0 (`u_cut` = the field's own maximum, a true no-op),
+                # exactly the shape's at m = 1.
+                # ... and the share it leaves falls GEOMETRICALLY, not
+                # linearly: what reads as a jump is the RELATIVE change in
+                # what is lit, so an even share of what is LEFT has to go
+                # each frame. `q = share ** m` is that law in one term — all
+                # the cells at m = 0, the shape's own share at m = 1, and a
+                # constant relative rate in between (a linear share spent
+                # 15% of the lit cells in one frame at the envelope's
+                # steepest; this spends about 8%, the plan's own bar).
+                share = max(float((norm_radius <= 1.0).mean()), 1e-4)
+                q = float(share ** ms)
+                u_cut = float(np.quantile(norm_radius, min(max(q, 0.0), 1.0)))
+                fade = (1.0 - np.clip(
+                    (norm_radius - u_cut) / WORD_SHAPE_EDGE_U, 0.0, 1.0)
+                ).astype(np.float32)[..., None]
+                rgb_array = (rgb_array.astype(np.float32) * fade
+                             ).astype(np.uint8)
             rgb_array = self._star_phase_frame(
                 rgb_array, norm_radius, angle, dt, pixels_in)
             image = Image.fromarray(rgb_array, mode="RGB")
@@ -1902,7 +2285,7 @@ class Radial2d(Twod):
         ang = np.arctan2(y - float(self.cy), x - float(self.cx))
         phi = (ang - theta).astype(np.float32)
         r = np.hypot(x - float(self.cx), y - float(self.cy))
-        u = r / (float(self.max_radius) * self._shape_div(phi))
+        u = r / (float(self.max_radius) * self._shape_div(phi, theta))
         return u.astype(np.float32), phi
 
     def _program_band_u(self, band_pos, phi):

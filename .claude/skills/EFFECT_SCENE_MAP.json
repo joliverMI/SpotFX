@@ -46,7 +46,9 @@
         "tests/test_star_phases.py",
         "tests/test_star_programs.py",
         "tests/test_star_into_programs.py",
-        "tests/test_star_strip_lull.py"
+        "tests/test_star_strip_lull.py",
+        "scripts/check_star_word_shape.py",
+        "tests/test_star_word_shape.py"
       ]
     },
     "fireworks-effect": {

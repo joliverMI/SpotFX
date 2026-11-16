@@ -561,8 +561,9 @@ def test_a_shape_word_adds_exactly_one_output_and_changes_nothing_else():
     colour hook must never be called (a word reaching a shape is a shape,
     not a colour), and the ONLY new thing the engine does is ask the shape
     hook. With no Words band on any scene that ask returns `no_class` and
-    no fixture is written at all (WORD_SHAPE_EFFECTS is empty until wave 1
-    — tests/test_word_shape_contract.py holds both halves)."""
+    no fixture is written at all, whatever WORD_SHAPE_EFFECTS holds
+    (tests/test_word_shape_contract.py holds both halves, and its own
+    `WIRED` tuple is where the wired effects are pinned)."""
     # Clear of the drop at 12_000's own imprint window, which is the one
     # event that sends a shape word back to the colour branch (round-2 fix
     # A — test_a_shaped_word_near_a_drop_still_tints_the_drop covers that).
