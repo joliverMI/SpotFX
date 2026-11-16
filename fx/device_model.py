@@ -516,6 +516,12 @@ WORD_SHAPE_EFFECTS: frozenset = frozenset({
     # the shape's own distance field, so the eye's edge and its pupil
     # become the shape at once (his Q8 C; fx/effects/sauron.py).
     "sauron",
+    # W1.2 — FIREWORKS: the shaped payoff burst, one big centred firework
+    # per sung word whose sparks arrive ON the word (~70% of them on the
+    # outline) and hang there (fx/effects/fireworks.py's WORD SHAPES
+    # block). The STRIP (fireworks1d) gets nothing — a shape has nowhere
+    # to be drawn on one line.
+    "fireworks",
 })
 
 # THE PER-EFFECT MINIMUM FORM (plan section 2.4): an effect whose shape

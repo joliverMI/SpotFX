@@ -227,3 +227,178 @@ referenced in docs/agents/fx-effects.md's own prose), `fx/VENDOR.md` #15, #17.
   into Fireworks fly their last stretch by it, so the hand-off continues one
   motion.
 `fx/effects/transition_cloud.py`'s docstring is the binding statement for phase 4's programs; `tests/test_transition_programs_phase4.py` measures them on the real pipeline.
+
+## WORD SHAPES — the shaped payoff burst (2026-11-16, Word Shapes plan row
+   W1.2). Matrix only; the strip gets nothing
+
+His words for the row: *"Fireworks: have a flare style firework (so the ones
+that are bigger) explode into the given shape and hang longer than the
+others. It should form a slightly more solid outline than the filling, but
+it also needs to still appear random."* Q9 A: one big centred shaped burst
+per word, ~70% of the sparks on the outline, hanging about twice as long,
+bigger at higher Energy.
+
+**Read `.claude/skills/word-shapes/SKILL.md` first** — the shape library,
+the six told keys, the envelope and the engine contract above all of this.
+`fireworks` is in `fx.device_model.WORD_SHAPE_EFFECTS`; **`fireworks1d` is
+NOT and must not be** (there is nowhere to draw a shape on one line), and
+the strip's schema does not carry the keys.
+
+**ONE BURST PER TOLD WORD, from the centre.** The SEQ edge (never the id —
+two hearts back to back both fire) arms `_ws_pending` in `config_updated`,
+with the same **creation-baseline rule as `burst_rockets`**: a fresh
+instance built from a config that already carries a shape and a SEQ does
+NOT fire. `draw` consumes it in `_word_shape_burst`, ungated exactly like
+the flare burst (a sung word's shape lands whatever the show is doing) and
+`ignore_cap`/`p_nocap`, so the scene's own rockets, beat bursts and drop
+tail never go quiet underneath and `_capacity()` is unchanged across the
+edge (the additive proof). **The effect writes no key back** — it runs the
+whole form, hold and release on its own clock (`_word_shape_clock`) and
+resets itself.
+
+**THE ONE THING THAT IS NOT OBVIOUS: EVERY SPARK'S LAUNCH VELOCITY IS
+SOLVED FROM THIS EFFECT'S OWN DRAG.** `draw` integrates `x += v*dt` and then
+`v *= 0.5**(dt/hl)`, `hl = 0.6 - 0.5*drag`, so the distance one unit of
+launch speed covers over `m` frames is the geometric sum
+`dt*(1-decel**m)/(1-decel)`; dividing the target by it lands the spark on
+the target the frame the form ends — the word. Measured arrival error on his
+crystal: **0.000 cell pitches**, every spark, both forms, all three shapes.
+Three consequences worth knowing before touching any of it:
+
+- **the solve is for the frame rate the effect is integrating at** (the
+  frame's own dt, at the spawn). A render rate that changes mid-form moves
+  the arrival a little; a render rate that is simply different (30 vs 60
+  fps) does not, because the solve is re-done per burst.
+- **the hang is a separate damper.** At the end of the form a spark still
+  carries `decel**m` of its launch speed (9% at his `drag` 0.69), which
+  would drift it on out through its own outline. From the frame it arrives,
+  `_ws_hang` damps the FLAGGED sparks only, half-life
+  `WORD_SHAPE_HANG_HL_S` (0.05 s) — the ordinary show's physics is
+  untouched. Residual drift after that is about 0.1 of a cell.
+- **a told form of 0** (impossible by contract: the engine floors it)
+  clamps to `WORD_SHAPE_MIN_FORM_S` and `max(2, ...)` frames rather than
+  dividing by zero or teleporting.
+
+**THE TARGETS, AND WHY NOTHING IS ON A LATTICE** ("it also needs to still
+appear random"): `word_shape_outline_share` (0.70) of the sparks take a
+uniformly random point along the outline BY ARC LENGTH (`shape.at(s)`) plus
+up to half a cell of radial jitter; the rest take another random outline
+point pulled in to a random depth, drawn **uniformly by area** over
+`WORD_SHAPE_FILL_DEPTH` (0.15..0.85) — depth-uniform piles the filling into
+the middle where every ray converges, which reads as a blob and sums
+different gradient colours into white. **`at(s)` is the only library view
+this row uses**, so no shape it draws ever builds an `sdf_fast` grid
+(`prime()` is ~200 ms and must never happen on a render frame) — asserted
+by test.
+
+**THE HANG AND THE FADE.** `p_wfade` (a new SoA array) is both the flag and
+the LENGTH of that spark's own fade window, so a second word's burst can
+never retime the first's fade-out. A spark is full bright from its own
+fade-in until its window opens, then goes out on its own clock over
+`WORD_SHAPE_FADE_FRAC` (0.45..1.0) of the told release — **spark by spark,
+never in one step** — twinkling throughout (`WORD_SHAPE_TWINKLE` 0.15 at
+6.5 Hz, the phase taken off the spark's own POSITION so neighbours are out
+of step and no second array is needed).
+
+**"HANG LONGER THAN THE OTHERS", MEASURED, AND WHY IT IS NOT LITERALLY
+TWICE IN HIS ROOM.** A shaped spark's whole life is the told form + hold +
+its own share of the release; an ordinary burst's is `burst_life` x
+`uniform(0.7, 1.15)`, so its mean is 0.925 x `burst_life`. At the effect's
+DEFAULT `burst_life` (1.2 s) that is **1.93x** — which is where the plan's
+"about twice as long" comes from. **His own Matrix entry carries 1.9 s**: he
+tuned ordinary bursts to be long-lived, so against the show he actually runs
+it is **1.22x** (a shaped spark living 2.14 s on average at Energy 0.8
+against an ordinary burst's 1.76 s; the whole shape stands 2.35 s loud,
+3.1 s quiet). Both are
+pinned by `test_the_shaped_sparks_hang_longer_than_the_others` rather than
+rounded to the plan's phrase, because the shape's duration is the TOLD
+envelope's — a room setting — and not this effect's to stretch. If he wants
+a longer hang, the lever is the room's `word_shape_hold_max_s` /
+`word_shape_release_ratio`, not anything here.
+
+**THREE CHOICES THE MEASUREMENTS FORCED** (all in the module constants, all
+re-measurable with `scripts/check_fireworks_word_shape.py`):
+
+- **the colours are a SLICE of the gradient** (`WORD_SHAPE_GRAD_SPAN` 0.15),
+  read by the spark's own angle from a per-burst random offset — not the
+  whole gradient. At his `blob_size` 2.0 the outline sparks overlap about
+  three deep, and two overlapping sparks from opposite ends of a rainbow
+  gradient sum to WHITE: the whole-gradient version put 1.9-3.3% of the lit
+  cells over the white threshold. A slice keeps neighbours in one hue, so an
+  overlap reads as that hue, brighter. 0.15 is the widest slice that leaves
+  NO white cell at Energy 1.0 for any of the three shapes.
+- **no bright knot at the origin**: the origins are scattered within one
+  cell pitch (uniformly by area) and the sparks have their own fade-in
+  (`WORD_SHAPE_FADE_IN_S` 0.18, from 0 — not the ordinary `FADE_IN_S`'s 0.3
+  floor), so the burst GROWS out of the centre instead of saturating one
+  cell to white.
+- **the inside sparks are dimmer** (`WORD_SHAPE_FILL_BRIGHT` 0.50 against
+  the outline's 1.0) so the filling reads as filling. This is the number the
+  fill-ratio bar below is most sensitive to.
+
+**THE CLARITY BAR IS MEASURED ON THE SHAPE ALONE.** No ordinary show
+underneath — which is a real state of his scene, not a convenience: his
+Matrix entry runs `spawn_rate: 0`, so a quiet passage launches nothing at
+all. A beat burst that happens to land inside the outline is the room, not
+the shape failing to be one, and the busy-room numbers are reported
+separately against an UNTOLD TWIN (the same show, the same frames, no
+shape). Measured on his real 976-cell mask at SIZE 0.62, at the word
+(bar: >= 70% of the outline cells lit, fill ratio <= 0.70):
+
+| shape | Energy 0.2 | Energy 0.8 | the plan's sim |
+|---|---|---|---|
+| heart (168 outline / 248 fill cells) | 87.5% / 0.39 | 95.2% / 0.60 | 72% / 0.46, 87% / 0.47 |
+| star (176 / 116) | 92.0% / 0.50 | 98.3% / 0.64 | 76% / 0.65, 86% / 0.65 |
+| diamond (119 / 136) | 95.8% / 0.43 | 100.0% / 0.63 | 81% / 0.50, 90% / 0.53 |
+
+At mid-hold coverage falls a few points and the fill ratio drops to
+0.22-0.40 (the flight's own trails have decayed): the shape reads MORE like
+an outline as it hangs, not less. 68 sparks at Energy 0.2, 92 at 0.8, 60 at
+the floor and 100 at 1.0. Cost: the shape holding adds about 0.1 ms p50 a
+frame on the 976 cells (bar 1.0), measured against the same show without
+it. **The denominators are
+`scripts/check_word_shapes.py`'s own cell sets, not re-derived here** — a
+bar whose denominator drifts silently is not a bar.
+
+**THE ONE NUMBER THIS ROW DID NOT CLEAR, and it is in the proofs rather
+than smoothed over.** The plan's fifth bar is "no whiter than the effect's
+own busy frames today". **Alone, the shape lights NO white cell** — not one,
+at any Energy, for any of the three shapes. But over a LIVE show the room's
+own beat bursts cross the standing sparks, and where they do the two
+colours ADD: the worst frame carries ~10 more washed-out cells than the
+same show without a shape (1.7-2.0% of the lit cells, against the room
+alone's ~0.6% and the effect's own Firework Burst flare's ~0.5% over the
+same frames; 1.49% over 600 frames of his ordinary busy show). It is the
+same mechanism the effect already shows wherever two of its own fireworks
+overlap, and **no brightness setting changes it** (measured at 1.0, 0.8 and
+0.65: 1.63-2.01% at every one), so there is nothing to tune away. **The fix
+available if he wants it** is to composite the shaped sparks with a MAX
+rather than a sum — a second bincount pass guarded by `_ws_live` — which
+would change this effect's own additive convention and is a decision above
+a build row. Until then the check script prints it under "ABOVE THE PLAN'S
+LETTER — reported, not moved" and
+`test_the_live_show_white_is_recorded_above_the_plans_letter` pins it, so it
+cannot drift unnoticed in either direction.
+
+**WHAT WRONG LOOKS LIKE, and the precedence.** P3 A means a shape is never
+TOLD while a charge, lull or drop is armed, so the shaped burst and the
+phase choreography do not normally meet. If one arrives anyway: a **lull**
+pauses ordinary launching but not the shaped sparks (they are on their own
+clocks, like any particle); a **drop** payoff and the drop tail burst over
+them; and a **pre-drop breath** clears every particle including them
+(`_pre_drop_step`'s true black — the shape vanishes, which is the breath
+doing exactly its job). A second word mid-hold or mid-release simply bursts
+over the first, which keeps fading: there is nothing to blend, which is this
+effect's answer to the plan's "no snap". A clearing write
+(`told() is None`) mid-shape takes nothing away for the same reason.
+
+**Proofs:** `tests/test_fireworks_word_shape.py` (the pinned-module
+byte-identity over 320 busy and 320 quiet frames, the real `ResponseEngine`
+through to the real effect, arrival, the split, the counts, the hang, the
+clarity bar, no white, the additive proof, the SEQ edges, the creation
+baseline), `scripts/check_fireworks_word_shape.py` (the evidence, with
+`--ascii`). Help topic `fireworks-word-shape`; the four tunables are
+registered in `config/effect_params.json`, so Sonic reaches them through
+`set_scene_entry_param` for free. **The shape is live only after `ledfx` is
+restarted (W3), and no scene is seeded with one ahead of his own tuning
+session** (`docs/ADDING_EFFECTS.md`).

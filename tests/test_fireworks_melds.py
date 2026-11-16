@@ -369,12 +369,18 @@ def test_a_snapshot_without_keepers_adopts_exactly_as_before(tmp_path):
             f.effect.n = 0
             f.effect._adopt_handoff(snap=snap, allow_hold=False)
             e = f.effect
-            out.append({k: getattr(e, k)[:e.n].copy() for k in fw_mod._SOA_NAMES})
+            # the arrays BOTH modules have: today's own SoA may have grown
+            # since the pinned one (the word-shape row added p_wfade), and
+            # an array the pinned module never had cannot differ
+            out.append({k: getattr(e, k)[:e.n].copy()
+                        for k in fw_mod._SOA_NAMES if hasattr(e, k)})
             await _close(f)
         return out
     now, then = _run(main())
     assert len(now["p_x"]) > 0
-    for k in fw_mod._SOA_NAMES:
+    shared = [k for k in fw_mod._SOA_NAMES if k in now and k in then]
+    assert "p_x" in shared and "p_life" in shared
+    for k in shared:
         assert np.array_equal(now[k], then[k]), k
 
 

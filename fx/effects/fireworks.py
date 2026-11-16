@@ -7,6 +7,8 @@ from PIL import Image
 import fx.effects.particle_handoff as particle_handoff
 import fx.effects.phase_grammar as phase_grammar
 import fx.effects.pre_drop as pre_drop
+import fx.effects.word_shape_keys as word_shape_keys
+import fx.effects.word_shapes as word_shapes
 from fx.color import validate_gradient
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
@@ -99,11 +101,84 @@ KEEPER_HOLD_S = 0.6    # held keepers with no drop arm by now burst on their
                        # own (an ordinary switch in a lull, or a lost arm) —
                        # never left hanging as dots
 
+# WORD SHAPES — THE SHAPED PAYOFF BURST (Word Shapes plan row W1.2,
+# approved by the Admiral 2026-11-15; his words for the row: "have a flare
+# style firework (so the ones that are bigger) explode into the given shape
+# and hang longer than the others. It should form a slightly more solid
+# outline than the filling, but it also needs to still appear random."
+# Q9 A: one big centred shaped burst per word, ~70% of the sparks on the
+# outline, hanging about twice as long, bigger at higher Energy).
+#
+# ONE burst from the centre per told word (the SEQ edge of
+# fx/effects/word_shape_keys.py's six keys, exactly like burst_rockets),
+# `word_shape_sparks_quiet`..`_loud` sparks by the word's Energy, and EVERY
+# spark's launch velocity SOLVED from this effect's own drag so it is
+# standing on its own target the frame the form ends — which is the word
+# (`_word_shape_burst`). They then HANG there (velocity damped to nothing,
+# a small per-spark twinkle) and fade out spark by spark over the release
+# on their own `p_life`, about twice an ordinary burst's. Uncapped
+# (p_nocap) like the Firework Burst flare, so the scene's own rockets, beat
+# bursts and drop tail never go quiet underneath. Not told, nothing here
+# runs and the effect renders what it renders today, frame for frame.
+WORD_SHAPE_FADE_POWER = 1.3      # a shaped spark's own fade curve
+WORD_SHAPE_OUTLINE_BRIGHT = 1.0  # an outline spark, full bright
+# THE COLOURS COME OFF THE SET'S GRADIENT BY POSITION — the angle the spark
+# lands at, read across this much of the gradient from a per-burst random
+# offset. NOT the whole gradient: at his blob_size the sparks on the
+# outline overlap about three deep, and two overlapping sparks from
+# OPPOSITE ends of a rainbow gradient sum to white (measured 2026-11-16 —
+# the whole-gradient version put 1.9% of the lit cells over the white
+# threshold against the effect's own 1.4% busy peak). A slice keeps
+# neighbours in the same hue, so an overlap reads as that hue, brighter;
+# the random offset is why two words are not the same colour, which is the
+# effect's own convention (each ordinary firework picks one gradient colour
+# at random). 0.15 is the widest slice that puts NO white cell on the panel
+# at Energy 1.0 for any of the three shapes (0.20 leaves the diamond at
+# 2.4%, 0.25 all three near 3%) — measured by
+# scripts/check_fireworks_word_shape.py.
+WORD_SHAPE_GRAD_SPAN = 0.15
+WORD_SHAPE_FILL_BRIGHT = 0.50    # an inside spark against an outline one:
+# his "a slightly more solid outline than the filling", and what keeps the
+# measured fill ratio under the plan's bar (the clarity bar in the skill)
+WORD_SHAPE_TWINKLE = 0.15        # glitter depth while the shape hangs
+WORD_SHAPE_TWINKLE_HZ = 6.5
+# the twinkle's phase per spark: its OWN POSITION through these two
+# multipliers, so two sparks a cell apart glitter out of step and no second
+# per-particle array is needed for it
+WORD_SHAPE_TWINKLE_PX = 53.0
+WORD_SHAPE_TWINKLE_PY = 97.0
+WORD_SHAPE_HANG_HL_S = 0.05      # velocity half-life once a spark arrives
+WORD_SHAPE_FADE_FRAC = (0.45, 1.0)  # each spark's fade window, as a
+# fraction of the told release: the shape goes out spark by spark, never in
+# one step, and the last of them is gone by the release's end
+WORD_SHAPE_MIN_FADE_S = 0.12     # a told release of 0 still fades out
+WORD_SHAPE_MIN_FORM_S = 0.1      # the flight is never shorter than this
+# (a form shorter than the effect's own minimum is impossible by contract —
+# the engine floors it — so this is the graceful clamp, never a divisor)
+WORD_SHAPE_JITTER_PITCH = 0.5    # radial jitter on an outline target, in
+# real-cell pitches (+/- this much), so the outline is a stroke rather than
+# a drawn line: "it also needs to still appear random"
+WORD_SHAPE_FILL_DEPTH = (0.15, 0.85)  # an inside target's depth along its
+# own ray, drawn uniformly BY AREA over that range (sqrt) rather than
+# uniformly in depth: depth-uniform piles the filling into the middle,
+# where every ray converges — which both reads as a blob and sums a pile of
+# different gradient colours into white (measured, 2026-11-16)
+WORD_SHAPE_LAUNCH_PITCH = 1.0    # the burst's origins are scattered within
+# this many real-cell pitches of the centre, uniformly by area: a firework
+# leaves from one place, but 100 sparks stacked on ONE cell saturate it to
+# white before they separate
+WORD_SHAPE_FADE_IN_S = 0.18      # a shaped spark's own fade-in (the
+# ordinary FADE_IN_S starts at 0.3 of full, which is what white at the
+# origin is made of); by the time they are full bright they have flown over
+# half of the way out, so the burst GROWS out of the centre instead of
+# flashing in it
+
 # Every per-particle SoA array, in one place so compaction and the particle
 # handoff native snapshot can never drift out of sync with each other.
 _SOA_NAMES = (
     "p_x", "p_y", "p_vx", "p_vy", "p_age", "p_life",
     "p_grad", "p_bright", "p_shown", "p_rev", "p_rocket", "p_nocap",
+    "p_wfade",
 )
 
 
@@ -132,6 +207,10 @@ class Fireworks2d(Twod, GradientEffect):
         "burst_rockets",
         *pre_drop.KEYS,
         *phase_grammar.BREATH_KEYS,
+        # WORD SHAPES: the six told keys ride ONLY SpotFX's own write
+        # (word_shape_keys' rule 1) — never an editor surface, never the
+        # param registry. The four tunables above them ARE registered.
+        *word_shape_keys.KEYS,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -256,11 +335,33 @@ class Fireworks2d(Twod, GradientEffect):
                 description="Payoff bursts to explode right now (driven by SpotFX flares; self-resets)",
                 default=0,
             ): vol.All(vol.Coerce(int), vol.Range(min=0, max=12)),
+            vol.Optional(
+                "word_shape_size",
+                description="Word shape: its half-height as a fraction of the panel's",
+                default=0.62,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=1.0)),
+            vol.Optional(
+                "word_shape_outline_share",
+                description="Word shape: the share of the burst's sparks that land on the outline",
+                default=0.70,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=0.9)),
+            vol.Optional(
+                "word_shape_sparks_quiet",
+                description="Word shape: sparks in the burst at Energy 0",
+                default=60,
+            ): vol.All(vol.Coerce(int), vol.Range(min=10, max=400)),
+            vol.Optional(
+                "word_shape_sparks_loud",
+                description="Word shape: sparks in the burst at Energy 1",
+                default=100,
+            ): vol.All(vol.Coerce(int), vol.Range(min=10, max=400)),
             # THE PRE-DROP: the four told keys and the breath-hold before it
             # (Fireworks is no breath-hold effect, so it is told a breath
             # only on a lull that plays a pre-drop) — fx/effects/pre_drop.py
             **pre_drop.schema_fields(),
             **phase_grammar.breath_schema_fields(),
+            # WORD SHAPES: the six keys SpotFX's Word Shape kind writes
+            **word_shape_keys.schema_fields(),
         }
     )
 
@@ -286,6 +387,11 @@ class Fireworks2d(Twod, GradientEffect):
         # tail, lull rockets): never occupies max_blobs, so the ordinary
         # show keeps launching underneath — see _capacity
         self.p_nocap = np.zeros(CAP, dtype=np.float32)
+        # WORD SHAPES: > 0 = a shaped spark, and the LENGTH of its own fade
+        # window in seconds (the last stretch of its p_life). One array
+        # carries both the flag and the fade, and because it is per spark a
+        # second word's burst can never retime the first's fade-out.
+        self.p_wfade = np.zeros(CAP, dtype=np.float32)
         self._soa = tuple(getattr(self, name) for name in _SOA_NAMES)
         self.n = 0
         self.spawn_acc = 0.0
@@ -333,6 +439,10 @@ class Fireworks2d(Twod, GradientEffect):
         self.brightness_audio = self._config["brightness_audio"]
         self.max_blobs = int(self._config["max_blobs"])
         self.trail_decay = self._config["trail_decay"]
+        self.word_shape_size = self._config["word_shape_size"]
+        self.ws_outline_share = self._config["word_shape_outline_share"]
+        self.ws_sparks_quiet = int(self._config["word_shape_sparks_quiet"])
+        self.ws_sparks_loud = int(self._config["word_shape_sparks_loud"])
 
         self.power_func = self.POWER_FUNCS_MAPPING[
             self._config["frequency_range"]
@@ -367,6 +477,28 @@ class Fireworks2d(Twod, GradientEffect):
         else:
             # non-creation pass: a changed phase key arms the edge
             self._phase_pending = new_phase if new_phase != self._phase else None
+
+        # WORD SHAPES: edge-detect the SEQ, never the shape id — two words
+        # of the same shape back to back must both fire (word_shape_keys).
+        # The same creation-baseline rule as burst_rockets below: a fresh
+        # instance built from a persisted config carrying a stale SEQ must
+        # NOT fire. Nothing is written back; the effect runs the whole form,
+        # hold and release on its own clock and resets itself after.
+        ws_told = word_shape_keys.told(self._config)
+        ws_seq = int(self._config.get(word_shape_keys.SEQ_KEY, 0) or 0)
+        if not hasattr(self, "_ws_seq"):
+            self._ws_seq = ws_seq
+            self._ws_pending = None   # a told shape waiting for its frame
+            self._ws_t = None         # the shape's own clock (None = idle)
+            self._ws_form = 0.0       # the flight time its sparks were given
+            self._ws_total = 0.0      # form + hold + release, as launched
+            self._ws_frac = 0.0       # how far formed, 0..1
+            self._ws_hang = False     # arrived: the sparks are damped
+            self._ws_live = False     # any shaped spark still flying
+        else:
+            if ws_told is not None and ws_seq != self._ws_seq:
+                self._ws_pending = ws_told
+            self._ws_seq = ws_seq
 
         # flare-driven payoff burst: edge-detect burst_rockets exactly like
         # the phase key (SpotFX writes a count, draw consumes it and
@@ -407,6 +539,15 @@ class Fireworks2d(Twod, GradientEffect):
                 gy = (py - self.cy) / max(self.sy, 1e-6)
                 corners.append(np.hypot(gx, gy))
         self.r_max = float(max(corners)) + 0.15
+        # WORD SHAPES: one real-cell pitch in this field's own normalized
+        # units, averaged over the two axes — a crystal column is half a
+        # pitch and a row sqrt(3)/2 of one (.claude/skills/crystal-hex-grid),
+        # so a jitter measured in cells needs both. The scale an outline
+        # target's radial jitter is drawn in.
+        self._ws_pitch = 0.5 * (
+            2.0 / max(self.sx, 1e-6)
+            + (2.0 / np.sqrt(3.0)) / max(self.sy, 1e-6)
+        )
         if self.trail is None or self.trail.shape[:2] != (
             self.r_height,
             self.r_width,
@@ -512,6 +653,7 @@ class Fireworks2d(Twod, GradientEffect):
         self.p_rev[s] = 1.0 if self.reverse else 0.0
         self.p_rocket[s] = 0.0
         self.p_nocap[s] = 1.0 if ignore_cap else 0.0
+        self.p_wfade[s] = 0.0
         self.n += k
 
     def _import_flyers(self, xs, ys, grads, brights, ncx, ncy, speed_mult=1.0):
@@ -547,6 +689,7 @@ class Fireworks2d(Twod, GradientEffect):
         self.p_rev[s] = 0.0  # handoff flyers always run forward
         self.p_rocket[s] = 0.0
         self.p_nocap[s] = 0.0
+        self.p_wfade[s] = 0.0
         self.n += k
 
     # ── handoff ─────────────────────────────────────────────────────────
@@ -755,6 +898,7 @@ class Fireworks2d(Twod, GradientEffect):
         self.p_rev[s] = 0.0
         self.p_rocket[s] = 0.0
         self.p_nocap[s] = 1.0   # the hand-off must land whole
+        self.p_wfade[s] = 0.0
         self.n += k
 
     def _program_field_velocity(self, px, py, vx, vy, dt):
@@ -788,6 +932,7 @@ class Fireworks2d(Twod, GradientEffect):
         self.p_rev[s] = 0.0
         self.p_rocket[s] = 1.0
         self.p_nocap[s] = 1.0
+        self.p_wfade[s] = 0.0
         self.n += k
         self._rocket_path = None
         self._keeper_hold_t = 0.0
@@ -872,6 +1017,7 @@ class Fireworks2d(Twod, GradientEffect):
         self.p_rev[s] = 0.0
         self.p_rocket[s] = 1.0
         self.p_nocap[s] = 1.0
+        self.p_wfade[s] = 0.0
         self.n += k
         self._rocket_path = {"sx": sx_, "sy": sy_, "ex": ex_, "ey": ey_}
 
@@ -966,6 +1112,150 @@ class Fireworks2d(Twod, GradientEffect):
                 float(rng.uniform(-0.3, 0.3)),
                 float(rng.random()),
             )
+
+    # ── word shapes ─────────────────────────────────────────────────────
+    # THE SHAPED PAYOFF BURST (the module constants are the binding
+    # statement; .claude/skills/word-shapes/SKILL.md is the contract above
+    # it). One burst per told word, from the centre, arriving ON the word.
+
+    def _word_shape_clock(self, dt):
+        """Advance the shape's own clock. Sets how far formed it is, whether
+        it has ARRIVED (from that frame on its sparks are damped where they
+        stand — the hang), and resets itself once the whole form, hold and
+        release is over, by which point every one of its sparks has outlived
+        its own `p_life`. The SPAWN is not here but in `draw`, where the
+        frame's own dt is what the launch velocities are solved against."""
+        if self._ws_t is None:
+            return
+        self._ws_t += dt
+        self._ws_frac = (1.0 if self._ws_form <= 0.0
+                         else min(1.0, self._ws_t / self._ws_form))
+        self._ws_hang = self._ws_t >= self._ws_form
+        if self._ws_t >= self._ws_total:
+            self._ws_t = None
+            self._ws_frac = 0.0
+            self._ws_hang = False
+
+    def _word_shape_burst(self, told, dt):
+        """ONE shaped firework: `k` sparks from the centre, `outline_share`
+        of them aimed at the shape's own outline (uniformly by ARC LENGTH
+        plus up to half a cell of radial jitter) and the rest at a random
+        depth inside it — nothing on a lattice, because his ask ends "it
+        also needs to still appear random".
+
+        EVERY SPARK'S LAUNCH VELOCITY IS SOLVED FROM THIS EFFECT'S OWN DRAG.
+        `draw` integrates `x += v*dt` and then `v *= 0.5**(dt/hl)` once per
+        frame, so the distance one unit of launch speed covers over `m`
+        frames is a geometric sum — computed once per burst for the frame
+        rate this effect is actually integrating at — and dividing the
+        target by it lands the spark on the target the frame the form ends.
+        That is what makes "the shape arrives ON the word" a measured claim
+        (tests/test_fireworks_word_shape.py asserts every spark inside one
+        cell of its target) rather than a hope.
+
+        The sparks are uncapped (`p_nocap`, the Firework Burst flare's own
+        rule) and purely additive: no live particle, rocket or phase state
+        is touched, so the scene's ordinary rockets, beat bursts and drop
+        tail carry on underneath."""
+        shape = word_shapes.get(told.shape)
+        rng = self._rng
+        level = float(np.clip(told.level, 0.0, 1.0))
+        quiet, loud = float(self.ws_sparks_quiet), float(self.ws_sparks_loud)
+        k = int(round(quiet + (loud - quiet) * level))
+        k = int(min(max(k, 0), CAP - self.n))
+        if k <= 0:
+            return
+        share = float(np.clip(self.ws_outline_share, 0.0, 1.0))
+        n_out = int(min(max(int(round(k * share)), 0), k))
+        n_in = k - n_out
+        size = float(self.word_shape_size)
+
+        # the targets, in this field's own normalized space (SIZE is the
+        # shape's half-height as a FRACTION of the panel's — word_shapes)
+        tx = np.zeros(k, dtype=np.float64)
+        ty = np.zeros(k, dtype=np.float64)
+        if n_out:
+            ox, oy = shape.at(rng.random(n_out))
+            safe = np.maximum(np.hypot(ox, oy), 1e-9)
+            jit = rng.uniform(-1.0, 1.0, n_out) * (
+                WORD_SHAPE_JITTER_PITCH * self._ws_pitch)
+            tx[:n_out] = size * ox + jit * (ox / safe)
+            ty[:n_out] = size * oy + jit * (oy / safe)
+        if n_in:
+            # a random point on the outline pulled in to a random depth:
+            # every shipped shape is star-shaped about its centre, so that
+            # point is inside it, and no sdf grid is built on a render frame
+            ix, iy = shape.at(rng.random(n_in))
+            lo, hi = WORD_SHAPE_FILL_DEPTH
+            depth = np.sqrt(rng.uniform(lo * lo, hi * hi, n_in))
+            tx[n_out:] = size * ix * depth
+            ty[n_out:] = size * iy * depth
+
+        step = float(min(max(dt, 1e-3), DT_MAX))
+        form = max(float(told.form_s), WORD_SHAPE_MIN_FORM_S)
+        frames = max(2, int(round(form / step)))
+        hl = max(0.6 - 0.5 * self.drag, 0.05)
+        decel = 0.5 ** (step / hl)
+        span = step * (1.0 - decel ** frames) / max(1.0 - decel, 1e-9)
+        form_eff = frames * step
+        release = max(float(told.release_s), WORD_SHAPE_MIN_FADE_S)
+        fade = release * rng.uniform(WORD_SHAPE_FADE_FRAC[0],
+                                     WORD_SHAPE_FADE_FRAC[1], k)
+
+        # the origins: one place, with a cell or so of scatter (see the
+        # constant) so the first frames are a small bright knot rather than
+        # one saturated cell
+        o_ang = rng.uniform(0.0, 2.0 * np.pi, k)
+        o_r = (np.sqrt(rng.random(k)) * WORD_SHAPE_LAUNCH_PITCH
+               * self._ws_pitch)
+        ox0 = o_r * np.cos(o_ang)
+        oy0 = o_r * np.sin(o_ang)
+
+        s = slice(self.n, self.n + k)
+        self.p_x[s] = ox0
+        self.p_y[s] = oy0
+        self.p_vx[s] = (tx - ox0) / span
+        self.p_vy[s] = (ty - oy0) / span
+        self.p_age[s] = 0.0
+        self.p_life[s] = form_eff + float(told.hold_s) + fade
+        # colour out of the set's own gradient BY POSITION: the angle the
+        # spark lands at, read across a SLICE of the gradient from a
+        # per-burst random offset (WORD_SHAPE_GRAD_SPAN says why a slice)
+        self.p_grad[s] = (
+            rng.random()
+            + WORD_SHAPE_GRAD_SPAN * (np.arctan2(ty, tx) / (2.0 * np.pi))
+        ) % 1.0
+        bright = np.empty(k, dtype=np.float64)
+        bright[:n_out] = WORD_SHAPE_OUTLINE_BRIGHT
+        bright[n_out:] = WORD_SHAPE_FILL_BRIGHT
+        self.p_bright[s] = bright
+        self.p_shown[s] = 0.0
+        self.p_rev[s] = 0.0
+        self.p_rocket[s] = 0.0
+        self.p_nocap[s] = 1.0
+        self.p_wfade[s] = fade
+        self.n += k
+
+        self._ws_t = 0.0
+        self._ws_form = form_eff
+        self._ws_total = form_eff + float(told.hold_s) + release
+        self._ws_frac = 0.0
+        self._ws_hang = False
+        self._ws_live = True
+
+    def word_shape_state(self):
+        """What the shape is doing this frame — read by the rig, the tests
+        and scripts/check_fireworks_word_shape.py, never by the render."""
+        n = self.n
+        return {
+            "form_fraction": float(self._ws_frac),
+            "t": None if self._ws_t is None else float(self._ws_t),
+            "hanging": bool(self._ws_hang),
+            "sparks": int(np.count_nonzero(self.p_wfade[:n] > 0.0)),
+            "outline_sparks": int(np.count_nonzero(
+                (self.p_wfade[:n] > 0.0)
+                & (self.p_bright[:n] >= WORD_SHAPE_OUTLINE_BRIGHT - 1e-6))),
+        }
 
     def _phase_step(self, dt):
         """Advance the charge/lull/drop state machine. Runs every draw;
@@ -1111,6 +1401,7 @@ class Fireworks2d(Twod, GradientEffect):
             self.spawn_acc = 0.0
 
         self._phase_step(dt)
+        self._word_shape_clock(dt)
         pd_gain = self._pre_drop_step()
 
         virtual = self._virtual
@@ -1238,6 +1529,18 @@ class Fireworks2d(Twod, GradientEffect):
                 decel = np.float32(0.5 ** (dt / max(hl, 0.05)))
                 self.p_vx[:n] *= decel
                 self.p_vy[:n] *= decel
+                if self._ws_hang:
+                    # WORD SHAPES: its sparks have arrived — damp them to a
+                    # stop where they stand so the shape HANGS instead of
+                    # drifting on through its own outline. Only the flagged
+                    # sparks are touched; the ordinary show's physics is
+                    # exactly what it was.
+                    held = self.p_wfade[:n] > 0.0
+                    hang = np.float32(0.5 ** (dt / WORD_SHAPE_HANG_HL_S))
+                    self.p_vx[:n] = np.where(
+                        held, self.p_vx[:n] * hang, self.p_vx[:n])
+                    self.p_vy[:n] = np.where(
+                        held, self.p_vy[:n] * hang, self.p_vy[:n])
                 self.p_age[:n] += dt
                 alive = (self.p_age[:n] < self.p_life[:n]) & (
                     np.hypot(self.p_x[:n], self.p_y[:n]) < self.r_max
@@ -1302,6 +1605,20 @@ class Fireworks2d(Twod, GradientEffect):
                     {"burst_rockets": 0}, validate=False, fire_event=False
                 )
 
+            # WORD SHAPES: the shaped burst. Ungated exactly like the flare
+            # burst above — a sung word's shape must land whatever the show
+            # is doing — and additive, so nothing live is touched.
+            if self._ws_pending is not None:
+                told = self._ws_pending
+                self._ws_pending = None
+                prev = self.n
+                self._word_shape_burst(told, dt)
+                if self.n > prev:
+                    fresh = slice(prev, self.n)
+                    x0 = np.concatenate([x0, self.p_x[fresh]])
+                    y0 = np.concatenate([y0, self.p_y[fresh]])
+                n = self.n
+
             if self._phase == "lull":
                 # guided rocket motion (positions set directly; the x0/y0
                 # copies above give them their motion smear + trail)
@@ -1325,6 +1642,33 @@ class Fireworks2d(Twod, GradientEffect):
                     start_bias + (1.0 - start_bias) * frac_t**gamma
                 ) * np.clip((1.0 - frac_t) / 0.12, 0.0, 1.0) ** 0.7
                 fade = np.where(self.p_rev[:n] > 0.0, rev_env, fwd)
+                if self._ws_live:
+                    # WORD SHAPES: a shaped spark is full bright from its own
+                    # fade-in until its own fade window opens, then goes out
+                    # on its own clock — spark by spark over the release,
+                    # never all at once — twinkling in place throughout (the
+                    # phase comes off its own position, so neighbours are out
+                    # of step). Read off p_wfade per spark, so an earlier
+                    # word's sparks keep fading on their own clock while a
+                    # second word's burst forms over them.
+                    wf = self.p_wfade[:n]
+                    held = wf > 0.0
+                    self._ws_live = bool(held.any())
+                    if self._ws_live:
+                        left = self.p_life[:n] - self.p_age[:n]
+                        twinkle = 1.0 - WORD_SHAPE_TWINKLE * 0.5 * (
+                            1.0 + np.sin(2.0 * np.pi * (
+                                WORD_SHAPE_TWINKLE_HZ * self.p_age[:n]
+                                + WORD_SHAPE_TWINKLE_PX * self.p_x[:n]
+                                + WORD_SHAPE_TWINKLE_PY * self.p_y[:n])))
+                        ws_env = (
+                            np.clip(left / np.maximum(wf, 1e-6), 0.0, 1.0)
+                            ** WORD_SHAPE_FADE_POWER
+                            * np.clip(self.p_age[:n] / WORD_SHAPE_FADE_IN_S,
+                                      0.0, 1.0)
+                            * twinkle
+                        )
+                        fade = np.where(held, ws_env, fade)
                 self.p_shown[:n] = self.p_bright[:n] * fade
             shown = self.p_shown[:n]
 
