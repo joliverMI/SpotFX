@@ -242,6 +242,99 @@ def test_deleted_guesses_can_be_brought_back():
     assert len(_guesses(lyric_matches.restore_deleted(URI))) == 1
 
 
+# ── shapes (Word Shapes row W0.2) ───────────────────────────────────────────
+
+SHAPE_LINES = ["i love you", "under the star"]
+
+
+def _shape_song():
+    """A song whose words reach a shape: "love" is the Heart shape's seed
+    word, and "star" sits on the Star shape AND on the radial effect."""
+    song(scfg, make_words(SHAPE_LINES))
+
+
+def test_the_prompt_lists_the_shape_labels_and_says_a_shape_is_drawn():
+    calls = []
+    asyncio.run(lyric_reading.read_song(URI, ask=_stub([], calls)))
+    system = calls[0]["system"]
+    assert "COLOUR LABELS: " in system and "EFFECT LABELS: " in system
+    assert "SHAPE LABELS: " in system
+    shape_list = system.split("SHAPE LABELS: ")[1]
+    assert "love" in shape_list and "diamond" in shape_list
+    assert "DRAW" in system and "give the SHAPE" in system
+    assert "shapes" in system.split("\n")[0]        # named in the list of kinds
+
+
+def test_a_claude_row_naming_love_parses_to_the_hearts_label():
+    """parse_reply needed no change for the third kind: a label is validated
+    against the one catalogue.labels map, which now carries shape words."""
+    _shape_song()
+    payload = _read([_row(0, "love", "love", 0.95, "sings about love")])
+    [guess] = _guesses(payload)
+    assert guess["label"] == "love" and guess["phrase"] == "love"
+    assert [(t["kind"], t["id"], t["name"]) for t in guess["targets"]] == [
+        ("shape", "heart", "Heart")]
+
+
+def test_a_row_naming_a_word_no_card_shape_or_effect_carries_is_still_refused():
+    _shape_song()
+    matches, refused = _parse([_row(0, "love", "octagon")])
+    assert matches == [] and refused == {lyric_reading.REFUSED_LABEL: 1}
+
+
+def test_a_word_on_a_shape_and_an_effect_lists_the_shape_first():
+    """PRECEDENCE (sung_labels.py): "star" is both the Star shape's word and
+    EFFECT_SEEDS["radial"]'s. The shape owns it for the planner; the effect
+    is still listed, and still carries the word on the page."""
+    _shape_song()
+    [guess] = _guesses(_read([_row(1, "star", "star", 0.9)]))
+    kinds = [(t["kind"], t["id"]) for t in guess["targets"]]
+    assert kinds[0] == ("shape", "star")
+    assert ("effect", "radial") in kinds
+
+
+def test_his_own_match_can_name_a_shape_target():
+    _shape_song()
+    lyric_matches.add(URI, 1, 1, TargetRef(kind="shape", id="heart"))
+    [match] = lyric_matches.payload(URI)["matches"]
+    assert match["source"] == "his" and match["phrase"] == "love"
+    assert match["label"] == "Heart"
+    assert match["targets"] == [
+        {"kind": "shape", "id": "heart", "name": "Heart", "swatch": None}]
+
+
+def test_his_shape_match_is_found_again_after_a_recapture():
+    _shape_song()
+    lyric_matches.add(URI, 1, 1, TargetRef(kind="shape", id="heart"))
+    capture(scfg)
+    sidecar(scfg, make_words(["oh", *SHAPE_LINES]))     # one word before it now
+    payload = lyric_matches.payload(URI)
+    [match] = payload["matches"]
+    assert match["first_word"] == 2 and match["targets"][0]["kind"] == "shape"
+    assert payload["unplaced"] == []
+
+
+def test_a_match_on_a_shape_the_library_does_not_know_is_refused():
+    _shape_song()
+    with pytest.raises(lyric_matches.MatchRefused, match="shape"):
+        lyric_matches.add(URI, 1, 1, TargetRef(kind="shape", id="octagon"))
+
+
+def test_a_shape_only_match_still_reaches_no_colour_set():
+    """Nothing fires from a shape yet. W0.3 is what makes a shape-reaching
+    word draw; today lyric_events' own reach() reads COLOUR-SET owners only,
+    so a word reaching only a shape plans as "no colour set" — for one of
+    Claude's guesses and for one of his own matches alike."""
+    from spectra.services import lyric_events
+    _shape_song()
+    _read([_row(0, "love", "love", 0.95)])
+    lyric_matches.add(URI, 5, 5, TargetRef(kind="shape", id="star"))
+    hits = {h.label: h for h in lyric_events.load_words(URI).hits}
+    assert set(hits) == {"love", "Star"}
+    for hit in hits.values():
+        assert hit.set_ids == () and hit.why_not == lyric_events.WHY_NO_COLOUR
+
+
 # ── surviving a recapture ───────────────────────────────────────────────────
 
 def _his_edits():

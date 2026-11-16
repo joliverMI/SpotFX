@@ -1,7 +1,8 @@
 """THE LYRICS DOMAIN — Sonic's reach over the sung labels and word matches
 built in lyrics plan step 3 (PR #499), AND word colours and imprints from
-lyrics plan step 4 (PR #504): what a colour set or effect answers to when
-it is sung, Claude's drafted colour meanings, one song's matched words,
+lyrics plan step 4 (PR #504): what a colour set, an effect or a SHAPE
+answers to when it is sung (the shapes since the Word Shapes plan's row
+W0.2), Claude's drafted colour meanings, one song's matched words,
 the automatic reader's own switch, and — the
 step-4 follow-up this module was still missing — the per-show word-colour
 switch, its three tuning settings, and a preview of what each word would
@@ -59,7 +60,7 @@ TestClient over the real router (lock_console's own test precedent),
 never a live network call.
 
 OPAQUE IDS ARE OFF-LIMITS, as elsewhere (force_scene_*'s own precedent): a
-colour set, an effect and a song are all reached by NAME through
+colour set, an effect, a shape and a song are all reached by NAME through
 name_resolve.resolve_name — exact, a dropped "V2"/"V1"/"UI" qualifier,
 then a clear fuzzy winner, refusing a near-tie rather than guessing. A
 song is the one exception to "use resolve_name's own known_names
@@ -104,8 +105,10 @@ them to him either, so there is nothing here to widen. Deleting a colour
 set or an effect's registration is not reached from here (that is the
 Colours page / the effect registry, same as every other domain's own
 "creation and deletion of the underlying thing stays where it already
-was" rule). The transition-time range (FAST_TRANSITION_MS/SLOW_TRANSITION_MS/
-FAST_AT_ENERGY in lyric_events.py) is likewise a pair of named constants,
+was" rule), and nor is adding or removing a SHAPE (that is one entry in
+fx/effects/word_shapes.py, the shape library — only a shape's WORDS are
+reached from here). The transition-time range (FAST_TRANSITION_MS/
+SLOW_TRANSITION_MS/FAST_AT_ENERGY in lyric_events.py) is likewise a pair of named constants,
 not one of the three stored settings — nothing here widens that either.
 """
 from __future__ import annotations
@@ -123,7 +126,7 @@ from spectra.services import (analysis_reader, claude_text, color_meanings, colo
                               name_resolve, sung_labels)
 from spectra.services.sonic_ops import SonicOperation
 
-TARGET_KINDS = ("color_set", "effect")
+TARGET_KINDS = ("color_set", "effect", "shape")
 LIST_KINDS = ("labels", "things", "moods", "places")
 
 #: A clean miss over the whole song library would hand back every analysed
@@ -275,19 +278,26 @@ def _target_candidates(kind: str) -> list[tuple[str, str]]:
     return [(t.id, t.name) for t in cat.targets.values() if t.kind == kind]
 
 
+_KIND_NOUNS = {"color_set": "colour set", "effect": "effect", "shape": "shape"}
+_KIND_WORDS = "kind must be color_set, effect or shape"
+
+
 def _resolve_target(kind: str, name: str) -> tuple[Optional[str], Optional[dict]]:
     if kind not in TARGET_KINDS:
-        return None, {"status": "rejected", "reason": "kind must be color_set or effect"}
-    noun = "colour set" if kind == "color_set" else "effect"
+        return None, {"status": "rejected", "reason": _KIND_WORDS}
+    noun = _KIND_NOUNS[kind]
     match, rejection = name_resolve.resolve_name(name, _target_candidates(kind), noun=noun)
     if rejection:
         return None, rejection
     return match.id, None
 
 
+_KIND_PAGE_ROWS = {"color_set": "color_sets", "effect": "effects", "shape": "shapes"}
+
+
 def _page_row(kind: str, target_id: str) -> Optional[dict]:
     page = sung_labels.page()
-    rows = page["color_sets"] if kind == "color_set" else page["effects"]
+    rows = page[_KIND_PAGE_ROWS[kind]]
     return next((r for r in rows if r["id"] == target_id), None)
 
 
@@ -361,7 +371,7 @@ async def _op_set_lyric_reading_settings(auto_read: Optional[bool] = None,
 
 def _op_list_sung_label_targets(kind: Optional[str] = None) -> dict:
     if kind is not None and kind not in TARGET_KINDS:
-        return {"status": "rejected", "reason": "kind must be color_set or effect"}
+        return {"status": "rejected", "reason": _KIND_WORDS}
     try:
         page = sung_labels.page()
     except sung_labels.StoreUnreadable as exc:
@@ -375,6 +385,9 @@ def _op_list_sung_label_targets(kind: Optional[str] = None) -> dict:
     if kind in (None, "effect"):
         for row in page["effects"]:
             out.append({"kind": "effect", "name": row["name"], "n_labels": len(row["labels"])})
+    if kind in (None, "shape"):
+        for row in page["shapes"]:
+            out.append({"kind": "shape", "name": row["name"], "n_labels": len(row["labels"])})
     return {"targets": out}
 
 
@@ -700,8 +713,9 @@ _SONG_PROP = {"type": "string",
              "description": "The song's title (or title and artist) — omit to mean whatever "
                              "is playing right now."}
 _KIND_PROP = {"type": "string", "enum": list(TARGET_KINDS),
-             "description": "color_set (a colour set or group on the Colours page) or "
-                             "effect (a registered light effect)."}
+             "description": "color_set (a colour set or group on the Colours page), "
+                             "effect (a registered light effect) or shape (a shape the show "
+                             "can draw on the panel: heart, star, diamond)."}
 
 OPERATIONS: dict[str, SonicOperation] = {
     "get_lyric_reading_settings": SonicOperation(
@@ -731,10 +745,10 @@ OPERATIONS: dict[str, SonicOperation] = {
     ),
     "list_sung_label_targets": SonicOperation(
         name="list_sung_label_targets", domain="lyrics", kind="read",
-        summary="List every colour set's and effect's name, with how many sung labels "
-                "each carries.",
-        instructions=("Pass kind (color_set or effect) to narrow it, or omit it for both. "
-                     "Call this first to find the exact name get_sung_labels / "
+        summary="List every colour set's, effect's and shape's name, with how many sung "
+                "labels each carries.",
+        instructions=("Pass kind (color_set, effect or shape) to narrow it, or omit it for "
+                     "all three. Call this first to find the exact name get_sung_labels / "
                      "edit_sung_label expect — a close spoken name still resolves, but the "
                      "real name is never wrong."),
         input_schema={"type": "object",
@@ -744,8 +758,8 @@ OPERATIONS: dict[str, SonicOperation] = {
     ),
     "get_sung_labels": SonicOperation(
         name="get_sung_labels", domain="lyrics", kind="read",
-        summary="Read one colour set's or effect's sung labels (and, for a colour set, "
-                "its drafted meanings: things, moods, places).",
+        summary="Read one colour set's, effect's or shape's sung labels (and, for a colour "
+                "set, its drafted meanings: things, moods, places).",
         instructions="kind and name (a close spoken name resolves; a near-tie is refused).",
         input_schema={"type": "object",
                      "properties": {"kind": _KIND_PROP, "name": {"type": "string"}},
@@ -754,14 +768,16 @@ OPERATIONS: dict[str, SonicOperation] = {
     ),
     "edit_sung_label": SonicOperation(
         name="edit_sung_label", domain="lyrics", kind="write",
-        summary="Add or take off one word from a colour set's or effect's sung labels, "
-                "or from a colour set's drafted meanings (things/moods/places).",
+        summary="Add or take off one word from a colour set's, effect's or shape's sung "
+                "labels, or from a colour set's drafted meanings (things/moods/places).",
         instructions=(
             "kind, name, list (labels, or — colour sets only — things/moods/places), "
-            "op (add or remove) and text (the one word or short phrase). An effect only has "
-            "labels. Removing a seeded or drafted word just takes it off his view of the "
-            "list — a later re-seed or re-draft offering it again will not bring it back "
-            "until he adds it again himself."),
+            "op (add or remove) and text (the one word or short phrase). An effect and a "
+            "shape only have labels. A shape's word is a word the show would DRAW that "
+            "shape for (\"love\" on the heart); when a word sits on a shape and an effect, "
+            "the shape is the one the show follows. Removing a seeded or drafted word just "
+            "takes it off his view of the list — a later re-seed or re-draft offering it "
+            "again will not bring it back until he adds it again himself."),
         input_schema={
             "type": "object",
             "properties": {
@@ -803,10 +819,11 @@ OPERATIONS: dict[str, SonicOperation] = {
     ),
     "add_lyric_match": SonicOperation(
         name="add_lyric_match", domain="lyrics", kind="write",
-        summary="Match a sung word or phrase to a colour set or effect, himself.",
+        summary="Match a sung word or phrase to a colour set, effect or shape, himself.",
         instructions=(
-            "target_kind, target_name (the colour set or effect it should reach), phrase "
-            "(the exact words, copied as sung — case and accents do not matter) and song "
+            "target_kind, target_name (the colour set, effect or shape it should reach), "
+            "phrase (the exact words, copied as sung — case and accents do not matter) "
+            "and song "
             "(optional, defaults to whatever is playing). If that phrase is sung more than "
             "once, occurrence (1-based, default 1) picks which; the result names how many "
             "times it is sung so you can ask which one he means."),

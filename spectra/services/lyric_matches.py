@@ -33,9 +33,14 @@ span is found again by its words, at the occurrence nearest where it was. One of
 his that cannot be found is reported as `unplaced` and kept, never dropped.
 
 WHO A MATCH REACHES IS RESOLVED WHEN IT IS READ. A guess names a label; every
-colour set or effect that carries that label now is who it would reach. A match
-of his can name a colour set or effect outright, and that stands even if the
-label list changes.
+colour set, effect or SHAPE that carries that label now is who it would reach,
+a shape FIRST when it shares the word with an effect (sung_labels.py's
+PRECEDENCE, which is the order `Catalogue.owners` is built in). A match of his
+can name a colour set, an effect or a shape outright, and that stands even if
+the label list changes. Nothing here knows the difference: a target is its
+`kind` and its `id`, so the shape kind the Word Shapes plan's row W0.2 added
+needed no code change on this side — only the proofs that it survives
+`resolve`, `anchor` and the payload.
 
 HIS WIN: a guess that overlaps words he matched himself is not shown, so a
 correction takes effect without him also having to delete what it replaces.
@@ -311,12 +316,12 @@ def save_reading(uri: str, reading: Reading) -> None:
 def _resolve_target(ref: TargetRef, catalogue: sung_labels.Catalogue) -> sung_labels.Target:
     target = catalogue.targets.get((ref.kind, ref.id))
     if target is None:
-        raise MatchRefused("That colour set or effect no longer exists.")
+        raise MatchRefused("That colour set, effect or shape no longer exists.")
     return target
 
 
 def add(uri: str, first_word: int, last_word: int, target: TargetRef) -> dict[str, Any]:
-    """He matched these words to this colour set or effect."""
+    """He matched these words to this colour set, effect or shape."""
     timeline = lyrics_timeline.timeline_for_uri(uri)
     if not timeline.usable:
         raise MatchRefused(timeline.note or "This song has no usable word timeline.")

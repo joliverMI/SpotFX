@@ -777,20 +777,21 @@ export const HELP_SECTIONS: HelpSection[] = [
   {
     id: 'sung-labels',
     title: 'Sung Labels',
-    keywords: 'sung labels words lyrics lyric colour color set effect meaning meanings things moods places claude draft correct edit seed spanish',
+    keywords: 'sung labels words lyrics lyric colour color set effect shape shapes heart star diamond meaning meanings things moods places claude draft correct edit seed spanish',
     intro:
-      'What each colour set and effect answers to when someone sings it. Claude reads a song\'s lyrics against this list and guesses which words are about what, and you correct the guesses on the Test Bed. Nothing on this page reaches your lights yet.',
+      'What each colour set, effect and shape answers to when someone sings it. Claude reads a song\'s lyrics against this list and guesses which words are about what, and you correct the guesses on the Test Bed. Nothing on this page reaches your lights yet.',
     entries: [
       {
         id: 'sung-labels-page',
         title: 'Correcting the words',
-        keywords: 'chip add remove delete label meaning things moods places edit kept draft seed search',
+        keywords: 'chip add remove delete label meaning things moods places edit kept draft seed search shape shapes heart star diamond draw',
         body: [
           'Every colour set starts with words worked out from its own colours and name: the colour in English and Spanish, its other names, and a few things it brings to mind. Each one has an × to take it off, and the box after the last word adds one of your own. Chips show where a word came from: plain from its colours and name, dashed drafted by Claude, solid yours.',
           'Draft meanings asks Claude for the things, moods and places each colour set brings to mind. Draft again replaces only Claude\'s words: anything you added stays, and anything you took off stays off even when Claude offers it again. A set with no colours of its own, like a brightness setting, has nothing to mean and is left out.',
           'Drafting goes a few colour sets at a time so each request stays short. If one of those batches takes too long and fails, the rest keep going rather than stopping there, and the button reports truthfully how many drafted and offers to retry only the ones that failed — anything that did succeed is never redrafted.',
           'A word so generic it could belong anywhere (ocean, calm) is kept off most sets on purpose, so the words actually tell sets apart: at most a handful of sets share one, a bit more for a plain colour name like red or gold.',
           'Effects have sung labels too, so a word like fish or stars can point at an effect rather than a colour.',
+          'Shapes row (coming next): the shapes the show can draw — heart, star, diamond — get their own cards, with the same × and add box as the colour sets and effects. A shape\'s words are words the show would draw that shape for, so the heart answers to love, corazón and kiss as well as heart. Each shape starts with its own words and your edits sit on top of them, exactly as they do everywhere else on this page. When a word belongs to a shape and an effect, like star, the shape is the one the show follows — the effect keeps the word on its own card until you take it off.',
         ],
       },
       {
@@ -801,7 +802,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'By default Claude reads a song only when you press Read on the Test Bed. Switch on reading songs automatically and it reads any song that has not been read, and reads songs again when the words on this list change, waiting until you have stopped editing for ten minutes.',
           'It goes one song a minute because every read spends your Claude allowance: a whole library takes hours. Moving a word from one colour set to another does not need a re-read, since which sets a word reaches is worked out when you look.',
           'There is no cut-off for unsure guesses any more. Claude keeps every match it thinks is plausible, with an honest confidence from 0 to 1, and that confidence is how often the word plays: a 0.9 word on nine plays in ten, a 0.1 word on one in ten (see Which words play). Songs read before this change only have their surer guesses until they are read again.',
-          'Sonic reaches all of this by voice too: read and change a colour set\'s or effect\'s sung labels and a colour set\'s drafted meanings, ask it to draft meanings for named colour sets or read a named song\'s lyrics now (both spend your Claude allowance and always ask first), show a song\'s word matches, and add, delete or restore one by naming the words it sits on. Turning automatic reading on asks first too; turning it off does not.',
+          'Sonic reaches all of this by voice too: read and change a colour set\'s, effect\'s or shape\'s sung labels and a colour set\'s drafted meanings, ask it to draft meanings for named colour sets or read a named song\'s lyrics now (both spend your Claude allowance and always ask first), show a song\'s word matches, and add, delete or restore one by naming the words it sits on. Turning automatic reading on asks first too; turning it off does not.',
         ],
       },
     ],

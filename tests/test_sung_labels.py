@@ -1,10 +1,13 @@
-"""The sung labels (lyrics plan step 3): what a colour set or effect answers to
-when it is sung, how the list is seeded, and that his edits outlast everything
-computed around them."""
+"""The sung labels (lyrics plan step 3): what a colour set, an effect or a
+SHAPE (Word Shapes row W0.2) answers to when it is sung, how the list is
+seeded, and that his edits outlast everything computed around them."""
 from __future__ import annotations
 
 import asyncio
 import json
+import os
+import subprocess
+import sys
 
 import pytest
 
@@ -206,6 +209,92 @@ def test_an_effect_has_labels_and_not_meanings():
         sung_labels.edit("effect", "fish", "things", "add", "shark")
 
 
+# ── shapes (Word Shapes row W0.2) ───────────────────────────────────────────
+
+def _shape_row(page, shape_id):
+    return next(r for r in page["shapes"] if r["id"] == shape_id)
+
+
+def test_the_page_carries_a_row_per_shape_with_the_librarys_own_words():
+    """The shape library is the ONE place a shape's starting words live; the
+    page reads them from there, in declaration order."""
+    from fx.effects import word_shapes
+    page = sung_labels.page()
+    assert [r["id"] for r in page["shapes"]] == list(word_shapes.shape_ids())
+    assert [r["name"] for r in page["shapes"]] == ["Heart", "Star", "Diamond"]
+    for shape_id, shape in word_shapes.SHAPES.items():
+        assert _texts(_shape_row(page, shape_id)["labels"]) == list(shape.words)
+    assert "love" in _texts(_shape_row(page, "heart")["labels"])
+
+
+def test_a_shape_row_carries_the_same_chip_payload_an_effect_row_does():
+    page = sung_labels.page()
+    shape_chip = _shape_row(page, "heart")["labels"][0]
+    effect_chip = next(r for r in page["effects"] if r["id"] == "fish")["labels"][0]
+    assert set(shape_chip) == set(effect_chip) == {"text", "source"}
+    assert set(_shape_row(page, "heart")) == {"id", "name", "labels"}
+
+
+def test_an_added_and_a_removed_shape_word_both_outlast_a_re_seed():
+    sung_labels.edit("shape", "heart", "labels", "add", "sweetheart")
+    sung_labels.edit("shape", "heart", "labels", "remove", "kiss")
+    for _ in range(2):          # re-reading the page re-seeds from the library
+        row = _shape_row(sung_labels.page(), "heart")
+        assert _source(row["labels"], "sweetheart") == "his"
+        assert _source(row["labels"], "love") == "seed"
+        assert "kiss" not in _texts(row["labels"])
+    stored = json.loads(scfg.SUNG_LABELS_FILE.read_text(encoding="utf-8"))
+    assert stored["shapes"]["heart"]["labels"] == {"added": ["sweetheart"],
+                                                  "removed": ["kiss"]}
+
+
+def test_a_shape_has_labels_and_not_meanings():
+    with pytest.raises(sung_labels.EditRefused):
+        sung_labels.edit("shape", "heart", "things", "add", "valentine")
+
+
+def test_an_unknown_shape_id_is_refused():
+    with pytest.raises(sung_labels.EditRefused, match="shape library"):
+        sung_labels.edit("shape", "octagon", "labels", "add", "stop")
+
+
+def test_an_old_store_without_shapes_loads_and_gains_only_the_empty_field():
+    """A sung_labels.json written before this row (no `shapes` key at all)
+    reads unchanged, and the next save adds that one empty field and nothing
+    else."""
+    before = {"schema_version": 1, "settings": {"auto_read": True},
+              "labels_changed_ms": 7, "color_sets": {}, "effects": {
+                  "fish": {"labels": {"added": ["shark"], "removed": []}}}}
+    scfg.SUNG_LABELS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    scfg.SUNG_LABELS_FILE.write_text(json.dumps(before), encoding="utf-8")
+    store = sung_labels.load()
+    assert store.shapes == {}
+    assert store.settings.auto_read is True
+    row = next(r for r in sung_labels.page()["effects"] if r["id"] == "fish")
+    assert "shark" in _texts(row["labels"])
+
+    sung_labels.set_auto_read(True)             # any save at all
+    after = json.loads(scfg.SUNG_LABELS_FILE.read_text(encoding="utf-8"))
+    assert after.pop("shapes") == {}
+    assert after == before
+
+
+def test_the_shape_library_is_not_imported_just_by_importing_the_labels():
+    """The shape library is numpy geometry read LAZILY (sung_labels.
+    shape_library). A fresh interpreter, because this file's own tests have
+    already pulled it in here."""
+    driver = (
+        "import sys, json\n"
+        "import spectra.services.sung_labels\n"
+        "import spectra.services.lyric_reading\n"
+        "import spectra.services.lyric_matches\n"
+        "print(json.dumps('fx.effects.word_shapes' in sys.modules))\n")
+    proc = subprocess.run([sys.executable, "-c", driver], cwd=os.fspath(scfg.REPO_ROOT),
+                          capture_output=True, text=True, timeout=90)
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    assert json.loads(proc.stdout.strip().splitlines()[-1]) is False
+
+
 # ── the list Claude is read against ─────────────────────────────────────────
 
 def test_the_list_says_who_carries_each_label():
@@ -214,6 +303,35 @@ def test_the_list_says_who_carries_each_label():
     assert "fish" in cat.effect_labels
     assert "azul" in cat.color_labels
     assert cat.targets[("effect", "fish")].kind == "effect"
+
+
+def test_a_shape_is_a_target_on_the_list_like_the_other_two():
+    cat = sung_labels.catalogue()
+    assert "love" in cat.shape_labels and "love" not in cat.effect_labels
+    assert cat.targets[("shape", "heart")].kind == "shape"
+    assert cat.targets[("shape", "heart")].name == "Heart"
+    assert [t.id for t in cat.owners["love"]] == ["heart"]
+
+
+def test_a_word_on_a_shape_and_an_effect_is_owned_by_the_shape():
+    """PRECEDENCE (sung_labels.py): "star"/"stars"/"estrella" sit on the Star
+    shape AND on EFFECT_SEEDS["radial"]. The shape is listed first, and the
+    effect keeps its own seed word — those are his to take off, not ours."""
+    cat = sung_labels.catalogue()
+    for word in ("star", "stars", "estrella"):
+        owners = cat.owners[word]
+        assert [(t.kind, t.id) for t in owners][0] == ("shape", "star")
+        assert ("effect", "radial") in [(t.kind, t.id) for t in owners]
+    row = next(r for r in sung_labels.page()["effects"] if r["id"] == "radial")
+    assert "star" in _texts(row["labels"])
+
+
+def test_a_shape_word_moves_the_hash_like_any_other():
+    start = sung_labels.catalogue().labels_hash
+    sung_labels.edit("shape", "diamond", "labels", "add", "gemstone")
+    assert sung_labels.catalogue().labels_hash != start
+    sung_labels.edit("shape", "diamond", "labels", "remove", "gemstone")
+    assert sung_labels.catalogue().labels_hash == start
 
 
 def test_meanings_are_on_the_list_too():
@@ -383,6 +501,24 @@ def test_the_edit_route_edits_and_answers_with_the_new_page():
     assert "rage" in _texts(_row(body, "red1")["meanings"]["moods"])
     refused = client.post("/api/sung-labels/edit", json={
         "kind": "effect", "id": "nope", "list": "labels", "op": "add", "text": "x"})
+    assert refused.status_code == 422
+
+
+def test_the_page_route_carries_the_three_shapes_and_an_edit_round_trips():
+    client = _client()
+    body = client.get("/api/sung-labels").json()
+    assert [r["name"] for r in body["shapes"]] == ["Heart", "Star", "Diamond"]
+    assert "love" in _texts(_shape_row(body, "heart")["labels"])
+
+    edited = client.post("/api/sung-labels/edit", json={
+        "kind": "shape", "id": "heart", "list": "labels", "op": "add",
+        "text": "sweetheart"}).json()
+    assert _source(_shape_row(edited, "heart")["labels"], "sweetheart") == "his"
+    assert _source(_shape_row(client.get("/api/sung-labels").json(), "heart")["labels"],
+                   "sweetheart") == "his"
+
+    refused = client.post("/api/sung-labels/edit", json={
+        "kind": "shape", "id": "octagon", "list": "labels", "op": "add", "text": "x"})
     assert refused.status_code == 422
 
 

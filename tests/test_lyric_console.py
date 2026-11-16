@@ -2,7 +2,8 @@
 labels, Claude's colour meanings, a song's word matches and the automatic
 reader's own switch and weak-match threshold (PR #499's own Sonic coverage
 follow-up), plus word colours and imprints' per-show switch, tuning and
-preview (PR #504's own follow-up). Reached through
+preview (PR #504's own follow-up), and the SHAPE target kind (Word Shapes
+row W0.2). Reached through
 spectra.services.settings_agent's real dispatch boundary, same convention
 as tests/test_drop_console.py; no live process, no light, Claude always a
 stub. preview_lyric_events is the one op that goes over HTTP (the module
@@ -62,12 +63,27 @@ def test_list_sung_label_targets_lists_colour_sets_and_effects():
     names = {t["name"] for t in out["targets"]}
     assert "Blood Red" in names
     assert "Fish" in names                 # a registered effect
+    assert "Heart" in names                # a shape the show can draw
 
 
 def test_list_can_be_narrowed_to_one_kind():
     out = _run("list_sung_label_targets", kind="effect")
     assert all(t["kind"] == "effect" for t in out["targets"])
     assert "Blood Red" not in {t["name"] for t in out["targets"]}
+
+
+def test_list_can_be_narrowed_to_the_shapes():
+    out = _run("list_sung_label_targets", kind="shape")
+    assert [(t["kind"], t["name"]) for t in out["targets"]] == [
+        ("shape", "Heart"), ("shape", "Star"), ("shape", "Diamond")]
+    assert [t["n_labels"] for t in out["targets"]] == [
+        len(words) for _name, words in sung_labels.shape_library().values()]
+
+
+def test_an_unknown_kind_names_all_three():
+    out = _run("list_sung_label_targets", kind="palette")
+    assert out["status"] == "rejected"
+    assert out["reason"] == "kind must be color_set, effect or shape"
 
 
 def test_get_sung_labels_resolves_by_exact_name():
@@ -110,6 +126,52 @@ def test_edit_sung_label_can_touch_a_meaning_kind():
     assert out["status"] == "applied"
     row = _run("get_sung_labels", kind="color_set", name="Blood Red")
     assert any(c["text"] == "rage" for c in row["meanings"]["moods"])
+
+
+def test_get_and_edit_reach_a_shapes_labels():
+    """Word Shapes row W0.2: the third kind, resolved by name like an effect."""
+    row = _run("get_sung_labels", kind="shape", name="heart")
+    assert row["kind"] == "shape" and row["name"] == "Heart"
+    assert any(c["text"] == "love" and c["source"] == "seed" for c in row["labels"])
+    assert "meanings" not in row                    # a shape has labels only
+
+    out = _run("edit_sung_label", kind="shape", name="Heart", list="labels",
+               op="add", text="sweetheart")
+    assert out["status"] == "applied"
+    assert "sweetheart" in out["summary"] and "Heart" in out["summary"]
+    again = _run("get_sung_labels", kind="shape", name="Heart")
+    assert any(c["text"] == "sweetheart" and c["source"] == "his" for c in again["labels"])
+
+    off = _run("edit_sung_label", kind="shape", name="Heart", list="labels",
+               op="remove", text="kiss")
+    assert off["status"] == "applied"
+    assert "kiss" not in {c["text"] for c in
+                          _run("get_sung_labels", kind="shape", name="Heart")["labels"]}
+
+
+def test_a_shape_refuses_a_meaning_kind():
+    out = _run("edit_sung_label", kind="shape", name="Heart", list="things",
+               op="add", text="valentine")
+    assert out["status"] == "rejected"
+
+
+def test_an_unknown_shape_name_is_refused_without_writing():
+    before = scfg.SUNG_LABELS_FILE.exists() and scfg.SUNG_LABELS_FILE.read_text()
+    out = _run("edit_sung_label", kind="shape", name="Octagon", list="labels",
+               op="add", text="stop")
+    assert out["status"] == "rejected"
+    assert "known_names" in out or "close_matches" in out
+    after = scfg.SUNG_LABELS_FILE.exists() and scfg.SUNG_LABELS_FILE.read_text()
+    assert before == after
+
+
+def test_he_can_match_a_phrase_to_a_shape_by_name():
+    out = _run("add_lyric_match", target_kind="shape", target_name="Heart",
+               phrase="know", song=STEM)
+    assert out["status"] == "applied" and "Heart" in out["summary"]
+    rows = _run("get_lyric_matches", song=STEM)["matches"]
+    [his] = [m for m in rows if m["source"] == "his"]
+    assert [(t["kind"], t["id"]) for t in his["targets"]] == [("shape", "heart")]
 
 
 def test_an_effect_refuses_a_meaning_kind():
@@ -565,6 +627,12 @@ _NO_LIGHT_DRIVER = textwrap.dedent('''
         phrase="red light", song=STEM)
     run("delete_lyric_match", phrase="red light", song=STEM)
     run("restore_lyric_matches", song=STEM)
+
+    run("get_sung_labels", kind="shape", name="Heart")
+    run("edit_sung_label", kind="shape", name="Heart", list="labels", op="add",
+        text="sweetheart")
+    run("add_lyric_match", target_kind="shape", target_name="Heart", phrase="know",
+        song=STEM)
 
     first = run("set_lyric_reading_settings", auto_read=True)
     run("set_lyric_reading_settings", auto_read=True, confirm_id=first["confirm_id"])

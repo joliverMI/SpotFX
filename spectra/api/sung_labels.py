@@ -1,7 +1,8 @@
 """The sung labels page's routes (lyrics plan step 3). Nothing here reaches
 the lights. spectra/services/sung_labels.py is the binding statement.
 
-  GET  /api/sung-labels            every colour set's and effect's labels
+  GET  /api/sung-labels            every colour set's, effect's and shape's
+                                    labels (`shapes` since Word Shapes W0.2)
   POST /api/sung-labels/edit       one word added or taken out
   POST /api/sung-labels/draft      Claude drafts meanings for a small batch of
                                     cards (color_meanings.DRAFT_BATCH_SIZE)
@@ -35,7 +36,7 @@ async def get_page():
 
 
 class EditBody(BaseModel):
-    kind: Literal["color_set", "effect"]
+    kind: Literal["color_set", "effect", "shape"]
     id: str = Field(min_length=1)
     list: Literal["labels", "things", "moods", "places"]
     op: Literal["add", "remove"]

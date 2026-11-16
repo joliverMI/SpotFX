@@ -3,7 +3,9 @@ name: sung-labels
 description: >
   Sung labels, Claude's colour meanings and a song's word matches (lyrics
   plan step 3, PR #499), AND word colours and imprints (lyrics plan step
-  4, PR #504), and THE ROLL (word chance per play, 2026-11-12):
+  4, PR #504), THE ROLL (word chance per play, 2026-11-12) and SHAPE
+  labels (Word Shapes row W0.2, the third target kind beside a colour set
+  and an effect):
   spectra/services/sung_labels.py, lyric_matches.py,
   lyric_reading.py, color_meanings.py, colour_words.py, claude_text.py and
   lyric_events.py; the /sung-labels correction page; the Test Bed's Sung
@@ -38,7 +40,7 @@ and a preview of what each word would do is the "Sonic reach" section below.
 ## The shape, cold
 
 1. **ONE LIST PER CARD, FOUR SOURCES, ONE COMPUTED.** `sung_labels.py`'s
-   `page()`/`catalogue()` build each colour set's and effect's sung labels
+   `page()`/`catalogue()` build each colour set's, effect's and shape's sung labels
    from its seed (`colour_words.seed_labels`, pure — colour + name), Claude's
    drafted meanings (`color_meanings.draft`, things/moods/places, colour
    sets only) and his own edits (`LabelEdits`: added/removed deltas, never a
@@ -73,6 +75,52 @@ and a preview of what each word would do is the "Sonic reach" section below.
 5. **OFF BY DEFAULT.** `SungLabelSettings.auto_read` gates
    `lyric_reading.run_supervised()`'s sweep entirely; a press (`POST
    /api/testbed/lyric-matches/read`) always works regardless.
+
+## THREE TARGET KINDS, AND THE SHAPE'S PRECEDENCE (Word Shapes row W0.2)
+
+A sung word can point at a colour set (`sung_labels.KIND_COLOR_SET`), a
+registered effect (`KIND_EFFECT`) or — since the Word Shapes plan's row W0.2
+— a SHAPE (`KIND_SHAPE`): one of the shapes the show can draw on the panel.
+The Admiral's words for the row: "Those would have word associations, like
+'heart' with 'love'. Make it easy to add more shapes and associations down
+the road."
+
+- **A SHAPE'S STARTING WORDS LIVE IN THE SHAPE LIBRARY, NOT IN
+  `sung_labels.py`.** `Shape.words` in `fx/effects/word_shapes.py` is the one
+  place they are written (`.claude/skills/word-shapes/SKILL.md`), so adding a
+  shape stays one `build(...)` entry and nothing else. There is deliberately
+  NO shape equivalent of `EFFECT_SEEDS` — do not add one. `sung_labels.
+  shape_library()` / `shape_seed()` read them, and both import that module
+  **lazily, inside the call**: the library is numpy geometry, and importing
+  `sung_labels`/`lyric_reading`/`lyric_matches` must not pull it in
+  (`tests/test_sung_labels.py`'s fresh-interpreter proof, beside the show's
+  own import-boundary proof in `tests/test_lyric_reading.py`).
+- **PRECEDENCE: a word on both a shape and an effect is the SHAPE'S.** Today
+  "star", "stars" and "estrella" sit on the Star shape AND on
+  `EFFECT_SEEDS["radial"]`. Implemented in exactly ONE place — the ORDER of
+  `Catalogue.owners`, where `_owner_rank` puts a shape target before any
+  other carrying the same word, so whoever resolves a match to an owner gets
+  the shape first. The effect KEEPS its seed word: those are his to take off
+  on the page, never ours to delete.
+- **NOTHING FIRES FROM A SHAPE YET.** `lyric_events.load_words`' own `reach`
+  reads COLOUR-SET owners only, so a word reaching only a shape plans as
+  `WHY_NO_COLOUR` ("no colour set") and does nothing. W0.3 is the row that
+  changes that; today's behaviour is pinned by a test, so changing it is a
+  visible change.
+- **Everything else about a shape is an effect's shape, exactly**: his edits
+  are deltas (`ShapeLabels.labels`, the `EffectLabels` shape), one chip
+  payload, labels only (a meaning kind is refused), an unknown shape id is
+  refused, the labels hash covers shape labels, `TargetKind` carries
+  `"shape"` so one of HIS matches can name a shape target outright, and
+  `lyric_matches`' `resolve`/`anchor`/payload needed no change at all —
+  a target is its `kind` and its `id`.
+- **An old `sung_labels.json` with no `shapes` key loads unchanged** and
+  gains only that one empty field on the next save.
+- **The page's Shapes row is W2.2**, not W0.2: this row is the model, the
+  service, the prompt, the API field and Sonic. `spectra/web/src/types.ts`
+  carries `SungShape` and `SungLabelsPageData.shapes` already so `tsc` stays
+  clean; the help paragraph in `sung-labels-page` is written ahead of the
+  row and says so.
 
 ## The highlight: where a word's effect shows before and at fire time (2026-11-12)
 
@@ -163,8 +211,8 @@ Built as the coverage follow-up this skill exists to record. Load
 
 - **Reads**: `get_lyric_reading_settings` (auto_read and Claude
   availability), `list_sung_label_targets` (every colour set's/
-  effect's name + label count, kind-filterable — call this first to get
-  the exact name the other ops expect), `get_sung_labels` (one named
+  effect's/shape's name + label count, kind-filterable — call this first to
+  get the exact name the other ops expect), `get_sung_labels` (one named
   target's labels, plus meanings for a colour set), `get_lyric_matches`
   (one song's matches — `song` omitted means whatever is playing now),
   `get_lyric_event_settings` (whether word colours are on for a song, the
@@ -174,7 +222,8 @@ Built as the coverage follow-up this skill exists to record. Load
   exact plan the Test Bed's Word actions row shows, including THE ROLL:
   `roll`, and each action's `chance`/`won`/`pin`).
 - **Writes, no confirmation needed**: `edit_sung_label` (add/remove one
-  word on a target's labels or, colour-set-only, things/moods/places),
+  word on a colour set's, effect's or SHAPE's labels or, colour-set-only,
+  things/moods/places),
   `add_lyric_match`/`delete_lyric_match`/`restore_lyric_matches` (a match
   is named by its PHRASE TEXT, disambiguated by `label` or `occurrence`
   when the same phrase repeats — never by its internal id), turning
@@ -230,9 +279,12 @@ Built as the coverage follow-up this skill exists to record. Load
   can hold hundreds of analysed songs, so `_resolve_song` caps a clean
   miss's `known_names` fallback (`SONG_CANDIDATES_SHOWN`) rather than
   listing every song — the same reason the Jukebox's own song search is a
-  bounded search, not a flat name list (AGENTS.md). A colour set or effect
-  name still uses `name_resolve.resolve_name` verbatim (its library is
-  small enough).
+  bounded search, not a flat name list (AGENTS.md). A colour set, effect or
+  shape name still uses `name_resolve.resolve_name` verbatim (its library is
+  small enough). `TARGET_KINDS` is the one list the kind enum comes from, so
+  `settings_mcp_server.py`'s `_LyricTargetKindEnum` widened with it and
+  needed no edit of its own; no new op was added, so no manifest fixture in
+  `tests/test_settings_agent_cli.py` needed a new tool name either.
 - **What stays off-limits, deliberately**: the automatic reader's own
   pacing constants (`SWEEP_POLL_S`/`READ_GAP_S`/`LABELS_QUIET_S`/
   `FAILURE_BACKOFF_S`) are a hand-picked pace, not a setting — nothing
@@ -249,8 +301,12 @@ Built as the coverage follow-up this skill exists to record. Load
 ## Files
 
 - `spectra/models/lyric_labels.py` — every stored shape (`SungLabelStore`,
+  `ColorSetLabels`, `EffectLabels`, `ShapeLabels`, `TargetKind`,
   `SongMatches`, `Reading`, `ClaudeGuess`, `HisMatch`, `LyricEventStore`,
   `LyricEventSettings`, `LyricShowState`).
+- `fx/effects/word_shapes.py` — the shape library, which owns every shape's
+  STARTING words (`.claude/skills/word-shapes/SKILL.md`). Read lazily from
+  `sung_labels.shape_library()`.
 - `spectra/services/{sung_labels,lyric_matches,lyric_reading,color_meanings,
   colour_words,claude_text,lyric_events}.py` — the mechanism (see each
   module's own docstring).
@@ -272,7 +328,12 @@ Built as the coverage follow-up this skill exists to record. Load
 
 ## Specs
 
-`tests/test_sung_labels.py`, `tests/test_lyric_reading.py`,
+`tests/test_sung_labels.py` (incl. the shape rows, the precedence rule, an
+old store with no `shapes` key, and the fresh-interpreter proof that the
+shape library stays out of this module's import), `tests/test_lyric_reading.
+py` (the SHAPE LABELS list in the prompt, a "love" row parsing to the
+heart, one of HIS matches naming a shape and surviving a recapture, and the
+pin that a shape-only match still reaches no colour set),
 `tests/test_lyric_events.py`, `tests/test_lyric_console.py` (the Sonic
 domain — round trips, the ask-first flow for both Claude-spending ops and
 the auto_read/word-colours-show on/off asymmetry, the import boundary

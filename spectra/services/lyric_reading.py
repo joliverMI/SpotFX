@@ -14,6 +14,15 @@ when the match is read back (lyric_matches.resolve), so the prompt stays small,
 is the same for every song (and so is cached), and moving a word from one set to
 another needs no re-reading. Only a change to the words on the list does.
 
+THREE LISTS IN THE PROMPT, ONE LIST OF LABELS BEHIND IT. Colour, effect and
+SHAPE labels are shown apart (the shapes since the Word Shapes plan's row
+W0.2) so Claude can judge a word for what it is — a shape label is a thing
+the show can DRAW, so "love" is the heart — but `parse_reply` still validates
+every label against the one `catalogue.labels` map, which is why a shape
+label needed no change there. A word on both a shape and an effect goes to
+the shape, and the prompt says so; the catalogue is what makes that stand
+(sung_labels.py, PRECEDENCE).
+
 A GUESS HAS TO SURVIVE BEING CHECKED. Every row Claude returns is validated
 against what is really there: the line must exist, the phrase must be sung on
 it, the label must be on the list. One that is not is thrown away and counted by
@@ -113,8 +122,8 @@ def reset() -> None:
 def build_system_prompt(catalogue: sung_labels.Catalogue) -> str:
     return (
         "You read song lyrics for a home light show. The show has a list of LABELS "
-        "(colours, things, moods, places and effects) and can react when a sung word or "
-        "short phrase is really about one of them.\n\n"
+        "(colours, things, moods, places, effects and shapes) and can react when a sung "
+        "word or short phrase is really about one of them.\n\n"
         f"Find the words or short phrases, 1 to {MAX_PHRASE_WORDS} words, that are about "
         "something on the list. Judge each one by what its line means:\n"
         "- A word that names a label in the sense it has here counts: \"her red dress\" is "
@@ -127,7 +136,10 @@ def build_system_prompt(catalogue: sung_labels.Catalogue) -> str:
         "- Report specific sung words and phrases only. Do not report what the song as a "
         "whole is about.\n"
         "- A short common word is rarely worth reporting unless the line is really about "
-        "it.\n\n"
+        "it.\n"
+        "- A SHAPE label is a thing the show can DRAW on its panel, so a word that means "
+        "that thing counts even when the word itself is not the shape's name: \"love\" is "
+        "the heart. When a word fits a shape and an effect, give the SHAPE.\n\n"
         "Give each match a confidence from 0 to 1. The show plays a match on that share of "
         "its plays: 0.9 plays nine plays in ten, 0.1 one play in ten. So be honest about "
         "doubt rather than leaving a match out: 0.9 or more when the words clearly mean the "
@@ -139,7 +151,8 @@ def build_system_prompt(catalogue: sung_labels.Catalogue) -> str:
         "(copied from that line exactly), `label` (spelled exactly as listed) and `why` "
         "(a few words).\n\n"
         "COLOUR LABELS: " + ", ".join(catalogue.color_labels) + "\n\n"
-        "EFFECT LABELS: " + ", ".join(catalogue.effect_labels) + "\n"
+        "EFFECT LABELS: " + ", ".join(catalogue.effect_labels) + "\n\n"
+        "SHAPE LABELS: " + ", ".join(catalogue.shape_labels) + "\n"
     )
 
 
