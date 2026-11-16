@@ -132,7 +132,9 @@
         "scripts/check_fish_tail_drive.py",
         "tests/test_fish_tail_drive.py",
         "scripts/check_fish_pond_rest.py",
-        "tests/test_fish_pond_rest.py"
+        "tests/test_fish_pond_rest.py",
+        "scripts/check_fish_word_shape.py",
+        "tests/test_fish_word_shape.py"
       ]
     },
     "melt-effect": {

@@ -237,8 +237,10 @@ must not be a validation error) and a NO-OP at fire time, and
 `scene_store.scene_warnings` says so on every save.
 
 **THE BAND IS THE SWITCH** (his Q6 A). A scene with no Words band is
-`no_class` and writes nothing. That, plus the empty `WORD_SHAPE_EFFECTS`,
-is why this row changed nothing in his room.
+`no_class` and writes nothing. That, plus `WORD_SHAPE_EFFECTS`, is the pair
+of switches between a sung word and a fixture: W0.3 changed nothing in his
+room because the second was empty, and wave 1 opens it one effect at a
+time.
 
 **WHERE EACH NUMBER COMES FROM.** The five timings are ROOM settings
 (Sonic-tellable, Help topic `word-shapes`), resolved by ONE pure function,
@@ -253,9 +255,10 @@ effect_types)`:
 | `word_shape_release_ratio` | 1.5 | the release is this × the form |
 
 The form is floored at `fx.device_model.word_shape_form_min_s` — a
-per-effect minimum (`WORD_SHAPE_FORM_MIN_S`, empty until Fish's wave-1 row
-gives it 2.0 s). **That accessor is the one thing easiest to get wrong
-here, and the W0.3 review caught exactly this:**
+per-effect minimum (`WORD_SHAPE_FORM_MIN_S`; the Fish's 2.0 s, since row
+W1.4, is the only one declared — STAR takes the approved Energy-paced
+form). **That accessor is the one thing easiest to get wrong here, and the
+W0.3 review caught exactly this:**
 
 - **THE LEAD IS THE FORM IN PRACTICE.** The effect is told the time LEFT to
   the word, and the band fired a lead early, so those are the same number.
@@ -699,6 +702,73 @@ quiet-Energy binding spawns 0.8 blobs/s for a 176-cell outline, and
 `spawn_rate` 2.0 or `beat_burst` 3 (his own params) read 72.7% / 75.6% in
 the same room. `.claude/skills/blackhole-effect/SKILL.md`'s own "WORD
 SHAPES" section is the full record.
+
+### Fish / `fish` (row W1.4, 2026-11-15) — a procession along the outline
+
+His revision of the row, verbatim: *"Fish: similar to orbits ... they need
+to smoothly accelerate and not have sudden velocity shifts"*, then *"the
+fish didn't seem to be sufficiently making the outline. We may need to boost
+the trail brightness and lower decay briefly to get it to show better. They
+also may need to more tightly flow."* P2 A, approved: with FEW fish the
+water keeps a trace of the loop while the fish swim it.
+
+The fish turn onto the loop nose to tail, each dashing a little to get
+there, circle it for the phrase and peel away. `.claude/skills/fish-effect`
+(its WORD SHAPES section) is the binding statement; what matters HERE,
+because it is about this contract rather than that effect:
+
+- **Fish is still the only effect with a MINIMUM FORM** — STAR, Sauron,
+  Fireworks, Orbits and the Black Hole all take the approved Energy-paced
+  one — and its 2.0 s is
+  why W0.3's "both floors ask the SHOWING scene's own effects" rule exists
+  at all: a procession has to SWIM onto the outline, and the lead IS the
+  form in practice, so asking globally would stretch every other scene's
+  shape to 2.0 s. `fx.device_model.WORD_SHAPE_FORM_MIN_S["fish"] = 2.0` —
+  in `device_model`, never a registered param, because the planner needs
+  it before it has asked any effect anything.
+- **The library views it reads** are `at(s)` and nothing else — no `polar`,
+  no `sdf`, no `sdf_fast`. So it deliberately does NOT call `prime()`,
+  which would build the ~200 ms `sdf_fast` grid it never looks at. An
+  effect that only walks the outline should do the same.
+- **SIZE is not the effect's own `sx`/`sy` here.** `word_shape_size` is a
+  fraction of the PANEL's half-height in the -1..1 space this skill
+  describes, but Fish's `sx`/`sy` carry `radius_scale` on top of that, so
+  it converts (`_word_shape_size_n`, `word_shape_size / radius_scale`).
+  Any effect whose normalized space is not the panel's own owes the same
+  conversion — the drawn shape must still come out the panel's aspect.
+- **The angle a shape's `at(s)` reports is the angle an effect's own
+  normalized space reports**, as long as its two axis scales are equal (as
+  Fish's are, both `radius_scale`), because a positive diagonal scaling
+  preserves the cyclic order of rays. That is what lets the Fish map a
+  fish's bearing to a place on the outline with `np.interp` and no panel
+  geometry at all, and it is monotonic only because every shipped shape is
+  star-shaped about its centre — which the library MEASURES.
+- **The clarity bar's denominators are this skill's own counts.** Fish's
+  check script imports `scripts/check_word_shapes.py`'s mask decode and its
+  `measure()` outline mask rather than re-deriving either, so a changed
+  outline moves both the pinned counts and the Fish's bar together.
+- **What its bar cost, and the warning for any effect that FOLLOWS an
+  outline rather than sampling it.** The shapes' corners are far sharper
+  than a fish's own turn radius: at SIZE 0.62 the outline turns 249 degrees
+  (the heart's cleft), 154 (a star's notch) and 114 (the diamond's tip)
+  inside ONE turn radius of arc, and the depth a radius-R arc must leave at
+  a corner of exterior angle theta is `R (1 / cos(theta / 2) - 1)` — a
+  reversal past 180 degrees being bounded by the circle's own diameter
+  instead. Fish answers it by tightening the turn ARC under a shape
+  (`WS_TURN_X`, the pre-drop's own mechanism) and by reading both distance
+  bars off the fish that law allows on the line. Budget for this before
+  promising a distance bar.
+- **Measured** (20 seeds, Energy 0.2 and 0.8, his real mask): on the word
+  0.4-1.4 cell pitches median, at mid-hold 0.2-1.8, the outline **99.4 to
+  100% lit** against bars of 60% (few) and 70% (many), white 18.96%/15.96%
+  against this effect's own worst busy frame today (21.75%/28.29%),
+  +0.72/+0.34 ms p50, and untold byte-identical over both real-audio arcs.
+- **A tighter follower is a whiter one.** Sections 4 and 5 pull against
+  each other here: the better the fish hug the loop, the more of the
+  shoal's light lands in the same cells. The plan's suggested 1.2-1.5 s
+  trail half-life measured 5 (few) to 13 (many) points MORE white for ZERO
+  outline gain, so it ships at 0.6 s. Any effect that concentrates its own
+  light onto the outline should expect the same trade.
 
 ## Related
 

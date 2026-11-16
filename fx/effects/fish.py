@@ -1,5 +1,6 @@
 import colorsys
 import logging
+import math
 
 import numpy as np
 import voluptuous as vol
@@ -7,7 +8,7 @@ from PIL import Image
 
 import fx.effects.particle_handoff as particle_handoff
 import fx.effects.pre_drop as pre_drop
-from fx.effects import lull_handoff, phase_grammar
+from fx.effects import lull_handoff, phase_grammar, word_shape_keys, word_shapes
 from fx.color import validate_gradient
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
@@ -1243,6 +1244,318 @@ BIG_AVOID_CORE = 0.7         # the share of a splat's reach counted as BODY:
 BIG_AVOID_U = np.array([0.0, 0.25, 0.5, 0.75, 1.0], dtype=np.float32)
                              # the ordinary fish's body, sampled nose to tail
 
+# ── WORD SHAPES: a procession along the outline (plan row W1.4) ─────────────
+# HIS WORDS for the row: "Fish: similar to orbits ... they need to smoothly
+# accelerate and not have sudden velocity shifts", and on the first design:
+# "the fish didn't seem to be sufficiently making the outline. We may need to
+# boost the trail brightness and lower decay briefly to get it to show
+# better. They also may need to more tightly flow." P2 A, approved: with FEW
+# fish the water keeps a trace of the loop while the fish swim it.
+#
+# WHAT HAPPENS. A sung word that reaches a shape fires the showing scene's
+# Words response and the `word_shape` kind writes the six told keys
+# (fx/effects/word_shape_keys.py) in ONE jump. This effect edge-detects the
+# SEQ, runs the whole form/hold/release on its own clock and resets itself
+# after; it never writes a key back. Every fish is assigned a place on the
+# outline, swims onto it under its ORDINARY turn clamp and speed ease — the
+# lull keepers' steer-to-target is the pattern — and then circles the loop
+# nose to tail for the hold. The trail brightens and lingers, and with few
+# fish the wake carries a trace of the loop behind them, so the whole
+# outline shows with only two or three.
+#
+# STEERED, NEVER PLACED, and nothing here is a new MODE: a shaped fish is
+# an ordinary swimmer (mode < 2) with the loop's own steer summed into the
+# same desired-heading vector every other term lands in, bounded by the
+# same turn-rate clamp. So the two fish laws still hold structurally — no
+# fish reverses on the spot, every about-face is an arc — and the whole
+# mechanism is a BLEND on the rest geometry: at m = 0 (untold, or after the
+# release) not one expression in draw() differs from today's, which is what
+# `tests/test_fish_word_shape.py`'s pinned-module proof holds.
+#
+# THE ENVELOPE IS THE SPEED, NEVER THE AIM (his "smoothly accelerate"): the
+# told smoothstep `m` paces how hard the loop pulls and how fast a fish
+# runs, but a fish heads for its entry from the FIRST frame of the form.
+# `grip` is the loop's own authority — 1 from that first frame, let go over
+# the first half of the RELEASE (WS_RELEASE_GRIP), so the fish return to
+# wandering with heading and speed intact while the trail is still fading.
+#
+# THE ENTRY RULE. Each fish's entry is the outline point on its OWN bearing
+# from the centre of view, so no two cross on the way in; no two entries are
+# within WS_ENTRY_MIN_GAP / n of the loop; and over WS_SPACE_EASE_S the
+# entries ease to EVEN spacing, each fish keeping its order round the loop.
+# The bearing is read in the fish's own normalized space, which is the
+# shape's own space up to one scale per axis (`sx` and `sy` share
+# `radius_scale`), so the two angles are the same angle.
+#
+# THE PAUSES (plan 3.4): the wall's authority, the big fish, a swim burst
+# and the pond rest are all held while a shape runs and resume after; one
+# already in flight finishes. The wall's hold is faded by m exactly the way
+# a big fish's threat already relaxes it, EXCEPT where the wall is late
+# turning a fish back from a wall it is heading into — "the pond gives way,
+# the wall does not" (the BIG_AVOID block) is kept, so nothing here can push
+# a fish off the panel. The lunge, the solo burst and the speed moments need
+# no gate of their own: they multiply the ORDINARY target, which the blend
+# below fades out.
+#
+# WHAT WRONG LOOKS LIKE. P3 A means a shape is never TOLD while a charge,
+# lull or drop is armed, but a phase can still ARRIVE mid-shape. Then the
+# phase wins: a formed school, a rush, ejecta, keepers and dispersing fish
+# are not on the loop at all, so the procession simply empties while the
+# told clock keeps running — and the trail and wake restore themselves at
+# the release's end either way. On the panel that reads as the shape
+# dissolving into the charge's school, which is the right answer: his
+# authored moment is the bigger one.
+WS_LOOP_S_FEW = 5.5         # seconds for one lap of the outline, few fish
+WS_LOOP_S_MANY = 7.0        # ... and many (a longer line, a slower flow)
+WS_TARGET_LEAD = 0.015      # the target sits this much of the loop AHEAD of
+                            # a fish's own place, so it is always swimming
+                            # toward something rather than sitting on it
+WS_REACH = 0.015            # ... and NEVER further ahead than this, however
+                            # far behind its station the fish is. THE ONE
+                            # THING THAT KEEPS A FISH ON A CORNER: anchored
+                            # to the time-marched station instead, a fish
+                            # that had fallen a tenth of the loop behind
+                            # aimed at a point right across the heart's
+                            # cleft or a star's notch and swam the CHORD —
+                            # measured 11 px (5.6 cell pitches) inside the
+                            # outline, against a 2-pitch bar. Anchored a
+                            # short arc ahead of the fish's OWN place, the
+                            # chord is always a few px long and the fish
+                            # follows the line round the corner; the lag is
+                            # closed by WS_SPACING_GAIN's speed correction
+                            # instead, which cannot pull it off the line.
+WS_SPACE_EASE_S = 1.0       # the entries ease to even spacing over this
+WS_ENTRY_MIN_GAP = 0.5      # no two entries closer than this x (1 / n) of
+                            # the loop
+WS_SEEK_W = 14.0            # the loop's steer weight — the lull keepers'
+                            # own KEEP_SEEK_W, the same job
+WS_TURN_GAIN_X = 2.0        # the heading gain is x (1 + m * this) under a
+                            # full shape, still clipped to the turn circle
+                            # below so it can never turn a fish tighter
+                            # than it can go. The plan asked for DOUBLE and
+                            # double was not enough: a proportional steer
+                            # needs a heading error to command a rate at
+                            # all, so at x2 the fish lagged the line's own
+                            # turn and swung wide of it — measured worst
+                            # distance on the word 4.5 cell pitches at x2
+                            # against 2.2 at x3, with the mid-hold and the
+                            # smoothness bars unchanged
+                            # (scripts/check_fish_word_shape.py sections 3
+                            # and 4). Reported, not quietly widened.
+WS_TURN_X = 0.25            # THE TURN ARC TIGHTENS, scaled by m: the circle
+                            # a fish turns on is this fraction of its own
+                            # under a full shape — HIS OWN NOTE, "They also
+                            # may need to more tightly flow", and the only
+                            # way the clarity bar is reachable at all. Every
+                            # shape in the library has corners far sharper
+                            # than his `orbit_radius` of 0.14 (a 4.5 px
+                            # circle): measured, the outline turns 249
+                            # degrees (the heart's cleft), 154 (a star's
+                            # notch) and 114 (the diamond's tip) inside one
+                            # turn radius of arc, so a fish on its ordinary
+                            # circle rounds those 5 cell pitches wide of the
+                            # line and the whole shape reads as a blob. At
+                            # 0.25 it is 1.1 px and the same corners cost
+                            # 0.3-2.4. THE CLAMP IS STILL THE CLAMP — every
+                            # steering term is bounded by it exactly as
+                            # before, it is simply a tighter circle while a
+                            # shape runs, and the mechanism is the lull
+                            # keepers' own (PRE_DROP_TURN, `kst["turn"]`
+                            # dividing omega_max). At m = 0 it IS the fish's
+                            # own circle, to the bit.
+WS_DASH_X = 2.5             # the approach may run this many x cruise
+                            # (`dist / time_left`, capped — the swim burst's
+                            # own 2.2x + lunge is the precedent for a fish
+                            # moving this fast)
+WS_DASH_SETTLE_S = 0.4      # ... eased to the procession's pace over the
+                            # form's last stretch, so the word itself is
+                            # never a velocity step
+WS_MIN_LEFT_S = 0.05        # the time left is never read below this
+# HOLDING STATION, in two parts, and the split is what keeps the fish ON
+# the line. The lag between a fish and its own place on the loop has a
+# COMMON-MODE part (the whole line is behind, because the places marched
+# while the fish were still swimming in, and a fish's path round a corner
+# is longer than the arc it is following) and a DIFFERENTIAL part (this
+# fish is out of step with its neighbours). Correcting both with speed
+# meant every fish sprinting to catch an absolute phase — his "no sudden
+# velocity shifts" — and never catching it, since a fish and its place move
+# at the same pace. So:
+#   * the LINE'S OWN PHASE follows the fish (WS_PHASE_GAIN): the procession
+#     is where the fish are, which is also what the water trace should be
+#     drawing;
+#   * each fish's SPEED fixes only its spacing against its neighbours
+#     (WS_SPACING_GAIN), so the line self-spaces nose to tail.
+WS_PHASE_GAIN = 1.5         # loop fractions a second the line's own phase
+                            # eases toward the fish's own mean place, per
+                            # fraction of common-mode lag
+WS_PHASE_MAX = 0.25         # ... reading no more lag than this in one go
+WS_SPACING_GAIN = 1.4       # a fish behind its SLOT swims this much faster
+                            # per slot of differential lag. 1.4 against 0.8
+                            # measured better on 11 of 12 distance columns
+                            # (scripts/check_fish_word_shape.py section 4,
+                            # 4 seeds x 3 shapes x few/many)
+WS_SLOT_LAG_MAX = 2.0       # ... slots the correction reads up to
+WS_PACE_MIN = 0.4           # ... and a fish AHEAD of its slot never slows
+                            # below this much of the pace
+WS_WALL_LOOK_CUT = 0.75     # the wall's look-ahead shrinks by m x this (its
+                            # glance starts later) ...
+WS_WALL_TURN_X = 2.0        # ... and its arc tightens toward this x, both
+                            # still floored at the fish's own turn radius in
+                            # `_glance_radius`: tightened WITHIN the clamp
+# HIS "LOWER DECAY BRIEFLY": the body trail's half-life under a full shape,
+# as (FEW, MANY) — a PAIR because the trade is only real with many fish.
+# With FEW the water trace (P2 A) already carries the line, so a longer
+# trail buys nothing and only adds light; with MANY there is no trace and
+# the trail IS how the band between the fish stays lit.
+#
+# BOTH NUMBERS WERE RE-MEASURED ON A METRIC THAT MEANS LIGHT, and the first
+# answer here was wrong because the metric was: counting a band cell "lit"
+# at ANY value above zero saturates at ~100% on this effect, since the
+# fish's own wake already washes the band untold. Read as the share of the
+# band above 128/255 (scripts/check_fish_word_shape.py's `band_contrast`),
+# the longer trail buys 13-24 points of real light with many fish for 3-5
+# points of white — which is the Admiral's own ask, so it is taken — and
+# nothing at all with few. The per-mode table is in
+# `.claude/skills/fish-effect/SKILL.md`; white stays under this effect's
+# own worst busy frame today either way, which is the standing constraint
+# (the WAKE COLOUR block, his 2026-10-26 report).
+WS_TRAIL_HALF_LIFE_S = (0.6, 1.0)
+WS_TRAIL_GAIN = 1.6         # ... and his "boost the trail brightness",
+                            # through the body layer's own hue-preserving
+                            # clip so a brighter smear never goes white
+WS_RIPPLE_LIFE_S = 3.0      # THE WATER TRACE (P2 A, few fish only):
+                            # `ripple_life` under a full shape — a ~1.26 s
+                            # wake half-life, so the trace is still there at
+                            # the end of the longest hold (2.0 s)
+WS_TRACE_AMP = 0.9          # the loop trace's deposit, x the ordinary
+                            # wake's own strength
+WS_TRACE_SIZE_BODY = 0.5    # ... sized this many body lengths across
+WS_TRACE_MAX_ARC = 0.08     # never more than this much of the loop in one
+                            # frame (a guard: a huge dt cannot paint the
+                            # whole outline at once)
+WS_OUTLINE_SAMPLES = 720    # the bearing -> place table's resolution
+WS_RELEASE_GRIP = 0.5       # the fish let go of the loop this far down the
+                            # release ("half-way down", plan 3.4)
+WS_PAUSE_AT = 0.02          # m past which the paused features are held
+
+
+def word_shape_grip(t, form_s, hold_s, release_s, share=WS_RELEASE_GRIP):
+    """THE LOOP'S OWN AUTHORITY, which is NOT the told envelope: 1 from the
+    first frame of the form (a fish heads for its entry straight away — the
+    S-curve paces its speed, never where it is going), 1 through the hold,
+    then 1 -> 0 on a smoothstep over the first `share` of the release, and 0
+    after. Zero at both ends of that ramp, so letting go of the loop is as
+    smooth as taking it.
+
+    A module function so the check script and the tests read the same law
+    the effect does."""
+    t = float(t)
+    form_s = max(0.0, float(form_s or 0.0))
+    hold_s = max(0.0, float(hold_s or 0.0))
+    release_s = max(0.0, float(release_s or 0.0))
+    if t < 0.0:
+        return 0.0
+    standing = form_s + hold_s
+    if t <= standing:
+        return 1.0
+    span = release_s * max(min(float(share), 1.0), 0.0)
+    if span <= 0.0:
+        return 0.0
+    u = min(max((t - standing) / span, 0.0), 1.0)
+    return float(1.0 - u * u * (3.0 - 2.0 * u))
+
+
+def word_shape_restart_t(fraction, form_s):
+    """Where on the FORM's own smoothstep a shape already `fraction` formed
+    sits, in seconds — the inverse of `word_shape_keys.envelope`'s rising
+    ramp (`3u^2 - 2u^3`, inverted in closed form).
+
+    This is what makes "a second word arriving mid-release restarts the form
+    from the current fraction" true without a snap to zero: the new form
+    starts at the clock time that already reads the fraction the old shape
+    had reached, so the envelope is continuous across the edge."""
+    form_s = max(0.0, float(form_s or 0.0))
+    f = min(max(float(fraction), 0.0), 1.0)
+    if form_s <= 0.0 or f <= 0.0:
+        return 0.0
+    if f >= 1.0:
+        return form_s
+    u = 0.5 - math.sin(math.asin(1.0 - 2.0 * f) / 3.0)
+    return float(form_s * min(max(u, 0.0), 1.0))
+
+
+def word_shape_release_t(fraction, form_s, hold_s, release_s):
+    """Where on the RELEASE's own smoothstep a shape still `fraction`
+    standing sits, in seconds — what a CLEARING write (told() back to None
+    mid-shape) jumps the clock to, so the shape lets go from where it is
+    instead of vanishing."""
+    form_s = max(0.0, float(form_s or 0.0))
+    hold_s = max(0.0, float(hold_s or 0.0))
+    release_s = max(0.0, float(release_s or 0.0))
+    f = min(max(float(fraction), 0.0), 1.0)
+    base = form_s + hold_s
+    if release_s <= 0.0:
+        return base
+    if f >= 1.0:
+        return base
+    if f <= 0.0:
+        return base + release_s
+    u = 0.5 - math.sin(math.asin(1.0 - 2.0 * (1.0 - f)) / 3.0)
+    return float(base + release_s * min(max(u, 0.0), 1.0))
+
+
+def word_shape_entries(bearings, table_ang, table_s, min_gap):
+    """Each fish's entry place on the loop, in loop fractions.
+
+    `bearings` are the fish's own bearings from the centre of view (radians,
+    the shape's own angle convention); `table_ang`/`table_s` the monotonic
+    bearing -> place map. Returns (entry place per fish, its rank round the
+    loop). Every entry is at least `min_gap` of the loop from its
+    neighbours, opened by order-preserving relaxation passes — so the fish
+    never cross on the way in, which is the whole point of reading the
+    bearing rather than handing out places by index."""
+    th = np.asarray(bearings, dtype=np.float64)
+    lo = float(table_ang[0])
+    wrapped = lo + (th - lo) % (2.0 * np.pi)
+    s = np.interp(wrapped, table_ang, table_s) % 1.0
+    k = s.size
+    order = np.argsort(s, kind="stable")
+    rank = np.empty(k, dtype=np.float64)
+    rank[order] = np.arange(k, dtype=np.float64)
+    if k < 2 or min_gap <= 0.0:
+        return s, rank
+    gap = min(float(min_gap), 1.0 / k)
+    # Exactly, not by relaxation. Sorted ascending, "every cyclic gap is at
+    # least `gap`" is "`v_i = ring_i - i * gap` is NON-DECREASING, and
+    # `v_last - v_first` is at most `1 - k * gap`". So: the nearest
+    # non-decreasing sequence to v (pool adjacent violators — exact, one
+    # pass), then, if the wrap is still short, compress the whole span into
+    # the room there is. Both steps keep v non-decreasing, so the fish keep
+    # their order round the loop, which is the entry rule's own point.
+    ring = s[order]
+    v = ring - np.arange(k, dtype=np.float64) * gap
+    stack_v: list[float] = []
+    stack_n: list[int] = []
+    for value in v:
+        total, count = float(value), 1
+        while stack_v and stack_v[-1] > total / count + 1e-15:
+            total += stack_v[-1] * stack_n[-1]
+            count += stack_n[-1]
+            stack_v.pop()
+            stack_n.pop()
+        stack_v.append(total / count)
+        stack_n.append(count)
+    v = np.repeat(np.asarray(stack_v), np.asarray(stack_n))
+    span = float(v[-1] - v[0])
+    room = 1.0 - k * gap
+    if span > room > 0.0:
+        v = v[0] + (v - v[0]) * (room / span)
+    elif room <= 0.0:
+        v = np.full(k, v[0])
+    out = np.empty(k, dtype=np.float64)
+    out[order] = (v + np.arange(k, dtype=np.float64) * gap) % 1.0
+    return out, rank
+
 
 def big_fish_hue_degrees(intensity):
     """His colour rule: 120 degrees at intensity 0.2 or below, 180 at 0.5
@@ -1337,6 +1650,12 @@ _SOA_NAMES = (
     # below 0 the turn through its glide), its heading (NaN = none), and
     # when that fish's next dart is due
     "p_dart", "p_dhd", "p_dnext",
+    # WORD SHAPES (the block of that name): this fish's entry place on the
+    # outline and its rank round the loop (NaN = not on the loop). A PLACE,
+    # not an index, for `p_disp`'s own reason: _compact() reshuffles slots
+    # whenever a fish retires, so anything keyed on an index silently moves
+    # to the wrong fish.
+    "p_ws_s", "p_ws_rank",
 )
 
 
@@ -1633,6 +1952,7 @@ class Fish2d(Twod, GradientEffect):
         *phase_grammar.BREATH_KEYS,
         phase_grammar.SHOCK_ON_KEY,
         *pre_drop.KEYS,
+        *word_shape_keys.KEYS,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -2160,6 +2480,28 @@ class Fish2d(Twod, GradientEffect):
             # THE PRE-DROP's told keys (ride only the lull arm; zeros on a
             # lull that plays none) — fx/effects/pre_drop.py
             **pre_drop.schema_fields(),
+            # WORD SHAPES (the block of that name): the shape's own two
+            # REGISTERED settings, plus the six told keys, which ride ONLY
+            # the `word_shape` kind's own write — fx/effects/
+            # word_shape_keys.py's rule 1.
+            vol.Optional(
+                "word_shape_size",
+                description=(
+                    "Word shape: the shape's half-height as a fraction of "
+                    "the panel's, so the fish's loop is this big"
+                ),
+                default=0.62,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=1.0)),
+            vol.Optional(
+                "word_shape_few",
+                description=(
+                    "Word shape: this many fish or fewer is 'few' — the "
+                    "water keeps a trace of the loop behind them so the "
+                    "whole outline shows"
+                ),
+                default=3,
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_PARTICLE_COUNT)),
+            **word_shape_keys.schema_fields(),
         }
     )
 
@@ -2264,6 +2606,10 @@ class Fish2d(Twod, GradientEffect):
         self.p_dart = np.zeros(CAP, dtype=np.float32)
         self.p_dhd = np.full(CAP, np.nan, dtype=np.float32)
         self.p_dnext = np.zeros(CAP, dtype=np.float32)
+        # WORD SHAPES (the block of that name): this fish's entry place on
+        # the outline and its rank round the loop, NaN while it has none
+        self.p_ws_s = np.full(CAP, np.nan, dtype=np.float64)
+        self.p_ws_rank = np.full(CAP, np.nan, dtype=np.float64)
         self._dart_rng = None
         self._darting = None
         self._rest_free = None
@@ -2309,6 +2655,17 @@ class Fish2d(Twod, GradientEffect):
         # one) and the dart's own state (PRE_DROP_* above)
         self._pd_clk = None
         self._pd_dart = None
+        # WORD SHAPES (the block of that name): the shape running now (None
+        # on every untold frame), the edge a write left for draw() to take,
+        # the bearing -> place table for the shape in hand, the loop's own
+        # drawn length, and the wall's (look-ahead, arc) multipliers while
+        # one runs
+        self._ws = None
+        self._ws_pending = None
+        self._ws_table = None
+        self._ws_loop = None
+        self._ws_wall = None
+        self._ws_gain_clip = False
         self._wall = None        # the lit silhouette's distance field
         self._wall_key = None    # ... and what it was read from
         self._solo_due = 0.0     # solo bursts owed but not yet placed
@@ -2426,6 +2783,9 @@ class Fish2d(Twod, GradientEffect):
         self.big_fish_ripple_size = self._config["big_fish_ripple_size"]
         self.big_fish_avoid = self._config["big_fish_avoid"]
         self.big_fish_avoid_margin = self._config["big_fish_avoid_margin"]
+        self.word_shape_size = self._config["word_shape_size"]
+        self.word_shape_few = self._config["word_shape_few"]
+        self._word_shape_told()
         # the big fish poke: edge-detected like fireworks' burst_rockets (a
         # write that changes the value arms; draw consumes it and self-
         # resets the key to 0 so an identical later write edges again)
@@ -2649,6 +3009,11 @@ class Fish2d(Twod, GradientEffect):
         self.p_dart[s] = 0.0
         self.p_dhd[s] = np.nan
         self.p_dnext[s] = 0.0
+        # WORD SHAPES: a fish born mid-shape has no place on the loop (the
+        # places are handed out at the edge, and nothing re-spaces the line
+        # for an arrival), so it swims ordinarily until the next word
+        self.p_ws_s[s] = np.nan
+        self.p_ws_rank[s] = np.nan
         self.p_wurg[s] = 0.0
         self.p_wcmd[s] = 0.0
         self.p_wauth[s] = 0.0
@@ -4048,10 +4413,11 @@ class Fish2d(Twod, GradientEffect):
 
     def _rest_held(self, n):
         """THE POND REST is held at 0: a charge, lull or drop, a formed
-        school, a rush, or a crossfade on either side of this effect (a
-        transition program running into it included)."""
+        school, a rush, a WORD SHAPE, or a crossfade on either side of this
+        effect (a transition program running into it included)."""
         return (
             self._phase != "none"
+            or self._word_shape_holds()
             or self._school_on
             or bool((self.p_mode[:n] == 3).any())
             or getattr(self, "_transition_program", None) is not None
@@ -4224,7 +4590,15 @@ class Fish2d(Twod, GradientEffect):
             1.0 + stiff * (quad * np.abs(v) + lin) * dt
         )
         v_tail = np.maximum(v, 0.0) * cruise
-        if weight >= 1.0:
+        # `weight` is a SCALAR on every frame but one under a WORD SHAPE,
+        # where the tail hands over per fish (the WORD SHAPES block), so the
+        # scalar branches below are the only ones an untold frame reaches.
+        if np.ndim(weight):
+            w = np.asarray(weight, dtype=np.float32)[idx]
+            self.p_spd[idx] = (
+                (1.0 - w) * self.p_spd[idx] + w * v_tail
+            ).astype(np.float32)
+        elif weight >= 1.0:
             self.p_spd[idx] = v_tail.astype(np.float32)
         else:
             self.p_spd[idx] = (
@@ -4239,7 +4613,9 @@ class Fish2d(Twod, GradientEffect):
         n = eligible.size
         amp_t = base * self.p_tamp[:n]
         freq_t = np.where(self.p_tf[:n] > 0.0, self.p_tf[:n], flap_freq)
-        if weight < 1.0:
+        if np.ndim(weight) or weight < 1.0:
+            # an ARRAY weight is a WORD SHAPE's per-fish hand-over; a scalar
+            # one is everything else, and 1.0 keeps today's expression
             amp_t = (1.0 - weight) * flap_amp + weight * amp_t
             freq_t = (1.0 - weight) * flap_freq + weight * freq_t
         return (np.where(eligible, amp_t, flap_amp),
@@ -4275,6 +4651,389 @@ class Fish2d(Twod, GradientEffect):
         self.p_sb_t[pick] = float(self.solo_burst_time)
         self._solo_due -= 1.0
         self.solo_bursts += 1
+
+    # ── WORD SHAPES (the block of that name at the top of the module) ───
+    def _word_shape_told(self):
+        """Read the told keys off a config write and leave draw() an edge.
+
+        THE SEQ, NEVER THE ID (word_shape_keys.py): two words of the same
+        shape back to back both edge. CREATION BASELINE, the fireworks
+        `burst_rockets` rule: a fresh instance built from a persisted config
+        carrying a stale SEQ must NOT fire, so the first read only
+        remembers the number it saw. A write that tells NOTHING while a
+        shape is running is a CLEARING write — it releases from where the
+        shape has got to rather than snapping it away.
+
+        Runs on the writer's own thread (`config_updated`), which is also
+        where the geometry lookup belongs: `word_shapes.get` is cheap, but
+        it is not the render thread's work. Nothing lazy is PRIMED here on
+        purpose — this effect reads only `at()`/`tangent()`, whose tables
+        `build()` already made, and `prime()` would build the ~200 ms
+        `sdf_fast` grid Fish never looks at.
+        """
+        told = word_shape_keys.told(self._config)
+        seq = int(self._config.get(word_shape_keys.SEQ_KEY, 0) or 0)
+        if not hasattr(self, "_ws_seen"):
+            self._ws_seen = seq
+            self._ws_told = told
+            return
+        was, self._ws_told = self._ws_told, told
+        if told is not None and seq != self._ws_seen:
+            self._ws_seen = seq
+            shape = word_shapes.get(told.shape)
+            self._ws_pending = ("start", told, shape)
+            return
+        self._ws_seen = seq
+        if told is None and was is not None:
+            self._ws_pending = ("clear", None, None)
+
+    def _word_shape_table(self, shape):
+        """The monotonic bearing -> place map for one shape, built once and
+        kept: a fish's own bearing from the centre of view answers with the
+        place on the outline that bearing points at.
+
+        Read in the fish's own NORMALIZED space, which is the shape's own
+        space up to one scale per axis (`sx` and `sy` both carry
+        `radius_scale`), so the two angles are literally the same angle and
+        this needs no panel geometry. Monotonic because every shipped shape
+        is star-shaped about its centre — the library measures that, it is
+        not assumed here."""
+        cached = self._ws_table
+        if cached is not None and cached[0] is shape:
+            return cached[1], cached[2]
+        s = np.linspace(0.0, 1.0, WS_OUTLINE_SAMPLES, endpoint=False)
+        ux, uy = shape.at(s)
+        ang = np.unwrap(np.arctan2(uy, ux))
+        if ang[-1] < ang[0]:
+            ang, s = ang[::-1].copy(), s[::-1].copy()
+        self._ws_table = (shape, ang, s)
+        return ang, s
+
+    def _word_shape_size_n(self):
+        """The shape's half-height in the fish's OWN normalized units.
+
+        `word_shape_size` is a fraction of the PANEL's half-height in the
+        -1..1 space every Twod effect works in; this effect's `sx`/`sy`
+        carry `radius_scale` on top of that (do_once), so one panel
+        half-height is `1 / radius_scale` of a fish's normalized unit. Both
+        axes share the factor, which is what keeps the drawn shape the
+        panel's own aspect — about 14% wider than tall on his crystal,
+        exactly as every circle here is (the word-shapes skill)."""
+        return float(self.word_shape_size) / max(float(self.radius_scale), 1e-6)
+
+    def _word_shape_loop_px(self, shape, size_n):
+        """The outline's length in SCREEN px at the size it is drawn — the
+        denominator of the procession's pace. A fact about the outline AS
+        DRAWN, so it depends on the drawn size and on the panel's own
+        `sx`/`sy`; hence the cache key."""
+        key = (id(shape), round(float(size_n), 6), float(self.sx),
+               float(self.sy))
+        cached = self._ws_loop
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        s = np.linspace(0.0, 1.0, WS_OUTLINE_SAMPLES, endpoint=False)
+        ux, uy = shape.at(s)
+        dx = np.diff(np.append(ux, ux[0])) * size_n * self.sx
+        dy = np.diff(np.append(uy, uy[0])) * size_n * self.sy
+        loop_px = float(np.hypot(dx, dy).sum())
+        self._ws_loop = (key, loop_px)
+        return loop_px
+
+    def _word_shape_reset(self):
+        """Forget the shape and every place on it. Nothing writes a told key
+        back (word_shape_keys.py's contract): the effect simply stops
+        reading them."""
+        self._ws = None
+        self._ws_wall = None
+        self.p_ws_s[:] = np.nan
+        self.p_ws_rank[:] = np.nan
+
+    def _word_shape_step(self, dt, n, mode, cruise):
+        """One frame of THE PROCESSION. None on every frame no shape runs —
+        and then not one expression in draw() below differs from today's,
+        which is what makes an untold frame byte for byte what it is now.
+
+        Returns the state draw() steers, paces and brightens by:
+          m        the told envelope (word_shape_keys.envelope), 0..1
+          grip     the loop's own authority (word_shape_grip)
+          idx      the fish on the loop this frame
+          m_fish   (n,) the envelope per fish, 0 for every fish not on it
+          tx, ty   each of `idx`'s target, in normalized world units
+          want     each of `idx`'s speed target, px/s
+          few      the latched mode (his Q10 A, as revised for Fish)
+          trace    the loop arc to lay into the water this frame, or None
+        """
+        pend, self._ws_pending = self._ws_pending, None
+        if pend is not None:
+            kind, told, shape = pend
+            if kind == "start" and shape is not None:
+                was = self._ws
+                # A SECOND WORD MID-SHAPE RESTARTS THE FORM FROM WHERE IT
+                # IS (acceptance 7), never from zero: the clock starts at
+                # the time that already reads the fraction standing.
+                frac = 0.0
+                if was is not None:
+                    frac = float(word_shape_keys.envelope(
+                        was["t"], was["told"].form_s, was["told"].hold_s,
+                        was["told"].release_s))
+                self._ws = {
+                    "told": told, "shape": shape,
+                    "t": word_shape_restart_t(frac, told.form_s),
+                    "few": None, "loop_s": 0.0, "loop_px": 0.0,
+                    "assigned": False, "age": 0.0, "march": 0.0,
+                    "line_phase": 0.0, "place": None,
+                }
+            elif kind == "clear" and self._ws is not None:
+                st = self._ws
+                frac = float(word_shape_keys.envelope(
+                    st["t"], st["told"].form_s, st["told"].hold_s,
+                    st["told"].release_s))
+                st["t"] = word_shape_release_t(
+                    frac, st["told"].form_s, st["told"].hold_s,
+                    st["told"].release_s)
+        st = self._ws
+        if st is None:
+            self._ws_wall = None
+            return None
+        told = st["told"]
+        st["t"] += dt
+        if st["t"] > told.total_s:
+            self._word_shape_reset()
+            return None
+        t = st["t"]
+        m = float(word_shape_keys.envelope(
+            t, told.form_s, told.hold_s, told.release_s))
+        grip = word_shape_grip(
+            t, told.form_s, told.hold_s, told.release_s)
+
+        # WHO IS ON THE LOOP. Ordinary swimmers only: a formed school, the
+        # drop's rush, its ejecta, the lull's keepers and a dispersing fish
+        # are authored choreography (or already leaving), and a scattering
+        # instance is on its way off the panel.
+        on = (mode < 2) & (self.p_nocap[:n] == 0)
+        if self._school_on or self._scatter is not None:
+            on = np.zeros(n, dtype=bool)
+        shape = st["shape"]
+        size_n = self._word_shape_size_n()
+        cnx, cny = self.cam_nx, self.cam_ny
+
+        if not st["assigned"]:
+            idx0 = np.flatnonzero(on)
+            if idx0.size == 0:
+                self._ws_wall = None
+                return None
+            ang, s_tab = self._word_shape_table(shape)
+            bearing = np.arctan2(self.p_y[idx0] - cny, self.p_x[idx0] - cnx)
+            entry, rank = word_shape_entries(
+                bearing, ang, s_tab, WS_ENTRY_MIN_GAP / idx0.size)
+            self.p_ws_s[:n] = np.nan
+            self.p_ws_rank[:n] = np.nan
+            self.p_ws_s[idx0] = entry
+            self.p_ws_rank[idx0] = rank
+            few = idx0.size <= int(self.word_shape_few)
+            st.update(
+                assigned=True, few=few,
+                loop_s=WS_LOOP_S_FEW if few else WS_LOOP_S_MANY,
+                loop_px=self._word_shape_loop_px(shape, size_n),
+                # the common phase the even spacing is measured from: the
+                # one that moves the line least, so easing to even spacing
+                # never drags a fish the long way round
+                phase0=float(np.angle(np.exp(
+                    2j * np.pi * (entry - rank / idx0.size)).mean())
+                    / (2.0 * np.pi)),
+                count=int(idx0.size),
+            )
+
+        placed = on & np.isfinite(self.p_ws_s[:n])
+        idx = np.flatnonzero(placed)
+        m_fish = np.where(placed, np.float32(m), np.float32(0.0))
+        # THE WALL IS PAUSED, by m: its glance starts later and, while it
+        # still has authority at all, flies the tightest arc its own circle
+        # allows rather than a wide sweep ("tightened WITHIN the clamp" —
+        # `_glance_radius` floors it at the turn radius either way).
+        self._ws_wall = (
+            self.wall_lookahead * (1.0 - WS_WALL_LOOK_CUT * m),
+            1.0 + (WS_WALL_TURN_X - 1.0) * m,
+        )
+        if idx.size == 0:
+            return {"m": m, "grip": grip, "idx": idx, "m_fish": m_fish,
+                    "tx": None, "ty": None, "want": None,
+                    "few": bool(st["few"]), "trace": None}
+
+        # ── where each fish is going ────────────────────────────────────
+        st["age"] += dt
+        # THE MARCH IS PACED BY THE ENVELOPE TOO: the line barely moves on
+        # the first frames of the form and is circling at full pace by the
+        # word, so a fish swims onto (very nearly) its own entry instead of
+        # chasing a place that has already run a third of the loop.
+        direction = -1.0 if self.reverse else 1.0
+        st["march"] += m * dt / max(st["loop_s"], 1e-3)
+        k = max(int(st["count"]), 1)
+        entry = self.p_ws_s[idx]
+        rank = self.p_ws_rank[idx]
+        even = st["phase0"] + rank / k
+        # the entries ease to EVEN spacing, each fish keeping its order:
+        # the shortest way round, on a smoothstep so the easing never adds
+        # a velocity step of its own
+        w = min(st["age"] / WS_SPACE_EASE_S, 1.0)
+        w = w * w * (3.0 - 2.0 * w)
+        delta = (even - entry + 0.5) % 1.0 - 0.5
+        place = (
+            entry + delta * w
+            + direction * (st["march"] + st["line_phase"])
+        ) % 1.0
+        prev = st["place"]
+        st["place"] = (place, idx.size)
+
+        # EACH FISH'S OWN PLACE ON THE LOOP, read from its bearing through
+        # the same table its entry came from — exact once it is on the line,
+        # and before then it is the outline point on its own bearing, which
+        # IS its entry. The target is a short arc ahead of THAT (never
+        # further than WS_REACH, see that block), so the chord the fish
+        # swims is always a few pixels long and it follows the line round a
+        # corner instead of cutting across it; how far it is behind its
+        # station is answered by its SPEED below, never by its aim.
+        ang, s_tab = self._word_shape_table(shape)
+        lo = float(ang[0])
+        bearing = np.arctan2(self.p_y[idx] - cny, self.p_x[idx] - cnx)
+        s_fish = np.interp(lo + (bearing - lo) % (2.0 * np.pi), ang, s_tab)
+        s_fish = s_fish % 1.0
+        lag = direction * (((place - s_fish) + 0.5) % 1.0 - 0.5)
+        target_s = (
+            s_fish
+            + direction * (np.clip(lag, -WS_REACH, WS_REACH)
+                           + WS_TARGET_LEAD)
+        ) % 1.0
+        ux, uy = shape.at(target_s)
+        tx = cnx + ux * size_n
+        ty = cny + uy * size_n
+
+        # ── how fast ────────────────────────────────────────────────────
+        # The procession's own pace is the loop's length over its lap time,
+        # corrected by how far the fish is BEHIND its own station (`lag`).
+        # That correction is what holds the line together: at the pace
+        # alone a lag is never closed, since a fish and its station move at
+        # the same speed.
+        # On the APPROACH it may run `dist / time_left` up to WS_DASH_X x
+        # cruise so it is on the line by the word, eased back to the pace
+        # over the form's last stretch so the word itself is never a step.
+        pace = st["loop_px"] / max(st["loop_s"], 1e-3)
+        # the LINE'S phase takes the common-mode lag (read next frame — one
+        # frame of lag on a 1.5/s ease is nothing), each fish's speed only
+        # its own share against its neighbours
+        common = float(np.mean(lag))
+        st["line_phase"] -= (
+            WS_PHASE_GAIN * dt
+            * min(max(common, -WS_PHASE_MAX), WS_PHASE_MAX))
+        slots = np.clip((lag - common) * k, -1.0, WS_SLOT_LAG_MAX)
+        station = pace * np.maximum(
+            1.0 + WS_SPACING_GAIN * slots, WS_PACE_MIN)
+        dist = np.hypot((tx - self.p_x[idx]) * self.sx,
+                        (ty - self.p_y[idx]) * self.sy)
+        left = told.form_s - t
+        if left > 0.0:
+            need = dist / max(left, WS_MIN_LEFT_S)
+            u = min(max(left / WS_DASH_SETTLE_S, 0.0), 1.0)
+            u = u * u * (3.0 - 2.0 * u)
+            want = station + (np.maximum(need, station) - station) * u
+        else:
+            want = station
+        want = np.minimum(want, WS_DASH_X * cruise)
+
+        # ── THE WATER TRACE (P2 A), few fish only ───────────────────────
+        # One deposit per fish per frame at the loop point its own PLACE has
+        # reached — the loop, not the fish, so the line glows even while a
+        # fish is still swimming onto it, and never ahead of its own place.
+        # A place moves well under a pixel a frame at either lap time, so a
+        # per-frame splat paints a continuous line exactly the way the
+        # fish's own tail deposit does, under exactly that deposit's own
+        # per-frame rule; WS_TRACE_MAX_ARC is the guard against a frame so
+        # long (or a restart) that the step would be a dotted line instead.
+        trace = None
+        if st["few"] and m > 0.0:
+            step = 0.0
+            if prev is not None and prev[1] == idx.size:
+                step = float(np.max(np.abs(
+                    (place - prev[0] + 0.5) % 1.0 - 0.5)))
+            if step <= WS_TRACE_MAX_ARC:
+                lx, ly = shape.at(place)
+                trace = (
+                    self.cx + (cnx + lx * size_n) * self.sx - self.cam_px,
+                    self.cy + (cny + ly * size_n) * self.sy - self.cam_py,
+                    idx,
+                )
+        return {"m": m, "grip": grip, "idx": idx, "m_fish": m_fish,
+                "tx": tx, "ty": ty, "want": want,
+                "few": bool(st["few"]), "trace": trace}
+
+    def _trail_half_life(self):
+        """The body trail's half-life. HIS NOTE on the Word Shapes build:
+        "We may need to boost the trail brightness and lower decay briefly
+        to get it to show better" — so under a shape the half-life eases
+        from the authored `trail_decay`'s own value up to its end of
+        WS_TRAIL_HALF_LIFE_S — the (FEW, MANY) pair, chosen by the latched
+        mode — and back, by the told envelope. `trail_decay` itself is
+        NEVER written: the scaling is the quantity it drives, so the
+        release's end restores his value exactly and no new param exists."""
+        half_life = 0.02 + self.trail_decay * 0.5
+        ws = self._ws
+        if ws is None:
+            return half_life
+        m = float(word_shape_keys.envelope(
+            ws["t"], ws["told"].form_s, ws["told"].hold_s,
+            ws["told"].release_s))
+        if m <= 0.0:
+            return half_life
+        few, many = WS_TRAIL_HALF_LIFE_S
+        want = few if ws.get("few") else many
+        return half_life + m * (want - half_life)
+
+    def _trail_gain(self):
+        """The body's deposit brightness into the trail — 1.0 untold, up to
+        WS_TRAIL_GAIN under a full shape (his "boost the trail
+        brightness"). It goes in through `_clip_body_layer`'s own
+        hue-preserving ceiling, so a brighter smear is never a whiter
+        one."""
+        ws = self._ws
+        if ws is None:
+            return 1.0
+        m = float(word_shape_keys.envelope(
+            ws["t"], ws["told"].form_s, ws["told"].hold_s,
+            ws["told"].release_s))
+        return 1.0 + m * (WS_TRAIL_GAIN - 1.0)
+
+    def _wake_half_life(self):
+        """The wake's half-life. Under a shape with FEW fish the water keeps
+        a trace of the loop for the whole hold (P2 A), which is
+        `ripple_life` eased up to WS_RIPPLE_LIFE_S by the told envelope and
+        back down over the release — the authored value never written, and
+        MANY fish left exactly as they are (their own bodies and trails
+        already light the line, and a longer-lived busy wake is where white
+        comes from — the WAKE COLOUR block)."""
+        life = float(self.ripple_life)
+        ws = self._ws
+        if ws is not None and ws.get("few"):
+            m = float(word_shape_keys.envelope(
+                ws["t"], ws["told"].form_s, ws["told"].hold_s,
+                ws["told"].release_s))
+            if m > 0.0:
+                life = life + m * (WS_RIPPLE_LIFE_S - life)
+        return max(life * WAKE_HALF_LIFE_X, 0.02)
+
+    def _word_shape_holds(self):
+        """Whether the paused features are held this frame (the PAUSES
+        paragraph of the WORD SHAPES block): a swim burst, the big fish and
+        the pond rest do not START while a shape is running. One already in
+        flight finishes."""
+        pend = self._ws_pending
+        if pend is not None and pend[0] == "start":
+            return True
+        ws = self._ws
+        if ws is None:
+            return False
+        return float(word_shape_keys.envelope(
+            ws["t"], ws["told"].form_s, ws["told"].hold_s,
+            ws["told"].release_s)) > WS_PAUSE_AT
 
     def _pond_distance(self, x, y):
         """Signed distance (SCREEN px, positive inside) from points to the
@@ -4348,9 +5107,18 @@ class Fish2d(Twod, GradientEffect):
             np.searchsorted(WALL_PHI, theta, side="right") - 1,
             0, WALL_PHI.size - 1,
         )
+        # WORD SHAPES (the block of that name): while a shape runs the
+        # look-ahead shortens and the arc tightens, both by the told
+        # envelope — but the floor below, the fish's OWN turn radius, is
+        # untouched either way: "tightened WITHIN the clamp". `None` is
+        # every other frame, where these are `self.wall_lookahead` and a
+        # literal 1.0, so the expression is exactly what it was.
+        look_s, turn_x = self.wall_lookahead, 1.0
+        if self._ws_wall is not None:
+            look_s, turn_x = self._ws_wall
         want = np.maximum(
-            r_nose[k], self.wall_lookahead * np.maximum(speed, 0.0)
-        ) / max(float(self.wall_turn_strength), 1e-3)
+            r_nose[k], look_s * np.maximum(speed, 0.0)
+        ) / (max(float(self.wall_turn_strength), 1e-3) * turn_x)
         return np.maximum(want, self.turn_radius_px).astype(np.float32)
 
     def _wall_run(self, px, py, dx, dy, s, free=None):
@@ -4836,7 +5604,7 @@ class Fish2d(Twod, GradientEffect):
             else:
                 self.wake[ry:, :, :] = 0.0
 
-        half_life = max(float(self.ripple_life) * WAKE_HALF_LIFE_X, 0.02)
+        half_life = self._wake_half_life()
         self.wake *= np.float32(0.5 ** (dt / half_life))
 
         a = float(np.clip(
@@ -4904,7 +5672,7 @@ class Fish2d(Twod, GradientEffect):
             )
         e = s_ * s_ * (3.0 - 2.0 * s_)
 
-        half_life = 0.02 + self.trail_decay * 0.5
+        half_life = self._trail_half_life()
         self.trail *= np.float32(0.5 ** (dt / half_life))
 
         if n:
@@ -5300,7 +6068,12 @@ class Fish2d(Twod, GradientEffect):
         fish also lays its own wake into the shared wake buffer, so the
         caller must composite `self.wake` AFTER calling this. Called once
         per frame by whichever path composites it."""
-        if self._big_pending or self._big_seen:
+        # WORD SHAPES: a big fish does not SET OFF while a shape is running
+        # (the PAUSES paragraph) — its poke stays queued and crosses after.
+        # One already in flight finishes, and the other fish still get out
+        # of its way at full strength.
+        holding = bool(self._big_pending) and self._word_shape_holds()
+        if (self._big_pending or self._big_seen) and not holding:
             pending, self._big_pending = self._big_pending, []
             for strength in pending:
                 self._spawn_big_fish(max(strength, 0.0))
@@ -5313,7 +6086,7 @@ class Fish2d(Twod, GradientEffect):
         h, w = int(self.r_height), int(self.r_width)
         if self._big_trail is None:
             self._big_trail = np.zeros((h, w, 3), dtype=np.float32)
-        half_life = 0.02 + self.trail_decay * 0.5
+        half_life = self._trail_half_life()
         self._big_trail *= np.float32(0.5 ** (dt / half_life))
         frame = np.zeros((h, w, 3), dtype=np.float32)
         # the ordinary fish's own audio brightness and size swell (no
@@ -5699,8 +6472,13 @@ class Fish2d(Twod, GradientEffect):
         beat_now = self._beat_pending
 
         # the swim burst envelope — a level the flare holds, rounded at the
-        # edges only (the flare kind's own hold is the burst's length)
-        if self.swim_burst:
+        # edges only (the flare kind's own hold is the burst's length).
+        # WORD SHAPES: a burst does not START while a shape is running (the
+        # PAUSES paragraph); one already in flight keeps its envelope and
+        # releases on its own hold, so it finishes rather than being cut.
+        if self.swim_burst and not (
+            self._burst <= 0.0 and self._word_shape_holds()
+        ):
             self._burst = min(self._burst + dt / BURST_ATTACK_S, 1.0)
         else:
             self._burst = max(self._burst - dt / BURST_RELEASE_S, 0.0)
@@ -5792,6 +6570,10 @@ class Fish2d(Twod, GradientEffect):
         swirling = dispersing & (self.p_lk[:n] > self.t)
         leaking = dispersing & ~swirling
         m = int(np.count_nonzero(swimming))
+        # WORD SHAPES (the block of that name): one frame of the procession.
+        # None on every untold frame, and then nothing below it is reached —
+        # which is what makes an untold frame byte for byte today's.
+        ws = self._word_shape_step(dt, n, mode, self.cruise_px)
         # THE OTHER FISH AVOID THE BIG FISH (the block beside BIG_AVOID_W):
         # read once a frame, before speed, so the dart and the swerve agree.
         # With no big fish crossing (or big_fish_avoid 0) nothing here runs.
@@ -5882,6 +6664,18 @@ class Fish2d(Twod, GradientEffect):
             want_full * MOTION_FLOOR_FRAC,
         )
         want = np.where(pulse_eligible, pulsed_want, want_full)
+        # WORD SHAPES: THE PROCESSION'S OWN PACE, blended in by the told
+        # envelope. It lands HERE — before the moments below — on purpose:
+        # the dash to the line replaces the surge-and-coast thrust pulse
+        # (his "smoothly accelerate and not have sudden velocity shifts"),
+        # while a swim burst, a big-fish flee or a solo dash already in
+        # flight still multiplies whatever speed the fish is on, so one
+        # mid-shape finishes instead of being cut off.
+        if ws is not None and ws["want"] is not None:
+            wsm = ws["m_fish"]
+            shaped = np.array(want, dtype=np.float32, copy=True)
+            shaped[ws["idx"]] = ws["want"]
+            want = want * (1.0 - wsm) + shaped * wsm
         # THE TAIL DRIVE (the block of that name at the top of the module):
         # its effort is the target WITHOUT the pulse (the tail makes the
         # pushes now), carried through every multiplier below. At
@@ -5891,6 +6685,15 @@ class Fish2d(Twod, GradientEffect):
             np.where(pulse_eligible, want_full, want) if tail_w > 0.0
             else None
         )
+        if ws is not None and want_tail is not None:
+            # ... and under a shape the tail hands over: the procession's
+            # pace is a smooth speed, so the tail's own thrust-and-drag
+            # pulse is faded out per fish by the envelope (an ARRAY weight —
+            # a scalar one is the only thing an untold frame ever sees), and
+            # what effort is left asks for the procession's pace.
+            wsm = ws["m_fish"]
+            tail_w = np.float32(tail_w) * (1.0 - wsm)
+            want_tail = want_tail * (1.0 - wsm) + want * wsm
         if want_tail is None and self.tail_drive > 0.0:
             # no fish is eligible this frame (a formed school) — the beat
             # envelope still ages, or a kick armed just before the charge
@@ -6013,6 +6816,9 @@ class Fish2d(Twod, GradientEffect):
             ),
             0.0,
         )
+        if ws is not None:
+            # WORD SHAPES: the loop is the fish's patch while a shape runs
+            w_home = w_home * (1.0 - ws["m_fish"])
         desired_x += np.cos(to_home) * w_home
         desired_y += np.sin(to_home) * w_home
 
@@ -6040,6 +6846,18 @@ class Fish2d(Twod, GradientEffect):
                 # while the wall is turning it back from a wall it is heading
                 # into, late: that turn is what keeps it on the panel
                 relax = big_urg * np.where(
+                    w_toward & (w_urg >= WALL_LATE), 0.0, 1.0)
+                w_turn = w_turn * (1.0 - relax)
+                w_auth = w_auth * (1.0 - relax)
+            if ws is not None:
+                # WORD SHAPES: THE WALL IS PAUSED, by the told envelope and
+                # by exactly the mechanism above — EXCEPT where it is late
+                # turning a fish back from a wall it is heading into. "The
+                # pond gives way, the wall does not" (the BIG_AVOID block)
+                # is what keeps a fish on the panel, and a shape is not
+                # allowed to spend it; the loop sits well inside the lit
+                # hexagon at any sane `word_shape_size` anyway.
+                relax = ws["m_fish"] * np.where(
                     w_toward & (w_urg >= WALL_LATE), 0.0, 1.0)
                 w_turn = w_turn * (1.0 - relax)
                 w_auth = w_auth * (1.0 - relax)
@@ -6079,6 +6897,9 @@ class Fish2d(Twod, GradientEffect):
                 # the pond gives way to a fish getting out of a big fish's
                 # way (its way out was chosen inside the lit panel)
                 w_bound = w_bound * (1.0 - big_urg)
+            if ws is not None:
+                # ... and to the loop, the same way (the WORD SHAPES block)
+                w_bound = w_bound * (1.0 - ws["m_fish"])
         # THE SWIM BURST'S BOUNDARY BRAKE - live only while a burst is
         # (self._burst / self._burst_tail), so ordinary swimming never
         # reaches it and is bit-for-bit what it always was. The steer above
@@ -6168,6 +6989,12 @@ class Fish2d(Twod, GradientEffect):
                 strength = np.minimum(np.abs(bias), 1.0)
                 swerve = hd[idx] + np.sign(bias) * strength * AVOID_MAX_TURN
                 w_avoid = AVOID_W * self.avoid_strength * strength
+                if ws is not None:
+                    # WORD SHAPES: nose-to-tail spacing on the loop is
+                    # AUTHORED (the entry rule, then even spacing), so a
+                    # crowd fix would only argue with it — the same reason
+                    # avoidance stays out of the charge's school
+                    w_avoid = w_avoid * (1.0 - ws["m_fish"][idx])
                 add_x = np.zeros(n, dtype=np.float32)
                 add_y = np.zeros(n, dtype=np.float32)
                 add_x[idx] = np.cos(swerve) * w_avoid
@@ -6314,6 +7141,21 @@ class Fish2d(Twod, GradientEffect):
             aim = np.nan_to_num(self.p_dhd[:n])
             desired_x += np.where(darting, np.cos(aim) * DART_W, 0.0)
             desired_y += np.where(darting, np.sin(aim) * DART_W, 0.0)
+        # WORD SHAPES: THE LOOP'S OWN STEER. Summed like every other term
+        # and bounded by the same turn clamp below, so swimming onto the
+        # line is an arc like every other about-face here. At FULL weight
+        # from the first frame of the form — a fish heads for its entry
+        # straight away and the envelope paces only its speed — and let go
+        # over the first half of the release (`grip`).
+        if ws is not None and ws["tx"] is not None:
+            wsi = ws["idx"]
+            to_loop = np.arctan2(
+                (ws["ty"] - self.p_y[wsi]) * self.sy,
+                (ws["tx"] - self.p_x[wsi]) * self.sx,
+            )
+            w_loop = WS_SEEK_W * ws["grip"]
+            desired_x[wsi] += np.cos(to_loop) * w_loop
+            desired_y[wsi] += np.sin(to_loop) * w_loop
         desired = np.arctan2(desired_y, desired_x)
         d_hd = _wrap_pi(desired - hd)
 
@@ -6335,6 +7177,13 @@ class Fish2d(Twod, GradientEffect):
         swirl = direction * self.spin * 2 * np.pi * self.base_speed
 
         omega_max = self.p_spd[:n] / self.turn_radius_px
+        if ws is not None:
+            # WORD SHAPES: the turn arc TIGHTENS, by the told envelope (the
+            # WS_TURN_X block). Exactly the pre-drop's own mechanism one
+            # mechanism over — the clamp still bounds every steering term,
+            # it is just a tighter circle while the shape runs.
+            omega_max = omega_max / np.maximum(
+                1.0 - (1.0 - WS_TURN_X) * ws["m_fish"], 1e-3)
         if kst is not None and "turn" in kst:
             # THE PRE-DROP: the keepers turn on PRE_DROP_TURN of their circle
             omega_max[kidx] = omega_max[kidx] / max(float(kst["turn"]), 1e-3)
@@ -6353,9 +7202,20 @@ class Fish2d(Twod, GradientEffect):
             # ... and as fast as its own turn circle allows (still clipped
             # to it below)
             d_hd = d_hd * (1.0 + BIG_TURN_BOOST * big_urg)
+        turn_gain = TURN_GAIN
+        bias = swirl + self.p_jog[:n]
+        if ws is not None:
+            # WORD SHAPES: the heading gain is DOUBLED under a full shape
+            # (still clipped to the turn circle below, so no fish ever turns
+            # tighter than it can — "tightened WITHIN the clamp"), and the
+            # current's steady swirl and the beat's turn kicks hand over to
+            # the loop: the loop IS the current while a shape runs, and a
+            # kick is exactly the sudden heading shift his note rules out.
+            turn_gain = TURN_GAIN * (1.0 + WS_TURN_GAIN_X * ws["m_fish"])
+            bias = bias * (1.0 - ws["m_fish"])
         omega = (
-            d_hd * TURN_GAIN
-            + np.where(steered & ~keeping, swirl + self.p_jog[:n], 0.0)
+            d_hd * turn_gain
+            + np.where(steered & ~keeping, bias, 0.0)
         )
         if wall_on:
             # the wall takes over the steering while it turns a fish, at a
@@ -6638,11 +7498,36 @@ class Fish2d(Twod, GradientEffect):
             self._deposit_wake(
                 tail_px, tail_py, amp, sizes, self.p_grad[:n][laying]
             )
+        # WORD SHAPES — THE WATER TRACE (P2 A, few fish only): the same
+        # deposit rule, laid at the loop point each fish's own place has
+        # reached rather than at its tail, in the fish's own colour (so the
+        # trace is the colour set's, through `_deposit_wake`'s own palette
+        # rule), faded in and out by the told envelope.
+        if (ws is not None and ws["trace"] is not None
+                and self.ripple_amount > 0.0 and self.wake is not None):
+            trace_x, trace_y, which = ws["trace"]
+            body_len = half_w[which] * 2.0 * self.body_aspect
+            t_sizes = np.clip(
+                WS_TRACE_SIZE_BODY * body_len * max(
+                    float(self.ripple_width), 0.5),
+                0.6, float(SPLAT_KERNEL_R) * 0.5,
+            ).astype(np.float32)
+            t_amp = (
+                self.ripple_amount * WS_TRACE_AMP * ws["m"]
+                * (RIPPLE_BASE + RIPPLE_SPEED_GAIN)
+                * np.clip(bright[which], 0.0, 1.0)
+                * min(dt * WAKE_DEPOSIT_HZ, 1.0)
+            ).astype(np.float32)
+            self._deposit_wake(
+                np.asarray(trace_x, dtype=np.float64),
+                np.asarray(trace_y, dtype=np.float64),
+                t_amp, t_sizes, self.p_grad[:n][which],
+            )
         self._step_wake(dt)
         self._apply_lull_dark()
 
         # ── render ──────────────────────────────────────────────────────
-        half_life = 0.02 + self.trail_decay * 0.5
+        half_life = self._trail_half_life()
         self.trail *= np.float32(0.5 ** (dt / half_life))
 
         # THE TRAIL IS FED THE FISH'S TRUE (UNGAINED) BRIGHTNESS, NEVER THE
@@ -6674,6 +7559,19 @@ class Fish2d(Twod, GradientEffect):
         # from the true value alone, so it cannot compound.
         frame = np.zeros_like(self.trail)
         visible = np.flatnonzero(bright > 0.0)
+        # WORD SHAPES — HIS NOTE, verbatim: "We may need to boost the trail
+        # brightness and lower decay briefly to get it to show better." The
+        # decay is `_trail_half_life` above; this is the brightness, and it
+        # goes in through `_clip_body_layer`'s WHOLE-pixel ceiling (the
+        # scatter's own, which keeps the colour) rather than a per-channel
+        # clip, so a boosted smear is a brighter smear and never a whiter
+        # one — asked for by the `_ws_gain_clip` flag, for the signature
+        # reason that method's own docstring gives. At gain 1.0 — every untold frame — `body_bright` IS `bright`,
+        # the same object, so nothing about this frame differs.
+        ws_gain = self._trail_gain()
+        body_bright = bright
+        if ws_gain > 1.0:
+            body_bright = bright * np.float32(ws_gain)
         # a pausing keeper LOOKS about: its head swings, its path does not
         # (drawing only — the travel heading above is untouched)
         hd_draw = hd
@@ -6684,15 +7582,20 @@ class Fish2d(Twod, GradientEffect):
             self._draw_bodies(
                 frame, visible,
                 self.p_x[:n][visible], self.p_y[:n][visible],
-                hd_draw[visible], bright[visible], half_w[visible],
+                hd_draw[visible], body_bright[visible], half_w[visible],
                 flap_amp[visible], self.p_grad[:n][visible],
             )
-        np.maximum(self.trail, self._clip_body_layer(frame), out=self.trail)
+        self._ws_gain_clip = ws_gain > 1.0
+        try:
+            np.maximum(self.trail, self._clip_body_layer(frame),
+                       out=self.trail)
+        finally:
+            self._ws_gain_clip = False
 
         body_out = self.trail
         if self._scatter is not None and visible.size:
             gained_frame = np.zeros_like(self.trail)
-            gained = bright * np.float32(self._scatter["gain"])
+            gained = body_bright * np.float32(self._scatter["gain"])
             self._draw_bodies(
                 gained_frame, visible,
                 self.p_x[:n][visible], self.p_y[:n][visible],
@@ -6773,9 +7676,17 @@ class Fish2d(Twod, GradientEffect):
 
     def _clip_body_layer(self, frame):
         """The body layer's 255 ceiling. Ordinary swimming clips each channel
-        on its own; a scatter's gained bodies are scaled down as a whole
-        wherever the brightest channel passes 255, keeping the colour."""
-        if self._scatter is None:
+        on its own; a scatter's gained bodies — and a WORD SHAPE's boosted
+        trail deposit — are scaled down as a whole wherever the brightest
+        channel passes 255, keeping the colour.
+
+        THE WORD SHAPE'S CASE RIDES A FLAG (`_ws_gain_clip`) RATHER THAN AN
+        ARGUMENT, deliberately: two check scripts already substitute or wrap
+        this method by its one-positional-argument signature
+        (`check_fish_big_fish_avoid.py`'s `_Bodies` spy and
+        `check_fish_disperse.py`'s per-channel control), and a new keyword
+        broke both. Keeping the signature keeps those proofs working."""
+        if self._scatter is None and not self._ws_gain_clip:
             return np.minimum(frame, 255.0)
         peak = frame.max(axis=2, keepdims=True)
         return np.where(
@@ -6806,7 +7717,7 @@ class Fish2d(Twod, GradientEffect):
         """Decay the trail AND the wake, and composite — the held-transition
         path. The wake is a live buffer, so leaving it out here would park a
         frozen smear on the panel for the whole hold."""
-        half_life = 0.02 + self.trail_decay * 0.5
+        half_life = self._trail_half_life()
         self.trail *= np.float32(0.5 ** (dt / half_life))
         self._rest_level = 0.0      # nothing swims here, so nothing rests
         self._darting = self._rest_free = None
