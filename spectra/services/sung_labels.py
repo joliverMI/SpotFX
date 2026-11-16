@@ -1,6 +1,6 @@
 """The sung labels (lyrics plan step 3, data/lyrics-timing-plan/
-grilling-notes.md): the words a colour set or an effect answers to when
-someone sings them. Claude reads each song's lyrics against this list
+grilling-notes.md): the words a colour set, an effect or a SHAPE answers to
+when someone sings them. Claude reads each song's lyrics against this list
 (spectra/services/lyric_reading.py); he corrects it on /sung-labels.
 
 The Admiral, 2026-11-09: "We do need to interpret when the subject of an
@@ -10,6 +10,34 @@ we can add 'labels' similar to like how we did in spotfx."
 
 Only word colours on a show he has switched on reads this module for the show
 (spectra/services/lyric_events.py, off for every show otherwise).
+
+THREE KINDS OF TARGET. A colour set (KIND_COLOR_SET), a registered effect
+(KIND_EFFECT) and, since the Word Shapes plan's row W0.2, a SHAPE
+(KIND_SHAPE) — one of the shapes the show can draw on the panel
+(fx/effects/word_shapes.py). The Admiral's words for the row: "Those would
+have word associations, like 'heart' with 'love'. Make it easy to add more
+shapes and associations down the road." A shape follows every rule an
+effect's labels already follow: seeded words, his edits stored as deltas,
+one chip payload, one place in the catalogue.
+
+A SHAPE'S STARTING WORDS LIVE IN THE SHAPE LIBRARY, NOT HERE. `Shape.words`
+in fx/effects/word_shapes.py is the one place they are written, so adding a
+shape later stays one `build(...)` entry and nothing else — there is
+deliberately no second table beside EFFECT_SEEDS below. `shape_library()`
+reads them, and imports that module LAZILY: nothing in the show's own import
+graph should pay for the shape library's numpy work just because this module
+is importable (its own tests pin that).
+
+PRECEDENCE: A WORD ON BOTH A SHAPE AND AN EFFECT IS THE SHAPE'S. Today
+"star", "stars" and "estrella" sit on the Star shape AND on
+EFFECT_SEEDS["radial"]; a word like that is owned by the shape for the
+planner's purposes. It is implemented in exactly one place — the order of
+`Catalogue.owners`, where a shape target is always listed before an effect
+target carrying the same word (`_owner_rank`) — so whoever resolves a match
+to an owner gets the shape first. The effect KEEPS its seed word: those are
+his to take off on the page, not ours to delete (W0.3 is what makes a
+shape-reaching word actually draw; until then `lyric_events.reach` still
+reads colour-set owners only, so a shape-only match does nothing).
 
 ONE LIST PER CARD, BUILT FROM FOUR PLACES, ONLY ONE OF WHICH IS COMPUTED:
   seed     — the card's colours and name (colour_words.seed_labels), worked out
@@ -46,7 +74,8 @@ from typing import Any, Optional, Sequence
 from fx import device_model
 from spectra import config
 from spectra.models.lyric_labels import (
-    MEANING_KINDS, ColorSetLabels, EffectLabels, LabelEdits, MeaningList, SungLabelStore,
+    MEANING_KINDS, ColorSetLabels, EffectLabels, LabelEdits, MeaningList, ShapeLabels,
+    SungLabelStore,
 )
 from spectra.services import color_sets, colour_words
 
@@ -54,6 +83,7 @@ logger = logging.getLogger(__name__)
 
 KIND_COLOR_SET = "color_set"
 KIND_EFFECT = "effect"
+KIND_SHAPE = "shape"
 
 SOURCE_SEED = "seed"
 SOURCE_CLAUDE = "claude"
@@ -102,6 +132,32 @@ EFFECT_NAMES: dict[str, str] = {
     "gifplayer": "GIF player", "pacman": "Pac-Man",
 }
 
+
+def shape_library() -> dict[str, tuple[str, tuple[str, ...]]]:
+    """Every shape the show can draw, as `{id: (name, starting words)}`, read
+    straight off the shape library — the ONE place a shape's starting words
+    live (fx/effects/word_shapes.py's `Shape.words`). There is no shape
+    equivalent of EFFECT_SEEDS above on purpose: adding a shape stays one
+    `build(...)` entry there.
+
+    IMPORTED LAZILY, inside the call. The library is numpy geometry, and
+    nothing that merely imports this module should pay for it: the show's own
+    import graph never reaches here at all (tests/test_lyric_reading.py), and
+    this keeps even an importer of THIS module clear of it until it actually
+    asks for the words. In declaration order, which is the order the Sung
+    labels page's Shapes row draws the cards in.
+    """
+    from fx.effects import word_shapes
+    return {s.id: (s.name, tuple(s.words)) for s in word_shapes.SHAPES.values()}
+
+
+def shape_seed(shape_id: str) -> Optional[tuple[str, ...]]:
+    """One shape's starting words, or None for an id the library does not
+    know."""
+    entry = shape_library().get(shape_id)
+    return None if entry is None else entry[1]
+
+
 _lock = threading.RLock()
 
 
@@ -131,6 +187,7 @@ class Catalogue:
     owners: dict[str, tuple[Target, ...]]
     color_labels: tuple[str, ...] = ()
     effect_labels: tuple[str, ...] = ()
+    shape_labels: tuple[str, ...] = ()
     labels_hash: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -259,18 +316,42 @@ def _effect_rows(store: SungLabelStore) -> list[dict]:
     return sorted(out, key=lambda r: r["name"].lower())
 
 
-def _hash_labels(color_labels: Sequence[str], effect_labels: Sequence[str]) -> str:
+def _shape_rows(store: SungLabelStore) -> list[dict]:
+    """One row per shape, the same chip payload an effect row carries, in the
+    shape library's own declaration order."""
+    out = []
+    for shape_id, (name, seed) in shape_library().items():
+        row = store.shapes.get(shape_id)
+        edits = row.labels if row else LabelEdits()
+        out.append({"id": shape_id, "name": name,
+                    "labels": _chips(seed, SOURCE_SEED, edits)})
+    return out
+
+
+def _hash_labels(color_labels: Sequence[str], effect_labels: Sequence[str],
+                 shape_labels: Sequence[str]) -> str:
     keys = {"color": sorted(colour_words.word_key(w) for w in color_labels),
-            "effect": sorted(colour_words.word_key(w) for w in effect_labels)}
+            "effect": sorted(colour_words.word_key(w) for w in effect_labels),
+            "shape": sorted(colour_words.word_key(w) for w in shape_labels)}
     return hashlib.sha256(json.dumps(keys, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-def _build_catalogue(card_rows: list[dict], effect_rows: list[dict]) -> Catalogue:
+def _owner_rank(target: Target) -> int:
+    """Where this kind of target sits among the owners of one word. A SHAPE
+    comes first: a word on both a shape and an effect is the shape's (see
+    PRECEDENCE in the module docstring). `sorted` is stable, so everything
+    else keeps the order it was added in."""
+    return 0 if target.kind == KIND_SHAPE else 1
+
+
+def _build_catalogue(card_rows: list[dict], effect_rows: list[dict],
+                     shape_rows: list[dict]) -> Catalogue:
     targets: dict[tuple[str, str], Target] = {}
     labels: dict[str, str] = {}
     owners: dict[str, list[Target]] = {}
     color_keys: set[str] = set()
     effect_keys: set[str] = set()
+    shape_keys: set[str] = set()
 
     def add(target: Target, words: list[str], bucket: set[str]) -> None:
         targets[(target.kind, target.id)] = target
@@ -288,14 +369,19 @@ def _build_catalogue(card_rows: list[dict], effect_rows: list[dict]) -> Catalogu
     for row in effect_rows:
         add(Target(KIND_EFFECT, row["id"], row["name"]),
             [c["text"] for c in row["labels"]], effect_keys)
+    for row in shape_rows:
+        add(Target(KIND_SHAPE, row["id"], row["name"]),
+            [c["text"] for c in row["labels"]], shape_keys)
 
     color_labels = tuple(sorted(labels[k] for k in color_keys))
     effect_labels = tuple(sorted(labels[k] for k in effect_keys))
+    shape_labels = tuple(sorted(labels[k] for k in shape_keys))
     return Catalogue(
         targets=targets, labels=labels,
-        owners={k: tuple(v) for k, v in owners.items()},
+        owners={k: tuple(sorted(v, key=_owner_rank)) for k, v in owners.items()},
         color_labels=color_labels, effect_labels=effect_labels,
-        labels_hash=_hash_labels(color_labels, effect_labels))
+        shape_labels=shape_labels,
+        labels_hash=_hash_labels(color_labels, effect_labels, shape_labels))
 
 
 def catalogue() -> Catalogue:
@@ -303,7 +389,7 @@ def catalogue() -> Catalogue:
     on it: two sets swapping a word changes who a match reaches, which is
     resolved live, and needs no second reading of the lyrics."""
     store = load()
-    return _build_catalogue(_card_rows(store), _effect_rows(store))
+    return _build_catalogue(_card_rows(store), _effect_rows(store), _shape_rows(store))
 
 
 def page() -> dict:
@@ -311,10 +397,12 @@ def page() -> dict:
     store = load()
     card_rows = _card_rows(store)
     effect_rows = _effect_rows(store)
-    cat = _build_catalogue(card_rows, effect_rows)
+    shape_rows = _shape_rows(store)
+    cat = _build_catalogue(card_rows, effect_rows, shape_rows)
     return {
         "color_sets": card_rows,
         "effects": effect_rows,
+        "shapes": shape_rows,
         "labels_hash": cat.labels_hash,
         "n_labels": len(cat.labels),
         "auto_read": store.settings.auto_read,
@@ -364,7 +452,8 @@ def _seed_for_card(card_id: str) -> tuple[Optional[color_sets.ColorSetCard], lis
 
 
 def edit(kind: str, target_id: str, field_name: str, op: str, text: str) -> None:
-    """One word added to or taken out of one list."""
+    """One word added to or taken out of one list, on a colour set, an effect
+    or a shape."""
     word = clean_label(text)
     with _lock:
         store = load()
@@ -387,6 +476,14 @@ def edit(kind: str, target_id: str, field_name: str, op: str, text: str) -> None
                 raise EditRefused("An effect has only sung labels.")
             row_e = store.effects.setdefault(target_id, EffectLabels())
             _edit_list(row_e.labels, EFFECT_SEEDS.get(target_id, ()), op, word)
+        elif kind == KIND_SHAPE:
+            seed_words = shape_seed(target_id)
+            if seed_words is None:
+                raise EditRefused("That shape is not in the shape library.")
+            if field_name != FIELD_LABELS:
+                raise EditRefused("A shape has only sung labels.")
+            row_s = store.shapes.setdefault(target_id, ShapeLabels())
+            _edit_list(row_s.labels, seed_words, op, word)
         else:
             raise EditRefused(f"Unknown kind {kind!r}.")
         store.labels_changed_ms = int(time.time() * 1000)

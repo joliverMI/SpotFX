@@ -2055,6 +2055,13 @@ export interface SungColorSet {
 
 export interface SungEffect { id: string; name: string; labels: SungChip[]; }
 
+/** One shape the show can draw, and the words it answers to (Word Shapes row
+ * W0.2; the Shapes row that draws these lands in W2.2). A shape's starting
+ * words live in the shape library itself (fx/effects/word_shapes.py), and a
+ * word on both a shape and an effect belongs to the SHAPE — see
+ * spectra/services/sung_labels.py's PRECEDENCE. */
+export interface SungShape { id: string; name: string; labels: SungChip[]; }
+
 export interface ClaudeAvailability {
   available: boolean;
   reason: string | null;
@@ -2065,6 +2072,7 @@ export interface ClaudeAvailability {
 export interface SungLabelsPageData {
   color_sets: SungColorSet[];
   effects: SungEffect[];
+  shapes: SungShape[];
   labels_hash: string;
   n_labels: number;
   auto_read: boolean;
@@ -2073,7 +2081,7 @@ export interface SungLabelsPageData {
 }
 
 export interface SungLabelEdit {
-  kind: 'color_set' | 'effect';
+  kind: 'color_set' | 'effect' | 'shape';
   id: string;
   list: SungListName;
   op: 'add' | 'remove';
@@ -2081,7 +2089,7 @@ export interface SungLabelEdit {
 }
 
 export interface LyricMatchTarget {
-  kind: 'color_set' | 'effect';
+  kind: 'color_set' | 'effect' | 'shape';
   id: string;
   name: string;
   swatch: string | null;

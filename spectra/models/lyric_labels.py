@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 MeaningKind = Literal["things", "moods", "places"]
 MEANING_KINDS: tuple[MeaningKind, ...] = ("things", "moods", "places")
-TargetKind = Literal["color_set", "effect"]
+TargetKind = Literal["color_set", "effect", "shape"]
 MatchSource = Literal["claude", "his"]
 
 
@@ -45,6 +45,14 @@ class ColorSetLabels(_Model):
 
 
 class EffectLabels(_Model):
+    labels: LabelEdits = Field(default_factory=LabelEdits)
+
+
+class ShapeLabels(_Model):
+    """His edits to one shape's sung labels (Word Shapes row W0.2). Exactly
+    an effect's shape: a shape's STARTING words live in the shape library
+    itself (fx/effects/word_shapes.py's `Shape.words`), never in a second
+    table here, and his changes are deltas on top of them."""
     labels: LabelEdits = Field(default_factory=LabelEdits)
 
 
@@ -121,6 +129,10 @@ class SungLabelStore(_Model):
     labels_changed_ms: int = 0
     color_sets: dict[str, ColorSetLabels] = Field(default_factory=dict)
     effects: dict[str, EffectLabels] = Field(default_factory=dict)
+    # Word Shapes row W0.2. Empty by default, so a file written before this
+    # row loads unchanged and gains only this one empty field on the next
+    # save.
+    shapes: dict[str, ShapeLabels] = Field(default_factory=dict)
 
 
 class WordSpan(_Model):

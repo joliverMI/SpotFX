@@ -113,8 +113,13 @@ shapes it never draws. Keep any new derived view lazy the same way.
    per-row counts.
 3. Update `PINNED` in `tests/test_word_shapes.py` with the new shape's
    numbers (deliberately — see the next section).
-4. Update this skill, and the Sung labels seed for the new shape's words
-   (W0.2's `shape` target kind) if that is live by then.
+4. Update this skill. The Sung labels side needs NOTHING: since W0.2 the
+   `shape` target kind reads `Shape.words` straight off this registry
+   (`sung_labels.shape_library()`, imported lazily), so a new entry here
+   gets its own Sung labels card, its Claude SHAPE label and its Sonic
+   reach for free — there is deliberately no second word table to keep in
+   step (`.claude/skills/sung-labels/SKILL.md`). Only re-run the targeted
+   tests that pin the word lists.
 
 A shape that is **not** star-shaped is allowed: it reports
 `star_shaped False`, `polar()` refuses it, and `at`/`sdf` still work. What

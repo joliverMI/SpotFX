@@ -238,7 +238,8 @@ const labelsPage = {
     { id: 'blue1', name: 'Mid - Ice', kind: 'set', disabled: false, swatch: '#00aaff', has_colours: true, labels: [{ text: 'blue', source: 'seed' }], meanings: { things: [], moods: [], places: [] }, drafted_ms: null, draft_model: null },
   ],
   effects: [{ id: 'fish', name: 'Fish', labels: [{ text: 'fish', source: 'seed' }] }],
-  labels_hash: 'h', n_labels: 3, auto_read: false, claude: CLAUDE, draft_batch_size: 10,
+  shapes: [{ id: 'heart', name: 'Heart', labels: [{ text: 'love', source: 'seed' }] }],
+  labels_hash: 'h', n_labels: 4, auto_read: false, claude: CLAUDE, draft_batch_size: 10,
 };
 
 const realFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
