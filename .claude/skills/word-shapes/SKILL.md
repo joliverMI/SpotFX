@@ -64,11 +64,23 @@ short version an effect needs:
   not, which still has the other two views;
 - **`sdf` is exact but costs ~10 ms over the whole panel — never call it
   per frame.** `sdf_fast` is the same field from a lazily built lookup
-  grid: ~0.13 ms for the panel's 2,664 cells, within `FAST_TOLERANCE`
-  (0.01 units) of the exact value, always float32, exact outside its grid.
-  Sauron's shaped iris and pupil are the case it exists for. `prime()`
-  builds the lazy parts on the caller's own thread so the first frame
-  does not pay for them.
+  grid: ~0.13 ms for the panel's 2,664 cells at any drawn size, within
+  `FAST_TOLERANCE` (0.01 units) of the exact value inside its grid, always
+  float32. Sauron's shaped iris and pupil are the case it exists for.
+  `prime()` builds the lazy parts on the caller's own thread so the first
+  frame does not pay for them.
+- **Past the grid's box `sdf_fast` is a far-field ESTIMATE**,
+  `hypot(x, y) - circumradius` floored at 0: never negative, never larger
+  than the truth (a strict lower bound), within `FAR_FIELD_TOLERANCE`
+  (35%) of it relatively, and stepping down from the bilinear value at the
+  boundary by about the same. Use it for "how far out am I", never for a
+  sub-cell decision or an inside test. **The box is fixed in SHAPE
+  coordinates, so how much of the panel falls outside it is the drawn
+  size's business**: none of the crystal at SIZE 0.62, ~73% of it at
+  SIZE 0.27 (Sauron's pupil). The exact `sdf` as a fallback there put a
+  small shape's per-frame cost straight back to ~8 ms — the PR 519
+  re-review's one finding, and why the estimate exists. The check script
+  uses only the exact `sdf`.
 
 ### Two things that are easy to get wrong
 

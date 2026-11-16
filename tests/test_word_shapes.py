@@ -460,20 +460,65 @@ def test_sdf_fast_over_the_whole_crystal_panel_is_accurate_and_quick():
         assert fast < exact / 10.0
 
 
-def test_sdf_fast_is_float32_and_falls_back_outside_its_grid():
+def test_sdf_fast_is_float32_and_keeps_the_shape_of_its_inputs():
     heart = word_shapes.get("heart")
     assert heart.sdf_fast(np.zeros(5), np.zeros(5)).dtype == np.float32
     assert heart.sdf_fast(0.0, 0.0).shape == ()
     assert heart.sdf_fast(np.zeros((3, 4)), np.zeros((3, 4))).shape == (3, 4)
-    far = word_shapes.FAST_EXTENT + 7.0
-    # outside the grid it is the exact field, not a clamped edge value
-    assert float(heart.sdf_fast(far, far)) == pytest.approx(
-        float(heart.sdf(far, far)), rel=1e-5)
-    mixed_x = np.array([0.0, far, 0.5])
-    mixed_y = np.array([0.0, far, -0.5])
-    assert np.allclose(heart.sdf_fast(mixed_x, mixed_y),
-                       heart.sdf(mixed_x, mixed_y),
+    inside_grid = np.array([0.0, 0.5, -0.9])
+    assert np.allclose(heart.sdf_fast(inside_grid, inside_grid),
+                       heart.sdf(inside_grid, inside_grid),
                        atol=word_shapes.FAST_TOLERANCE)
+
+
+def test_the_far_field_outside_the_grid_is_a_cheap_lower_bound():
+    # past its own box sdf_fast is hypot(x, y) - circumradius, floored at
+    # 0: never negative, never MORE than the truth (the triangle
+    # inequality), and within FAR_FIELD_TOLERANCE of it relatively. The
+    # exact sdf as a fallback here is what put a small shape's per-frame
+    # cost back to ~8 ms (PR 519 re-review).
+    rng = np.random.default_rng(20261116)
+    reach = 6.0          # the panel's corner at SIZE 0.17 and up
+    for shape_id in SHIPPED:
+        shape = word_shapes.get(shape_id)
+        px = rng.uniform(-reach, reach, 40_000)
+        py = rng.uniform(-reach, reach, 40_000)
+        outside = ((np.abs(px) > word_shapes.FAST_EXTENT)
+                   | (np.abs(py) > word_shapes.FAST_EXTENT))
+        px, py = px[outside], py[outside]
+        got = shape.sdf_fast(px, py)
+        exact = shape.sdf(px, py)
+        assert np.all(got >= 0.0)
+        assert np.all(got <= exact + 1e-5)       # a lower bound, always
+        rel = np.abs(got - exact) / exact
+        assert rel.max() <= word_shapes.FAR_FIELD_TOLERANCE, (
+            f"{shape_id}: far field off by {rel.max():.1%}")
+        assert rel.mean() < 0.10
+
+
+def test_sdf_fast_stays_quick_for_a_small_shape():
+    # the grid's box is fixed in SHAPE coordinates, so how much of the
+    # panel falls outside it is entirely the drawn size's business: at
+    # Sauron's pupil size most of the crystal does
+    panel = check.load_panel()
+    norm_x, norm_y = panel.normalized()
+    for size in (0.27, 0.2):
+        x = (norm_x / size).astype(np.float32)
+        y = (norm_y / size).astype(np.float32)
+        outside = ((np.abs(x) > word_shapes.FAST_EXTENT)
+                   | (np.abs(y) > word_shapes.FAST_EXTENT))
+        assert outside.mean() > 0.5, "this test is not exercising the far field"
+        for shape_id in SHIPPED:
+            shape = word_shapes.get(shape_id).prime()
+            got = shape.sdf_fast(x, y)
+            assert np.all(got[outside] >= 0.0)
+            start = time.perf_counter()
+            for _ in range(20):
+                shape.sdf_fast(x, y)
+            per_call = (time.perf_counter() - start) / 20
+            assert per_call < 0.0005, (
+                f"{shape_id} at SIZE {size}: sdf_fast took "
+                f"{per_call * 1e3:.2f} ms for {x.size} cells")
 
 
 # ── a shape that is not star-shaped ────────────────────────────────────────

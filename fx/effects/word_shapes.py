@@ -68,12 +68,14 @@ change that makes any of them worse is a visible one):
   over the whole crystal panel (2,664 cells) in float64, about 60% of that
   in float32 (the dtype follows the inputs). Right for a check, a
   measurement or a one-off target; far too slow for a frame.
-- `sdf_fast` is the per-frame field: ~0.13 ms for the same 2,664 cells,
-  within FAST_TOLERANCE (0.01 units; measured worst 0.009, the star's) of
-  `sdf`. Its grid costs ~200 ms to build, once, on first use — `prime()`
-  moves that off the render path. FAST_SPACING is 0.02 rather than 0.01 on
-  purpose: 0.01 is four times the build for an error already well inside
-  the bar.
+- `sdf_fast` is the per-frame field: ~0.13 ms for the same 2,664 cells at
+  any size, within FAST_TOLERANCE (0.01 units; measured worst 0.009, the
+  star's) of `sdf` inside its grid, and within FAR_FIELD_TOLERANCE
+  relatively outside it (a lower bound, never negative, never for a
+  sub-cell decision). Its grid costs ~200 ms to build, once, on first use
+  — `prime()` moves that off the render path. FAST_SPACING is 0.02 rather
+  than 0.01 on purpose: 0.01 is four times the build for an error already
+  well inside the bar.
 
 LAZY ON PURPOSE. `build()` does only the cheap work (normalise, orient,
 arc lengths, segment constants); the star-shaped verdict, the polar table
@@ -167,6 +169,11 @@ FAST_EXTENT = 2.0
 # What `sdf_fast` is worth: the measured worst error of the bilinear
 # lookup against the exact field, rounded up. Pinned by the tests.
 FAST_TOLERANCE = 0.01
+# And what its FAR FIELD is worth, past the grid's own box: the measured
+# worst RELATIVE error of `hypot(x, y) - circumradius` against the exact
+# distance, rounded up (worst 34%, the heart's, right at the boundary;
+# mean 7%, falling off with distance). Also pinned by the tests.
+FAR_FIELD_TOLERANCE = 0.35
 
 # Points this close together are the same point (a repeated closing point).
 _SAME_POINT_EPS = 1e-9
@@ -300,6 +307,10 @@ class Shape:
 
     # ── derived, filled in by build() ──────────────────────────────────
     perimeter: float = field(default=0.0, repr=False)
+    # The outline's farthest point from (0, 0) — the one number `sdf_fast`
+    # needs for its far field, and the bracket a ray cast or a bisection
+    # starts from.
+    circumradius: float = field(default=0.0, repr=False)
     _cum: NDArray[np.float64] = field(default=None, repr=False)  # type: ignore[assignment]
     _seg: tuple = field(default=(), repr=False)
     _closed: NDArray[np.float64] = field(default=None, repr=False)  # type: ignore[assignment]
@@ -453,15 +464,29 @@ class Shape:
     def sdf_fast(self, x: ArrayLike, y: ArrayLike) -> NDArray[np.float32]:
         """`sdf` for a render frame: bilinear from the lookup grid, always
         float32, within FAST_TOLERANCE of the exact field (measured; the
-        tests pin it). A point outside the grid's own box falls back to the
-        exact `sdf`, so the answer is never wrong, only slower for those
-        points.
+        tests pin it).
 
         Use `sdf` for a check, a measurement or a one-off target, and this
         one for a field evaluated every frame (Sauron's shaped iris and
         pupil under a moving gaze). Its only real cost is the first call,
         which builds the grid — call `prime()` off the render path if that
         matters.
+
+        OUTSIDE THE GRID'S OWN BOX it is a cheap FAR-FIELD ESTIMATE,
+        `hypot(x, y) - circumradius` floored at 0: never negative, never
+        larger than the true distance (it is a strict lower bound, by the
+        triangle inequality), and within FAR_FIELD_TOLERANCE of it
+        relatively — worst right at the boundary, where it also steps down
+        from the bilinear value by that much. It is for "how far out am I",
+        never for a sub-cell decision and never for inside/outside.
+
+        That matters because the grid's box is a fixed +-FAST_EXTENT in
+        SHAPE coordinates, so how much of a panel falls outside it depends
+        entirely on the size the effect draws at: at SIZE 0.62 none of the
+        crystal does, while at SIZE 0.27 (Sauron's pupil) about 70% does.
+        The exact `sdf` as a fallback therefore put the per-frame cost
+        straight back to ~8 ms for a small shape — the reason this estimate
+        exists (PR 519 re-review).
 
         Within about FAST_TOLERANCE of the outline the interpolated sign
         can differ from the exact one; that is what the tolerance means,
@@ -483,7 +508,8 @@ class Shape:
         outside = (fx < 0.0) | (fx > n - 1) | (fy < 0.0) | (fy > n - 1)
         if outside.any():
             out = np.array(out, dtype=np.float32, copy=True)
-            out[outside] = self.sdf(xa[outside], ya[outside]).astype(np.float32)
+            out[outside] = np.maximum(
+                np.hypot(xa[outside], ya[outside]) - self.circumradius, 0.0)
         return out
 
 
@@ -503,6 +529,7 @@ def build(id: str, name: str, points: ArrayLike, words: tuple[str, ...],
 
     return Shape(id=id, name=name, points=pts, words=tuple(words),
                  upright=bool(upright), perimeter=perimeter,
+                 circumradius=float(np.linalg.norm(pts, axis=1).max()),
                  _cum=cum, _seg=_segments(pts), _closed=closed)
 
 
@@ -520,8 +547,7 @@ def polar_table_by_bisection(shape: Shape) -> NDArray[np.float64]:
     if shape.sdf(0.0, 0.0) >= 0.0:
         raise ValueError(f"shape {shape.id!r}: its own centre is not inside it")
     lo = np.zeros(POLAR_BINS)
-    hi = np.full(POLAR_BINS,
-                 float(np.linalg.norm(shape.points, axis=1).max()) * 1.05)
+    hi = np.full(POLAR_BINS, shape.circumradius * 1.05)
     for _ in range(_BISECT_ITERS):
         mid = (lo + hi) / 2.0
         inside = shape.sdf(mid * ux, mid * uy) < 0.0
@@ -607,7 +633,8 @@ def has(id: str) -> bool:
 
 
 __all__ = [
-    "FAST_EXTENT", "FAST_SPACING", "FAST_TOLERANCE", "POLAR_BINS", "Shape",
+    "FAR_FIELD_TOLERANCE", "FAST_EXTENT", "FAST_SPACING", "FAST_TOLERANCE",
+    "POLAR_BINS", "Shape",
     "SHAPES", "build", "get", "has", "polar_table_by_bisection",
     "ray_radius", "shape_ids",
 ]
