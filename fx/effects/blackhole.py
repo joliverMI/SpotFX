@@ -8,8 +8,9 @@ from PIL import Image
 import fx.effects.lull_dark as lull_dark
 import fx.effects.particle_handoff as particle_handoff
 import fx.effects.pre_drop as pre_drop
+import fx.effects.word_shape_keys as word_shape_keys
 from fx.color import parse_color, validate_color, validate_gradient
-from fx.effects import lull_handoff, phase_grammar
+from fx.effects import lull_handoff, phase_grammar, word_shapes
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.gradient import GradientEffect
 from fx.effects.twod import Twod
@@ -356,6 +357,81 @@ PRE_DROP_RING_W = 0.09        # the ring's half-width, normalized radius
 PRE_DROP_RING_GAIN0 = 0.55    # its brightness at the edge, 1.0 on the drop
 
 
+# WORD SHAPES — THE EVENT HORIZON TAKES THE SHAPE (Word Shapes plan row
+# W1.1, approved by the Admiral 2026-11-15; `fx/effects/word_shape_keys.py`
+# is the binding statement for the six told keys and the one envelope, and
+# `.claude/skills/word-shapes/SKILL.md` for the library and the clarity
+# bars). His words for the row, verbatim: "Black hole: The event horizon
+# shape changes to match the shape. The particles in the event horizon flow
+# around in this shape, as the event horizon beats to the music." and "The
+# shapes should form smoothly. ... hold momentarily, and then release back
+# and smoothly."
+#
+# ONE CHANGE IN THE EFFECT: the event-horizon radius becomes a RADIUS PER
+# ANGLE. `_horizon_rest()` is today's rest radius (the ring `horizon_scale`
+# times the breathing `1 + horizon_audio x impulse`); with a shape told and
+# `m` the envelope's fraction, `_horizon_rest_at(theta)` is that same
+# quantity built on a per-angle RING SCALE
+#
+#     (1 - m) * horizon_scale + m * word_shape_size * shape.polar(theta)
+#
+# so the breathing multiplies the SHAPE exactly as it multiplies the ring
+# ("the event horizon beats to the music"), and the charge/lull/drop math
+# (`_horizon_phase`) then applies on top UNCHANGED — which is what makes
+# the lull's fill, the drop's pinch and a flare punch keep their precedence
+# with no code of their own (plan section 3.1's "the shape is a blend on the
+# REST geometry, before the phase math").
+#
+# Untold (`word_shape_keys.told()` is None — no key, an empty or unknown id,
+# or form+hold+release all zero) `_horizon_radius_at` IS `_horizon_radius`,
+# `m` is 0 and nothing above runs: the effect renders byte for byte what it
+# renders today, proven against the pre-change module in
+# tests/test_blackhole_word_shape.py.
+#
+# THE SHAPED REST RADIUS GETS THE HEX'S OWN CEILING, not the ring's 0.9.
+# A heart's farthest point is 1.26 unit lengths, so at the top of
+# `word_shape_size` (0.9) with the breathing at full the outline would clip
+# against 0.9 and flatten its lobes. Past the hex there are no real cells at
+# all (HEX_FILL_RADIUS, the silhouette's own furthest vertex), so this is
+# the only bound that means anything here; at the plan's default size
+# nothing reaches it.
+WORD_SHAPE_R_MAX = HEX_FILL_RADIUS + LULL_FILL_MARGIN
+
+# THE BLACK DISC'S INSET WHILE A SHAPE STANDS, in CELL PITCHES — measured,
+# then derived, not chosen. The disc follows the shape's own outline
+# (`_disc_radius`); outside a shape it stops 0.01 inside the ring, the
+# antialias margin it has always used. A captive is PINNED exactly ON the
+# outline and paints a blob of `blob_size` cells around itself, and the trail
+# it laid an instant ago sits wherever the outline was then, so a disc that
+# stops a hair inside the outline blacks out the inner half of every captive
+# AND the whole trail behind it the moment the bass beats the outline
+# outward. Measured on his own Black Hole V2 entry, outline coverage at the
+# hold: 52-58% at a 0.01 inset, 54-73% at one cell pitch, 62-84% at 1.5.
+#
+# ONE AND A HALF CELL PITCHES is where the two bars meet. One pitch is where
+# the plan's INSIDE cells begin ("deeper than one pitch inside"), and half a
+# cell more is exactly how far the music may beat the outline out
+# (`_word_shape_breath`) — so the disc never eats a captive's own blob or
+# the trail it just laid, and every cell the plan counts as inside is still
+# black: measured 100% for the star and the diamond, 99.6% for the heart,
+# against a 95% bar. Two pitches breaks it (the heart falls to 93.5%).
+# A cell pitch is the panel's own (`_ws_beat_max`, worked out in do_once from
+# the hex lattice), never a number of normalized radius typed in here.
+WORD_SHAPE_DISC_PITCHES = 1.5
+
+
+def _smoothstep(u):
+    """`fx/effects/word_shape_keys.py`'s own motion law, the one place this
+    module needs it directly rather than through `envelope()`: the word
+    shape's form LIFTED off a fraction the outline is already at, and a
+    clearing write's release from that fraction. The plain
+    form/hold/release case agrees with `word_shape_keys.envelope` to the
+    bit, which tests/test_blackhole_word_shape.py pins rather than
+    assumes."""
+    u = min(1.0, max(0.0, float(u)))
+    return u * u * (3.0 - 2.0 * u)
+
+
 def _hex_spawn_edge_radius(theta):
     """Distance from center to the measured crystal-mapper hex silhouette
     along each angle in `theta` (radians, any shape) — the convex-polygon
@@ -403,6 +479,10 @@ class Blackhole2d(Twod, GradientEffect):
         *pre_drop.KEYS,
         phase_grammar.SHOCK_ON_KEY,
         lull_handoff.DROP_KEY,
+        # WORD SHAPES: the six told keys ride ONLY the Word Shape kind's own
+        # write (word_shape_keys.py rule 1). `word_shape_size` is NOT one of
+        # them — it is a registered, Sonic-tellable param like any other.
+        *word_shape_keys.KEYS,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -578,6 +658,15 @@ class Blackhole2d(Twod, GradientEffect):
             # only on a lull that plays one) — fx/effects/pre_drop.py
             **pre_drop.schema_fields(),
             **lull_handoff.drop_schema_fields(),
+            # WORD SHAPES (plan row W1.1): the six told keys, plus this
+            # effect's own size. The keys default to NOT TOLD, so splicing
+            # them in changes nothing until SpotFX writes a shape.
+            **word_shape_keys.schema_fields(),
+            vol.Optional(
+                "word_shape_size",
+                description="Word shape size: the shape's half-height as a fraction of the panel's own",
+                default=0.62,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.3, max=0.9)),
         }
     )
 
@@ -685,6 +774,7 @@ class Blackhole2d(Twod, GradientEffect):
         self.horizon_audio = self._config["horizon_audio"]
         self.horizon_hold = self._config["horizon_hold"]
         self.handoff_ease = self._config["handoff_ease"]
+        self.word_shape_size = float(self._config["word_shape_size"])
         self.horizon_follow_blobs = self._config["horizon_follow_blobs"]
         self._horizon_rgb_explicit = np.array(
             parse_color(self._config["horizon_color"]), dtype=np.float32
@@ -748,6 +838,8 @@ class Blackhole2d(Twod, GradientEffect):
             if new_rush > 0:
                 self._rush_pending += new_rush
 
+        self._word_shape_edge()
+
         self.power_func = self.POWER_FUNCS_MAPPING[
             self._config["frequency_range"]
         ]
@@ -792,6 +884,27 @@ class Blackhole2d(Twod, GradientEffect):
         gx = (x_idx - self.cx) / max(self.sx, 1e-6)
         gy = (y_idx - self.cy) / max(self.sy, 1e-6)
         self.grid_r = np.sqrt(gx**2 + gy**2).astype(np.float32)
+        # WORD SHAPES: each cell's ANGLE in the same projection, so the
+        # black disc can follow a shaped outline per angle. Fixed for the
+        # life of the panel, which is what lets the per-cell polar lookup be
+        # cached per shape instead of recomputed per frame
+        # (_word_shape_polar_grid).
+        self.grid_theta = np.arctan2(gy, gx).astype(np.float32)
+        self._ws_polar_grid = None
+        self._ws_polar_for = None
+        # WORD SHAPES: HALF A CELL, in this panel's own normalized radius —
+        # how far the music may push a shaped outline off the size it was
+        # told (_word_shape_breath). A real-cell PITCH is 2 columns across
+        # and sqrt(3)/2 of a row down on the hex lattice
+        # (.claude/skills/crystal-hex-grid/SKILL.md), so in normalized units
+        # it is 4/(cols-1) one way and (2/(sqrt(3)/2))/(rows-1) the other;
+        # the TIGHTER of the two is the one a half-cell claim has to hold in.
+        # On his crystal (72 x 37) that is 0.0563 and 0.0642, so the cap is
+        # 0.028.
+        self._ws_beat_max = 0.5 * min(
+            4.0 / max(self.r_width - 1, 1),
+            (2.0 / (math.sqrt(3.0) / 2.0)) / max(self.r_height - 1, 1),
+        )
         # normalized radius just past the farthest panel corner: outflow
         # blobs stay alive into the corners (instead of popping at the
         # inscribed rim) and wide-field adopted blobs aren't culled on entry
@@ -1080,16 +1193,29 @@ class Blackhole2d(Twod, GradientEffect):
                         -OMEGA_MAX, OMEGA_MAX)
         vr = v if self.reverse else -v
         vt = omega * r
-        horizon_on = self.horizon_scale > 0.0 or self._phase != "none"
+        horizon_on = (self.horizon_scale > 0.0 or self._phase != "none"
+                      or self._word_shape_on())
         if horizon_on and not self.reverse:
-            rh = self._horizon_radius()
+            # WORD SHAPES: the ring a blob here would be riding is the
+            # SHAPE's own outline at this angle while one stands, read at
+            # the same reference speed draw()'s capture branch uses — so a
+            # hand-off taken mid-shape describes the motion the blob
+            # actually has. Untold, every number is the scalar horizon's.
+            rh = self._horizon_radius_at(th)
+            rh_ref = self._horizon_ref_radius()
             v_h = self.base_speed * (
                 self.edge_speed
-                + (1.0 - self.edge_speed) * max(0.0, 1.0 - rh) ** self.accel
+                + (1.0 - self.edge_speed)
+                * max(0.0, 1.0 - rh_ref) ** self.accel
             ) * (1.0 + self.speed_audio * self.impulse * 2.0)
             omega_h = float(np.clip(
-                (self.swirl if self.swirl != 0 else 1.0) * v_h / max(rh, R_FLOOR),
+                (self.swirl if self.swirl != 0 else 1.0) * v_h
+                / max(rh_ref, R_FLOOR),
                 -OMEGA_MAX, OMEGA_MAX))
+            if self._word_shape_on():
+                omega_h = np.clip(
+                    omega_h * rh_ref / np.maximum(rh, R_FLOOR),
+                    -OMEGA_MAX, OMEGA_MAX)
             ring = r <= rh + REVERSE_FALLBACK_RING_TOL
             vr = np.where(ring, 0.0, vr)
             vt = np.where(ring, omega_h * np.maximum(r, 1e-6), vt)
@@ -1170,15 +1296,20 @@ class Blackhole2d(Twod, GradientEffect):
         jth = rng.uniform(0.0, 2 * np.pi, got)
         px = ncx + jr * np.cos(jth)
         py = ncy + jr * np.sin(jth)
+        theta = np.arctan2(py, px).astype(np.float32)
+        # WORD SHAPES: per angle here too, so an eruption during a shape
+        # starts outside the outline rather than inside it (the identical
+        # scalar untold).
         inner = (
-            self._horizon_radius()
-            if (self.horizon_scale > 0 and not self.reverse)
+            self._horizon_radius_at(theta)
+            if ((self.horizon_scale > 0 or self._word_shape_on())
+                and not self.reverse)
             else self.kill_radius
         )
         self.p_r[s] = np.maximum(
             np.sqrt(px**2 + py**2), inner + 0.02
         ).astype(np.float32)
-        self.p_theta[s] = np.arctan2(py, px).astype(np.float32)
+        self.p_theta[s] = theta
         if not self.reverse:
             self.p_out[s] = rng.uniform(0.35, 0.9, got).astype(np.float32)
             self._out_active = True
@@ -1508,20 +1639,304 @@ class Blackhole2d(Twod, GradientEffect):
             return drop is None or drop["burst_t"] is None
         return False
 
+    # ── WORD SHAPES: the event horizon takes the shape ──────────────────
+    # The whole mechanism is three questions, asked in this order every
+    # frame: is a shape running (_word_shape_edge, on the SEQ), how far is it
+    # formed (_word_shape_step, the one envelope), and what is the horizon's
+    # radius at this angle (_horizon_rest_at). Nothing else in the effect
+    # changed: the capture pin, the black disc, the ring's speed and the
+    # eruption ring all simply read the per-angle radius instead of the
+    # scalar one, and read the identical scalar when nothing is told.
+
+    def _word_shape_edge(self):
+        """Consume a word-shape write: edge-detect the SEQ exactly the way
+        the blob rush edge-detects its count, and start this effect's own
+        shape clock at 0.
+
+        THE SEQ, NEVER THE ID (word_shape_keys.py): two words of the same
+        shape back to back must both edge. CREATION BASELINE, the fireworks
+        `burst_rockets` rule: a fresh instance built from a persisted config
+        carrying a stale SEQ must NOT fire, so the first pass only remembers
+        what it was handed.
+
+        A NEW WORD MID-SHAPE LIFTS, IT DOES NOT SNAP (the plan's acceptance
+        7): the form restarts from the fraction the shape is at, so a word
+        arriving during a release pulls the outline back out from where it
+        had got to instead of collapsing to the ring first. A CLEARING write
+        (`told()` None while a shape stands — an older SpotFX, a hand test,
+        the `word_shape: ""` write) releases from that same fraction over the
+        release it was last told, rather than vanishing in one frame.
+
+        `prime()` HERE, not on the frame path: the shape's polar table costs
+        a few milliseconds the first time it is read, and config_updated runs
+        on SpotFX's own write, never on the render thread."""
+        told = word_shape_keys.told(self._config)
+        seq = told.seq if told is not None else 0
+        if not hasattr(self, "_ws_seen"):
+            # creation baseline — see the docstring
+            self._ws_seen = seq
+            self._ws = None
+            self._ws_m = 0.0
+            self._ws_live = None
+            return
+        if told is None:
+            self._ws_seen = 0
+            running = self._ws
+            if running is not None and not running["clearing"]:
+                self._ws = {
+                    "shape": running["shape"], "t": 0.0, "m0": self._ws_m,
+                    "form_s": 0.0, "hold_s": 0.0,
+                    "release_s": running["release_s"], "clearing": True,
+                }
+            return
+        if seq == self._ws_seen:
+            return
+        self._ws_seen = seq
+        try:
+            shape = word_shapes.get(told.shape).prime()
+        except (KeyError, ValueError):
+            # told() already refuses an id this build does not know; a shape
+            # that is not star-shaped has no radius per angle and so cannot
+            # be a horizon at all. Either way: nothing forms, nothing breaks.
+            self._ws = None
+            return
+        if not shape.star_shaped:
+            self._ws = None
+            return
+        self._ws = {
+            "shape": shape, "t": 0.0, "m0": float(self._ws_m),
+            "form_s": told.form_s, "hold_s": told.hold_s,
+            "release_s": told.release_s, "clearing": False,
+        }
+
+    def _word_shape_step(self, dt):
+        """Advance the shape clock and resolve this frame's form fraction
+        `_ws_m` (0..1) and live shape `_ws_live`.
+
+        THE ENVELOPE IS word_shape_keys.envelope's, with one addition: the
+        form is LIFTED off whatever fraction the shape was already at
+        (`m0 + (1 - m0) x smoothstep(t / form)`), so it still reaches 1.0
+        exactly `form_s` after the edge — the contract's "complete on the
+        word", with no settle time — whether it started from the ring or from
+        a half-released shape. Zero speed at both ends of both ramps is what
+        keeps the outline from starting or stopping with a step.
+
+        A told form of 0 is complete at once rather than a division by zero
+        (the engine floors the form at the effect's own minimum, so this is
+        unreachable by contract — it is still handled, because a hand test
+        and a LedFX UI scrub are not bound by the contract)."""
+        ws = self._ws
+        if ws is None:
+            self._ws_m = 0.0
+            self._ws_live = None
+            return
+        ws["t"] += dt
+        t = ws["t"]
+        form, hold, release = ws["form_s"], ws["hold_s"], ws["release_s"]
+        if ws["clearing"]:
+            if release <= 0.0 or t >= release:
+                self._ws = None
+                self._ws_m = 0.0
+                self._ws_live = None
+                return
+            m = ws["m0"] * (1.0 - _smoothstep(t / release))
+        elif t < form:
+            m0 = ws["m0"]
+            m = m0 + (1.0 - m0) * _smoothstep(t / form)
+        elif t <= form + hold:
+            m = 1.0
+        elif release > 0.0 and t <= form + hold + release:
+            m = 1.0 - _smoothstep((t - form - hold) / release)
+        else:
+            # the effect resets its OWN state when the whole thing is over;
+            # it never writes a key back (word_shape_keys.py's rule 3)
+            self._ws = None
+            self._ws_m = 0.0
+            self._ws_live = None
+            return
+        self._ws_m = float(min(1.0, max(0.0, m)))
+        self._ws_live = ws["shape"]
+
+    def _word_shape_on(self):
+        """Whether a shape is standing far enough to shape anything. The
+        single predicate every shaped read is gated on, so the untold path is
+        one boolean away from today's code rather than a parallel branch."""
+        return self._ws_live is not None and self._ws_m > 0.0
+
+    def _word_shape_polar_grid(self):
+        """`shape.polar()` for EVERY CELL's angle, cached. The panel's angles
+        never change and `polar` does not depend on the form fraction, so
+        this is built once per shape and reused — which is what keeps the
+        shaped disc a table lookup's worth of arithmetic per frame rather
+        than a 2,664-angle interpolation."""
+        shape = self._ws_live
+        key = (shape.id, self.grid_theta.shape)
+        if self._ws_polar_for != key:
+            self._ws_polar_grid = shape.polar(self.grid_theta).astype(
+                np.float32)
+            self._ws_polar_for = key
+        return self._ws_polar_grid
+
+    def _word_shape_scale(self, polar):
+        """The RING SCALE at each angle: the plan's own blend,
+        `(1 - m) x horizon_scale + m x word_shape_size x polar(theta)`. The
+        breathing and the phase math are applied to this by
+        _horizon_rest_at / _horizon_phase, unchanged — that placement is
+        what gives the lull's fill, the drop's pinch and a flare punch their
+        precedence for free."""
+        m = self._ws_m
+        return (1.0 - m) * self.horizon_scale + (
+            m * self.word_shape_size * polar)
+
+    def _word_shape_breath(self):
+        """How far the music pushes the horizon out THIS FRAME, as a radius
+        rather than a factor: `horizon_scale x horizon_audio x impulse` — the
+        RING'S OWN SWELL, the exact quantity `_horizon_rest()`'s multiplier
+        adds at m = 0.
+
+        WHY THE BEAT IS ADDITIVE ON A SHAPE AND MULTIPLICATIVE ON A RING, the
+        one place this row departs from the plan's own wording ("the
+        breathing multiplier ... applies to that") and the reason, MEASURED:
+        a shaped horizon is about three times the ring's radius, so the same
+        multiplier is three times the absolute swell — at his own live
+        `horizon_audio` 0.3 on loud lows the heart stood 12% WIDE of its told
+        size, roughly two cells, which is not a beat but a different size.
+        It also broke the row's own two gates, both of which say the outline
+        must BE the told shape: the plan's acceptance test (the radius equals
+        `SIZE x polar(theta)` within half a cell at the hold) and the clarity
+        bar, whose denominator is the outline-cell band at SIZE 0.62 — the
+        captives traced the shape beautifully (83-95% of the band they were
+        actually on) and almost entirely missed the band being measured.
+        Keeping the swell ABSOLUTE keeps the beat he already tuned — up to
+        `0.2 x 0.3 = 0.06` of the panel's half-height, about one cell pitch,
+        visibly pumping with the bass — while the shape stands at its told
+        size, so both gates measure what they say they measure. Untold, the
+        two forms are the SAME ARITHMETIC: at m = 0 the rest radius is
+        `ring + ring x horizon_audio x impulse`, which IS
+        `ring x (1 + horizon_audio x impulse)`.
+
+        AND IT IS CAPPED AT HALF A CELL (`_ws_beat_max`, derived from the
+        panel in do_once). That cap is the plan's own acceptance test read
+        literally — "the per-angle radius equals `SIZE x polar(theta)` within
+        half a cell at the hold" — and it holds under ANY audio rather than
+        only in silence, which is the stronger and more useful claim: the
+        shape he asked for is the shape on the panel, at every moment of the
+        hold, and the beat is a real one-cell step on the biggest hits
+        instead of a size change. MEASURED: uncapped, loud lows (his own
+        busy-music proxy, tests/test_blackhole_infall_through_transition.py's
+        0.25-1.2 lows) pushed the outline 0.9 of a cell out and dropped
+        outline coverage to 52-58%, under the 65% bar; capped it is 68-78%.
+
+        A NEGATIVE `horizon_audio` ("how much sound grows (+) or shrinks (-)
+        the event horizon") pulls the outline in on the beat instead, by the
+        same capped amount; the rest radius' own 0.02 floor is what keeps it
+        a shape."""
+        swell = self.horizon_scale * self.horizon_audio * self.impulse
+        cap = getattr(self, "_ws_beat_max", 0.0)
+        return min(cap, max(-cap, swell))
+
+    def _horizon_rest_at(self, polar):
+        """_horizon_rest() per angle, from that angle's `polar` radius: the
+        shaped ring scale plus the music's own swell
+        (_word_shape_breath), clipped to the hex's own reach
+        (WORD_SHAPE_R_MAX — see that constant for why not the ring's
+        0.9)."""
+        return np.clip(
+            self._word_shape_scale(polar) + self._word_shape_breath(),
+            0.02,
+            WORD_SHAPE_R_MAX,
+        ).astype(np.float32)
+
+    def _horizon_radius_at(self, theta):
+        """The event horizon's radius at each angle in `theta`. IDENTICALLY
+        `_horizon_radius()` — the same float — whenever no shape is standing,
+        so every caller can read this one unconditionally."""
+        if not self._word_shape_on():
+            return self._horizon_radius()
+        polar = self._ws_live.polar(np.asarray(theta, dtype=np.float32))
+        return self._horizon_phase(self._horizon_rest_at(polar))
+
+    def _horizon_radius_grid(self):
+        """The same radius for every CELL of the panel (the black disc and
+        the explicit halo ring), through the cached per-cell polar lookup."""
+        if not self._word_shape_on():
+            return self._horizon_radius()
+        return self._horizon_phase(
+            self._horizon_rest_at(self._word_shape_polar_grid()))
+
+    def _horizon_ref_radius(self):
+        """The radius the RING'S OWN SPEED is read at: the horizon untold,
+        and the blended MEAN radius while a shape stands
+        (`(1 - m) x horizon_scale + m x SIZE x polar_mean`).
+
+        THIS IS WHAT SPREADS THE CAPTIVES EVENLY (plan section 3.1, point 3).
+        A captive's angular rate is scaled by `ref / r(theta)`, so its LINEAR
+        speed along the outline is the ring's own everywhere: blobs do not
+        thin out over a heart's lobes or a star's long points and pile up in
+        its notches, which is what a constant angular rate on a non-circular
+        outline does. At m = 0 the reference IS the horizon, so the speed is
+        continuous through the form's first frame."""
+        if not self._word_shape_on():
+            return self._horizon_radius()
+        m = self._ws_m
+        scale = ((1.0 - m) * self.horizon_scale
+                 + m * self.word_shape_size * self._ws_live.polar_mean)
+        return self._horizon_phase(float(np.clip(
+            scale + self._word_shape_breath(),
+            0.02, WORD_SHAPE_R_MAX)))
+
+    def _disc_inset(self):
+        """How far inside its own outline the black disc stops: the antialias
+        margin it has always used (0.01), or WORD_SHAPE_DISC_PITCHES cell
+        pitches of this panel's own while a shape stands — see that
+        constant for the measurement behind the 1.5."""
+        if not self._word_shape_on() or self._phase != "none":
+            # A PHASE OWNS THE DISC, and that is load-bearing, not tidiness:
+            # the lull's fill tops out at HEX_FILL_RADIUS + LULL_FILL_MARGIN
+            # precisely so the disc's inner edge, one antialias margin in,
+            # still covers the hexagon's own outermost vertices — a 1.5-pitch
+            # inset there leaves them LIT and the lull's dark is not dark
+            # (measured; it is what
+            # test_a_lull_arriving_mid_hold_still_fills_the_hex catches). By
+            # P3 A a shape is never TOLD while a phase is armed, so this only
+            # ever decides what happens when a phase ARRIVES mid-shape — and
+            # there the plan's precedence says the phase's own look wins.
+            return 0.01
+        return WORD_SHAPE_DISC_PITCHES * 2.0 * self._ws_beat_max
+
     def _horizon_radius(self):
         """Current event-horizon radius: baseline scaled by the audio impulse
         (grows with sound when horizon_audio is positive). The charge/lull/
         drop phases override it: charge HOLDS the baseline (only the ring's
         thickness grows — see _phase_halo), the lull expands it to fill the
         hex silhouette by the lull's dark point (_lull_timing) and holds it there, the drop
-        pinches + resets."""
-        base = float(
+        pinches + resets.
+
+        Split into _horizon_rest() + _horizon_phase() in the WORD SHAPES row
+        so the shaped path can run the SAME phase math on a rest radius PER
+        ANGLE; this scalar is byte for byte what it always was, and is still
+        what every reader that has no angle to offer asks for."""
+        return self._horizon_phase(self._horizon_rest())
+
+    def _horizon_rest(self):
+        """THE REST RADIUS: the ring's own baseline, breathing with the music
+        (`horizon_scale x (1 + horizon_audio x impulse)`), before any phase.
+        `_horizon_rest_at` is this same quantity per angle while a word shape
+        stands."""
+        return float(
             np.clip(
                 self.horizon_scale * (1.0 + self.horizon_audio * self.impulse),
                 0.02,
                 0.9,
             )
         )
+
+    def _horizon_phase(self, base):
+        """The charge/lull/drop math on a rest radius — `base` a float, or an
+        ARRAY of per-angle rest radii while a word shape stands. Every branch
+        is expressed exactly as it was when this was one method, so a scalar
+        `base` returns the identical float (the untold byte-identity proof
+        leans on that)."""
         phase = getattr(self, "_phase", "none")
         if phase == "none":
             return base
@@ -1541,7 +1956,11 @@ class Blackhole2d(Twod, GradientEffect):
             # a flare punch pulls the horizon back toward its baseline by
             # its level; the release re-expands it onto exactly this fill
             fill *= 1.0 - min(1.0, getattr(self, "_punch_level", 0.0))
-            top = max(HEX_FILL_RADIUS + LULL_FILL_MARGIN, base)
+            top = (
+                np.maximum(HEX_FILL_RADIUS + LULL_FILL_MARGIN, base)
+                if isinstance(base, np.ndarray)
+                else max(HEX_FILL_RADIUS + LULL_FILL_MARGIN, base)
+            )
             return base + (top - base) * fill
         # drop: the burst fires (and the horizon starts easing back from
         # zero) on the very first frame of the phase — see _phase_step's
@@ -1626,7 +2045,12 @@ class Blackhole2d(Twod, GradientEffect):
         (his ask — see _horizon_radius) there is no separate curve left to
         follow, and no expanding black disc during the build at all. The
         lull's own expansion is the horizon's, so the disc follows it and
-        the panel goes dark exactly when the ring reaches the hex."""
+        the panel goes dark exactly when the ring reaches the hex.
+
+        `rh` is a float, or the horizon PER CELL while a word shape stands
+        (_horizon_radius_grid) — the disc follows the shape's own outline,
+        which is "the black inside keeping the shape". How far inside the
+        outline it stops is _disc_inset()."""
         return rh
 
     def _spawn(self, count, beat_count, *, theta=None, ignore_cap=False):
@@ -1680,9 +2104,11 @@ class Blackhole2d(Twod, GradientEffect):
         )
         if self.reverse:
             # With an event horizon, eruptions come from the horizon ring.
+            # WORD SHAPES: per angle, so an eruption leaves FROM the
+            # outline when one stands (the scalar horizon untold).
             inner = (
-                self._horizon_radius()
-                if self.horizon_scale > 0
+                self._horizon_radius_at(theta)
+                if self.horizon_scale > 0 or self._word_shape_on()
                 else self.kill_radius
             )
             self.p_r[s] = rng.uniform(inner, inner + 0.06, count)
@@ -1760,7 +2186,16 @@ class Blackhole2d(Twod, GradientEffect):
         self._phase_step(dt)
         self._punch_step(dt)
         self._pre_drop_step()
-        horizon_on = self.horizon_scale > 0.0 or self._phase != "none"
+        # WORD SHAPES: the shape clock runs before anything reads the
+        # horizon, because the horizon IS the shape while one stands.
+        self._word_shape_step(dt)
+        shaped = self._word_shape_on()
+        # A shape told on a horizon-less config (horizon_scale 0, where blobs
+        # fall to the centre and die) would otherwise be silently inert: a
+        # word shape IS an event horizon, so it turns one on, swelling from
+        # the rest radius' own 0.02 floor.
+        horizon_on = (self.horizon_scale > 0.0 or self._phase != "none"
+                      or shaped)
         rh = self._horizon_radius() if horizon_on else 0.0
         swirl_sign = np.sign(self.swirl) if self.swirl != 0 else 1.0
         # Consumed unconditionally, even with no live particles: an edge
@@ -2007,8 +2442,18 @@ class Blackhole2d(Twod, GradientEffect):
                     out_mask = None
 
             if horizon_on and not self.reverse:
+                # WORD SHAPES: the horizon is a radius PER ANGLE while a
+                # shape stands, so a falling blob is captured, pinned and
+                # held at the radius on ITS OWN angle — which is what puts
+                # the captives on the outline instead of on a circle. th0 is
+                # the blob's angle entering this frame (this runs before
+                # p_theta is advanced); one frame of swirl is a fraction of a
+                # degree. `rh_ref` is the radius the ring's SPEED is read at
+                # (see _horizon_ref_radius). Untold, both ARE `rh`.
+                rh_b = self._horizon_radius_at(th0) if shaped else rh
+                rh_ref = self._horizon_ref_radius() if shaped else rh
                 # Falling blobs are captured into orbit at the horizon
-                free = (cap < 0) & (new_r <= rh)
+                free = (cap < 0) & (new_r <= rh_b)
                 if out_mask is not None:
                     free &= ~out_mask
                 cap[free] = 0.0
@@ -2023,7 +2468,7 @@ class Blackhole2d(Twod, GradientEffect):
                 # infall this is inert: a pinned orbiter sits exactly at
                 # rh, so it is always within tolerance.
                 pinned = captured & (
-                    new_r <= rh + REVERSE_FALLBACK_RING_TOL)
+                    new_r <= rh_b + REVERSE_FALLBACK_RING_TOL)
                 # a blob that finished its fall back into the horizon is
                 # done turning — the ring owns its radius from here
                 if self._turn_active:
@@ -2038,15 +2483,15 @@ class Blackhole2d(Twod, GradientEffect):
                     # and are back on that ring when the punch releases,
                     # still there for the drop. Only a blob caught during
                     # the punch pins to the held-back horizon.
-                    held = captured & ~pinned & (r > rh)
+                    held = captured & ~pinned & (r > rh_b)
                     new_r = np.where(held, r, new_r)
-                new_r = np.where(pinned, rh, new_r)
+                new_r = np.where(pinned, rh_b, new_r)
                 v_h = (
                     self.base_speed
                     * (
                         self.edge_speed
                         + (1.0 - self.edge_speed)
-                        * max(0.0, 1.0 - rh) ** self.accel
+                        * max(0.0, 1.0 - rh_ref) ** self.accel
                     )
                     * (1.0 + self.speed_audio * self.impulse * 2.0)
                     * wind
@@ -2054,10 +2499,22 @@ class Blackhole2d(Twod, GradientEffect):
                 omega_h = np.clip(
                     (self.swirl if self.swirl != 0 else 1.0)
                     * v_h
-                    / max(rh, R_FLOOR),
+                    / max(rh_ref, R_FLOOR),
                     -OMEGA_MAX,
                     OMEGA_MAX,
                 )
+                if shaped:
+                    # THE SAME LINEAR SPEED ALL THE WAY ROUND: omega x
+                    # ref / r(theta), so a captive crosses a heart's lobe
+                    # and its notch at the ring's own speed and the blobs
+                    # stay evenly spread (_horizon_ref_radius). Clipped on
+                    # the same bound, so a shape with a tiny radius
+                    # somewhere cannot spin a blob past OMEGA_MAX.
+                    omega_h = np.clip(
+                        omega_h * rh_ref / np.maximum(rh_b, R_FLOOR),
+                        -OMEGA_MAX,
+                        OMEGA_MAX,
+                    )
                 # an off-ring captive swirls by its OWN radius (the plain
                 # omega above); only a pinned orbiter takes the ring's.
                 # Its hold clock keeps running either way — the capture is
@@ -2278,8 +2735,13 @@ class Blackhole2d(Twod, GradientEffect):
         out = np.asarray(self.matrix, dtype=np.float32) + self.trail
         # explicit charge/drop halo ring, painted under the disc so the
         # black swallows its inner tail with a crisp edge
+        # WORD SHAPES: the same radius per CELL, so the halo ring and the
+        # black disc both follow the outline. One cached polar lookup per
+        # frame (_word_shape_polar_grid); untold it is the scalar `rh`, so
+        # both callees see exactly what they always did.
+        rh_grid = self._horizon_radius_grid() if shaped else rh
         if col is None and self._phase != "none":
-            self._phase_halo(out, rh)
+            self._phase_halo(out, rh_grid)
         # (disc suppressed while collapsing — it would black out exactly
         # where the particles are converging)
         if horizon_on and col is None:
@@ -2291,7 +2753,8 @@ class Blackhole2d(Twod, GradientEffect):
             # (the same v*(2 - v/255) doubling Twod.render()'s pre-fill
             # removal fixed for the rest of the frame).
             # During a charge the disc lags the halo, which sweeps ahead.
-            inside = self.grid_r < (self._disc_radius(rh) - 0.01)
+            inside = self.grid_r < (
+                self._disc_radius(rh_grid) - self._disc_inset())
             out[inside] = 0.0
         # THE PRE-DROP's infall ring, over the black (a told lull only)
         if col is None and self._pd_clk is not None:

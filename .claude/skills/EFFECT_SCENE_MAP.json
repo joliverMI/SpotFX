@@ -21,7 +21,9 @@
         "tests/test_blackhole_orphan_drop_none_crash.py",
         "tests/test_blackhole_reverse_fallback.py",
         "tests/test_blackhole_spawn_radius.py",
-        "tests/test_blackhole_strip_phase.py"
+        "tests/test_blackhole_strip_phase.py",
+        "scripts/check_blackhole_word_shape.py",
+        "tests/test_blackhole_word_shape.py"
       ]
     },
     "orbits-effect": {

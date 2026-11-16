@@ -1973,6 +1973,17 @@
           "max": 5.0,
           "default": 0.8,
           "help_topic": "flare-punch"
+        },
+        "word_shape_size": {
+          "label": "Word Shape Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.3,
+          "max": 0.9,
+          "aspect": "shape",
+          "note": "A sung word's shape: its half-height as a fraction of the panel's own half-height, so 0.62 draws one about 11 rows tall and 22 columns wide on the crystal. The event horizon swells into the shape at this size and its captives trace the outline.",
+          "help_topic": "word-shapes",
+          "default": 0.62
         }
       },
       "defaults": {

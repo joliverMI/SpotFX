@@ -2996,3 +2996,41 @@ against that commit.
     busy audio. No vendored line changed. Evidence:
     `scripts/check_orbits_word_shape.py`,
     `tests/test_orbits_word_shape.py`.
+
+
+98. `effects/blackhole.py` (SpotFX-authored on top of #12/#38/#61/#88):
+    WORD SHAPES, THE EVENT HORIZON TAKES THE SHAPE (Word Shapes plan row
+    W1.1, approved 2026-11-15; the Admiral: "Black hole: The event horizon
+    shape changes to match the shape. The particles in the event horizon
+    flow around in this shape, as the event horizon beats to the music").
+    ONE change, and everything else reads it: the event-horizon radius
+    becomes a RADIUS PER ANGLE. `_horizon_radius` splits into
+    `_horizon_rest()` (the ring's baseline times the breathing, today's
+    float) and `_horizon_phase(base)` (the charge/lull/drop math, expressed
+    exactly as before so a scalar returns the identical float); the shaped
+    path runs the SAME `_horizon_phase` on `_horizon_rest_at(theta)` =
+    `(1 - m) * horizon_scale + m * word_shape_size * shape.polar(theta)`
+    plus `_word_shape_breath()`, with `m` the form fraction from
+    `fx/effects/word_shape_keys.py`'s envelope, LIFTED off whatever fraction
+    the outline is already at so a second word mid-release does not snap.
+    The capture pin (`_horizon_radius_at(th0)` per blob), the black disc and
+    halo (`_horizon_radius_grid()`, a cached per-cell polar lookup), the
+    ring's speed (`_horizon_ref_radius()`, with the angular rate scaled
+    `ref / r(theta)` so the LINEAR speed round the outline is constant) and
+    the eruption ring in `_spawn`/`_erupt_burst` all read it.
+    Two MEASURED departures from the plan's wording, both because the row's
+    own gates say the outline must BE the told shape: the breathing is
+    ADDITIVE and capped at half a cell (a multiplier on a 3x radius is 3x
+    the swell — the heart stood 12% wide of its size and the clarity bar
+    measured almost nothing), and the black disc stops 1.5 cell pitches
+    inside the outline (`WORD_SHAPE_DISC_PITCHES`) outside a phase, 0.01
+    inside one (a 1.5-pitch inset at the lull's fill top leaves the hexagon's
+    outermost vertices lit). `word_shape_size` (0.62, 0.3-0.9) is the one new
+    registered param; the six told keys ride only the Word Shape kind's
+    write. `blackhole1d` gets nothing — a shape has no meaning on a strip.
+    Untold (`told()` None) the module renders byte for byte what it rendered
+    at `5db75fe6`, proven against the pinned module over 320 frames of busy
+    and of quiet audio. Evidence: `tests/test_blackhole_word_shape.py`,
+    `scripts/check_blackhole_word_shape.py`;
+    `.claude/skills/blackhole-effect/SKILL.md`'s "WORD SHAPES" section is
+    the binding record of the measurements and the precedence table.

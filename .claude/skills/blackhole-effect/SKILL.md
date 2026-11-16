@@ -307,6 +307,141 @@ section). At strength 0 the strip renders the same bytes as before the
 fold, watchdog included (`scripts/check_particle_strip_phase.py`). The
 2-D Matrix module is untouched by all of this.
 
+## WORD SHAPES — the event horizon takes the shape (2026-11-15, row W1.1)
+
+**Load `.claude/skills/word-shapes` first** — it owns the library, the six
+told keys, the envelope and the engine contract above this effect. This
+section is only what a shape does to THIS effect.
+
+His words for the row: *"Black hole: The event horizon shape changes to
+match the shape. The particles in the event horizon flow around in this
+shape, as the event horizon beats to the music."* and *"The shapes should
+form smoothly. ... hold momentarily, and then release back and smoothly."*
+
+**ONE CHANGE, AND EVERYTHING ELSE FOLLOWS FROM IT: the horizon radius
+became a radius PER ANGLE.** `_horizon_radius()` is still today's scalar
+and still what every reader with no angle to offer asks for; it is now
+`_horizon_phase(_horizon_rest())`, and the shaped path runs the SAME
+`_horizon_phase` on a per-angle rest radius:
+
+```
+rest(theta) = (1 - m) * horizon_scale + m * word_shape_size * shape.polar(theta)
+              + _word_shape_breath()
+```
+
+with `m` the form fraction. Four things read it, and nothing else in the
+effect changed: the CAPTURE PIN (a falling blob is caught, pinned and held
+at the radius on its own angle — `_horizon_radius_at(th0)`), the BLACK DISC
+and the explicit halo (`_horizon_radius_grid()`, one cached per-cell polar
+lookup per shape), the RING'S SPEED (`_horizon_ref_radius()`), and the
+eruption ring in `_spawn`/`_erupt_burst`. `blackhole1d` gets NOTHING — a
+shape has no meaning on one line of pixels, and it is deliberately absent
+from `WORD_SHAPE_EFFECTS`.
+
+**THE CAPTIVES FLOW ROUND THE OUTLINE AT THE RING'S OWN SPEED ALONG IT.**
+The angular rate is `omega x ref / r(theta)` with `ref` the blended MEAN
+radius, so the LINEAR speed is constant everywhere: blobs spread evenly
+over a heart's lobes and a star's points instead of thinning where the
+outline is far out. Measured constant within 5% round a heart. The one
+departure is `OMEGA_MAX` (6 pi rad/s), the bound that has always capped
+this effect's swirl — on loud music a deep notch can ask for more and gets
+the cap.
+
+**THE BEAT IS ADDITIVE HERE, AND THAT IS THE ROW'S ONE DEPARTURE FROM THE
+PLAN'S WORDING** ("the breathing multiplier ... applies to that"). A shaped
+horizon is ~3x the ring's radius, so the same MULTIPLIER is 3x the absolute
+swell: at his own `horizon_audio` 0.3 on loud lows the heart stood 12% wide
+of its told size (~2 cells), which broke both of the row's gates — the
+radius-equals-`SIZE x polar` test and the clarity bar, whose denominator is
+the outline band at SIZE 0.62. `_word_shape_breath()` is therefore the
+RING'S OWN swell, `horizon_scale x horizon_audio x impulse`, **capped at
+half a cell** (`_ws_beat_max`, derived from the hex lattice in `do_once`).
+Untold the two forms are the same arithmetic. Measured: uncapped, outline
+coverage 52-58%; capped, 68-78%.
+
+**THE BLACK DISC STOPS 1.5 CELL PITCHES INSIDE THE OUTLINE**
+(`WORD_SHAPE_DISC_PITCHES`) — one pitch is where the plan's INSIDE cells
+begin, half a cell more is how far the beat can push the outline, so the
+disc never blacks a captive's own blob or the trail it just laid. Measured
+coverage by inset: 52-58% at 0.01, 54-73% at one pitch, 62-84% at 1.5, and
+two pitches breaks the inside-black bar (the heart falls to 93.5%).
+**A PHASE TAKES THE DISC BACK TO 0.01**, and that is load-bearing: the
+lull's fill tops out at `HEX_FILL_RADIUS + LULL_FILL_MARGIN` exactly so a
+disc one antialias margin in still covers the hexagon's outermost vertices,
+and a 1.5-pitch inset there leaves them LIT — the lull's dark is not dark.
+
+**PRECEDENCE — what happens when a phase or a punch lands mid-shape.** The
+shape is a blend on the REST radius, applied BEFORE `_horizon_phase`, so
+every existing phase composes with no code of its own. Measured, each by
+its own test:
+
+| arrives mid-shape | what happens |
+|---|---|
+| a DROP | the pinch multiplies the shaped radius as it multiplies the ring's: the outline collapses to a point and the payoff burst erupts. The shape's own clock keeps running underneath, so if the drop is short the outline comes back. |
+| a LULL | its fill grows every angle to the hex and holds: the shape dissolves INTO the fill and the dark is dark. |
+| a CHARGE | the radius holds at its baseline, which here is the shaped baseline — the ring's thickness, the formation rate and the fall speed build around the outline. |
+| a FLARE PUNCH | nothing. A punch holds the horizon back from a LULL's fill; outside a phase there is no fill to hold back, so the outline is untouched and the shape's clock does not move. |
+
+By P3 A a shape is never TOLD while a charge, lull or drop is armed, so
+every row above is a phase ARRIVING, not a shape starting inside one.
+
+**INFALL CONTINUES, AND NO CAP CHANGE WAS NEEDED.** A shaped horizon is ~3x
+the ring and catches more of what is falling, so the captive population
+grows with the form (measured ~20 to ~22 at Energy 0.2, ~65 to ~76 at 0.8 —
+and the infalling population FALLS, because blobs have less distance to
+cover). `max_blobs` gates only the INFALLING population (the 2026-10-17
+bh-infall fix, option D), so a full outline can never starve fresh infall
+and the plan's conditional "then the shape must raise the effective cap"
+does not apply. The limit at quiet Energy is his own spawn RATE, not the
+cap.
+
+**THE CLARITY BAR, MEASURED** (`scripts/check_blackhole_word_shape.py`, his
+own Black Hole V2 crystal entry resolved at each Energy, three seeds of busy
+music, at the word / mid-hold / the hold's end; the bar is 65% of the PINNED
+outline cells and 95% inside black):
+
+| shape | Energy 0.2 | Energy 0.8 | plan's sim | inside black |
+|---|---|---|---|---|
+| heart (168 cells) | 76.8-83.3% | 84.5-85.2% | 76 / 76% | 100% |
+| star (176) | 58.5-74.4% | 77.3-79.0% | 67 / 65% | 100% |
+| diamond (119) | 89.1-92.4% | 92.4-92.8% | 79 / 76% | 100% |
+
+**THE ONE MISS, NAMED RATHER THAN ROUNDED OFF: the star at Energy 0.2 at
+the END of a 1.2 s hold, ~58%.** It reads the bar at the word (73.9%) and
+at mid-hold (74.4%) and the cause is the captive POPULATION, not the shape:
+his quiet-Energy binding spawns 0.8 blobs/s with one per beat, so about 21
+captives have to trace a 176-cell outline, and the ring's own turnover
+(`horizon_hold` 2.8 s + 0.8 s fade) empties it faster than that rate
+refills. Same room, same shape, same instant: `spawn_rate` 2.0 (his own
+binding's loud end) reads 72.7% and `beat_burst` 3 reads 75.6% — both
+params he already owns, both one step in his own tuning session.
+`tests/test_blackhole_word_shape.py::test_the_thin_case_is_the_population_not_the_shape`
+is that claim as a test.
+
+**NO WHITE, at the scale this is really at:** at a strict threshold (the
+smallest channel over 90% of the largest) his busy frames show 2
+near-neutral cells out of ~700 lit and a shape standing shows 3 — one more
+cell where two captives' trails cross. Not the disc's inset: at a 0 inset
+it is the same 3 cells.
+
+**ITS OWN PARAM:** `word_shape_size` (0.62, 0.3-0.9, registered, help topic
+`word-shapes`) — the shape's half-height as a fraction of the panel's own,
+so Sonic reaches it with `set_scene_entry_param` for free. The six told
+keys are deliberately NOT registered. Cost: +0.1 ms p50 per frame with a
+shape holding, bar 1 ms.
+
+**Proofs:** `tests/test_blackhole_word_shape.py` (the shared offline rig the
+check script imports) and `scripts/check_blackhole_word_shape.py`. Untold,
+the effect renders byte for byte what it rendered at `5db75fe6` over 320
+frames of busy and of quiet audio — the pinned-module comparison, which is
+also what caught a per-run virtual-id leak in the rig itself (a deactivated
+particle effect leaves a hand-off snapshot keyed by virtual id, and the next
+room on that id adopts it).
+
+**DEPLOY:** nothing of this is live until `spectra.service` is restarted
+(W3) and none of his scenes is seeded with a Words band ahead of his own
+tuning session (`docs/ADDING_EFFECTS.md`).
+
 ## Sonic reach
 
 Sonic reaches any registered param's CURRENT value on one scene's one

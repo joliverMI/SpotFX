@@ -164,11 +164,13 @@ def _words_scene(name="Shape Scene", *, kinds=None, lanes=None,
 #          pupil, his Q8 C)
 #   W1.2 — Fireworks, fx/effects/fireworks.py (the shaped payoff burst)
 #   W1.3 — ORBITS, fx/effects/orbits.py (few trace it, many become it)
+#   W1.1 — Black Hole, fx/effects/blackhole.py (the shaped event horizon)
 WIRED = (
     "radial",
     "sauron",
     "fireworks",
     "orbits",
+    "blackhole",
 )
 
 

@@ -148,8 +148,20 @@ effect, with red controls for both defect shapes.
 ## Black Hole (`fx/effects/blackhole.py`) — four things that bite
 
 Everything below is recorded in `fx/VENDOR.md` (#12, #14, #18, #19, #20,
-#38)
+#38, #98)
 with the mechanism detail; this is the short list of traps.
+
+**A fifth, since the Word Shapes row W1.1 (2026-11-16): the event-horizon
+radius is a RADIUS PER ANGLE while a sung word's shape stands**, so
+`_horizon_radius()` (the scalar) is no longer the only answer — the capture
+pin, the black disc, the ring's speed and the eruption ring read
+`_horizon_radius_at(theta)` / `_horizon_radius_grid()`. Anything new that
+reads the horizon must read the per-angle form, which IS the identical
+scalar whenever nothing is told.
+`.claude/skills/blackhole-effect/SKILL.md`'s "WORD SHAPES" section is the
+binding record (the additive half-cell beat, the disc's 1.5-pitch inset and
+why a phase takes it back, the precedence table, the measured clarity
+numbers and the one named miss).
 
 1. **`reverse` is a SPAWN-SIDE flag that also picks the sign of every live
    blob's motion.** Nothing reverses a particle already in flight, which is
