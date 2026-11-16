@@ -333,6 +333,30 @@ def lyric_shape_timing(energy: float, phrase_ms: float) -> tuple:
     return word_shape_timing(energy, phrase_ms, load_room_controls(), live)
 
 
+def lyric_can_draw(energy: float) -> bool:
+    """Could the SHOWING scene draw a shape at this Energy? The planner's
+    own question (W0.3 round-2 review, 2026-11-16), answered by
+    scene_response.words_band_draws over conductor.scene.
+
+    Why it is asked at PLAN time: a word reaching both a shape and a colour
+    set has to pick one, and the pick decides its timing — a shape fires its
+    form (0.5-0.9 s) early, a colour its own transition (0.15-3 s). Asked at
+    the fire instead, the lead has already passed and a quiet colour that
+    should glide in over 2-3 s would get whatever the shape's lead left it.
+    So the planner plans the word it will really be.
+
+    Never raises: unreadable state answers True, which plans the SHAPE —
+    the same direction every other "unknowable" in this feature errs
+    (fire_lyric_shape_event's own fallback then catches it)."""
+    from spectra.services import scene_response
+    try:
+        return scene_response.words_band_draws(conductor.scene, float(energy))
+    except Exception:                                    # noqa: BLE001
+        logger.exception("word shapes: the showing scene's Words band could "
+                         "not be read — planned as a shape")
+        return True
+
+
 async def fire_lyric_shape_event(action: Any, ramp_ms: int) -> dict:
     """WORD SHAPES (Word Shapes plan W0.3, 2026-11-15): a sung word drawing
     its shape, reached only from trigger_engine._tick_lyric_words, only on a
@@ -416,6 +440,7 @@ def _push_word_colour(record: dict) -> None:
 trigger_engine._lyric_colour = fire_lyric_colour_event
 trigger_engine._lyric_shape = fire_lyric_shape_event
 trigger_engine._lyric_shape_timing = lyric_shape_timing
+trigger_engine._lyric_can_draw = lyric_can_draw
 trigger_engine._lyric_pick = pick_lyric_colour
 trigger_engine._lyric_fired = _push_word_colour
 trigger_engine._lyric_note_set = responses.note_lyric_set

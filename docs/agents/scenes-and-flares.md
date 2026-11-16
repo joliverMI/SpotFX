@@ -285,20 +285,30 @@ colour — the planner's shape branch runs first, deliberately, because the
 Words band's own colour kinds (a Colour Jump pooled in the same band, or in
 a lane beside the shape) are the colour path for a shape word.
 
-**AND WHEN THE SCENE CANNOT DRAW, THE COLOUR STILL LANDS.** All 57 of his
+**AND WHERE NO SCENE CAN DRAW, THE COLOUR IS UNCHANGED.** All 57 of his
 songs with sung words have word colours switched on, so the feature must not
-subtract one while the Words sections are being built. When `on_word_shape`
-reports that nothing in the room could draw — `no_class` (no Words band on
-the showing scene), `no_band` (its bands miss this word's Energy) or
-`no_active_scene` — a word that also reaches a colour set takes the COLOUR
-path through the same hook a colour word uses, with its own momentary/held
-rule and the same time-left ramp, logged `lyric:shape` with
-`result: fell_back_to_colour`. **Not** for a hold (a preview, Absorb, a
-house mode or P3 A's phase holds a colour word too), and **not** for a Words
-band that ran with no effect wired — that band is the designed path. The one
-thing that really moves: a word that used to IMPRINT its colour on a nearby
-drop, scene change or flare now fires that colour on itself, because the
-shape branch runs before the event lookup and a shape never imprints.
+subtract one while the Words sections are being built. Two rules guarantee
+it, and both are plan-time:
+
+- **`can_draw(energy)`** — `scene_response.words_band_draws` over the
+  showing scene, bound by `engine.lyric_can_draw`: does its Words section
+  have a band covering this Energy with an enabled Word Shape kind that
+  fires at it? If not, the word is planned as the colour word it is, with
+  its OWN `fire_at`, its own transition and its own imprint. It is a
+  plan-time question because it decides the TIMING — a shape fires its form
+  (0.5-0.9 s) early, a colour its own transition (0.15-3 s) — and a lead
+  that has passed cannot be given back.
+- **a drop inside the imprint window skips only the SHAPE**, so a word sung
+  near a drop still tints that drop exactly as it always has.
+
+`WordAction.shape_skipped` (`drop_wins` / `nothing_can_draw`) is the only
+trace, and the Test Bed prints it. The FIRE-TIME fallback
+(`lyric_events.SHAPE_NOTHING_DREW` → the colour path, logged `lyric:shape`
+with `result: fell_back_to_colour`) stays as the NET for one race only: the
+showing scene changing inside the 1 s replan window. It never fires for a
+hold (a preview, Absorb, a house mode or P3 A's phase holds a colour word
+too), nor for a Words band that ran with no effect wired — that band is the
+designed path.
 
 **TIMING — the shape completes ON the word.** His words: *"the timing should
 be such that the trigger lands on where the shape is first fully formed."*

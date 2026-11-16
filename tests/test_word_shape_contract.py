@@ -105,6 +105,20 @@ def _only(actions):
     return actions[0]
 
 
+def _comparable(action) -> dict:
+    """Every field of a planned action EXCEPT the shape's own trace — what
+    "this word plans exactly as it would without its shape" means, field
+    for field (the round-2 review's own standard)."""
+    return {
+        "verdict": action.verdict, "why": action.why,
+        "event": None if action.event is None else action.event.id,
+        "blocked_by": action.blocked_by, "energy": action.energy,
+        "momentary": action.momentary, "transition_ms": action.transition_ms,
+        "form_s": action.form_s, "hold_s": action.hold_s,
+        "release_s": action.release_s,
+    }
+
+
 def _words_scene(name="Shape Scene", *, kinds=None, lanes=None,
                  word_bands=True, flare_shape=False) -> SceneV2:
     """A one-virtual scene whose Words section holds a Word Shape kind.
@@ -176,26 +190,147 @@ def test_a_word_that_reaches_a_shape_draws_it():
     assert a.transition_ms == round(a.form_s * 1000)
 
 
-def test_a_drop_inside_the_window_wins_and_the_shape_is_skipped():
+def test_a_drop_inside_the_window_skips_the_shape_and_keeps_the_colour():
     """His Q5 A, verbatim: "a drop within the imprint window wins and the
-    shape is skipped"."""
+    shape is skipped" — THE SHAPE, not the colour (round-2 review,
+    2026-11-16). A word that also reaches a colour set falls through and
+    imprints on that drop exactly as it does today; `shape_skipped` is the
+    only trace of the shape it did not draw."""
     for delta in (-2000, -1, 0, 1, 2000):
-        a = _only(_plan([_hit()], [_drop(10_000 + delta)]))
-        assert a.verdict == le.VERDICT_NOTHING, delta
-        assert a.why == le.WHY_DROP_WINS, delta
+        a = _only(_plan([_hit(sets=("red",))], [_drop(10_000 + delta)]))
+        assert a.verdict == le.VERDICT_IMPRINT, delta
         assert a.event is not None and a.event.kind == le.KIND_DROP
+        assert a.shape_skipped == le.WHY_DROP_WINS, delta
     for delta in (-2001, 2001):
-        assert _only(_plan([_hit()], [_drop(10_000 + delta)])).verdict \
-            == le.VERDICT_SHAPE, delta
+        far = _only(_plan([_hit(sets=("red",))], [_drop(10_000 + delta)]))
+        assert far.verdict == le.VERDICT_SHAPE, delta
+        assert far.shape_skipped is None, delta
 
 
-def test_a_drop_with_its_colour_change_off_still_wins():
+def test_a_word_near_a_drop_plans_exactly_as_it_would_without_its_shape():
+    """THE ROUND-2 TEST, field for field: his existing word colours must be
+    byte-for-byte as today. Every "love"/"heart"/"star" sung within the
+    window of a drop used to tint that drop, and still does."""
+    drop = [_drop(10_400)]
+    shaped = _only(_plan([_hit(sets=("red",))], drop))
+    plain = _only(_plan([_hit(sets=("red",), shape=None)], drop))
+    assert _comparable(shaped) == _comparable(plain)
+    assert shaped.shape_skipped == le.WHY_DROP_WINS
+    assert plain.shape_skipped is None
+
+
+def test_a_shape_only_word_near_a_drop_has_nothing_to_fall_through_to():
+    a = _only(_plan([_hit(sets=())], [_drop(10_400)]))
+    assert a.verdict == le.VERDICT_NOTHING and a.why == le.WHY_DROP_WINS
+    assert "no colour set" in le.describe(a)
+
+
+def test_a_drop_with_its_colour_change_off_still_skips_the_shape():
     """`can_carry` is about carrying a COLOUR; a drop is the bigger musical
-    moment either way, so the shape is skipped regardless."""
+    moment either way, so the SHAPE is skipped regardless — and then the
+    colour branch applies its own `can_carry` rule, as it always has."""
     cold = le.EventMoment("d", le.KIND_DROP, 10_400, "drop", False,
                           le.CANNOT_DROP_COLOUR_OFF)
-    a = _only(_plan([_hit()], [cold]))
-    assert a.verdict == le.VERDICT_NOTHING and a.why == le.WHY_DROP_WINS
+    a = _only(_plan([_hit(sets=("red",))], [cold]))
+    assert a.shape_skipped == le.WHY_DROP_WINS
+    assert a.verdict == le.VERDICT_NOTHING and a.why == le.WHY_CANNOT_CARRY
+    plain = _only(_plan([_hit(sets=("red",), shape=None)], [cold]))
+    assert _comparable(a) == _comparable(plain)
+
+
+# ── the plan-time "can anything draw this?" (round-2 fix B) ────────────────
+
+
+def test_a_word_nothing_can_draw_is_planned_as_todays_colour_word():
+    """THE ROUND-2 FIX (B), 2026-11-16. Deciding at the FIRE could only hand
+    the colour whatever was left of the SHAPE's lead — 500-900 ms where a
+    quiet colour glides in over 1.5-3 s. So the planner asks, and a word no
+    scene can draw is planned as the colour word it is: own verdict, own
+    momentary rule, own transition, own imprint."""
+    for energy in (0.0, 0.2, 0.4, 0.8):
+        hits = [_hit(sets=("red",), energy=energy)]
+        shaped = _only(le.plan_words(hits, [], TUNING,
+                                     shape_timing=_room_timing(),
+                                     can_draw=lambda _e: False))
+        plain = _only(_plan([_hit(sets=("red",), energy=energy, shape=None)]))
+        assert _comparable(shaped) == _comparable(plain), energy
+        assert shaped.transition_ms == le.transition_ms_for(energy), energy
+        assert shaped.shape_skipped == le.WHY_CANNOT_DRAW, energy
+
+
+def test_a_word_nothing_can_draw_still_imprints_as_today():
+    flare = [_flare(10_400)]
+    shaped = _only(le.plan_words([_hit(sets=("red",))], flare, TUNING,
+                                 shape_timing=_room_timing(),
+                                 can_draw=lambda _e: False))
+    plain = _only(_plan([_hit(sets=("red",), shape=None)], flare))
+    assert shaped.verdict == le.VERDICT_IMPRINT
+    assert _comparable(shaped) == _comparable(plain)
+
+
+def test_a_scene_that_can_draw_gets_the_shape():
+    a = _only(le.plan_words([_hit(sets=("red",))], [], TUNING,
+                            shape_timing=_room_timing(),
+                            can_draw=lambda _e: True))
+    assert a.verdict == le.VERDICT_SHAPE and a.shape_skipped is None
+
+
+def test_can_draw_is_asked_at_the_words_own_energy():
+    asked: list[float] = []
+
+    def can_draw(energy: float) -> bool:
+        asked.append(energy)
+        return energy >= 0.5
+    actions = le.plan_words(
+        [_hit(10_000, sets=("red",), energy=0.2, line=0, first=1),
+         _hit(30_000, sets=("red",), energy=0.8, line=1, first=2)],
+        [], TUNING, shape_timing=_room_timing(), can_draw=can_draw)
+    assert sorted(asked) == [0.2, 0.8]
+    by_word = {a.hit.first_word: a for a in actions}
+    assert by_word[1].verdict == le.VERDICT_FIRE
+    assert by_word[2].verdict == le.VERDICT_SHAPE
+
+
+def test_a_shape_only_word_is_still_a_shape_when_nothing_can_draw():
+    """It has no colour to fall back to, so planning it as a colour word
+    would invent one. It stays a shape, and the fire path logs `no_class`
+    — which is how he finds out a scene needs a Words band."""
+    a = _only(le.plan_words([_hit(sets=())], [], TUNING,
+                            shape_timing=_room_timing(),
+                            can_draw=lambda _e: False))
+    assert a.verdict == le.VERDICT_SHAPE
+
+
+def test_the_showing_scenes_words_band_is_what_can_draw_means():
+    """`scene_response.words_band_draws` is the one answer, and it applies
+    the same static gates a fire would: the band's Energy window, the
+    kind's own `enabled` and its `min_intensity`."""
+    full = _words_scene()
+    assert sr.words_band_draws(full, 0.1) and sr.words_band_draws(full, 0.9)
+    assert not sr.words_band_draws(None, 0.5), "no scene draws nothing"
+    assert not sr.words_band_draws(_words_scene(word_bands=False), 0.5)
+
+    narrow = _words_scene()
+    narrow.responses["word"] = ResponseSpec(bands=[FlareBand(
+        intensity_min=0.8, intensity_max=1.0, kinds={"Heart": 1.0})])
+    assert not sr.words_band_draws(narrow, 0.2)
+    assert sr.words_band_draws(narrow, 0.9)
+
+    off = _words_scene()
+    off.flare_kinds = [FlareKind(name="Heart", type="word_shape", enabled=False)]
+    assert not sr.words_band_draws(off, 0.5)
+
+    gated = _words_scene()
+    gated.flare_kinds = [FlareKind(name="Heart", type="word_shape",
+                                   min_intensity=0.6)]
+    assert not sr.words_band_draws(gated, 0.5)
+    assert sr.words_band_draws(gated, 0.7)
+
+    # A Words band holding only a COLOUR kind draws no shape.
+    colour_only = _words_scene(kinds={"Colour Jump": 1.0})
+    colour_only.flare_kinds = [FlareKind(name="Colour Jump", type="drift_jump",
+                                         jump="color_set")]
+    assert not sr.words_band_draws(colour_only, 0.5)
 
 
 def test_a_flare_or_a_scene_change_beside_a_shape_does_not_stop_it():

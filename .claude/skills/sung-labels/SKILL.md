@@ -111,21 +111,23 @@ the road."
   colour set is NOT `WHY_NO_COLOUR` any more. The planner then has a
   FOURTH VERDICT, `VERDICT_SHAPE` ("shape"), taken BEFORE the colour
   branch:
-    - **a word reaching BOTH a shape and colour sets is a SHAPE** — the
-      Words response band's own colour kinds are how a shape word
-      recolours the room. **NO COLOUR IS LOST WHILE THE WORDS SECTIONS ARE
-      BUILT** (W0.3 review, 2026-11-16): when nothing in the room could
-      draw — no Words band on the showing scene, its bands missing this
-      Energy, or no scene showing — such a word takes THE COLOUR PATH
-      instead (`lyric_events.colour_fallback`, logged `lyric:shape` with
-      `result: fell_back_to_colour`), with its own momentary/held rule and
-      the same time-left ramp, since all 57 of his songs with sung words
-      have word colours switched on. The one thing that moves is the
-      colour's CARRIER: the shape branch runs before the event lookup and
-      a shape never imprints, so a word that used to give its colour to a
-      nearby drop, scene change or flare now fires that colour on itself.
-      A shape-reaching word with no colour set has nothing to fall back
-      to, so it does nothing — as it did before this row, when it was
+    - **a word reaching BOTH a shape and colour sets is a SHAPE where a
+      scene can actually DRAW one** — the Words response band's own colour
+      kinds are how a shape word recolours the room. **HIS EXISTING WORD
+      COLOURS ARE BYTE-FOR-BYTE AS TODAY** (W0.3 reviews, 2026-11-16), and
+      two rules guarantee it, since all 57 of his songs with sung words
+      have word colours switched on: (a) `can_draw(energy)` is asked at
+      PLAN time (`scene_response.words_band_draws` over the showing
+      scene), so a word no scene can draw is planned as the ordinary
+      colour word it is — own `fire_at`, own transition, own imprint; and
+      (b) a drop inside the imprint window skips only the SHAPE, so the
+      word still tints that drop. `WordAction.shape_skipped` (`drop_wins`
+      / `nothing_can_draw`) is the only trace, carried by `describe` and
+      `action_payload`. The fire-time `colour_fallback` /
+      `SHAPE_NOTHING_DREW` path remains as the NET for one race only: the
+      showing scene changing inside the 1 s replan window. A
+      shape-reaching word with no colour set has nothing to fall back to,
+      so it does nothing — as it did before this row, when it was
       `WHY_NO_COLOUR`;
     - a DROP inside the imprint window WINS and the shape is skipped
       (`WHY_DROP_WINS`); a flare or a scene change does not, and a shape

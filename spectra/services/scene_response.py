@@ -1239,6 +1239,39 @@ def kind_lead_ms(kind: FlareKind, intensity: float, virtuals: dict) -> int:
     return lead
 
 
+def words_band_draws(scene: Optional[SceneV2], intensity: float) -> bool:
+    """Could a sung word at this Energy actually DRAW a shape on this scene?
+    Read-only peek for the PLANNER (W0.3 round-2 review, 2026-11-16): True
+    when the scene's Words section has a band covering `intensity` that
+    attaches an enabled `word_shape` kind which fires at that intensity.
+
+    WHY THE PLANNER ASKS AT ALL. A word that reaches a shape and a colour
+    set has to choose one, and the choice decides its TIMING — a shape
+    fires `form_s` (0.5-0.9 s) early, a colour its own `transition_ms_for`
+    (0.15-3 s). Deciding at the fire is too late: the lead has already
+    passed, and the colour would have to make do with whatever the shape's
+    lead left it. So the planner asks here, and a word that cannot be drawn
+    is planned as the ordinary colour word it is (lyric_events.plan_words).
+
+    THE POSSIBILITY SET, like every other forward peek in this module
+    (color_rotate_lead_ms' own note): a shape kind POOLED in a lane may
+    lose the fire-time roll, and this still answers True — the pick is
+    random and re-resolved at fire time, so no peek can know the winner.
+    A word that then loses the roll does whatever its lane-mate does, which
+    is the Words band's own behaviour and what he chose by pooling them.
+    The min_intensity and `enabled` gates ARE applied, because those are
+    static facts about the kind rather than a roll."""
+    spec = None if scene is None else (scene.responses or {}).get("word")
+    band = select_band(spec.bands, intensity) if spec else None
+    if band is None:
+        return False
+    declared = {k.name: k for k in scene.flare_kinds}
+    return any(
+        kind is not None and kind.type == "word_shape" and kind.enabled
+        and kind.fires_at(intensity)
+        for kind in (declared.get(name) for name in band.kinds))
+
+
 def word_shape_lead_ms(intensity: float, virtuals: Optional[dict] = None,
                        phrase_ms: float = 0.0) -> int:
     """The form time, in ms, for a word at `intensity` Energy on the room's

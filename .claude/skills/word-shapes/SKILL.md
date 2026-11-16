@@ -282,29 +282,57 @@ BEFORE the colour branch:
 1. sat out (the roll — unchanged, `chance_for`/`roll_hits` untouched) →
    nothing;
 2. phrase taken → nothing;
-3. **a DROP inside the imprint window → nothing, `WHY_DROP_WINS`** (his
-   Q5 A: the drop is the bigger moment). Blind to `can_carry`: that flag is
-   about carrying a COLOUR. A flare or a scene change does NOT stop a
-   shape, and **a shape never imprints on anything**;
-4. too soon (the SHARED minimum gap — a shape counts against the next word
+3. **a DROP inside the imprint window skips the SHAPE** (his Q5 A: the
+   drop is the bigger moment) — and the word FALLS THROUGH to the colour
+   branch, where it imprints on that drop exactly as it does today. Blind
+   to `can_carry`: that flag is about carrying a COLOUR, and the colour
+   branch applies it itself. A flare or a scene change does not stop a
+   shape, and a shape never imprints on anything;
+4. **nothing can draw it** (`can_draw(energy)`, below) → the word is
+   planned as the ordinary colour word it is;
+5. too soon (the SHARED minimum gap — a shape counts against the next word
    and takes its line, exactly like a fired colour word) → nothing;
-5. otherwise `VERDICT_SHAPE`, with `transition_ms = form_s × 1000`.
+6. otherwise `VERDICT_SHAPE`, with `transition_ms = form_s × 1000`.
+
+In 3 and 4 the only trace of the shape is `WordAction.shape_skipped`
+(`drop_wins` / `nothing_can_draw`), which `describe` and `action_payload`
+carry so the Test Bed can say *"it would have drawn a heart, but ..."*
+rather than looking like a plain colour word. A word with NO colour set has
+nothing to fall through to, so it keeps its shape either way: a drop near it
+ends it, and an undrawable one is still planned as a shape, which the fire
+path logs as `no_class`.
 
 **A word reaching BOTH a shape and colour sets is a SHAPE** — the Words
 band's own colour kinds are how a shape word recolours the room.
 
-**THE COLOUR FALLBACK** (W0.3 review, 2026-11-16) is what keeps that from
-subtracting anything while the Words sections are built. When
-`on_word_shape` reports that NOTHING IN THE ROOM COULD DRAW
-(`lyric_events.SHAPE_NOTHING_DREW` — `no_class`, `no_band`,
-`no_active_scene`) and the word also reaches a colour set, the word takes
-THE COLOUR PATH through the same hook a colour word uses, with its own
-momentary/held rule and the same time-left ramp
-(`lyric_events.colour_fallback`), logged `lyric:shape` with
-`result: fell_back_to_colour`. He has word colours switched on for all 57
-songs with sung words, and no existing word colour may disappear.
+**HIS EXISTING WORD COLOURS ARE BYTE-FOR-BYTE AS TODAY**, and two rules
+(both from the W0.3 reviews, 2026-11-16) are what guarantee it. All 57 of
+his songs with sung words have word colours switched on, so a feature that
+waits for a Words band must never SUBTRACT a colour change while it waits:
 
-Three things this fallback deliberately is NOT:
+1. **`can_draw(energy)`, asked at PLAN time.** `scene_response.
+   words_band_draws` over the showing scene (bound by
+   `engine.lyric_can_draw`): does its Words section have a band covering
+   this Energy with an enabled `word_shape` kind that fires at it? If not,
+   the word is planned as the colour word it is — **own `fire_at`, own
+   transition, own imprint**. This has to be a plan-time question because
+   IT DECIDES THE TIMING: a shape fires its form (0.5-0.9 s) early, a
+   colour its own `transition_ms_for` (0.15-3 s). Deciding at the fire
+   could only hand the colour whatever the shape's lead left — a quiet
+   colour that should glide in over 2-3 s would arrive in under a second,
+   and a lead that has passed cannot be given back.
+2. **a drop near the word skips only the SHAPE** (rule 3 above), so the
+   word still tints the drop.
+
+**THE FIRE-TIME FALLBACK IS THE NET** for the one race the plan cannot see:
+the showing scene changed inside the replan window (`LYRIC_REPLAN_S`, 1 s),
+so the word was planned as a shape and arrives somewhere that cannot draw
+it. Then `on_word_shape` reports `lyric_events.SHAPE_NOTHING_DREW`
+(`no_class` / `no_band` / `no_active_scene`) and the word takes the colour
+path through the same hook (`lyric_events.colour_fallback`), logged
+`lyric:shape` with `result: fell_back_to_colour` — with the shape's own lead
+behind it, the best available once the moment has passed. Two things the
+net deliberately is NOT:
 
 - **not for a HOLD.** A preview, Absorb, a house mode or P3 A's
   charge/lull/drop holds a colour word today too, so falling back there
@@ -312,15 +340,6 @@ Three things this fallback deliberately is NOT:
 - **not for `applied` with `virtuals: 0`.** A Words band that RAN is the
   designed path — its own colour kinds included — and before wave 1 that
   is *every* Words band. He attached that band and chose its behaviour.
-- **not an imprint.** The shape branch runs before the event lookup and a
-  shape never imprints, so a word that used to give its colour to a nearby
-  drop, scene change or flare now fires that colour on ITSELF. The colour
-  still lands, by the same rule, on the same word; its carrier is what
-  moves. That is the row's one real behaviour change, and it is recorded by
-  test (`tests/test_lyric_events.py`).
-- a shape-reaching word with NO colour set has nothing to fall back to, so
-  it does nothing — which is also what it did before this row, when such a
-  word was `WHY_NO_COLOUR`.
 
 **P3 A, THE FIRE-TIME SKIP.** `engine.fire_lyric_shape_event` takes the
 gates in this order: the response gate at the ANALYSED tier (a preview,

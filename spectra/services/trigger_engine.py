@@ -602,6 +602,7 @@ class TriggerEngine:
         lyric_colour: Callable[..., Awaitable[Any]] | None = None,
         lyric_shape: Callable[..., Awaitable[Any]] | None = None,
         lyric_shape_timing: Callable[..., Any] | None = None,
+        lyric_can_draw: Callable[[float], bool] | None = None,
         lyric_pick: Callable[..., dict] | None = None,
         lyric_note_set: Callable[[Optional[str]], None] | None = None,
         lyric_release_hold: Callable[[], None] | None = None,
@@ -863,6 +864,13 @@ class TriggerEngine:
         # (room_controls.word_shape_timing).
         self._lyric_shape = lyric_shape or self._no_lyric_shape
         self._lyric_shape_timing = lyric_shape_timing or self._room_shape_timing
+        # ... and `_lyric_can_draw(energy)` is whether the SHOWING scene can
+        # draw a shape at that Energy, the planner's own question (W0.3
+        # round-2 review). An engine with no room says YES, which plans the
+        # shape — a pure `plan_words` spec's own default, and the direction
+        # every unknowable in this feature errs (the fire-time fallback
+        # catches it).
+        self._lyric_can_draw = lyric_can_draw or (lambda _energy: True)
         self._lyric_pick = lyric_pick or (lambda *_a, **_k: {"result": "unwired"})
         self._lyric_note_set = lyric_note_set or (lambda _set_id: None)
         self._lyric_release_hold = lyric_release_hold or (lambda: None)
@@ -2084,7 +2092,8 @@ class TriggerEngine:
                                            self._seq_meta, self._flare_ids)
         self._lyric_plan = lyric_events.plan_play(
             words.hits, events, tuning, play,
-            shape_timing=self._lyric_shape_timing)
+            shape_timing=self._lyric_shape_timing,
+            can_draw=self._lyric_can_draw)
         self._lyric_imprints = {
             a.event.id: a for a in self._lyric_plan
             if a.verdict == lyric_events.VERDICT_IMPRINT and a.event is not None}
@@ -2354,18 +2363,21 @@ class TriggerEngine:
         show log as `lyric:shape`, landed, held or fallen back, and every
         open page is told through the same live pulse a colour word uses.
 
-        THE COLOUR FALLBACK (W0.3 review, 2026-11-16 — the priority fix).
-        When NOTHING IN THE ROOM COULD DRAW (`lyric_events.
-        SHAPE_NOTHING_DREW`: the showing scene has no Words section, its
-        bands miss this Energy, or no scene is showing) a word that ALSO
-        reaches a colour set takes THE COLOUR PATH, through the very same
-        hook a colour word uses, with its own momentary/held rule and the
-        same time-left ramp. Without this, every shape-reaching word on
-        every scene without a Words band — which today is all of them —
-        would have gone from changing his colours to doing nothing, on 57
-        songs that have word colours switched on. A HOLD is deliberately
-        NOT this case (see that constant's own comment): a preview, Absorb,
-        a house mode or P3 A's phase holds a colour word too."""
+        THE COLOUR FALLBACK IS THE NET, NOT THE MECHANISM (round-2 review,
+        2026-11-16). "Can anything draw this?" is decided at PLAN time now
+        (`lyric_events.plan_words`' own `can_draw`), so a shape-reaching
+        word on a scene that cannot draw is PLANNED as the ordinary colour
+        word it is — own `fire_at`, own transition, own imprint. What is
+        left for here is the race that plan cannot see: the showing scene
+        CHANGED inside the replan window (`LYRIC_REPLAN_S`, 1 s), so the
+        word was planned as a shape and arrives somewhere that cannot draw
+        it. Then a word that also reaches a colour set takes the colour
+        path through the very same hook a colour word uses — with the
+        shape's own lead behind it, which is the honest best available once
+        the moment has passed, and the reason this is a net rather than the
+        answer. A HOLD is deliberately NOT this case (see
+        `SHAPE_NOTHING_DREW`'s own comment): a preview, Absorb, a house
+        mode or P3 A's phase holds a colour word too."""
         try:
             record = await self._lyric_shape(action, ramp_ms)
         except Exception:
@@ -2522,7 +2534,8 @@ class TriggerEngine:
         return lyric_events.Preview(
             enabled=enabled, words=words,
             actions=lyric_events.plan_play(words.hits, events, self._lyric_tuning(), play,
-                                            shape_timing=self._lyric_shape_timing),
+                                            shape_timing=self._lyric_shape_timing,
+                                            can_draw=self._lyric_can_draw),
             n_events=len(events), play=play, kept_seed=kept, playing=playing)
 
     def song_event_moments(self, uri: str) -> list[lyric_events.EventMoment]:
