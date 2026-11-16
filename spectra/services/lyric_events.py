@@ -73,7 +73,15 @@ colour path's fallback. His rules, each one applied where it is named:
     a multiple of the form. The form is ALSO the lead — `transition_ms`
     here, so `fire_at = word − form` (LEAD family, positive = earlier) and
     the shape completes ON the word, which is the whole promise of the
-    feature ("the trigger lands on where the shape is first fully formed").
+    feature ("the trigger lands on where the shape is first fully formed");
+  - NOTHING IN THE ROOM COULD DRAW, AND THE WORD HAS A COLOUR SET: it takes
+    THE COLOUR PATH instead (`colour_fallback`, `SHAPE_NOTHING_DREW`). His
+    57 songs with sung words all have word colours on, so a feature that
+    waits for a Words band must not SUBTRACT a colour change while it
+    waits. The one thing that moves is the colour's CARRIER: the shape
+    branch runs before the event lookup and never imprints, so a word that
+    used to give its colour to a nearby drop, scene change or flare now
+    fires that colour on itself.
 
 THE BAND IS THE SWITCH (his Q6 A): a shape word does something only if the
 showing scene has a Words band with a Word Shape kind in it. A scene
@@ -211,6 +219,24 @@ MOMENT_HOLD_MIN_MS = 350
 MOMENT_HOLD_MAX_MS = 1500
 MOMENT_FADE_RATIO = 1.5
 MOMENT_FADE_MIN_MS = 150
+
+# WORD SHAPES (W0.3), THE COLOUR FALLBACK. What `on_word_shape` reports
+# when NOTHING IN THE ROOM COULD DRAW the shape — the showing scene has no
+# Words section, its bands do not reach this word's Energy, or no scene is
+# showing at all. Deliberately NOT every non-`applied` result:
+#   * a HOLD (a preview, Absorb, a house mode, P3 A's charge/lull/drop) is
+#     something deliberately holding the room, and a colour word is held by
+#     those same gates today — falling back there would walk straight
+#     through a gate;
+#   * `applied` with `virtuals: 0` is a Words band that RAN (its own colour
+#     kinds included, which is the designed colour path for a shape word);
+#     he attached that band and chose its behaviour. Before wave 1 wires an
+#     effect that is every Words band, and it must stay the Words
+#     behaviour rather than fall back.
+SHAPE_NOTHING_DREW = ("no_class", "no_band", "no_active_scene")
+# ... and what the show log calls a shape word that took the colour path
+# instead, so "it did nothing" and "it went red" are never the same row.
+RESULT_FELL_BACK = "fell_back_to_colour"
 
 # What the imprint's fire reports back, read by the show log.
 RESULT_LANDED = "landed"
@@ -632,6 +658,39 @@ def default_shape_timing(energy: float, phrase_ms: float) -> tuple[float, float,
 
 
 # ── the roll ────────────────────────────────────────────────────────────────
+
+
+def colour_fallback(action: WordAction,
+                    tuning: LyricEventSettings) -> Optional[WordAction]:
+    """THE COLOUR FALLBACK (W0.3 review, 2026-11-16). The same word, planned
+    as the COLOUR word it would have been if it reached no shape — for the
+    one case where nothing in the room could draw (`SHAPE_NOTHING_DREW`
+    above). None when the word reaches no colour set, which is the honest
+    "there was nothing else to do" case.
+
+    WHY THIS EXISTS AT ALL. His 57 songs with sung words all have word
+    colours switched ON, and a word that reaches a shape is a shape (his
+    Q5 A) — so between this row and W2.5 attaching Words bands to his
+    scenes, every shape-reaching word on every scene without one would have
+    gone from changing his colours to doing nothing. A feature that is
+    "off until a band exists" must not SUBTRACT behaviour while it waits.
+
+    EXACTLY TODAY'S COLOUR WORD, re-derived from the same two functions the
+    colour branch uses (`is_momentary` against the cut-off, and
+    `transition_ms_for`), never carried over from the shape: the shape's
+    own `transition_ms` is its FORM, a different quantity on a different
+    scale, and reusing it would silently retune every fallback word's fade
+    (`moment_fade_ms` reads it). The RAMP the fire path hands the colour is
+    still the time LEFT to the word, so the colour lands on the word exactly
+    as it would have."""
+    if not action.hit.set_ids:
+        return None
+    energy = float(action.energy)
+    return replace(
+        action, verdict=VERDICT_FIRE, why=None, event=None, blocked_by=None,
+        momentary=is_momentary(energy, tuning.energy_cutoff),
+        transition_ms=transition_ms_for(energy),
+        form_s=0.0, hold_s=0.0, release_s=0.0)
 
 
 def chance_for(hit: WordHit) -> float:

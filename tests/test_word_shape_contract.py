@@ -24,6 +24,11 @@ sung word and that write:
      and a scene with no Words band writes nothing and says so.
   5. THE GATES (`engine.fire_lyric_shape_event`): P3 A — a charge, lull or
      drop happening on the showing scene skips the shape, named.
+  5b. THE COLOUR FALLBACK (W0.3 review, 2026-11-16): when nothing in the
+     room could draw, a word that also reaches a colour set takes the
+     colour path exactly as it would have, and a HOLD is deliberately not
+     that case. His 57 switched-on songs are why this is a priority rather
+     than a nicety: no existing word colour may disappear.
   6. THE EDGES: no trigger may name class `word`, the preview's three ruler
      marks, Sonic's reach, and a `responses["word"]` round-trip.
 
@@ -390,6 +395,35 @@ def test_a_per_effect_minimum_form_floors_the_lead(monkeypatch):
     assert word_shape_timing(1.0, 1000, st, ["orbits"])[0] == 0.5
 
 
+def test_the_planned_lead_asks_the_SHOWING_scenes_effects(monkeypatch):
+    """THE REVIEW'S FIX (1), 2026-11-16. The lead IS the form in practice
+    (the effect is told the time LEFT), so flooring the PLAN-time form at
+    the global maximum would make every scene's shape form over the longest
+    minimum any effect declares — a Black Hole scene would form over Fish's
+    2.0 s instead of the approved Energy-paced 0.5-0.9 s. So the planner
+    asks the SHOWING scene."""
+    from spectra.services import engine as engine_mod
+    monkeypatch.setattr(device_model, "WORD_SHAPE_FORM_MIN_S", {"fish": 2.0})
+    energy_form_s = word_shape_timing(0.8, 900, RoomControlState(), ["orbits"])[0]
+    assert energy_form_s == 0.5, "the Energy-paced form, with no floor in reach"
+
+    for effect, expected in ((EFFECT, energy_form_s), ("fish", 2.0)):
+        scene = _words_scene()
+        scene.devices[0].effect_type = effect
+        _cond, responder, _executor, _clock = _scratch(scene)
+        monkeypatch.setattr(engine_mod, "conductor", responder.conductor)
+        [action] = le.plan_words(
+            [_hit(energy=0.8, end_ms=10_900)], [], TUNING,
+            shape_timing=engine_mod.lyric_shape_timing)
+        assert action.form_s == expected, effect
+        assert action.transition_ms == round(expected * 1000), effect
+
+    # A bare engine with no room attached keeps the only safe answer there
+    # is — the global maximum — and says so in its own docstring.
+    from spectra.services.trigger_engine import TriggerEngine
+    assert TriggerEngine._room_shape_timing(0.8, 900)[0] == 2.0
+
+
 def test_unreadable_room_controls_fall_back_to_the_plans_defaults(monkeypatch):
     from spectra.services import room_controls
     monkeypatch.setattr(room_controls, "load_room_controls",
@@ -401,22 +435,31 @@ def test_unreadable_room_controls_fall_back_to_the_plans_defaults(monkeypatch):
 
 
 class Rec:
-    """Records what the clock asked for, nothing more."""
+    """Records what the clock asked for, nothing more. `shape_result` is
+    what the shape hook reports back, so a spec can put the engine in the
+    "nothing could draw" state the colour fallback exists for."""
 
-    def __init__(self):
+    shape_result: dict = {"result": "applied", "word_shape": {"virtuals": 1}}
+
+    def __init__(self, shape_result=None):
         self.shapes: list = []
         self.words: list = []
         self.pos = 0
+        if shape_result is not None:
+            self.shape_result = shape_result
 
     async def lyric_shape(self, action, ramp_ms):
         self.shapes.append((action.hit.phrase, action.hit.shape_id, ramp_ms,
                             self.pos, action.form_s, action.hold_s,
                             action.release_s, action.energy))
-        return {"result": "applied", "word_shape": {"virtuals": 1}}
+        return dict(self.shape_result)
 
     async def lyric_colour(self, action, ramp_ms):
-        self.words.append((action.hit.phrase, ramp_ms, self.pos))
-        return {"result": "jumped", "color_jump": {"picked_id": "red"}}
+        self.words.append((action.hit.phrase, ramp_ms, self.pos,
+                           action.verdict, action.momentary,
+                           action.transition_ms))
+        return {"result": "jumped",
+                "color_jump": {"picked_id": "red", "set_name": "Red"}}
 
 
 async def _noop(_uri):
@@ -797,6 +840,98 @@ def test_a_preview_or_a_house_mode_holds_a_shape(monkeypatch, shape_effects):
     assert _told(executor) == []
 
 
+# ═══ 5b. the colour fallback (the review's priority fix) ══════════════════
+
+
+NOTHING_DREW = [
+    ({"result": "no_class"}, "no_class"),
+    ({"result": "no_band"}, "no_band"),
+    ({"result": "no_active_scene"}, "no_active_scene"),
+]
+
+
+@pytest.mark.parametrize("record,why", NOTHING_DREW)
+def test_a_shape_with_nowhere_to_draw_falls_back_to_its_colour(record, why):
+    """THE REVIEW'S PRIORITY FIX (2026-11-16). He has word colours switched
+    on for all 57 songs with sung words, and no existing word colour may
+    disappear. A word that reaches a shape AND a colour set, on a scene that
+    cannot draw, must change the colour exactly as it did before this row
+    existed — its own momentary/held rule by Energy, and the same
+    time-left ramp."""
+    from spectra.services import fire_history
+    rec = Rec(shape_result=record)
+    hit = _hit(10_000, energy=0.8, sets=("red",), end_ms=10_900)
+    _sweep(_clock_engine(rec, [hit]), rec)
+    assert len(rec.shapes) == 1, "the shape was tried first"
+    assert len(rec.words) == 1, "and the colour took over"
+    phrase, ramp_ms, pos, verdict, momentary, transition_ms = rec.words[0]
+    assert phrase == "heart"
+    assert verdict == le.VERDICT_FIRE, "the colour path gets a colour word"
+    assert momentary is le.is_momentary(0.8, TUNING.energy_cutoff)
+    assert transition_ms == le.transition_ms_for(0.8), \
+        "its OWN transition, never the shape's form"
+    assert pos + ramp_ms == 10_000, "and it still lands on the word"
+    [row] = [r for r in fire_history.load_show_log(uri=URI)
+             if r.get("key") == "lyric:shape"]
+    detail = row["detail"]
+    assert detail["result"] == le.RESULT_FELL_BACK
+    assert detail["nothing_drew"] == why
+    assert detail["colour"] == "jumped"
+    assert (detail["set_id"], detail["set_name"]) == ("red", "Red")
+    assert detail["shape"] == "heart", "and it says which shape it meant to draw"
+
+
+def test_a_shape_only_word_with_nowhere_to_draw_does_nothing_and_says_so():
+    """No colour set to fall back to: nothing happens, and the row says
+    why — "the shape did nothing" has to be answerable from the record."""
+    from spectra.services import fire_history
+    rec = Rec(shape_result={"result": "no_class"})
+    _sweep(_clock_engine(rec, [_hit(10_000, energy=0.8, sets=())]), rec)
+    assert len(rec.shapes) == 1 and rec.words == []
+    [row] = [r for r in fire_history.load_show_log(uri=URI)
+             if r.get("key") == "lyric:shape"]
+    assert row["detail"]["result"] == "no_class"
+    assert row["detail"]["nothing_drew"] == "no_class"
+    assert row["detail"]["colour"] is None
+
+
+@pytest.mark.parametrize("record", [
+    {"result": "held", "held_for": "phase", "reason": "lull"},
+    {"result": "held", "held_for": "preview"},
+    {"result": "held", "held_for": "house_mode", "reason": "mode 'Away'"},
+    {"result": "applied", "word_shape": {"virtuals": 0}},
+])
+def test_a_hold_or_a_words_band_that_ran_never_falls_back(record):
+    """The fallback is for "nothing in the room COULD draw", never for
+    "something is deliberately holding the room" — a colour word is held by
+    those same gates today, so falling back would walk through one. And a
+    Words band that RAN (even with no effect wired yet, which is every
+    Words band until wave 1) is the designed path: its own colour kinds are
+    the colour path for a shape word."""
+    rec = Rec(shape_result=record)
+    _sweep(_clock_engine(rec, [_hit(10_000, energy=0.8, sets=("red",))]), rec)
+    assert len(rec.shapes) == 1
+    assert rec.words == [], "the colour hook was never asked"
+
+
+def test_the_fallback_word_is_rebuilt_not_carried_over():
+    """`colour_fallback` is pure and re-derives both colour numbers from the
+    same two functions the colour branch uses. Carrying the shape's own
+    `transition_ms` over would silently retune the fade
+    (`moment_fade_ms` reads it)."""
+    shape = _only(_plan([_hit(energy=0.8, sets=("red",))]))
+    assert shape.verdict == le.VERDICT_SHAPE
+    fallback = le.colour_fallback(shape, TUNING)
+    assert fallback is not None
+    assert fallback.verdict == le.VERDICT_FIRE
+    assert fallback.transition_ms == le.transition_ms_for(0.8)
+    assert fallback.transition_ms != shape.transition_ms
+    assert (fallback.form_s, fallback.hold_s, fallback.release_s) == (0.0, 0.0, 0.0)
+    assert fallback.shape_id is None, "it is a colour word now"
+    assert fallback.hit is shape.hit, "the same word, though"
+    assert le.colour_fallback(_only(_plan([_hit(sets=())])), TUNING) is None
+
+
 # ═══ 6. the edges ═════════════════════════════════════════════════════════
 
 
@@ -843,6 +978,33 @@ def test_the_preview_ruler_puts_the_trigger_where_the_shape_completes():
         1000 * (form_s + hold_s + release_s))
     end_s = timeline["fire_at_s"] + timeline["effect_animation_ms"] / 1000.0
     assert end_s == pytest.approx(trigger + hold_s + release_s)
+
+
+def test_the_words_section_ignores_a_per_kind_offset_and_says_so():
+    """THE REVIEW'S FIX (3), 2026-11-16: `on_word_shape` fires its band
+    atomically, so a kind's own `trigger_offset_ms` never moves the real
+    fire. Stated three ways rather than left to be discovered — the save
+    warns, the preview's ruler does not draw it, and the timing doc has
+    the row."""
+    from spectra.services import flare_preview, scene_store
+    scene = _words_scene()
+    scene.flare_kinds[0].trigger_offset_ms = -250
+    [warning] = scene_store.scene_warnings(scene)
+    assert "trigger_offset_ms -250" in warning
+    assert "not applied" in warning
+    # The ruler draws the mark where the shape really lands, NOT where the
+    # offset would have put it (that would be the preview lying).
+    timeline = _run(flare_preview.build_timeline(scene, scene.flare_kinds[0], 0.8))
+    assert timeline["trigger_mark_s"] == timeline["animation_anchor_s"]
+    # ... while an ordinary kind's offset still moves its mark, unchanged.
+    other = _words_scene()
+    other.flare_kinds = [FlareKind(
+        name="Spin", type="momentary", trigger_offset_ms=-250,
+        params={"spin": ParamTarget(mode="absolute", value=0.9)})]
+    other.responses["word"] = ResponseSpec(bands=[FlareBand(
+        intensity_min=0.0, intensity_max=1.0, kinds={"Spin": 1.0})])
+    moved = _run(flare_preview.build_timeline(other, other.flare_kinds[0], 0.8))
+    assert moved["trigger_mark_s"] > moved["animation_anchor_s"]
 
 
 def test_the_preview_draws_the_shape_it_is_asked_for():

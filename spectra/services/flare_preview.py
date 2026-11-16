@@ -377,6 +377,14 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
     attached_classes = sorted(kind_attached_classes(scene, kind.name))
     lead_ms = (0 if anchor_rule == ANCHOR_DROP_START
                else kind_lead_ms(kind, intensity, conductor.virtuals))
+    # THE WORDS SECTION IGNORES PER-KIND OFFSETS (W0.3 review, 2026-11-16):
+    # on_word_shape fires its band atomically, so a word_shape kind's own
+    # trigger_offset_ms never moves the real fire. The ruler must not claim
+    # otherwise — drawing his authored offset here would be the preview
+    # lying about when his shape lands, the exact defect the ANCHOR RULE
+    # work above exists to prevent. scene_store.scene_warnings names the
+    # offset on save, so it is stated rather than silently dropped.
+    offset_ms = 0 if kind.type == "word_shape" else kind.trigger_offset_ms
 
     writes = list(responder.executor.writes)
     effect_ms = pulse_effect_ms(kind, conductor)
@@ -402,7 +410,7 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
             "duration_s": MIN_TIMELINE_S,
             "animation_anchor_s": round(anchor_s, 4),
             "trigger_mark_s": round(
-                trigger_mark_s(anchor_s, kind.trigger_offset_ms, MIN_TIMELINE_S), 4),
+                trigger_mark_s(anchor_s, offset_ms, MIN_TIMELINE_S), 4),
             "lead_ms": lead_ms,
             "anchor_rule": anchor_rule,
             "attached_classes": attached_classes,
@@ -433,7 +441,7 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
         "duration_s": round(duration_s, 4),
         "animation_anchor_s": round(anchor_s, 4),
         "trigger_mark_s": round(
-            trigger_mark_s(anchor_s, kind.trigger_offset_ms, duration_s), 4),
+            trigger_mark_s(anchor_s, offset_ms, duration_s), 4),
         "lead_ms": lead_ms,
         "anchor_rule": anchor_rule,
         "attached_classes": attached_classes,

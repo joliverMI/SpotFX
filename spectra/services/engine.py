@@ -312,6 +312,27 @@ async def fire_lyric_colour_event(action: Any, ramp_ms: int) -> dict:
     return record
 
 
+def lyric_shape_timing(energy: float, phrase_ms: float) -> tuple:
+    """THE PLANNER'S SHAPE TIMING, with the room attached (W0.3 review,
+    2026-11-16). `room_controls.word_shape_timing` is the one rule; what
+    this adds is the SHOWING SCENE'S OWN live effect types, so the form the
+    planner computes — which is also the LEAD, and therefore in practice
+    the form the effect is told (the time left to the word) — is floored at
+    what is actually on the panel rather than at the whole library's
+    maximum. Without this, one effect declaring a 2.0 s minimum would
+    stretch EVERY scene's shape to 2.0 s (fx.device_model.
+    word_shape_form_min_s' own docstring).
+
+    Wired onto trigger_engine._lyric_shape_timing below, the same way
+    _lyric_colour is: a TriggerEngine with no room keeps its own fallback
+    (the global maximum, since the room is then unknown). Never raises —
+    TriggerEngine._room_shape_timing's own failure path is the model."""
+    from spectra.services.room_controls import (load_room_controls,
+                                                word_shape_timing)
+    live = [st.effect_type for st in conductor.virtuals.values()]
+    return word_shape_timing(energy, phrase_ms, load_room_controls(), live)
+
+
 async def fire_lyric_shape_event(action: Any, ramp_ms: int) -> dict:
     """WORD SHAPES (Word Shapes plan W0.3, 2026-11-15): a sung word drawing
     its shape, reached only from trigger_engine._tick_lyric_words, only on a
@@ -394,6 +415,7 @@ def _push_word_colour(record: dict) -> None:
 
 trigger_engine._lyric_colour = fire_lyric_colour_event
 trigger_engine._lyric_shape = fire_lyric_shape_event
+trigger_engine._lyric_shape_timing = lyric_shape_timing
 trigger_engine._lyric_pick = pick_lyric_colour
 trigger_engine._lyric_fired = _push_word_colour
 trigger_engine._lyric_note_set = responses.note_lyric_set

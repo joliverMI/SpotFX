@@ -283,18 +283,35 @@ nothing, that warning is the answer.
 His Q5 A. A word that reaches BOTH a shape and colour sets is a SHAPE, not a
 colour — the planner's shape branch runs first, deliberately, because the
 Words band's own colour kinds (a Colour Jump pooled in the same band, or in
-a lane beside the shape) are the colour path for a shape word. **The one
-live consequence of this row**: on a show he has switched ON, a word on a
-shape's seed word (`love`, `heart`, `star`, `shine`, `diamond`, `crystal`,
-...) no longer fires its colour, and until a Words band exists it does
-nothing instead.
+a lane beside the shape) are the colour path for a shape word.
+
+**AND WHEN THE SCENE CANNOT DRAW, THE COLOUR STILL LANDS.** All 57 of his
+songs with sung words have word colours switched on, so the feature must not
+subtract one while the Words sections are being built. When `on_word_shape`
+reports that nothing in the room could draw — `no_class` (no Words band on
+the showing scene), `no_band` (its bands miss this word's Energy) or
+`no_active_scene` — a word that also reaches a colour set takes the COLOUR
+path through the same hook a colour word uses, with its own momentary/held
+rule and the same time-left ramp, logged `lyric:shape` with
+`result: fell_back_to_colour`. **Not** for a hold (a preview, Absorb, a
+house mode or P3 A's phase holds a colour word too), and **not** for a Words
+band that ran with no effect wired — that band is the designed path. The one
+thing that really moves: a word that used to IMPRINT its colour on a nearby
+drop, scene change or flare now fires that colour on itself, because the
+shape branch runs before the event lookup and a shape never imprints.
 
 **TIMING — the shape completes ON the word.** His words: *"the timing should
 be such that the trigger lands on where the shape is first fully formed."*
 So the form time is a LEAD: the band fires `form_s` EARLY
 (`fire_at = word − form`, LEAD family, positive = earlier) and the effect is
 told the time LEFT at the tick that fired, so a late tick shortens the form
-rather than landing the shape late.
+rather than landing the shape late. **Because of that, the lead and the form
+are the same number in practice** — which is why both the plan-time and the
+fire-time per-effect floor ask the SHOWING scene's own live effects, never
+the whole library's maximum (`fx.device_model.word_shape_form_min_s`).
+**A PER-KIND `trigger_offset_ms` IS NOT APPLIED IN THE WORDS SECTION**: the
+band fires atomically on the word, the save warns if a kind in a Words band
+carries one, and the preview draws the mark at offset 0 to match.
 `docs/SPECTRA_TIMING_CONVENTIONS.md` carries both rows (the form, and the
 hold/release as durations on the effect's own clock) with file:line cites —
 read it before changing any of these numbers.

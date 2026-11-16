@@ -524,19 +524,27 @@ def word_shape_form_min_s(effect_types=None) -> float:
     """The longest minimum form among `effect_types`, or — with none given
     — among EVERY effect that declares one.
 
-    THE TWO HALVES (the "conservative at plan time, exact at fire time"
-    split the word-colour path already uses, spectra/services/
-    lyric_events.py):
-      * PLAN TIME has no idea which scene will be showing when the word is
-        sung, so it asks with no effect types and gets the global maximum —
-        a LEAD that is too LONG is harmless (the form actually told is the
-        time LEFT to the word at the tick that fires it, so the shape still
-        completes ON the word), while one that is too short lands the shape
-        late, which is the one thing the plan's "complete on the word"
-        promise cannot survive.
-      * FIRE TIME knows the showing scene's live effects and asks with
-        exactly those, so the floor applied to the told form is the real
-        one.
+    ASK WITH THE SHOWING SCENE'S OWN EFFECTS WHEREVER YOU CAN (W0.3 review,
+    2026-11-16). The global maximum is a LAST RESORT, never the plan-time
+    answer: because the form an effect is actually TOLD is the time LEFT to
+    the word at the tick that fires it, the lead and the form are the SAME
+    number in practice, so a lead inflated to the global maximum does not
+    merely fire early — it makes every scene's shape FORM over that
+    maximum. Once Fish's wave-1 row declares 2.0 s, asking globally would
+    give a Black Hole scene a 2.0 s form in place of the approved
+    Energy-paced 0.5-0.9 s. So:
+      * PLAN TIME asks with the SHOWING scene's live effect types
+        (engine.lyric_shape_timing, over conductor.virtuals). The showing
+        scene can change between the plan and the word; that is the same
+        "conservative at plan time, exact at fire time" trade the colour
+        path already makes, and it errs by at most one scene's difference
+        rather than by the whole library's maximum.
+      * FIRE TIME asks again with the live effects, so the floor applied to
+        the told form is always the real one
+        (engine.fire_lyric_shape_event).
+      * NO EFFECT TYPES AT ALL — a bare TriggerEngine with no room wired (a
+        spec, or the Test Bed on a host with no conductor) — falls back to
+        the global maximum, the only safe answer when the room is unknown.
     0.0 with nothing declared (this row) — the Energy-paced form stands
     alone, and the whole mechanism is inert."""
     if not WORD_SHAPE_FORM_MIN_S:

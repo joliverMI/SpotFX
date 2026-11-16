@@ -113,12 +113,20 @@ the road."
   branch:
     - **a word reaching BOTH a shape and colour sets is a SHAPE** — the
       Words response band's own colour kinds are how a shape word
-      recolours the room, so there is no second colour path and no
-      fallback. This is the one live-behaviour consequence of W0.3: on a
-      show he has switched ON, a word on a shape's seed word (`love`,
-      `heart`, `star`, `shine`, `diamond`, `crystal`, ...) stops firing
-      its colour, and until a scene has a Words band (W2.1) it does
-      nothing instead;
+      recolours the room. **NO COLOUR IS LOST WHILE THE WORDS SECTIONS ARE
+      BUILT** (W0.3 review, 2026-11-16): when nothing in the room could
+      draw — no Words band on the showing scene, its bands missing this
+      Energy, or no scene showing — such a word takes THE COLOUR PATH
+      instead (`lyric_events.colour_fallback`, logged `lyric:shape` with
+      `result: fell_back_to_colour`), with its own momentary/held rule and
+      the same time-left ramp, since all 57 of his songs with sung words
+      have word colours switched on. The one thing that moves is the
+      colour's CARRIER: the shape branch runs before the event lookup and
+      a shape never imprints, so a word that used to give its colour to a
+      nearby drop, scene change or flare now fires that colour on itself.
+      A shape-reaching word with no colour set has nothing to fall back
+      to, so it does nothing — as it did before this row, when it was
+      `WHY_NO_COLOUR`;
     - a DROP inside the imprint window WINS and the shape is skipped
       (`WHY_DROP_WINS`); a flare or a scene change does not, and a shape
       NEVER imprints;

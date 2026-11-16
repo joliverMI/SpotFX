@@ -1555,9 +1555,17 @@ class ResponseEngine:
             a lull's dark to punch through it. Allowed-but-unreachable is
             the honest state, and the one to revisit if P3 A is ever
             relaxed.
-        The fire runs ATOMICALLY (anchor_relocated False): the trigger
-        clock relocates the whole word by its form, not per kind, so the
-        band's kinds all land together on the word.
+        THE FIRE RUNS ATOMICALLY (anchor_relocated False), and that is a
+        STATED LIMIT, not an oversight (W0.3 review, 2026-11-16): the
+        trigger clock relocates the whole word by its form, so the band's
+        kinds all land together on the word and A KIND'S OWN
+        `trigger_offset_ms` IS NOT APPLIED HERE. A word has one moment —
+        the sung word — and the one lead that matters is the form, which
+        has to land the shape on it; a per-kind stagger would move a kind
+        off the word it exists to coincide with. The preview is kept
+        consistent (flare_preview.build_timeline draws a word_shape kind's
+        mark at offset 0) and scene_store.scene_warnings names a non-zero
+        offset on a Words band, so the field is never silently inert.
 
         THE SHAPE RIDES A CONTEXTVAR (WORD_SHAPE_ACTIVE, the
         lyric_events.ACTIVE pattern) rather than a parameter: _run_kinds_

@@ -250,19 +250,25 @@ effect_types)`:
 
 The form is floored at `fx.device_model.word_shape_form_min_s` — a
 per-effect minimum (`WORD_SHAPE_FORM_MIN_S`, empty until Fish's wave-1 row
-gives it 2.0 s). **That accessor is where the plan-time / fire-time split
-lives, and it is the one thing easiest to get wrong here:**
+gives it 2.0 s). **That accessor is the one thing easiest to get wrong
+here, and the W0.3 review caught exactly this:**
 
-- **PLAN TIME is conservative.** The planner has no idea which scene will
-  be showing when the word is sung, so it asks with no effect types and
-  gets the GLOBAL maximum. A lead that is too long is harmless; one that
-  is too short lands the shape late, which is the one thing "complete on
-  the word" cannot survive.
-- **FIRE TIME is exact.** `engine.fire_lyric_shape_event` tells the effect
-  the time LEFT to the word (`word − position` at the firing tick),
-  floored at the SHOWING effects' own minimum. So a late tick shortens the
-  form rather than landing the shape late — the same shape the word-colour
-  ramp already has.
+- **THE LEAD IS THE FORM IN PRACTICE.** The effect is told the time LEFT to
+  the word, and the band fired a lead early, so those are the same number.
+  A floor applied to the lead therefore does not merely fire early — it
+  makes the shape FORM over that floor.
+- **so BOTH halves ask the SHOWING scene's own live effects.** Plan time:
+  `engine.lyric_shape_timing`, over `conductor.virtuals`. Fire time:
+  `engine.fire_lyric_shape_event`, again over the live effects. Asking
+  globally at plan time would have given a Black Hole scene Fish's 2.0 s
+  instead of the approved Energy-paced 0.5-0.9 s the moment Fish's row
+  landed.
+- **the GLOBAL maximum is the no-room fallback only** —
+  `TriggerEngine._room_shape_timing`, for an engine `services/engine.py`
+  has not wired (a spec, a Test Bed with no conductor). It is the only safe
+  answer when the room is unknown.
+- a late tick therefore shortens the form rather than landing the shape
+  late — the same shape the word-colour ramp already has.
 
 **THE LEAD.** The form IS the lead: `fire_at = word − form` (LEAD family,
 positive = earlier — `docs/SPECTRA_TIMING_CONVENTIONS.md` has both rows
@@ -285,11 +291,36 @@ BEFORE the colour branch:
 5. otherwise `VERDICT_SHAPE`, with `transition_ms = form_s × 1000`.
 
 **A word reaching BOTH a shape and colour sets is a SHAPE** — the Words
-band's own colour kinds are how a shape word recolours the room. This is
-the row's one live-behaviour consequence: on a show he has switched ON, a
-word on a shape seed word (`love`, `heart`, `star`, `shine`, `diamond`,
-`crystal`, …) no longer fires its colour, and until a scene has a Words
-band (W2.1) it does nothing instead.
+band's own colour kinds are how a shape word recolours the room.
+
+**THE COLOUR FALLBACK** (W0.3 review, 2026-11-16) is what keeps that from
+subtracting anything while the Words sections are built. When
+`on_word_shape` reports that NOTHING IN THE ROOM COULD DRAW
+(`lyric_events.SHAPE_NOTHING_DREW` — `no_class`, `no_band`,
+`no_active_scene`) and the word also reaches a colour set, the word takes
+THE COLOUR PATH through the same hook a colour word uses, with its own
+momentary/held rule and the same time-left ramp
+(`lyric_events.colour_fallback`), logged `lyric:shape` with
+`result: fell_back_to_colour`. He has word colours switched on for all 57
+songs with sung words, and no existing word colour may disappear.
+
+Three things this fallback deliberately is NOT:
+
+- **not for a HOLD.** A preview, Absorb, a house mode or P3 A's
+  charge/lull/drop holds a colour word today too, so falling back there
+  would walk straight through a gate.
+- **not for `applied` with `virtuals: 0`.** A Words band that RAN is the
+  designed path — its own colour kinds included — and before wave 1 that
+  is *every* Words band. He attached that band and chose its behaviour.
+- **not an imprint.** The shape branch runs before the event lookup and a
+  shape never imprints, so a word that used to give its colour to a nearby
+  drop, scene change or flare now fires that colour on ITSELF. The colour
+  still lands, by the same rule, on the same word; its carrier is what
+  moves. That is the row's one real behaviour change, and it is recorded by
+  test (`tests/test_lyric_events.py`).
+- a shape-reaching word with NO colour set has nothing to fall back to, so
+  it does nothing — which is also what it did before this row, when such a
+  word was `WHY_NO_COLOUR`.
 
 **P3 A, THE FIRE-TIME SKIP.** `engine.fire_lyric_shape_event` takes the
 gates in this order: the response gate at the ANALYSED tier (a preview,
@@ -299,6 +330,14 @@ skipped with `held_for: "phase"`** (`ResponseEngine.phase_armed()`: the
 `_phase_armed` flag for a charge/lull, and a drop's own ramp window, since
 a drop arms no phase of its own). Every outcome is logged as `lyric:shape`
 on the show log and pushed to every open page.
+
+**THE WORDS SECTION IGNORES PER-KIND OFFSETS** (same review).
+`on_word_shape` fires its band ATOMICALLY (`anchor_relocated` False), so a
+kind's own `FlareKind.trigger_offset_ms` does not move the real fire: a word
+has one moment, and the one lead that matters is the form that lands the
+shape on it. Stated three ways rather than left to be discovered — the save
+warns (`scene_store.scene_warnings`), the preview draws the mark at offset 0
+for this type, and `docs/SPECTRA_TIMING_CONVENTIONS.md` carries the row.
 
 **THE WRITE.** `_word_shape` reads the action off the `WORD_SHAPE_ACTIVE`
 ContextVar (the `lyric_events.ACTIVE` pattern — the kind pipeline is shared

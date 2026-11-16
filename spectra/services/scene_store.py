@@ -101,6 +101,22 @@ def scene_warnings(scene: SceneV2) -> list[str]:
                 f"flare kind '{name}' is a word_shape — only the Words "
                 f"section fires a shape, so its attachment to {classes} "
                 f"does nothing")
+    # THE WORDS SECTION IGNORES PER-KIND OFFSETS (W0.3 review, 2026-11-16):
+    # scene_response.on_word_shape fires its band atomically, so an offset
+    # authored on any kind a Words band attaches never moves the real fire.
+    # The word's own moment, less the form, is the whole timing.
+    word_spec = (scene.responses or {}).get("word")
+    if word_spec is not None:
+        offsets = {k.name: k.trigger_offset_ms for k in scene.flare_kinds
+                   if k.trigger_offset_ms}
+        named = sorted({name for band in word_spec.bands for name in band.kinds
+                        if name in offsets})
+        for name in named:
+            out.append(
+                f"flare kind '{name}' carries trigger_offset_ms "
+                f"{offsets[name]:+d} and is attached to the Words section, "
+                f"which fires its band on the word itself — the offset is "
+                f"not applied there")
     return out
 
 
