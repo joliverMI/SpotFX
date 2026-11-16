@@ -43,3 +43,70 @@ upserts, a source already carrying the kind is refused). A dry run against
 a COPY of his live store was read before shipping (Matrix keeps
 drift_speed/snap_threshold/snap_hold/flames bindings and flame_audio 2,
 speed_audio, impulse_decay, x/y offsets).
+
+## Words band — one `Word Shape` kind, full range (Word Shapes W2.5)
+
+`scripts/add_word_shapes.py` is the one thing that turns Word Shapes on in
+his room — and because this scene is NOT SEEDED YET (the tuning gate above),
+the script reports it as absent and skips it rather than inventing it: run
+it again, or with `--scene Sauron`, once the seed has landed. On this scene
+it writes exactly two keys:
+
+- `flare_kinds` gains ONE entry, `{"name": "Word Shape", "type":
+  "word_shape", ...}` — offset 0, no minimum intensity, enabled. The type
+  carries no jump/params/gain/hold_ms of its own: the five timings are ROOM
+  settings (`word_shape_form_slow_s` / `_form_fast_s` / `_hold_min_s` /
+  `_hold_max_s` / `_release_ratio`, Sonic-tellable), Energy-paced per word,
+  and the shape itself is the sung label's.
+- `responses["word"]` is CREATED as ONE full-range band `[0.0, 1.0)`
+  attaching that kind at ×1.0 in its own implicit lane (`kind_lanes`
+  empty), every other field at the model's default.
+
+**THE BAND IS THE SWITCH** (his Q6 A: shapes are on "for every song once a
+scene's Words band has a Word Shape kind attached"). A scene with no Words
+section is `no_class` and writes nothing. FULL RANGE because
+`scene_response.words_band_draws` is asked at PLAN time whether the showing
+scene's Words section covers THIS Energy with an enabled `word_shape` kind
+— a band stopping short of 1.0 would silently hand the loudest words back
+to the colour path. **No colour kind is pooled beside it**: his Q5 A allows
+one and a Words band is an ordinary `ResponseSpec`, but he did not ask for
+one and it is his to add from the Scenes page.
+
+**ONE MORE WRITE ON A LEGACY SCENE, and it is load-preserving.** His
+stored scenes are in the LEGACY format — no `flare_kinds` key at all, kinds
+auto-named on load (`models/scene.py _migrate_flare_kinds`) — and THE
+ABSENCE OF THAT KEY IS THE LEGACY FLAG: without it, a response class
+carrying no explicit `reroll_dice` loads with the historical default TRUE
+and gains a "Dice Re-roll" kind on every band; with it, that class loads
+FALSE and the kind silently DETACHES. Declaring the Word Shape kind
+introduces the key, so before doing it the script writes the explicit
+legacy default (`reroll_dice: true`) into every spec that has none — the
+loaded scene is then exactly what it was. Its `verify_diff` compares the
+LOADED models (`SceneV2(**raw).model_dump()`, our kind and section
+stripped) as well as the raw dicts, so this class of mistake cannot be
+invisible to it again. `--revert` drops the now-empty `flare_kinds` key too
+(restoring the legacy reading) but leaves that one explicit flag, which is
+load-neutral: **the backup is the byte-exact restore.** Found by running
+the script end to end on a real-shaped store — W2.5 review, 2026-11-16.
+
+**UNDO, and why a re-run is not one.** Plan §7: the kind's power button
+switches it off on this scene, detaching it from the band does the same,
+and `--revert` removes both from all six. Each of the first two leaves data
+the script did not write, so a re-run REFUSES rather than undoing his undo
+— an existing `Word Shape` kind is left exactly as authored (a switched-off
+one is never re-enabled) and a Words section that differs aborts with the
+difference printed. Raw-dict patch, never `scene_store.save()`; dry-run by
+default; `--apply` backs the store up to
+`storage/spectra/backups/scenes-word-shapes-<stamp>.json` first and
+re-reads the written file to verify nothing else moved. A run with nothing
+to do writes nothing and takes NO backup, and a stamp already taken (the
+stamp is seconds-resolution) takes the next free name — so the backup of
+the original store can never be clobbered by a backup of a patched one.
+
+**WHO RUNS IT, AND WHEN:** DJ, at W3, only after the W1 code is deployed
+and `spectra.service` restarted (an older process cannot load a `word`
+response class). The tuning gate (`docs/ADDING_EFFECTS.md`) puts his eye
+before a shape is live in a song, and his first look is the Words preview,
+which needs the kind declared. Proof: `tests/test_add_word_shapes.py`
+(fixture store only — never live storage). The shape library, the told keys
+and the engine contract are the `word-shapes` skill.
