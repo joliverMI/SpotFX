@@ -61,7 +61,11 @@ async def upsert_scene(scene: SceneV2):
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     scene_store.save(scene)
-    return {"status": "saved", "id": scene.id}
+    # ADVISORY (scene_store.scene_warnings): legal, stored, and inert —
+    # a word_shape kind attached outside the Words section today. Never a
+    # refusal; the editor shows it.
+    return {"status": "saved", "id": scene.id,
+            "warnings": scene_store.scene_warnings(scene)}
 
 
 @router.delete("/{scene_id}")

@@ -491,6 +491,70 @@ BIG_FISH_EFFECTS = frozenset({"fish"})
 # (spectra scene_response._sauron_surge).
 SAURON_SURGE_EFFECTS = frozenset({"sauron"})
 
+# THE WORD SHAPE EFFECTS (Word Shapes plan W0.3, 2026-11-15): the effects
+# that know how to draw a sung word's shape and are therefore told
+# fx/effects/word_shape_keys.py's six keys on a `word_shape` flare-kind
+# fire (spectra scene_response._word_shape, over _flare_states() so a Light
+# Show "flares off" target gets none). Same membership-gate shape as the
+# sets above, and like them the keys are deliberately absent from the
+# effect-parameter registry: they ride ONLY that one write.
+#
+# EMPTY ON PURPOSE IN THIS ROW. W0.3 builds the whole engine contract — the
+# class, the kind, the planner's shape branch, the fire path, the told
+# write — and wires NO effect to it: wave 1 adds each effect (Black Hole's
+# shaped horizon, STAR's shaped radius, Orbits' tethers, Fish's procession,
+# Sauron's shaped iris, Fireworks' shaped burst) one row at a time, each
+# behind the Admiral's own tuning gate (docs/ADDING_EFFECTS.md). So even a
+# scene with a Words band and a Word Shape kind writes to no fixture until
+# the first wave-1 row lands. To join, follow fx/effects/word_shape_keys.py's
+# own "HOW AN EFFECT OPTS IN".
+WORD_SHAPE_EFFECTS: frozenset = frozenset()
+
+# THE PER-EFFECT MINIMUM FORM (plan section 2.4): an effect whose shape
+# cannot credibly assemble inside the Energy-paced form time (the plan gives
+# Fish 2.0 s — a procession of fish has to swim into place) declares its own
+# floor here, in seconds, keyed by registry name. The planner's timing takes
+# the LARGER of the Energy-paced form and this (room_controls.
+# word_shape_timing), so the band fires early enough for whatever is
+# showing. EMPTY now; Fish's own wave-1 row fills it.
+WORD_SHAPE_FORM_MIN_S: dict[str, float] = {}
+
+
+def word_shape_form_min_s(effect_types=None) -> float:
+    """The longest minimum form among `effect_types`, or — with none given
+    — among EVERY effect that declares one.
+
+    ASK WITH THE SHOWING SCENE'S OWN EFFECTS WHEREVER YOU CAN (W0.3 review,
+    2026-11-16). The global maximum is a LAST RESORT, never the plan-time
+    answer: because the form an effect is actually TOLD is the time LEFT to
+    the word at the tick that fires it, the lead and the form are the SAME
+    number in practice, so a lead inflated to the global maximum does not
+    merely fire early — it makes every scene's shape FORM over that
+    maximum. Once Fish's wave-1 row declares 2.0 s, asking globally would
+    give a Black Hole scene a 2.0 s form in place of the approved
+    Energy-paced 0.5-0.9 s. So:
+      * PLAN TIME asks with the SHOWING scene's live effect types
+        (engine.lyric_shape_timing, over conductor.virtuals). The showing
+        scene can change between the plan and the word; that is the same
+        "conservative at plan time, exact at fire time" trade the colour
+        path already makes, and it errs by at most one scene's difference
+        rather than by the whole library's maximum.
+      * FIRE TIME asks again with the live effects, so the floor applied to
+        the told form is always the real one
+        (engine.fire_lyric_shape_event).
+      * NO EFFECT TYPES AT ALL — a bare TriggerEngine with no room wired (a
+        spec, or the Test Bed on a host with no conductor) — falls back to
+        the global maximum, the only safe answer when the room is unknown.
+    0.0 with nothing declared (this row) — the Energy-paced form stands
+    alone, and the whole mechanism is inert."""
+    if not WORD_SHAPE_FORM_MIN_S:
+        return 0.0
+    if effect_types is None:
+        return max(WORD_SHAPE_FORM_MIN_S.values())
+    mins = [WORD_SHAPE_FORM_MIN_S[e] for e in effect_types
+            if e in WORD_SHAPE_FORM_MIN_S]
+    return max(mins) if mins else 0.0
+
 
 # ── effect-parameter registry ────────────────────────────────────────────────
 

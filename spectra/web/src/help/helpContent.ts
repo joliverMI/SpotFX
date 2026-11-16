@@ -795,6 +795,19 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'word-shapes',
+        title: 'Word shapes: a sung word draws a shape',
+        keywords: 'word shape shapes heart star diamond draw form hold release forming time energy words section band flare sung word love sparkle sonic',
+        body: [
+          'A sung word that points at a shape — heart for love, star for shine, diamond for sparkle — can make the lights DRAW that shape: it forms smoothly, stands complete for a moment, then lets go smoothly. The forming finishes exactly ON the word, so the shape is at its fullest the instant the word is sung.',
+          'It is a flare in every way but one: you give a scene a Words section (beside Flares, Charges, Lulls and Drops), put a Word Shape kind in one of its Energy bands, and only a sung word ever fires it — no trigger can. A scene with no Words section does nothing on a shape word, so the section IS the switch. A colour kind in the same band fires alongside the shape, and that is how a shape word also changes your colours.',
+          'Five settings, all tunable by voice: Word shape — forming time, quiet (0.9 s) and forming time, loud (0.5 s), between which the forming paces with the song\'s Energy; shortest and longest hold (0.8 s and 2 s), between which the shape stands complete for as long as the phrase is sung; and release (1.5), how much slower it lets go than it formed.',
+          'A shape is skipped when a drop lands within a couple of seconds of the word (the drop is the bigger moment), when a charge, lull or drop is already running, when the word is inside the minimum gap after another word, or when the word did not come up on this play. A flare or a scene change beside it does not stop it. Every one of those is written to the show log.',
+          'Your existing word colours do not change. Where the showing scene has no Words section — or its bands do not reach that word\'s Energy — a word that also points at a colour set simply changes that colour, exactly as it did before shapes existed, on its own timing: a quiet word still glides in over a couple of seconds, and a word beside a drop still tints the drop. Only a word that points at a shape and nothing else does nothing there, and the show log says so.',
+          'No effect draws a shape yet: the shapes themselves, and which effects can draw them, arrive one effect at a time after you have tuned each one in the room.',
+        ],
+      },
+      {
         id: 'sung-labels-reading',
         title: 'When songs get read',
         keywords: 'automatic auto read re-read reading off default labels change claude allowance tokens weak match threshold cutoff confidence chance sonic voice',

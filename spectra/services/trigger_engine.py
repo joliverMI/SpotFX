@@ -600,6 +600,9 @@ class TriggerEngine:
         lyric_settings: Callable[[], Any] | None = None,
         lyric_words: Callable[[str], Any] | None = None,
         lyric_colour: Callable[..., Awaitable[Any]] | None = None,
+        lyric_shape: Callable[..., Awaitable[Any]] | None = None,
+        lyric_shape_timing: Callable[..., Any] | None = None,
+        lyric_can_draw: Callable[[float], bool] | None = None,
         lyric_pick: Callable[..., dict] | None = None,
         lyric_note_set: Callable[[Optional[str]], None] | None = None,
         lyric_release_hold: Callable[[], None] | None = None,
@@ -853,6 +856,21 @@ class TriggerEngine:
         self._lyric_tuning = lyric_settings or lyric_events.settings
         self._lyric_load = lyric_words or lyric_events.load_words
         self._lyric_colour = lyric_colour or self._no_lyric_colour
+        # WORD SHAPES (plan W0.3). `_lyric_shape(action, ramp_ms)` is the
+        # shape's own fire hook, wired in services/engine.py exactly like
+        # `_lyric_colour`; `_lyric_shape_timing(energy, phrase_ms)` is the
+        # room's own form/hold/release rule, bound into the planner so the
+        # Test Bed and the show read ONE set of numbers
+        # (room_controls.word_shape_timing).
+        self._lyric_shape = lyric_shape or self._no_lyric_shape
+        self._lyric_shape_timing = lyric_shape_timing or self._room_shape_timing
+        # ... and `_lyric_can_draw(energy)` is whether the SHOWING scene can
+        # draw a shape at that Energy, the planner's own question (W0.3
+        # round-2 review). An engine with no room says YES, which plans the
+        # shape — a pure `plan_words` spec's own default, and the direction
+        # every unknowable in this feature errs (the fire-time fallback
+        # catches it).
+        self._lyric_can_draw = lyric_can_draw or (lambda _energy: True)
         self._lyric_pick = lyric_pick or (lambda *_a, **_k: {"result": "unwired"})
         self._lyric_note_set = lyric_note_set or (lambda _set_id: None)
         self._lyric_release_hold = lyric_release_hold or (lambda: None)
@@ -2072,7 +2090,10 @@ class TriggerEngine:
         self._lyric_planned, self._lyric_planned_at = key, now
         events = self._lyric_event_moments(candidates, triggers, mode, windows,
                                            self._seq_meta, self._flare_ids)
-        self._lyric_plan = lyric_events.plan_play(words.hits, events, tuning, play)
+        self._lyric_plan = lyric_events.plan_play(
+            words.hits, events, tuning, play,
+            shape_timing=self._lyric_shape_timing,
+            can_draw=self._lyric_can_draw)
         self._lyric_imprints = {
             a.event.id: a for a in self._lyric_plan
             if a.verdict == lyric_events.VERDICT_IMPRINT and a.event is not None}
@@ -2298,13 +2319,22 @@ class TriggerEngine:
             imprint.result = lyric_events.RESULT_CANNOT_CARRY
 
     async def _tick_lyric_words(self, last: int, position_ms: int) -> None:
-        """The words firing on their own, each started its transition early
-        so the colour arrives on the word (LEAD family, positive = earlier:
+        """The words acting on their own — a colour word FIRING ALONE or a
+        SHAPE WORD drawing its shape (Word Shapes plan W0.3) — each started
+        its transition early so the colour, or the finished shape, arrives
+        ON the word (LEAD family, positive = earlier:
         `fire_at = word - transition`, the drop-colour fade's shape). Exactly
         once per approach, by the fired-keys memory. The ramp is the time left
-        from the tick that fires it, so a late tick still lands on the word."""
+        from the tick that fires it, so a late tick still lands on the word.
+
+        ONE loop, ONE lead rule, for both verdicts: a shape's
+        `transition_ms` IS its form time (lyric_events' own planner), so
+        "fire the transition early and tell the effect what is left" is
+        exactly the same arithmetic — the only difference is which hook the
+        action goes to."""
         for action in self._lyric_plan:
-            if action.verdict != lyric_events.VERDICT_FIRE:
+            if action.verdict not in (lyric_events.VERDICT_FIRE,
+                                      lyric_events.VERDICT_SHAPE):
                 continue
             word_ms = int(action.hit.ms)
             key = (f"lyric:{action.hit.key}", word_ms)
@@ -2316,7 +2346,94 @@ class TriggerEngine:
             self._fired.add(key)
             if position_ms - word_ms > LYRIC_SEEK_SKIP_MS:
                 continue
-            await self._fire_lyric_word(action, max(0, word_ms - position_ms), position_ms)
+            ramp_ms = max(0, word_ms - position_ms)
+            if action.verdict == lyric_events.VERDICT_SHAPE:
+                await self._fire_lyric_shape(action, ramp_ms, position_ms)
+            else:
+                await self._fire_lyric_word(action, ramp_ms, position_ms)
+
+    async def _fire_lyric_shape(self, action: lyric_events.WordAction, ramp_ms: int,
+                                position_ms: int) -> None:
+        """One shape word (Word Shapes plan W0.3): the showing scene's Words
+        section, fired `form_s` early so the shape completes on the word.
+        `ramp_ms` is the time LEFT to the word — what the effect is actually
+        told as its form, so a late tick shortens the form instead of
+        landing the shape late (engine.fire_lyric_shape_event makes that
+        exact). Logged either way: every shape word's outcome goes on the
+        show log as `lyric:shape`, landed, held or fallen back, and every
+        open page is told through the same live pulse a colour word uses.
+
+        THE COLOUR FALLBACK IS THE NET, NOT THE MECHANISM (round-2 review,
+        2026-11-16). "Can anything draw this?" is decided at PLAN time now
+        (`lyric_events.plan_words`' own `can_draw`), so a shape-reaching
+        word on a scene that cannot draw is PLANNED as the ordinary colour
+        word it is — own `fire_at`, own transition, own imprint. What is
+        left for here is the race that plan cannot see: the showing scene
+        CHANGED inside the replan window (`LYRIC_REPLAN_S`, 1 s), so the
+        word was planned as a shape and arrives somewhere that cannot draw
+        it. Then a word that also reaches a colour set takes the colour
+        path through the very same hook a colour word uses — with the
+        shape's own lead behind it, which is the honest best available once
+        the moment has passed, and the reason this is a net rather than the
+        answer. A HOLD is deliberately NOT this case (see
+        `SHAPE_NOTHING_DREW`'s own comment): a preview, Absorb, a house
+        mode or P3 A's phase holds a colour word too."""
+        try:
+            record = await self._lyric_shape(action, ramp_ms)
+        except Exception:
+            logger.exception("word shapes: the word '%s' failed", action.hit.phrase)
+            record = {"result": "error"}
+        record = record if isinstance(record, dict) else {"result": "unwired"}
+        logger.info("word shape: '%s' (%s) -> %s", action.hit.phrase,
+                    action.hit.shape_id, record.get("result"))
+        shape = record.get("word_shape") or {}
+        detail = {
+            "verdict": lyric_events.VERDICT_SHAPE, "shape": action.hit.shape_id,
+            "energy": round(action.energy, 4),
+            "form_s": action.form_s, "hold_s": action.hold_s,
+            "release_s": action.release_s, "ramp_ms": ramp_ms,
+            "told_form_s": shape.get("form_s"), "virtuals": shape.get("virtuals"),
+            "result": record.get("result"), "held_for": record.get("held_for")}
+        set_id = set_name = None
+        landed = record.get("result") == "applied"
+        if record.get("result") in lyric_events.SHAPE_NOTHING_DREW:
+            fallback = lyric_events.colour_fallback(action, self._lyric_tuning())
+            detail["nothing_drew"] = record.get("result")
+            if fallback is None:
+                # It reached a shape and no colour set: there was genuinely
+                # nothing else to do. Logged, so "the shape did nothing" is
+                # answerable from the record rather than inferred.
+                detail["colour"] = None
+            else:
+                colour = await self._colour_for_shape(fallback, ramp_ms)
+                jump = colour.get("color_jump") or {}
+                set_id, set_name = jump.get("picked_id"), jump.get("set_name")
+                landed = colour.get("result") == "jumped"
+                detail.update({
+                    "result": lyric_events.RESULT_FELL_BACK,
+                    "colour": colour.get("result"),
+                    "held_for": colour.get("held_for"),
+                    "momentary": fallback.momentary,
+                    "transition_ms": fallback.transition_ms,
+                    "set_id": set_id, "set_name": set_name})
+        self._log_lyric("lyric:shape", action.hit, position_ms, detail)
+        self._push_lyric(lyric_events.fired_payload(
+            lyric_events.VERDICT_SHAPE, action.hit, event=None,
+            set_id=set_id, set_name=set_name, result=detail["result"],
+            landed=landed, uri=self._uri, position_ms=position_ms))
+
+    async def _colour_for_shape(self, fallback: lyric_events.WordAction,
+                                ramp_ms: int) -> dict:
+        """The colour hook, for a shape word that had nothing to draw. Its
+        own try/except, so a colour failure is reported as the colour's
+        rather than swallowing the shape's own record."""
+        try:
+            colour = await self._lyric_colour(fallback, ramp_ms)
+        except Exception:
+            logger.exception("word shapes: the colour fallback for '%s' failed",
+                             fallback.hit.phrase)
+            return {"result": "error"}
+        return colour if isinstance(colour, dict) else {"result": "unwired"}
 
     async def _fire_lyric_word(self, action: lyric_events.WordAction, ramp_ms: int,
                                position_ms: int) -> None:
@@ -2416,7 +2533,9 @@ class TriggerEngine:
             play = lyric_events.Play(uri, kept, kept=True, source=lyric_events.ROLL_KEPT)
         return lyric_events.Preview(
             enabled=enabled, words=words,
-            actions=lyric_events.plan_play(words.hits, events, self._lyric_tuning(), play),
+            actions=lyric_events.plan_play(words.hits, events, self._lyric_tuning(), play,
+                                            shape_timing=self._lyric_shape_timing,
+                                            can_draw=self._lyric_can_draw),
             n_events=len(events), play=play, kept_seed=kept, playing=playing)
 
     def song_event_moments(self, uri: str) -> list[lyric_events.EventMoment]:
@@ -3161,6 +3280,35 @@ class TriggerEngine:
     @staticmethod
     async def _no_lyric_colour(action, ramp_ms: int) -> None:
         return None
+
+    @staticmethod
+    async def _no_lyric_shape(action, ramp_ms: int) -> None:
+        return None
+
+    @staticmethod
+    def _room_shape_timing(energy: float, phrase_ms: float):
+        """The room's own word-shape timing, for the planner, WITH NO ROOM
+        ATTACHED — the fallback for an engine services/engine.py has not
+        wired (a spec, a Test Bed on a host with no conductor). Read fresh
+        per plan (the planner runs at most every LYRIC_REPLAN_S), so a
+        change through Sonic reaches the next replan. Never raises: the
+        plan's own defaults stand in, exactly as `_drop_colour_on` falls
+        back when room controls cannot be read.
+
+        THE LIVE ENGINE DOES NOT USE THIS. `engine.lyric_shape_timing`
+        replaces it and passes the SHOWING scene's live effect types, so
+        the per-effect minimum floor is the showing scene's rather than the
+        whole library's maximum — which matters because the lead IS the
+        form in practice (W0.3 review, 2026-11-16; see
+        fx.device_model.word_shape_form_min_s)."""
+        try:
+            from spectra.services.room_controls import (load_room_controls,
+                                                        word_shape_timing)
+            return word_shape_timing(energy, phrase_ms, load_room_controls())
+        except Exception:                                # noqa: BLE001
+            logger.exception("word shapes: room controls unreadable — the "
+                             "plan's default timing")
+            return lyric_events.default_shape_timing(energy, phrase_ms)
 
     @staticmethod
     async def _no_drop_colour(selection_intensity: float,

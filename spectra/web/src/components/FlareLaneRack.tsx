@@ -31,6 +31,7 @@ const kindIcon = (k: FlareKind): string =>
       : k.type === 'pulse_flip' ? '🌗'
       : k.type === 'big_fish' ? '🐋'
       : k.type === 'sauron_surge' ? '🔥'
+      : k.type === 'word_shape' ? '💟'
         : k.type === 'momentary' ? '↩' : '⚓';
 
 export interface RackDropTarget { mode: 'insert' | 'join'; anchor: string | null; }

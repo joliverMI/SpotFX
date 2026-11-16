@@ -26,6 +26,13 @@ export const RESPONSE_CLASS_COLOR: Record<ResponseClass, string> = {
   charge: PHASE_COLOR.charge, // amber-gold — building
   lull: PHASE_COLOR.lull,     // sky blue — receding
   drop: PHASE_COLOR.drop,     // magenta — impact
+  // The WORDS section (Word Shapes plan W0.3) can never appear on this
+  // bar — no trigger may name class 'word' (models/trigger.py refuses it),
+  // and a sung word is not a trigger. The entry exists so the map stays
+  // total over a widened ResponseClass; it falls back to a plain
+  // fire_response colour rather than inventing a fifth one for something
+  // that is never drawn here.
+  word: KIND_COLOR.fire_response,
 };
 
 /** The marker colour for a trigger: fire_response splits further by its

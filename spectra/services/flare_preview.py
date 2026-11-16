@@ -123,7 +123,8 @@ from spectra.services.drift_conductor import DriftConductor
 from spectra.services.fx_executor import RecordingExecutor
 from spectra.services.scene_response import (ANCHOR_DROP_START, ResponseEngine,
                                              kind_anchor_rule,
-                                             kind_attached_classes, kind_lead_ms)
+                                             kind_attached_classes, kind_lead_ms,
+                                             preview_word_shape)
 
 # A scrub timeline must never look shorter than his own worked example (a
 # 6s timeline holding a 3s effect) even when a kind's own computed shape is
@@ -301,8 +302,39 @@ def sauron_surge_effect_ms(kind: FlareKind, conductor: DriftConductor,
     return round(1000.0 * sauron_fx.surge_visible_s(intensity), 1)
 
 
+def word_shape_effect_ms(kind: FlareKind, intensity: float,
+                         conductor: DriftConductor,
+                         shape: str | None = None) -> float | None:
+    """How long a word_shape flare's SHAPE is visible — its whole envelope,
+    form + hold + release, on the room's own settings
+    (scene_response.preview_word_shape, the same read the write itself
+    makes). None for any other kind.
+
+    THE RULER'S THREE MARKS (Word Shapes plan W0.3): start = word − form,
+    trigger = word, end = word + hold + release. The existing machinery
+    already draws exactly that, with nothing new to invent, BECAUSE
+    kind_lead_ms returns the form for this type: the write lands at
+    `fire_at_s = anchor − form`, the trigger mark sits at `anchor` (an
+    untouched trigger_offset_ms), and this number stretches the end marker
+    the remaining hold + release past it. Unlike a Pulse flash or a Sauron
+    surge, whose write is on the mark, a shape's write is the form EARLIER
+    than its mark — which is the whole point of the kind.
+
+    Returned even when NO virtual will take the write (WORD_SHAPE_EFFECTS
+    is empty until wave 1): the shape's timing is the room's, not the
+    fixture's, so the ruler must still show him what he has tuned. That is
+    the one deliberate difference from pulse_effect_ms/big_fish_effect_ms,
+    which return None with no matching virtual because there is then no
+    animation at all."""
+    if kind.type != "word_shape":
+        return None
+    action = preview_word_shape(intensity, shape, conductor.virtuals)
+    return round(1000.0 * (action.form_s + action.hold_s + action.release_s), 1)
+
+
 async def build_timeline(scene: SceneV2, kind: FlareKind,
-                         intensity: float) -> dict[str, Any]:
+                         intensity: float,
+                         shape: str | None = None) -> dict[str, Any]:
     """The isolated single-kind execution timeline: every write fire_kind
     (+ its scheduled releases) issues, with real relative timing, plus the
     derived animation_start_s/animation_end_s markers the scrub UI draws
@@ -313,7 +345,7 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
     clock = _FakeClock()
     executor = RecordingExecutor(clock=clock)
     conductor, responder, _writes = _scratch_engine(scene, intensity, clock, executor)
-    fire_record = await responder.fire_kind(kind, intensity)
+    fire_record = await responder.fire_kind(kind, intensity, shape=shape)
     for hold_s in responder.pending_hold_groups():
         clock.advance_to(hold_s)
         await responder.flush_releases(hold_s)
@@ -345,6 +377,14 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
     attached_classes = sorted(kind_attached_classes(scene, kind.name))
     lead_ms = (0 if anchor_rule == ANCHOR_DROP_START
                else kind_lead_ms(kind, intensity, conductor.virtuals))
+    # THE WORDS SECTION IGNORES PER-KIND OFFSETS (W0.3 review, 2026-11-16):
+    # on_word_shape fires its band atomically, so a word_shape kind's own
+    # trigger_offset_ms never moves the real fire. The ruler must not claim
+    # otherwise — drawing his authored offset here would be the preview
+    # lying about when his shape lands, the exact defect the ANCHOR RULE
+    # work above exists to prevent. scene_store.scene_warnings names the
+    # offset on save, so it is stated rather than silently dropped.
+    offset_ms = 0 if kind.type == "word_shape" else kind.trigger_offset_ms
 
     writes = list(responder.executor.writes)
     effect_ms = pulse_effect_ms(kind, conductor)
@@ -352,6 +392,9 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
         effect_ms = big_fish_effect_ms(kind, conductor, intensity)
     if effect_ms is None:
         effect_ms = sauron_surge_effect_ms(kind, conductor, intensity)
+    word_shape = fire_record.get("word_shape_preview")
+    if effect_ms is None:
+        effect_ms = word_shape_effect_ms(kind, intensity, conductor, shape)
     if not writes:
         anchor_s = animation_anchor_s(MIN_TIMELINE_S)
         return {
@@ -362,10 +405,12 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
             # Force-Scene precedent) and says so — see FlareKind.enabled.
             "overrode_disabled": not kind.enabled,
             "animation_start_s": None, "animation_end_s": None,
+            "effect_animation_ms": effect_ms,
+            "word_shape": word_shape,
             "duration_s": MIN_TIMELINE_S,
             "animation_anchor_s": round(anchor_s, 4),
             "trigger_mark_s": round(
-                trigger_mark_s(anchor_s, kind.trigger_offset_ms, MIN_TIMELINE_S), 4),
+                trigger_mark_s(anchor_s, offset_ms, MIN_TIMELINE_S), 4),
             "lead_ms": lead_ms,
             "anchor_rule": anchor_rule,
             "attached_classes": attached_classes,
@@ -392,10 +437,11 @@ async def build_timeline(scene: SceneV2, kind: FlareKind,
         "animation_start_s": round(start_s - start_s, 4),
         "animation_end_s": round(end_s - start_s, 4),
         "effect_animation_ms": effect_ms,
+        "word_shape": word_shape,
         "duration_s": round(duration_s, 4),
         "animation_anchor_s": round(anchor_s, 4),
         "trigger_mark_s": round(
-            trigger_mark_s(anchor_s, kind.trigger_offset_ms, duration_s), 4),
+            trigger_mark_s(anchor_s, offset_ms, duration_s), 4),
         "lead_ms": lead_ms,
         "anchor_rule": anchor_rule,
         "attached_classes": attached_classes,

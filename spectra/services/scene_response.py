@@ -170,6 +170,21 @@ Per event, fed by the bridge with the fire's intensity:
                   no lead — see _pulse_flash/_pulse_flip. A FLASH fires only
                   while the top bar's Energy is at least the room's
                   pulse_flash_min_energy (0.8, pulse_flash_allowed).
+       word_shape — the WORD SHAPE kind (Word Shapes plan W0.3,
+                  2026-11-15): a sung word that reaches a shape fires the
+                  showing scene's "word" response section (on_word_shape,
+                  the fifth class — only a sung word ever reaches it), and
+                  this kind writes fx/effects/word_shape_keys.py's six told
+                  keys to every virtual whose live effect is in
+                  fx.device_model.WORD_SHAPE_EFFECTS. The firework_burst
+                  shape in every structural respect — one instant jump of
+                  deliberately-unregistered keys, no carry, no release —
+                  with ONE difference: it has a LEAD, the form time, so the
+                  shape completes ON the word (the trigger clock fires the
+                  band `form_s` early; kind_lead_ms reports it for the
+                  preview). WORD_SHAPE_EFFECTS is EMPTY until wave 1, so
+                  even a Words band writes to no fixture yet. See
+                  _word_shape.
   MINIMUM INTENSITY (FlareKind.min_intensity, any type; pulse_flip defaults
   to 0.4): a kind fires only ABOVE its minimum. Below it the kind leaves its
   lane's pool for that fire, exactly as a disabled kind does
@@ -868,6 +883,69 @@ _PUNCH_OK: ContextVar[bool] = ContextVar("spectra_flare_punch_ok",
 _DROP_COLOUR_DONE: ContextVar[bool] = ContextVar("spectra_drop_colour_done",
                                                  default=False)
 
+# WORD SHAPES (spectra/services/lyric_events.py, plan W0.3): the shape
+# action one on_word_shape call is running, so the `word_shape` kind's own
+# executor can read the shape id and its form/hold/release without a second
+# argument threaded through _execute_band/_run_kinds_inner (the
+# lyric_events.ACTIVE pattern, for the same reason: the kind pipeline is
+# shared by five classes and must not grow a per-class parameter). None
+# outside on_word_shape — and a `word_shape` kind that finds it None writes
+# nothing, which is exactly what makes the kind a no-op on a flare band.
+WORD_SHAPE_ACTIVE: ContextVar[Optional[Any]] = ContextVar(
+    "spectra_word_shape_action", default=None)
+
+
+def active_word_shape():
+    return WORD_SHAPE_ACTIVE.get()
+
+
+# The shape a PREVIEW draws when nothing names one (the W2.1 picker will).
+# "heart" is the plan's own first shape and the one his starting labels
+# reach; fx/effects/word_shapes.py owns the id.
+PREVIEW_SHAPE = "heart"
+
+
+@dataclass(frozen=True)
+class PreviewWordShape:
+    """THE PREVIEW'S SYNTHETIC SHAPE ACTION. A word_shape kind previewed in
+    isolation (ResponseEngine.fire_kind, the flare scrubbing preview and its
+    live room hold) has no sung word behind it, so there is nothing to read
+    a shape id or an envelope off — this stands in, carrying exactly the
+    fields _word_shape and on_word_shape read from a real
+    lyric_events.WordAction and nothing else. Deliberately NOT a WordAction
+    with a fabricated WordHit: a preview must never be mistakable for a
+    word that was really sung (a fabricated hit would flow into the show
+    log and the live pulse looking real)."""
+    shape_id: str
+    energy: float
+    form_s: float
+    hold_s: float
+    release_s: float
+
+
+def preview_word_shape(intensity: float, shape: Optional[str] = None,
+                       virtuals: Optional[dict] = None,
+                       phrase_ms: float = 0.0) -> PreviewWordShape:
+    """The synthetic action for a previewed shape at `intensity`, on the
+    room's own timing (word_shape_lead_ms' same read, so the preview's
+    ruler and its write can never disagree)."""
+    types = (None if virtuals is None
+             else [st.effect_type for st in virtuals.values()])
+    try:
+        from spectra.services.room_controls import (load_room_controls,
+                                                    word_shape_timing)
+        form_s, hold_s, release_s = word_shape_timing(
+            intensity, phrase_ms, load_room_controls(), types)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("word shapes: room controls unreadable — the "
+                         "plan's default timing for this preview")
+        form_s, hold_s, release_s = lyric_events.default_shape_timing(
+            intensity, phrase_ms)
+    return PreviewWordShape(shape_id=str(shape or PREVIEW_SHAPE),
+                            energy=max(0.0, min(1.0, float(intensity))),
+                            form_s=form_s, hold_s=hold_s, release_s=release_s)
+
+
 # WORD COLOURS (spectra/services/lyric_events.py): how a word's colour is named
 # on its jump, and what a momentary word's release needs. `virtuals` is the
 # conductor's own dict at the landing, which a scene fire replaces.
@@ -1146,9 +1224,74 @@ def kind_lead_ms(kind: FlareKind, intensity: float, virtuals: dict) -> int:
     lead = 0
     if kind.type == "color_rotate":
         lead = max(lead, color_rotate_ramp_ms(intensity))
+    if kind.type == "word_shape":
+        # WORD SHAPES (W0.3): the form time IS the lead — the shape must be
+        # complete ON the word ("the trigger lands on where the shape is
+        # first fully formed"). The real fire's lead comes from the
+        # PLANNER (WordAction.transition_ms, which is the same number for
+        # the same Energy), not from here: a sung word is the only thing
+        # that fires this kind, and it arrives with its own timing already
+        # worked out. This branch exists for the PREVIEW, which fires the
+        # kind in isolation with no word, and so has to ask the room.
+        lead = max(lead, word_shape_lead_ms(intensity, virtuals))
     if _kind_would_glide(kind, virtuals):
         lead = max(lead, DICE_REROLL_GLIDE_MS)
     return lead
+
+
+def words_band_draws(scene: Optional[SceneV2], intensity: float) -> bool:
+    """Could a sung word at this Energy actually DRAW a shape on this scene?
+    Read-only peek for the PLANNER (W0.3 round-2 review, 2026-11-16): True
+    when the scene's Words section has a band covering `intensity` that
+    attaches an enabled `word_shape` kind which fires at that intensity.
+
+    WHY THE PLANNER ASKS AT ALL. A word that reaches a shape and a colour
+    set has to choose one, and the choice decides its TIMING — a shape
+    fires `form_s` (0.5-0.9 s) early, a colour its own `transition_ms_for`
+    (0.15-3 s). Deciding at the fire is too late: the lead has already
+    passed, and the colour would have to make do with whatever the shape's
+    lead left it. So the planner asks here, and a word that cannot be drawn
+    is planned as the ordinary colour word it is (lyric_events.plan_words).
+
+    THE POSSIBILITY SET, like every other forward peek in this module
+    (color_rotate_lead_ms' own note): a shape kind POOLED in a lane may
+    lose the fire-time roll, and this still answers True — the pick is
+    random and re-resolved at fire time, so no peek can know the winner.
+    A word that then loses the roll does whatever its lane-mate does, which
+    is the Words band's own behaviour and what he chose by pooling them.
+    The min_intensity and `enabled` gates ARE applied, because those are
+    static facts about the kind rather than a roll."""
+    spec = None if scene is None else (scene.responses or {}).get("word")
+    band = select_band(spec.bands, intensity) if spec else None
+    if band is None:
+        return False
+    declared = {k.name: k for k in scene.flare_kinds}
+    return any(
+        kind is not None and kind.type == "word_shape" and kind.enabled
+        and kind.fires_at(intensity)
+        for kind in (declared.get(name) for name in band.kinds))
+
+
+def word_shape_lead_ms(intensity: float, virtuals: Optional[dict] = None,
+                       phrase_ms: float = 0.0) -> int:
+    """The form time, in ms, for a word at `intensity` Energy on the room's
+    own settings — the LEAD a word_shape kind takes (positive = earlier).
+    `virtuals` narrows the per-effect minimum to what is actually showing
+    (fx.device_model.word_shape_form_min_s); None asks for the conservative
+    global maximum. Never raises: unreadable room controls fall back to the
+    plan's own defaults, exactly as every other room read here does."""
+    types = (None if virtuals is None
+             else [st.effect_type for st in virtuals.values()])
+    try:
+        from spectra.services.room_controls import load_room_controls, word_shape_timing
+        form_s, _hold_s, _release_s = word_shape_timing(
+            intensity, phrase_ms, load_room_controls(), types)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("word shapes: room controls unreadable — the "
+                         "plan's default form")
+        form_s, _hold_s, _release_s = lyric_events.default_shape_timing(
+            intensity, phrase_ms)
+    return int(round(form_s * 1000.0))
 
 
 # The three anchor families (his ruling, settled 2026-08-20, data/drops-
@@ -1323,6 +1466,16 @@ class ResponseEngine:
         # _color_rotate's own docstring.
         self._pending_color_rotates: list[tuple[str, str, float, int]] = []
         self._phase_armed: Optional[str] = None  # "charge"|"lull" awaiting payoff
+        # WORD SHAPES (W0.3): the counter the told keys carry so two words
+        # of the SAME shape back to back both read as a fresh edge in the
+        # effect (word_shape_keys' SEQ_KEY rule). Monotonic per engine.
+        self._word_shape_seq = 0
+        # ... and when the last DROP this engine armed stops counting as
+        # "a drop is happening" for P3 A's skip (phase_armed below). A drop
+        # arms no phase of its own (_drive_phase sets _phase_armed only for
+        # charge/lull — a drop is one-shot), so its own window is stamped
+        # here instead of inferred.
+        self._drop_armed_until = 0.0
         # The virtuals the armed LULL actually reached (a house-withheld or
         # flares-off virtual is not among them) — where a flare may punch
         # through the lull's dark (_punch_lull).
@@ -1404,6 +1557,85 @@ class ResponseEngine:
         finally:
             _DROP_COLOUR_DONE.reset(colour_token)
             _PUNCH_OK.reset(punch_token)
+        self.surges.append(record)
+        await self._broadcast({"type": "surge", **record})
+        return record
+
+    async def on_word_shape(self, action) -> dict:
+        """THE WORDS SECTION (Word Shapes plan W0.3, 2026-11-15 — the
+        Admiral's Q2 A: "a fifth response section, Words, with its own
+        Energy bands and lanes; only a sung word fires it"). Runs the
+        showing scene's `responses["word"]` at the sung word's own Energy
+        exactly as on_event runs any class: band by intensity, lanes
+        resolved, every picked kind executed through _run_kinds_inner. A
+        colour kind pooled in the band therefore fires as it would
+        anywhere, which is how a shape word recolours the room (his Q5 A:
+        "a colour kind may be pooled beside the shape").
+
+        THREE DELIBERATE DIFFERENCES from on_event, each because a word is
+        not a phase:
+          * no _drive_phase and no PHASE_RAMP_MS lookup — the phase
+            machinery never sees "word" (models/scene.py's own note), so a
+            Words band arms no charge/lull/drop choreography;
+          * no drop-colour claim — a word is not a drop;
+          * the flare PUNCH stays ALLOWED (_PUNCH_OK True, set explicitly
+            rather than left to the default). The reason on_event suppresses
+            it for a charge/lull/drop — "a phase's own band must not hold
+            its own start lit" — simply does not apply to a word. In
+            practice it is unreachable today: P3 A skips a shape word
+            outright while a charge, lull or drop is armed
+            (engine.fire_lyric_shape_event), so a shape never lands inside
+            a lull's dark to punch through it. Allowed-but-unreachable is
+            the honest state, and the one to revisit if P3 A is ever
+            relaxed.
+        THE FIRE RUNS ATOMICALLY (anchor_relocated False), and that is a
+        STATED LIMIT, not an oversight (W0.3 review, 2026-11-16): the
+        trigger clock relocates the whole word by its form, so the band's
+        kinds all land together on the word and A KIND'S OWN
+        `trigger_offset_ms` IS NOT APPLIED HERE. A word has one moment —
+        the sung word — and the one lead that matters is the form, which
+        has to land the shape on it; a per-kind stagger would move a kind
+        off the word it exists to coincide with. The preview is kept
+        consistent (flare_preview.build_timeline draws a word_shape kind's
+        mark at offset 0) and scene_store.scene_warnings names a non-zero
+        offset on a Words band, so the field is never silently inert.
+
+        THE SHAPE RIDES A CONTEXTVAR (WORD_SHAPE_ACTIVE, the
+        lyric_events.ACTIVE pattern) rather than a parameter: _run_kinds_
+        inner is shared by five classes and must not grow a per-class
+        argument. _word_shape reads it; a `word_shape` kind reached from
+        any other class finds it unset and writes nothing.
+
+        `action` is a lyric_events.WordAction with VERDICT_SHAPE (the real
+        path) or the preview's synthetic equivalent — anything carrying
+        shape_id / energy / form_s / hold_s / release_s."""
+        scene = self.conductor.scene
+        started_at = self._clock()
+        intensity = max(0.0, min(1.0, float(getattr(action, "energy", 0.0))))
+        shape = getattr(action, "shape_id", None)
+        record: dict[str, Any] = {
+            "at": started_at, "class": "word", "intensity": round(intensity, 4),
+            "shape": shape}
+        if scene is None:
+            record["result"] = "no_active_scene"
+            self.surges.append(record)
+            return record
+        spec = scene.responses.get("word")
+        band = select_band(spec.bands, intensity) if spec else None
+        if spec is None or band is None:
+            record["result"] = "no_class" if spec is None else "no_band"
+            self.surges.append(record)
+            return record
+        record["band"] = {"intensity_min": band.intensity_min,
+                          "intensity_max": band.intensity_max}
+        shape_token = WORD_SHAPE_ACTIVE.set(action)
+        punch_token = _PUNCH_OK.set(True)
+        try:
+            await self._execute_band(scene, band, intensity, record,
+                                     started_at=started_at)
+        finally:
+            _PUNCH_OK.reset(punch_token)
+            WORD_SHAPE_ACTIVE.reset(shape_token)
         self.surges.append(record)
         await self._broadcast({"type": "surge", **record})
         return record
@@ -1655,6 +1887,7 @@ class ResponseEngine:
         flips = [(k, s) for k, s in attached if k.type == "pulse_flip"]
         bigs = [(k, s) for k, s in attached if k.type == "big_fish"]
         surges = [(k, s) for k, s in attached if k.type == "sauron_surge"]
+        shapes = [(k, s) for k, s in attached if k.type == "word_shape"]
 
         carry: dict[tuple[str, str], Any] = {}
         jumps: dict[str, dict[str, Any]] = {}    # vid → params, instant
@@ -1788,6 +2021,14 @@ class ResponseEngine:
                 "name": kind.name, "type": kind.type,
                 "scale": scale, **result["sauron_surge"]})
 
+        if shapes:   # one shape per batch — a word has one shape
+            kind, scale = shapes[0]
+            sel_intensity = max(0.0, min(1.0, intensity * scale))
+            result["word_shape"] = await self._word_shape(sel_intensity)
+            kind_records.append({
+                "name": kind.name, "type": kind.type,
+                "scale": scale, **result["word_shape"]})
+
         result["kinds"] = kind_records
         self.conductor.on_surge(carry)
         result["carried"] = [{"virtual_id": vid, "param": p}
@@ -1864,7 +2105,8 @@ class ResponseEngine:
                         entry["kind_names"], outcome, batch.delay_ms)
         return entry
 
-    async def fire_kind(self, kind: FlareKind, intensity: float) -> dict:
+    async def fire_kind(self, kind: FlareKind, intensity: float,
+                        shape: Optional[str] = None) -> dict:
         """Fire ONE declared kind in isolation, bypassing band selection
         entirely — the scrubbing flare-preview timeline's execution entry
         point (spectra/services/flare_preview.py, his ask: "bring up a
@@ -1897,12 +2139,27 @@ class ResponseEngine:
             record["result"] = "below_min_intensity"
             record["min_intensity"] = kind.min_intensity
             return record
+        # WORD SHAPES (W0.3): a previewed shape has no sung word, so one is
+        # synthesised here — ONCE, around the whole isolated fire — and the
+        # kind's own executor reads it off the same ContextVar a real word
+        # sets (on_word_shape). `shape` names which shape; None previews
+        # PREVIEW_SHAPE. Set for every type, not only word_shape, so a
+        # pooled shape kind inside a previewed band would see it too.
+        shape_token = None
+        if kind.type == "word_shape" and WORD_SHAPE_ACTIVE.get() is None:
+            action = preview_word_shape(intensity, shape, self.conductor.virtuals)
+            record["word_shape_preview"] = {
+                "shape": action.shape_id, "form_s": action.form_s,
+                "hold_s": action.hold_s, "release_s": action.release_s}
+            shape_token = WORD_SHAPE_ACTIVE.set(action)
         fire_seq = self._begin_fire()
         try:
             return await self._fire_kind_locked(scene, kind, intensity, record,
                                                 fire_seq)
         finally:
             self._end_fire(fire_seq)
+            if shape_token is not None:
+                WORD_SHAPE_ACTIVE.reset(shape_token)
 
     async def _fire_kind_locked(self, scene: SceneV2, kind: FlareKind,
                                 intensity: float, record: dict[str, Any],
@@ -1948,6 +2205,8 @@ class ResponseEngine:
             record["big_fish"] = await self._big_fish(intensity)
         if kind.type == "sauron_surge":
             record["sauron_surge"] = await self._sauron_surge(intensity)
+        if kind.type == "word_shape":
+            record["word_shape"] = await self._word_shape(intensity)
         self.conductor.on_surge(carry)
         record["carried"] = [{"virtual_id": vid, "param": p} for (vid, p) in carry]
         record["result"] = "applied"
@@ -2606,6 +2865,58 @@ class ResponseEngine:
             targets += 1
         return {"intensity": strength, "virtuals": targets}
 
+    async def _word_shape(self, intensity: float) -> dict:
+        """The WORD SHAPE kind (Word Shapes plan W0.3, 2026-11-15 — the
+        Admiral: "It would operate like a flare in the scenes panel, just
+        only fire by sung word"): ONE instant jump of
+        fx/effects/word_shape_keys.py's six told keys on every virtual whose
+        live effect is in fx.device_model.WORD_SHAPE_EFFECTS — the
+        membership-gate shape _firework_burst uses, over _flare_states() so
+        a Light Show "flares off" target gets none. The effect edge-detects
+        the SEQ, forms the shape over `word_shape_form_s`, holds it, releases
+        it and resets itself: SpotFX writes once and says nothing more.
+
+        WHERE EACH NUMBER COMES FROM. The shape id and the whole envelope
+        ride on the action this fire is running (WORD_SHAPE_ACTIVE, set by
+        on_word_shape) — the planner's, except the FORM, which the fire path
+        makes exact (the time LEFT to the word at the tick that fires,
+        floored at the showing effects' own minimum — see
+        fx.device_model.word_shape_form_min_s and engine.fire_lyric_shape_
+        event). `intensity` is the word's own Energy, and goes out as
+        `word_shape_level` so an effect can size the shape by the room's
+        loudness; it is NOT the form's input here, which is already decided.
+
+        NO ACTION, NO WRITE. A `word_shape` kind attached to a flare,
+        charge, lull or drop band is reached with WORD_SHAPE_ACTIVE unset
+        and writes nothing, named — that is what makes the kind accepted by
+        the model but a no-op anywhere but a Words band (FlareKind's own
+        docstring, and scene_store.scene_warnings says so on save).
+
+        The six keys are deliberately absent from the effect-parameter
+        registry, so they never enter the param/gain kinds' jumps/glides
+        dicts: a shape composes with every other kind in the band, exactly
+        as a surge does. Nothing carries and nothing releases — there is no
+        release queue for any of the four drain points."""
+        from fx.effects import word_shape_keys as wsk
+        action = WORD_SHAPE_ACTIVE.get()
+        shape = None if action is None else getattr(action, "shape_id", None)
+        if not shape:
+            return {"result": "no_word", "shape": None, "virtuals": 0}
+        self._word_shape_seq += 1
+        keys = wsk.keys_for(shape, self._word_shape_seq,
+                            float(action.form_s), float(action.hold_s),
+                            float(action.release_s), float(intensity))
+        targets = 0
+        for vid, state in self._flare_states().items():
+            if state.effect_type not in device_model.WORD_SHAPE_EFFECTS:
+                continue
+            await self._jump(vid, state.effect_type, dict(keys))
+            targets += 1
+        return {"shape": shape, "seq": self._word_shape_seq,
+                "form_s": keys[wsk.FORM_KEY], "hold_s": keys[wsk.HOLD_KEY],
+                "release_s": keys[wsk.RELEASE_KEY],
+                "level": keys[wsk.LEVEL_KEY], "virtuals": targets}
+
     def pending_color_rotate_holds(self) -> list[float]:
         """Distinct DWELLS still pending for the colour rotate-and-back
         flare — mirrors pending_hold_groups()'s shape for this kind's own,
@@ -3155,6 +3466,13 @@ class ResponseEngine:
             self._phase_armed = (event_class
                                  if event_class in ("charge", "lull")
                                  else None)
+            if event_class == "drop":
+                # WORD SHAPES (W0.3, P3 A): how long a drop counts as "a
+                # drop is happening" for a shape word's skip — its own
+                # phase ramp, the only length a drop has (PHASE_RAMP_MS,
+                # never stretched for a drop). Nothing else reads this.
+                self._drop_armed_until = (self._clock()
+                                          + PHASE_RAMP_MS["drop"] / 1000.0)
             self._lull_vids = (frozenset(targets) if event_class == "lull"
                                else frozenset())
         record = {"targets": targets, "ramp_ms": ramp_ms, "gap_ms": gap_ms}
@@ -3402,6 +3720,23 @@ class ResponseEngine:
                              "strip phase strength at its default")
             return strip_phase.DEFAULT_STRENGTH
         return min(strip_phase.MAX_STRENGTH, max(0.0, v))
+
+    def phase_armed(self) -> Optional[str]:
+        """Which charge/lull/drop is happening RIGHT NOW on the showing
+        scene, or None — the one question a shape word asks before it
+        draws (Word Shapes plan W0.3, the Admiral's P3 A: "a shape word
+        landing inside a charge, lull or drop is skipped and logged").
+
+        A charge or lull is armed until its payoff or release
+        (`_phase_armed`, the lifecycle flag release_phases already owns);
+        a DROP arms nothing — it is one-shot — so it counts for its own
+        ramp length from the moment it was driven (`_drop_armed_until`).
+        Read-only, no clock side effects, safe to call on the fire path."""
+        if self._phase_armed is not None:
+            return self._phase_armed
+        if self._drop_armed_until > self._clock():
+            return "drop"
+        return None
 
     async def release_phases(self, *, force: bool = False) -> int:
         """The lifecycle guard carried from the original program

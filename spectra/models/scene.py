@@ -39,6 +39,10 @@ plus DECLARED MECHANISMS:
                              contrasting colour set by the intensity
                  sauron_surge every live Sauron eye's flames erupt toward
                              the crystal's edge and burn back in ~0.55 s
+                 word_shape  a sung word's SHAPE forms, holds and releases
+                             on every live effect that knows shapes — only
+                             ever fired by a sung word, through the "word"
+                             response class below (Word Shapes plan W0.3)
                Any kind may carry a min_intensity: it fires only ABOVE it
                (pulse_flip defaults to 0.4) — see FlareKind's own docstring.
                A momentary/permanent kind's params are ParamTarget
@@ -48,10 +52,16 @@ plus DECLARED MECHANISMS:
                momentary also carries an optional hold_ms (CHOSEN HOLD
                before release; None = the fixed PULSE_HOLD_S default) —
                see scene_response.py.
-  responses  — the four event classes (flare/charge/lull/drop), each an
-               intensity-banded ResponseSpec whose bands SELECT AND SCALE
+  responses  — the five event classes (flare/charge/lull/drop/word), each
+               an intensity-banded ResponseSpec whose bands SELECT AND SCALE
                the named kinds: band.kinds maps kind name → scale factor
-               multiplying that kind's strength in that range
+               multiplying that kind's strength in that range. "word" is the
+               Words section (Word Shapes plan W0.3, the Admiral's Q2 A: "a
+               fifth response section, Words, with its own Energy bands and
+               lanes"): ONLY a sung word fires it — no trigger may name it
+               (models/trigger.py's FireResponseAction refuses it), and it
+               never enters the charge/lull/drop phase machinery
+               (scene_response.PHASE_RAMP_MS has no "word" key)
   color_journey — the room owns ONE continuous colour journey BY DEFAULT;
                a scene may OVERRIDE it outright as a first-class capability
                (owner's color-drift-scope answer). Transition semantics
@@ -81,8 +91,23 @@ from spectra.models.sequencer import CurvePoint, _validate_sorted_x
 SceneParamScalar = bool | int | float | str
 SceneParamValue = SceneParamScalar | ValueBinding
 
-RESPONSE_CLASSES = ("flare", "charge", "lull", "drop")
-ResponseClass = Literal["flare", "charge", "lull", "drop"]
+# THE RESPONSE CLASSES. "word" is the Words section (Word Shapes plan W0.3,
+# 2026-11-15 — the Admiral's Q2 A): an ordinary ResponseSpec (bands over
+# Energy, lanes, kinds) that ONLY a sung word fires. Two deliberate
+# asymmetries, both proven by test rather than left to convention:
+#   - a trigger can never name it (models/trigger.py's FireResponseAction
+#     validator, and spectra/api/engine.py's own test-fire injector leaves
+#     it out) — a sung word is the only way in;
+#   - the phase machinery never sees it (scene_response.PHASE_RAMP_MS is
+#     keyed by class and has no "word" entry), so a Words band arms no
+#     charge/lull/drop choreography.
+# THE BAND IS THE SWITCH (his Q6 A): a scene with no "word" band changes
+# nothing, which is why this widening is byte-identical for his room today.
+RESPONSE_CLASSES = ("flare", "charge", "lull", "drop", "word")
+ResponseClass = Literal["flare", "charge", "lull", "drop", "word"]
+# The four a TRIGGER may fire. Deliberately not RESPONSE_CLASSES: a sung
+# word is the only thing that fires the Words section.
+TRIGGER_RESPONSE_CLASSES = ("flare", "charge", "lull", "drop")
 
 
 class SceneColorAssignment(BaseModel):
@@ -330,7 +355,7 @@ DEFAULT_MIN_INTENSITY: dict[str, float] = {"pulse_flip": 0.4}
 
 class FlareKind(BaseModel):
     """One NAMED flare kind — a first-class concept the scene declares and
-    its bands select. Ten types, binding semantics:
+    its bands select. Eleven types, binding semantics:
       drift_jump  jump the drift — jump="color_set" rolls the shipped
                   colour-set selector and JUMPS to the pick; jump="dice"
                   re-rolls the scene's 🎲 bindings (fresh shape). Both
@@ -435,6 +460,28 @@ class FlareKind(BaseModel):
                   instant poke of the effect's own self-resetting `surge`
                   key, no jump/params/gain/hold_ms, nothing carries, nothing
                   releases, no lead (it erupts ON the mark).
+      word_shape  the WORD SHAPE kind (Word Shapes plan W0.3, 2026-11-15 —
+                  the Admiral: "It would operate like a flare in the scenes
+                  panel, just only fire by sung word"): a sung word that
+                  reaches a shape writes `fx/effects/word_shape_keys.py`'s
+                  six told keys to every virtual whose live effect is in
+                  fx.device_model.WORD_SHAPE_EFFECTS (EMPTY until wave 1,
+                  so a Words band writes to no fixture yet), and the effect
+                  forms / holds / releases the shape on its OWN clock. The
+                  firework_burst shape exactly: one instant jump, no
+                  jump/params/gain/hold_ms of its own, nothing carried,
+                  nothing released. Its ONE lead is the form time (LEAD
+                  family, positive = earlier — the engine fires the band
+                  `form_s` early so the shape completes ON the word;
+                  docs/SPECTRA_TIMING_CONVENTIONS.md). The five timings are
+                  ROOM settings (word_shape_form_slow_s / _form_fast_s /
+                  _hold_min_s / _hold_max_s / _release_ratio, Sonic-
+                  tellable), so this type carries none of its own.
+                  ONLY MEANINGFUL ON A "word" BAND: the model accepts it on
+                  a flare/charge/lull/drop band (a drag into the Flares rack
+                  must not be a validation error), but it is a NO-OP at fire
+                  time — only on_word_shape carries a shape to write — and
+                  scene_store.scene_warnings says so on every save.
     min_intensity (any type; None = no gate, except pulse_flip, which
     defaults to 0.4) — the kind fires only when the fire's intensity is
     strictly ABOVE it ("only at intensities greater than .4"). Gated where
@@ -504,7 +551,7 @@ class FlareKind(BaseModel):
     name: str = Field(min_length=1)
     type: Literal["drift_jump", "momentary", "permanent", "color_rotate",
                   "firework_burst", "blob_rush", "pulse_flash", "pulse_flip",
-                  "big_fish", "sauron_surge"]
+                  "big_fish", "sauron_surge", "word_shape"]
     jump: Optional[Literal["color_set", "dice"]] = None
     params: dict[str, ParamTarget] = Field(default_factory=dict)
     gain: float = Field(default=1.0, ge=0.0)
@@ -632,6 +679,18 @@ class FlareKind(BaseModel):
                     f"fixed (scene_response.BLOB_RUSH_BLOBS — see "
                     f"FlareKind's own docstring); params/gain/hold_ms "
                     f"don't apply here and would silently do nothing")
+        elif self.type == "word_shape":
+            if self.jump is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is word_shape — jump belongs on a "
+                    f"drift_jump kind")
+            if self.params or self.gain != 1.0 or self.hold_ms is not None:
+                raise ValueError(
+                    f"kind '{self.name}' is word_shape — the shape's form, "
+                    f"hold and release are the room's own word_shape_* "
+                    f"settings, Energy-paced per word (see FlareKind's own "
+                    f"docstring); params/gain/hold_ms don't apply here and "
+                    f"would silently do nothing")
         elif self.type == "firework_burst":
             if self.jump is not None:
                 raise ValueError(

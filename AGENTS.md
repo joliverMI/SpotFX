@@ -145,7 +145,7 @@ time-related.
 |---|---|
 | Timing/offset/lead sign conventions anywhere | `docs/SPECTRA_TIMING_CONVENTIONS.md` |
 | Adding a new LedFX effect, the tuning gate, scene seeding order | `docs/ADDING_EFFECTS.md` |
-| The Word Shapes shape library (`fx/effects/word_shapes.py`), its `word_shape_*` told keys, the form/hold/release envelope, an outline-coverage denominator | `.claude/skills/word-shapes` |
+| The Word Shapes shape library (`fx/effects/word_shapes.py`), its `word_shape_*` told keys, the form/hold/release envelope, an outline-coverage denominator, the "word" response section (the Words band), the `word_shape` flare kind, the five `word_shape_*` room settings | `.claude/skills/word-shapes` |
 | Designing a NEW or IMPROVED effect/scene/flare kind/transition/drop-sequence effect with him (the interview, the explainer, the plan he confirms) | `.claude/skills/effect-design` |
 | The in-app Help page, `helpContent.ts`, deep links, orphan topics | `docs/agents/workflow-conventions.md`, `docs/agents/ui-infra-and-tests.md` |
 | SPECTRA's own capability/decision ledger | `docs/SPECTRA_SPEC.md` |

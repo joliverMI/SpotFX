@@ -32,6 +32,12 @@ import type { LaneRef } from './flareKindOps';
 
 const CLASS_TITLES: Record<ResponseClass, string> = {
   flare: 'Flares', charge: 'Charges', lull: 'Lulls', drop: 'Drops',
+  // The WORDS section (Word Shapes plan W0.3). Its own editing surface is
+  // W2.1; this tab does not list it yet (RESPONSE_CLASSES is still the
+  // four), so these two entries exist only to keep the maps total over a
+  // widened ResponseClass — which is deliberately not the same thing as
+  // the section being buildable here.
+  word: 'Words',
 };
 // The S2 engine executes these: the bridge classifies every spot-effects
 // trigger fire (charge/lull/drop stay themselves; scene changes are not
@@ -42,6 +48,7 @@ const CLASS_HINTS: Record<ResponseClass, string> = {
   charge: 'A charge (build-up) fires from the music: the phase machinery builds the arc; the band\'s kinds coil the room into the payoff.',
   lull: 'A lull fires: the band\'s kinds colour the suspension — typically a permanent gain < 1 ducks the room and carries.',
   drop: 'A drop fires: the payoff lands; permanent kinds move the baselines and drift resumes from the new point.',
+  word: 'A sung word that reaches a shape fires this section — nothing else does, and no trigger can. The band containing the word\'s Energy fires its attached kinds: a Word Shape kind draws the shape (forming so it completes ON the word, then holding and releasing), and a colour kind pooled beside it recolours the room as it would anywhere.',
 };
 
 const kindIcon = (k: FlareKind): string =>
@@ -53,6 +60,7 @@ const kindIcon = (k: FlareKind): string =>
       : k.type === 'pulse_flip' ? '🌗'
       : k.type === 'big_fish' ? '🐋'
       : k.type === 'sauron_surge' ? '🔥'
+      : k.type === 'word_shape' ? '💟'
         : k.type === 'momentary' ? '↩' : '⚓';
 
 const kindTypeLabel = (k: FlareKind): string =>
@@ -82,6 +90,7 @@ const kindContent = (k: FlareKind): string => {
   if (k.type === 'pulse_flip') bits.push('Pulse colour turns 180° and swings back');
   if (k.type === 'big_fish') bits.push('a big contrasting fish crosses behind the others');
   if (k.type === 'sauron_surge') bits.push('the eye\'s flames erupt and burn back');
+  if (k.type === 'word_shape') bits.push('a sung word\'s shape forms, holds and releases');
   if (k.min_intensity != null) bits.push(`only above Energy ${k.min_intensity}`);
   return bits.join(' · ');
 };
@@ -96,6 +105,7 @@ const TYPE_HINT: Record<string, string> = {
   pulse_flip: 'On the Singles\' Pulse light: the colour turns 180° at once and swings back round the colour wheel over three quarters of a beat — never through grey or white. Fires only above Energy 0.4 unless the kind sets its own minimum.',
   big_fish: 'On Fish: one really large fish swims straight across the panel, behind the ordinary fish, at 60% brightness (Fish\'s Big Fish Brightness setting). Faster at higher intensity; its colour is the scene\'s centre colour turned 120° (intensity 0.2 or less) up to 180° (0.5 or more), either way round, so it contrasts. No knobs on the kind — its brightness, size and crossing times are Fish\'s own settings.',
   sauron_surge: 'On Sauron: the eye\'s flames erupt toward the crystal\'s edge, the iris and the ember sky flare, and the fire burns back over about half a second — bigger at higher intensity, landing on the mark. No knobs on the kind — the fire\'s own look is Sauron\'s Flames, Flame Audio, Flame Speed and Ember Sky settings.',
+  word_shape: 'A sung word\'s shape (heart, star, diamond) forms, stands complete, then releases — on every effect that knows shapes. It completes exactly ON the word: the form time is how far ahead of the word it starts, paced by the word\'s Energy (0.9 s quiet down to 0.5 s loud). Only a Words band fires it — a sung word is the only trigger — so attaching it to Flares, Charges, Lulls or Drops does nothing. No knobs on the kind: the form, hold and release are the room\'s own Word shape settings.',
   firework_burst: 'Explodes extra payoff rockets the instant the flare fires, on every live fireworks effect — 3 rockets at intensity 0 up to 6 at intensity 1, on top of whatever the scene is already launching; no knobs of its own.',
 };
 

@@ -17,8 +17,8 @@ planner and its output is exactly what it was without the feature
 THE PLAN IS ONE PURE FUNCTION, `plan_words` (behind `plan_play`, which rolls
 the play first), and the Test Bed and the trigger clock both call it, so what
 the page says a word will do is what the show does.
-It decides, once per word, whether the word FIRES ALONE, IMPRINTS on an event or
-does NOTHING and why. Only three facts need the room at the moment it happens,
+It decides, once per word, whether the word DRAWS ITS SHAPE, FIRES ALONE,
+IMPRINTS on an event or does NOTHING and why. Only three facts need the room at the moment it happens,
 and those are decided there and logged: whether the scene showing allows the
 colour, whether that event can really carry it, and whether anything is holding
 the room's colours.
@@ -52,6 +52,58 @@ there." So:
   - With no play (a song not playing and no kept roll) the Test Bed shows
     every word as if it won, each with its chance, and can sample a play.
 
+WORD SHAPES (Word Shapes plan W0.3, 2026-11-15 — the Admiral: "It would
+operate like a flare in the scenes panel, just only fire by sung word"). A
+match may now reach a SHAPE as well as (or instead of) a colour set, and a
+word that reaches one takes the SHAPE BRANCH BEFORE the colour branch: a
+shape word fires the showing scene's "word" response section, whose own
+colour kinds are how a word recolours the room from there, so a word that
+reaches BOTH a shape and colour sets is a shape — never both, never the
+colour path's fallback. His rules, each one applied where it is named:
+
+  - a shape word TAKES ITS LINE and counts toward the minimum gap exactly
+    like a fired colour word (one word's worth of show, whichever kind it
+    is);
+  - A DROP WITHIN THE IMPRINT WINDOW WINS and the SHAPE is skipped
+    (`WHY_DROP_WINS`, his Q5 A) — the drop is the bigger moment, and the
+    shape would be forming straight into it. **THE COLOUR IS NOT SKIPPED
+    WITH IT**: the word falls through to the colour branch and imprints on
+    that drop exactly as it does today, carrying `shape_skipped` as the
+    only trace. A flare or a scene change does not stop a shape at all,
+    and a shape never imprints on anything;
+  - NOTHING CAN DRAW IT, asked at PLAN time (`can_draw`, bound to the
+    showing scene's Words band by `engine.lyric_can_draw`): the word is
+    planned as the ordinary colour word it is, with its OWN `fire_at`, its
+    own transition and its own imprint. This is a plan-time question
+    BECAUSE IT DECIDES THE TIMING — a shape fires its form (0.5-0.9 s)
+    early, a colour its own `transition_ms_for` (0.15-3 s) — and a
+    fire-time fallback cannot give back a lead that has already passed;
+  - the timing is one rule, `room_controls.word_shape_timing`: the form
+    paces with Energy, the hold is the sung phrase clamped, the release is
+    a multiple of the form. The form is ALSO the lead — `transition_ms`
+    here, so `fire_at = word − form` (LEAD family, positive = earlier) and
+    the shape completes ON the word, which is the whole promise of the
+    feature ("the trigger lands on where the shape is first fully formed");
+  - and the FIRE-TIME NET for the one race the plan cannot see — the
+    showing scene changed inside the replan window — is
+    `colour_fallback` / `SHAPE_NOTHING_DREW`: the colour path again, with
+    the shape's own lead behind it, which is the best available once the
+    moment has passed.
+
+HIS EXISTING WORD COLOURS ARE UNCHANGED BY ALL OF THIS. Every one of his 57
+songs with sung words has word colours switched on, and the two rules above
+are what keep a shape from ever SUBTRACTING one: a word near a drop still
+tints the drop, and a word nothing can draw still fires or imprints its own
+colour on its own clock. A shape only ever happens where a scene can
+actually draw it.
+
+THE BAND IS THE SWITCH (his Q6 A): a shape word does something only if the
+showing scene has a Words band with a Word Shape kind in it. A scene
+without one is byte-identical to today — which is why this planner's shape
+branch is unreachable for every song whose labels reach no shape, and why
+`WORD_SHAPE_EFFECTS` being empty means even a Words band writes to no
+fixture until wave 1.
+
 HOW A WORD IS WEIGHED. Among the words that play, the strongest goes first (his
 own matches ahead of every guess, then Claude's confidence, then the emphasis
 score, then the earlier word), so a stronger word can never be crowded out by a
@@ -60,6 +112,7 @@ weaker one:
   1. A word sitting out this play fires nothing. A match that reaches only an
      effect has no event yet, and fires nothing.
   2. Once per phrase: a sung line that already gave a lyric event gives no more.
+  2b. A word that reaches a SHAPE draws it (rules above) and stops here.
   3. The event: every drop, scene change or update, and flare within the imprint
      window either way, inclusive of the window's edge. Drop first, then scene
      change or update, then flare; the nearest wins a tie. No event near it, and
@@ -121,6 +174,9 @@ logger = logging.getLogger(__name__)
 VERDICT_FIRE = "fire"
 VERDICT_IMPRINT = "imprint"
 VERDICT_NOTHING = "nothing"
+# WORD SHAPES (W0.3): the fourth verdict. A shape word fires the showing
+# scene's "word" response section and nothing else — it never imprints.
+VERDICT_SHAPE = "shape"
 
 WHY_SAT_OUT = "sat_out"
 WHY_NO_COLOUR = "no_colour_set"
@@ -128,6 +184,9 @@ WHY_PHRASE = "phrase_taken"
 WHY_TOO_SOON = "too_soon"
 WHY_LOST = "lost_event"
 WHY_CANNOT_CARRY = "event_cannot_carry"
+# A shape word with a DROP inside the imprint window: the drop wins, the
+# shape is skipped (his Q5 A). A flare or scene change never does this.
+WHY_DROP_WINS = "drop_wins"
 
 KIND_DROP = "drop"
 KIND_SCENE = "scene"
@@ -174,6 +233,29 @@ MOMENT_HOLD_MIN_MS = 350
 MOMENT_HOLD_MAX_MS = 1500
 MOMENT_FADE_RATIO = 1.5
 MOMENT_FADE_MIN_MS = 150
+
+# WORD SHAPES (W0.3), THE COLOUR FALLBACK. What `on_word_shape` reports
+# when NOTHING IN THE ROOM COULD DRAW the shape — the showing scene has no
+# Words section, its bands do not reach this word's Energy, or no scene is
+# showing at all. Deliberately NOT every non-`applied` result:
+#   * a HOLD (a preview, Absorb, a house mode, P3 A's charge/lull/drop) is
+#     something deliberately holding the room, and a colour word is held by
+#     those same gates today — falling back there would walk straight
+#     through a gate;
+#   * `applied` with `virtuals: 0` is a Words band that RAN (its own colour
+#     kinds included, which is the designed colour path for a shape word);
+#     he attached that band and chose its behaviour. Before wave 1 wires an
+#     effect that is every Words band, and it must stay the Words
+#     behaviour rather than fall back.
+SHAPE_NOTHING_DREW = ("no_class", "no_band", "no_active_scene")
+# ... and the PLAN-TIME form of the same question (round-2 review): no scene
+# could draw this word's shape at this Energy, decided while the plan is
+# made rather than at the word, so the word keeps its OWN colour timing
+# (`fire_at`, transition, imprint) instead of inheriting the shape's lead.
+WHY_CANNOT_DRAW = "nothing_can_draw"
+# ... and what the show log calls a shape word that took the colour path
+# instead, so "it did nothing" and "it went red" are never the same row.
+RESULT_FELL_BACK = "fell_back_to_colour"
 
 # What the imprint's fire reports back, read by the show log.
 RESULT_LANDED = "landed"
@@ -420,6 +502,12 @@ class WordHit:
     set_names: tuple[str, ...] = ()
     energy: Optional[float] = None
     why_not: Optional[str] = None
+    # WORD SHAPES (W0.3): the shape this word reaches, if any — the FIRST
+    # shape target the strongest match reaches (`hits_from_matches`). A hit
+    # with one takes the shape branch; a hit with one and no colour set is
+    # NOT `WHY_NO_COLOUR` any more, because it has something to do.
+    shape_id: Optional[str] = None
+    shape_name: Optional[str] = None
     # One swatch per set in `set_ids` (sung_labels.Target.swatch, the colour
     # the Word matches row draws a set with), so the song strip can lend a
     # word's colour to the event it reaches before the song plays. None where
@@ -474,7 +562,30 @@ class WordAction:
     blocked_by: Optional[str] = None
     energy: float = NEUTRAL_ENERGY
     momentary: bool = False
+    # For a colour word, the colour change's own duration; for a SHAPE word,
+    # the form time. Both are the LEAD (`fire_at = word − transition_ms`,
+    # positive = earlier), so one field carries both and the trigger clock
+    # needs no second idea of "how early".
     transition_ms: int = 0
+    # WORD SHAPES (W0.3): the whole envelope the effect is told, from
+    # `room_controls.word_shape_timing`. form_s == transition_ms / 1000 by
+    # construction; hold and release are durations on the effect's own
+    # clock. All three are 0 on anything but a shape.
+    form_s: float = 0.0
+    hold_s: float = 0.0
+    release_s: float = 0.0
+    # WORD SHAPES (W0.3 round-2 review): why this word reaches a shape and
+    # is NOT drawing one — `WHY_DROP_WINS` (a drop inside the window) or
+    # `WHY_CANNOT_DRAW` (no scene can draw it at this Energy). The word is
+    # then planned as the COLOUR word it would be without the shape, and
+    # this field is the only trace of the shape it skipped, so the Test Bed
+    # can say "it would have drawn a heart, but ..." instead of silently
+    # looking like an ordinary colour word.
+    shape_skipped: Optional[str] = None
+
+    @property
+    def shape_id(self) -> Optional[str]:
+        return self.hit.shape_id if self.verdict == VERDICT_SHAPE else None
 
 
 @dataclass(frozen=True)
@@ -547,7 +658,74 @@ def moment_fade_ms(transition_ms: int) -> int:
     return max(MOMENT_FADE_MIN_MS, int(round(transition_ms * MOMENT_FADE_RATIO)))
 
 
+# ── a word's shape timing (WORD SHAPES, W0.3) ───────────────────────────────
+
+# (energy, phrase_ms) -> (form_s, hold_s, release_s). The planner takes this
+# as a CALLABLE rather than reading the room itself: the one rule lives in
+# `room_controls.word_shape_timing` (where the five settings are), and this
+# module stays a pure function of what it is handed, exactly as it is for
+# every other number here. The trigger clock and the Test Bed both bind the
+# live room's settings into it (`TriggerEngine._lyric_shape_timing`).
+ShapeTiming = Callable[[float, float], "tuple[float, float, float]"]
+
+# (energy) -> can the showing scene actually DRAW a shape at this Energy?
+# Taken as a CALLABLE for the same reason as ShapeTiming above: the answer
+# needs the room (a Words band covering this Energy with a Word Shape kind
+# in it — scene_response.words_band_draws), and this module stays a pure
+# function of what it is handed. A caller with no room says True, which is
+# what every pure `plan_words` spec wants.
+CanDraw = Callable[[float], bool]
+
+
+def default_shape_timing(energy: float, phrase_ms: float) -> tuple[float, float, float]:
+    """The plan's own defaults, for a caller with no room to read (a pure
+    `plan_words` spec, a Test Bed preview on a host with no room controls).
+    Deliberately the same numbers `fx/effects/word_shape_keys.py` states —
+    imported, never re-typed — so "the default" is one value everywhere."""
+    from fx.effects import word_shape_keys as wsk
+    e = _clamp01(energy)
+    frac = 1.0 if FAST_AT_ENERGY <= 0 else min(1.0, e / FAST_AT_ENERGY)
+    form_s = wsk.DEFAULT_FORM_S + (0.5 - wsk.DEFAULT_FORM_S) * frac
+    hold_s = min(max(max(0.0, float(phrase_ms or 0.0)) / 1000.0,
+                     wsk.DEFAULT_HOLD_S), 2.0)
+    return (round(form_s, 4), round(hold_s, 4),
+            round(wsk.release_s_for(form_s), 4))
+
+
 # ── the roll ────────────────────────────────────────────────────────────────
+
+
+def colour_fallback(action: WordAction,
+                    tuning: LyricEventSettings) -> Optional[WordAction]:
+    """THE COLOUR FALLBACK (W0.3 review, 2026-11-16). The same word, planned
+    as the COLOUR word it would have been if it reached no shape — for the
+    one case where nothing in the room could draw (`SHAPE_NOTHING_DREW`
+    above). None when the word reaches no colour set, which is the honest
+    "there was nothing else to do" case.
+
+    WHY THIS EXISTS AT ALL. His 57 songs with sung words all have word
+    colours switched ON, and a word that reaches a shape is a shape (his
+    Q5 A) — so between this row and W2.5 attaching Words bands to his
+    scenes, every shape-reaching word on every scene without one would have
+    gone from changing his colours to doing nothing. A feature that is
+    "off until a band exists" must not SUBTRACT behaviour while it waits.
+
+    EXACTLY TODAY'S COLOUR WORD, re-derived from the same two functions the
+    colour branch uses (`is_momentary` against the cut-off, and
+    `transition_ms_for`), never carried over from the shape: the shape's
+    own `transition_ms` is its FORM, a different quantity on a different
+    scale, and reusing it would silently retune every fallback word's fade
+    (`moment_fade_ms` reads it). The RAMP the fire path hands the colour is
+    still the time LEFT to the word, so the colour lands on the word exactly
+    as it would have."""
+    if not action.hit.set_ids:
+        return None
+    energy = float(action.energy)
+    return replace(
+        action, verdict=VERDICT_FIRE, why=None, event=None, blocked_by=None,
+        momentary=is_momentary(energy, tuning.energy_cutoff),
+        transition_ms=transition_ms_for(energy),
+        form_s=0.0, hold_s=0.0, release_s=0.0)
 
 
 def chance_for(hit: WordHit) -> float:
@@ -590,10 +768,13 @@ def roll_hits(hits: Sequence[WordHit], play: Optional[Play]) -> list[WordHit]:
 
 
 def plan_play(hits: Sequence[WordHit], events: Sequence[EventMoment],
-              tuning: LyricEventSettings, play: Optional[Play]) -> list[WordAction]:
+              tuning: LyricEventSettings, play: Optional[Play],
+              shape_timing: Optional[ShapeTiming] = None,
+              can_draw: Optional[CanDraw] = None) -> list[WordAction]:
     """Roll this play, then plan the words that won it. What the trigger
     clock and the Test Bed both call."""
-    return plan_words(roll_hits(hits, play), events, tuning)
+    return plan_words(roll_hits(hits, play), events, tuning,
+                      shape_timing=shape_timing, can_draw=can_draw)
 
 
 # ── the plan ────────────────────────────────────────────────────────────────
@@ -611,16 +792,39 @@ def _event_for(hit: WordHit, events: Sequence[EventMoment],
     return min(near, key=lambda e: (_PRIORITY[e.kind], abs(e.ms - hit.ms), e.ms, e.id))
 
 
+def _drop_near(hit: WordHit, events: Sequence[EventMoment],
+               window_ms: float) -> Optional[EventMoment]:
+    """The nearest DROP within the imprint window of this word, or None —
+    the one event that stops a shape (his Q5 A). Deliberately blind to
+    `can_carry`: that flag is about carrying a COLOUR (the drop colour
+    change being switched off, say), and a drop is the bigger musical
+    moment either way."""
+    near = [e for e in events if e.kind == KIND_DROP
+            and abs(e.ms - hit.ms) <= window_ms]
+    if not near:
+        return None
+    return min(near, key=lambda e: (abs(e.ms - hit.ms), e.ms, e.id))
+
+
 def plan_words(hits: Sequence[WordHit], events: Sequence[EventMoment],
-               tuning: LyricEventSettings) -> list[WordAction]:
+               tuning: LyricEventSettings,
+               shape_timing: Optional[ShapeTiming] = None,
+               can_draw: Optional[CanDraw] = None) -> list[WordAction]:
     """One action per hit, in song order. The rules are in the module docstring,
     and they run in this order."""
     window_ms = float(tuning.imprint_window_s) * 1000.0
     gap_ms = float(tuning.min_gap_s) * 1000.0
+    timing = shape_timing or default_shape_timing
+    drawable = can_draw or (lambda _energy: True)
     done: dict[str, WordAction] = {}
     lines_taken: set[int] = set()
     events_taken: dict[str, WordHit] = {}
     fired: list[WordHit] = []
+    # Why the word under consideration reaches a shape and is not drawing
+    # one, or None. Read by `nothing` and by the colour branch's own two
+    # WordActions below — all three are in this scope, so the value the
+    # loop last set is the one they see.
+    skipped: Optional[str] = None
 
     def too_soon(hit: WordHit) -> Optional[WordHit]:
         return next((w for w in fired if abs(w.ms - hit.ms) < gap_ms), None)
@@ -628,15 +832,68 @@ def plan_words(hits: Sequence[WordHit], events: Sequence[EventMoment],
     def nothing(hit: WordHit, why: str, event: Optional[EventMoment] = None,
                 blocked_by: Optional[str] = None) -> WordAction:
         return WordAction(hit, VERDICT_NOTHING, why=why, event=event, blocked_by=blocked_by,
-                          energy=NEUTRAL_ENERGY if hit.energy is None else float(hit.energy))
+                          energy=NEUTRAL_ENERGY if hit.energy is None else float(hit.energy),
+                          shape_skipped=skipped)
 
     for hit in sorted(hits, key=_weigh):
+        skipped = None
         if hit.why_not is not None:
             done[hit.key] = nothing(hit, hit.why_not)
             continue
         if hit.line in lines_taken:
             done[hit.key] = nothing(hit, WHY_PHRASE)
             continue
+        if hit.shape_id:
+            # WORD SHAPES (W0.3), BEFORE the colour branch: a word that
+            # reaches a shape IS a shape, even when it also reaches colour
+            # sets — the Words band's own colour kinds are how a shape word
+            # recolours the room (module docstring).
+            #
+            # TWO WAYS OUT OF THAT, both added by the round-2 review
+            # (2026-11-16) and both for the same reason: HIS EXISTING WORD
+            # COLOURS MUST STAY BYTE-FOR-BYTE AS TODAY. Each one FALLS
+            # THROUGH to the colour branch below rather than ending the
+            # word, and leaves `skipped` as the only trace:
+            #   * A DROP INSIDE THE WINDOW. His Q5 A skips the SHAPE, not
+            #     the colour — so the word goes on to imprint on that drop
+            #     exactly as it does today. (Ending here instead would have
+            #     stopped every "love"/"heart"/"star" sung within 2 s of a
+            #     drop from tinting it, on every scene, for good.)
+            #   * NOTHING CAN DRAW IT. Decided HERE, at plan time, not at
+            #     the fire: the word then keeps its OWN colour timing — its
+            #     own `fire_at`, its own transition, its own imprint — where
+            #     a fire-time fallback can only hand the colour whatever is
+            #     left of the SHAPE's lead, which is 500-900 ms in place of
+            #     the 1.5-3 s a quiet colour glides in over. A fire-time
+            #     fallback cannot restore a lead that has already passed.
+            # A word with NO colour set has nothing to fall through to, so
+            # it stays with its shape either way: a drop near it ends it
+            # (nothing to do), and an undrawable one is still planned as a
+            # shape, which the fire path then logs as `no_class`.
+            drop = _drop_near(hit, events, window_ms)
+            energy = NEUTRAL_ENERGY if hit.energy is None else float(hit.energy)
+            if drop is not None and not hit.set_ids:
+                done[hit.key] = nothing(hit, WHY_DROP_WINS, event=drop)
+                continue
+            if drop is not None:
+                skipped = WHY_DROP_WINS
+            elif drawable(energy) or not hit.set_ids:
+                soon = too_soon(hit)
+                if soon is not None:
+                    done[hit.key] = nothing(hit, WHY_TOO_SOON, blocked_by=soon.phrase)
+                    continue
+                form_s, hold_s, release_s = timing(energy, hit.end_ms - hit.ms)
+                done[hit.key] = WordAction(
+                    hit, VERDICT_SHAPE, energy=energy,
+                    transition_ms=int(round(form_s * 1000.0)),
+                    form_s=form_s, hold_s=hold_s, release_s=release_s)
+                # A shape takes its line and counts toward the gap, exactly
+                # like a fired colour word.
+                lines_taken.add(hit.line)
+                fired.append(hit)
+                continue
+            else:
+                skipped = WHY_CANNOT_DRAW
         event = _event_for(hit, events, window_ms)
         if event is None:
             soon = too_soon(hit)
@@ -647,7 +904,8 @@ def plan_words(hits: Sequence[WordHit], events: Sequence[EventMoment],
             done[hit.key] = WordAction(
                 hit, VERDICT_FIRE, energy=energy,
                 momentary=is_momentary(energy, tuning.energy_cutoff),
-                transition_ms=transition_ms_for(energy))
+                transition_ms=transition_ms_for(energy),
+                shape_skipped=skipped)
             lines_taken.add(hit.line)
             fired.append(hit)
             continue
@@ -664,7 +922,8 @@ def plan_words(hits: Sequence[WordHit], events: Sequence[EventMoment],
             continue
         done[hit.key] = WordAction(
             hit, VERDICT_IMPRINT, event=event,
-            energy=NEUTRAL_ENERGY if hit.energy is None else float(hit.energy))
+            energy=NEUTRAL_ENERGY if hit.energy is None else float(hit.energy),
+            shape_skipped=skipped)
         events_taken[event.id] = hit
         lines_taken.add(hit.line)
         fired.append(hit)
@@ -707,13 +966,23 @@ def _pin_of(lead: Mapping[str, Any], considered: Sequence[Mapping[str, Any]]) ->
 
 def hits_from_matches(matches: Sequence[Mapping[str, Any]], lines: Sequence[int],
                       energy_at: Callable[[int], Optional[float]],
-                      reach: Callable[[Mapping[str, Any]], Sequence[tuple[str, str]]]
+                      reach: Callable[[Mapping[str, Any]], Sequence[tuple[str, str]]],
+                      shapes: Optional[Callable[[Mapping[str, Any]],
+                                                Sequence[tuple[str, str]]]] = None
                       ) -> list[WordHit]:
     """Pure. `lines` is each word's sung line; `reach(match)` every colour set a
     match reaches as (id, name) or (id, name, swatch), effects left out. His
     matches outrank every guess on the same words, so a correction wins without
     him also having to delete what it replaces. No guess is too weak to keep:
-    its confidence is its chance (chance_for)."""
+    its confidence is its chance (chance_for).
+
+    `shapes(match)` (WORD SHAPES, W0.3) is every SHAPE a match reaches, as
+    (id, name) — the hit takes the FIRST one the strongest match reaches,
+    strongest match first, so a correction decides the shape the same way it
+    decides the colour. Omitted (the default) means no shape reach at all,
+    which is exactly what this function did before shapes existed. A hit
+    that reaches a shape is no longer `WHY_NO_COLOUR` when it reaches no
+    colour set: it has something to do."""
     hits: list[WordHit] = []
     for cluster in _clusters(matches):
         first = min(m["first_word"] for m in cluster)
@@ -730,7 +999,14 @@ def hits_from_matches(matches: Sequence[Mapping[str, Any]], lines: Sequence[int]
                 set_id, name = reached[0], reached[1]
                 swatch = reached[2] if len(reached) > 2 else None
                 pairs.setdefault(set_id, (name, swatch))
-        if why_not is None and not pairs:
+        shape_id = shape_name = None
+        if shapes is not None:
+            for match in sorted(best, key=lambda m: -_strength(m)):
+                reached = list(shapes(match))
+                if reached:
+                    shape_id, shape_name = str(reached[0][0]), str(reached[0][1])
+                    break
+        if why_not is None and not pairs and shape_id is None:
             why_not = WHY_NO_COLOUR
         hits.append(WordHit(
             key=f"{first}-{last}", first_word=first, last_word=last, phrase=str(lead["phrase"]),
@@ -741,6 +1017,7 @@ def hits_from_matches(matches: Sequence[Mapping[str, Any]], lines: Sequence[int]
             set_names=tuple(name for name, _sw in pairs.values()),
             swatches=tuple(sw for _name, sw in pairs.values()),
             energy=energy_at(int(lead["ms"])), why_not=why_not,
+            shape_id=shape_id, shape_name=shape_name,
             match_id=None if lead.get("id") is None else str(lead["id"]),
             pin=_pin_of(lead, considered)))
     return hits
@@ -762,14 +1039,34 @@ def load_words(uri: str) -> SongWords:
     def energy_at(ms: int) -> Optional[float]:
         return None if energy is None else energy.at(ms)
 
-    def reach(match: Mapping[str, Any]) -> list[tuple[str, str, Optional[str]]]:
+    def _targets(match: Mapping[str, Any], kind: str
+                 ) -> list[tuple[str, str, Optional[str]]]:
         if match.get("source") == "his":
             return [(t["id"], t["name"], t.get("swatch")) for t in match.get("targets", ())
-                    if t.get("kind") == sung_labels.KIND_COLOR_SET]
+                    if t.get("kind") == kind]
         owners = catalogue.owners.get(colour_words.word_key(str(match.get("label") or "")), ())
-        return [(t.id, t.name, t.swatch) for t in owners if t.kind == sung_labels.KIND_COLOR_SET]
+        return [(t.id, t.name, t.swatch) for t in owners if t.kind == kind]
 
-    hits = hits_from_matches(matches, [w.line for w in timeline.scored], energy_at, reach)
+    def reach(match: Mapping[str, Any]) -> list[tuple[str, str, Optional[str]]]:
+        return _targets(match, sung_labels.KIND_COLOR_SET)
+
+    def shapes(match: Mapping[str, Any]) -> list[tuple[str, str, Optional[str]]]:
+        """WORD SHAPES (W0.3): the shape targets a match reaches — W0.2's
+        own third target kind (`sung_labels.KIND_SHAPE`), read off the same
+        `catalogue.owners` the colour reach above reads.
+
+        W0.2's PRECEDENCE RULE IS ALREADY IN THAT ORDER and is not re-stated
+        here: `_owner_rank` lists a shape target BEFORE an effect target
+        carrying the same word (today "star"/"stars"/"estrella" sit on both
+        the Star shape and EFFECT_SEEDS["radial"]), so taking the first
+        shape among a word's owners is taking the one W0.2 decided. The
+        shape-vs-COLOUR question is the planner's, not the catalogue's: a
+        word reaching both is a shape because `plan_words` runs the shape
+        branch first (this module's docstring)."""
+        return _targets(match, sung_labels.KIND_SHAPE)
+
+    hits = hits_from_matches(matches, [w.line for w in timeline.scored], energy_at,
+                             reach, shapes)
     return SongWords(uri, timeline.status, timeline.note, tuple(hits),
                      clock_flagged=timeline.clock.flagged)
 
@@ -802,21 +1099,49 @@ def chance_words(hit: WordHit) -> str:
     return f"Plays on about {_percent(hit.chance)} of plays (Claude's confidence)."
 
 
+def _skipped_words(action: WordAction) -> str:
+    """The clause the Test Bed appends when a word reaches a shape and is
+    doing its colour instead — so a shaped word that looks like a plain
+    colour word on the page says why."""
+    if action.shape_skipped is None:
+        return ""
+    name = action.hit.shape_name or action.hit.shape_id
+    if action.shape_skipped == WHY_DROP_WINS:
+        return (f" The {name} shape is skipped: a drop lands inside the "
+                f"window, and the drop is the bigger moment.")
+    if action.shape_skipped == WHY_CANNOT_DRAW:
+        return (f" The {name} shape is skipped: no scene showing can draw "
+                f"one at this Energy (give a scene a Words band with a "
+                f"Word Shape kind).")
+    return f" The {name} shape is skipped."
+
+
 def describe(action: WordAction) -> str:
     """The sentence the Test Bed prints for this word."""
     hit, event = action.hit, action.event
     if action.why == WHY_SAT_OUT:
         return (f"Sits out this play: its chance is {_percent(hit.chance)} and it did not "
                 "come up this time.")
+    if action.verdict == VERDICT_SHAPE:
+        name = hit.shape_name or hit.shape_id
+        return (f"Draws the {name} shape: it forms over "
+                f"{_seconds(action.form_s * 1000)}, finishing on the word, "
+                f"holds {_seconds(action.hold_s * 1000)} and releases over "
+                f"{_seconds(action.release_s * 1000)}.")
     if action.verdict == VERDICT_FIRE:
         how = (f"high energy ({action.energy:.2f}), so it is momentary" if action.momentary
                else (f"low energy ({action.energy:.2f}), so it holds until the next scene "
                      "change or matched word"))
-        return f"Fires on its own: {how}, changing over {_seconds(action.transition_ms)}."
+        return (f"Fires on its own: {how}, changing over "
+                f"{_seconds(action.transition_ms)}.{_skipped_words(action)}")
     if action.verdict == VERDICT_IMPRINT and event is not None:
         away = (event.ms - hit.ms) / 1000.0
         return (f"Gives its colour to the {event.label} at {_clock_words(event.ms)} "
-                f"({away:+.1f} s from the word).")
+                f"({away:+.1f} s from the word).{_skipped_words(action)}")
+    if action.why == WHY_DROP_WINS and event is not None:
+        return (f"A drop lands at {_clock_words(event.ms)}, inside the window, "
+                f"so the shape is skipped — the drop is the bigger moment — "
+                f"and this word reaches no colour set to give it instead.")
     if action.why == WHY_NO_COLOUR:
         return "This match reaches no colour set, so it fires nothing yet."
     if action.why == WHY_PHRASE:
@@ -843,9 +1168,13 @@ def action_payload(action: WordAction) -> dict[str, Any]:
         "draw": None if hit.draw is None else round(hit.draw, 4), "won": hit.won,
         "chance_words": chance_words(hit),
         "set_names": list(hit.set_names), "set_ids": list(hit.set_ids), "swatch": hit.swatch,
+        "shape": hit.shape_id, "shape_name": hit.shape_name,
+        "shape_skipped": action.shape_skipped,
         "verdict": action.verdict, "why": action.why,
         "words": describe(action), "energy": round(action.energy, 3),
         "momentary": action.momentary, "transition_ms": action.transition_ms,
+        "form_s": round(action.form_s, 4), "hold_s": round(action.hold_s, 4),
+        "release_s": round(action.release_s, 4),
         "blocked_by": action.blocked_by,
         "event": None if event is None else {
             "id": event.id, "kind": event.kind, "ms": event.ms, "label": event.label,
@@ -868,7 +1197,8 @@ def word_marks(actions: Sequence[WordAction]) -> tuple[dict[str, dict[str, Any]]
     Returns (imprints, fires): `imprints` maps an event's id (the trigger id
     tick() fires, the same id `/api/upcoming` now carries) to the word that
     gives it its colour — its phrase, time and swatch; `fires` is one marker
-    per word firing on its own, kind "word" (a diamond on the marker row),
+    per word firing on its own — a colour word OR a shape word, the latter
+    carrying `shape` (W0.3) — kind "word" (a diamond on the marker row),
     drawn where the word is sung. Words that do nothing are left out: the
     Test Bed's Word actions row is where those are explained.
 
@@ -884,12 +1214,16 @@ def word_marks(actions: Sequence[WordAction]) -> tuple[dict[str, dict[str, Any]]
             imprints[action.event.id] = {
                 "word": hit.phrase, "word_ms": int(round(hit.ms)), "swatch": hit.swatch,
                 "word_key": hit.key}
-        elif action.verdict == VERDICT_FIRE:
+        elif action.verdict in (VERDICT_FIRE, VERDICT_SHAPE):
+            # A SHAPE word is a marker of the same kind, carrying its shape
+            # (W0.3): one row, one idea — "a word did something here" —
+            # whether the something was a colour or a shape.
             fires.append({
                 "ms": int(round(hit.ms)), "end_ms": int(round(hit.end_ms)), "kind": KIND_WORD,
                 "rank": None, "rank_of": None, "source": "word", "id": fire_id(hit),
                 "word": hit.phrase, "word_ms": int(round(hit.ms)), "swatch": hit.swatch,
-                "word_key": hit.key, "momentary": action.momentary})
+                "word_key": hit.key, "momentary": action.momentary,
+                "shape": action.shape_id})
     return imprints, fires
 
 
@@ -916,6 +1250,10 @@ def fired_payload(verdict: str, hit: WordHit, *, event: Optional[EventMoment],
         "event_ms": int(round(hit.ms)) if event is None else int(event.ms),
         "result": result, "landed": bool(landed), "set_id": set_id, "set_name": set_name,
         "swatch": swatch_for(hit, set_id), "position_ms": position_ms,
+        # WORD SHAPES (W0.3): the shape that just formed, or None. `verdict`
+        # is VERDICT_SHAPE on a shape word, so a page can tell the two
+        # kinds of fire-alone apart without reading this field at all.
+        "shape": hit.shape_id if verdict == VERDICT_SHAPE else None,
     }
 
 

@@ -167,6 +167,13 @@ check(set(sc.SETTINGS_REGISTRY) == {
     "transition_burst_px", "transition_burst_ms", "transition_land_at",
     "transition_graft_ms", "transition_count_hold_ms",
     "transition_match_count",
+    # 2026-10-26/28, the predrop plan's and Energy's own:
+    "drop_colour_change", "drop_colour_spread_deg", "energy_lookahead_s",
+    "drop_testing",
+    # 2026-11-15, the five WORD SHAPE timings (Word Shapes plan W0.3):
+    "word_shape_form_slow_s", "word_shape_form_fast_s",
+    "word_shape_hold_min_s", "word_shape_hold_max_s",
+    "word_shape_release_ratio",
 }, "registry is the deliberate allowlist (eight room keys + the four "
    "analysed-transition knobs + the five 2026-10-06 widening keys + "
    "drop_floor + lull_dark_max_s + lull_breath_hold_s + the four "
@@ -253,7 +260,11 @@ check(set(scc.SCENE_SETTINGS_REGISTRY) == {
     "drop_shock_enabled",
     # 2026-10-12, the scene's own drop timing offset (PR #415)
     "drop_timing_offset_ms",
-}, "scene settings registry is the deliberate eight-key scalar allowlist "
+    # 2026-10-26, the predrop plan's two per-scene windows (3.2) — added
+    # after this script's set was last written, folded in 2026-11-15:
+    "pre_drop_intro_enabled", "pre_drop_intro_min_ms", "pre_drop_intro_max_ms",
+    "pre_drop_spike_enabled", "pre_drop_spike_min_ms", "pre_drop_spike_max_ms",
+}, "scene settings registry is the deliberate scalar allowlist "
    "(phase_blend_charge_ramp_ms/lull_ramp_ms retired 2026-08-20 — the "
    "charge/lull ramp is a computed dynamic stretch now, not a knob)")
 check(scc._model_field_bounds(_SceneV2, "entry_ramp_ms") ==

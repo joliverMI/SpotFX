@@ -1817,7 +1817,14 @@ OPERATIONS: dict[str, SonicOperation] = {
             "flames erupt toward the crystal's edge and burn back over "
             "~0.55s, bigger at higher intensity — no jump/params/gain/ "
             "hold_ms; the fire's own look is Sauron's flames/flame_audio/ "
-            "flame_speed/sky settings, reached with set_scene_entry_param). "
+            "flame_speed/sky settings, reached with set_scene_entry_param), "
+            "word_shape (a sung word's shape forms, holds and releases on "
+            "every effect that knows shapes — no jump/params/gain/hold_ms; "
+            "the form, hold and release are the room's own Word shape "
+            "settings, reached with set_setting, and the form is paced by "
+            "the word's Energy. ONLY a Words band fires it: attached to a "
+            "flare, charge, lull or drop band it is accepted but does "
+            "nothing, and the save says so). "
             "min_intensity (0..1, any type) makes the kind fire only when "
             "the fire's intensity is ABOVE it; pulse_flip defaults to 0.4 "
             "(never fires at or below 0.4). Like enabled, OMIT it to keep "
@@ -1867,7 +1874,8 @@ OPERATIONS: dict[str, SonicOperation] = {
                 "name": {"type": "string"},
                 "type": {"type": "string", "enum": ["drift_jump", "momentary", "permanent",
                                                     "pulse_flash", "pulse_flip",
-                                                    "big_fish", "sauron_surge"]},
+                                                    "big_fish", "sauron_surge",
+                                                    "word_shape"]},
                 "jump": {"type": "string", "enum": ["color_set", "dice"]},
                 "params": {"type": "object", "additionalProperties": True},
                 "gain": {"type": "number"},

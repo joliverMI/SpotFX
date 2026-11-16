@@ -91,6 +91,11 @@ class OpenRequest(BaseModel):
     scene_id: str
     kind_name: str
     intensity: float = Field(default=1.0, ge=0.0, le=1.0)
+    # WORD SHAPES (plan W0.3): which shape a `word_shape` kind previews.
+    # None previews scene_response.PREVIEW_SHAPE (heart); the Words
+    # section's own shape picker (W2.1) passes the one he is editing.
+    # Ignored by every other kind type.
+    shape: str | None = None
 
 
 def _resolve_scene_and_kind(scene_id: str, kind_name: str) -> tuple[SceneV2, FlareKind]:
@@ -106,7 +111,8 @@ def _resolve_scene_and_kind(scene_id: str, kind_name: str) -> tuple[SceneV2, Fla
 @router.post("/open")
 async def open_preview(body: OpenRequest):
     scene, kind = _resolve_scene_and_kind(body.scene_id, body.kind_name)
-    timeline = await flare_preview.build_timeline(scene, kind, body.intensity)
+    timeline = await flare_preview.build_timeline(scene, kind, body.intensity,
+                                                  shape=body.shape)
     # A real /open is a deliberate new look — a mount, or him moving the
     # intensity slider — never a bare heartbeat, so it's always allowed to
     # clear a ceiling lock from a prior session and let a new one begin.

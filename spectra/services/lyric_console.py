@@ -922,9 +922,10 @@ OPERATIONS: dict[str, SonicOperation] = {
     ),
     "preview_lyric_events": SonicOperation(
         name="preview_lyric_events", domain="lyrics", kind="read",
-        summary="Show what each matched word in a song would do — fire its own colour, "
-                "give it to a nearby drop, scene change/update or flare, or do nothing and "
-                "why — the same plan the Test Bed's Word actions row shows.",
+        summary="Show what each matched word in a song would do — draw its shape, fire "
+                "its own colour, give it to a nearby drop, scene change/update or flare, "
+                "or do nothing and why — the same plan the Test Bed's Word actions row "
+                "shows.",
         instructions=(
             "song is optional (omit to mean whatever is playing now). Works whether or not "
             "word colours are switched on for that song — it previews the plan either way, "
@@ -933,7 +934,12 @@ OPERATIONS: dict[str, SonicOperation] = {
             "own matches and Always pins every time). `roll.state` says which play the plan "
             "is for — `playing` (this play of the song playing, `roll.tag` its number), "
             "`kept` (his kept roll), or `none` (not playing: every word shown as if it "
-            "plays) — and `won` false / why `sat_out` marks a word sitting out this play."),
+            "plays) — and `won` false / why `sat_out` marks a word sitting out this play. "
+            "A word that reaches a SHAPE has verdict `shape` and carries that shape plus "
+            "its forming/hold/release times: a shape word draws instead of changing "
+            "colour, even when it also reaches a colour set, and it only reaches the "
+            "lights on a scene with a Words band. Why `drop_wins` means a drop landed "
+            "inside the window and the shape was skipped."),
         input_schema={"type": "object", "properties": {"song": _SONG_PROP},
                      "additionalProperties": False},
         handler=_op_preview_lyric_events,

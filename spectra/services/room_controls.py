@@ -785,6 +785,32 @@ class RoomControlState(BaseModel):
     # scene_response.pulse_flash_allowed is the one rule. 0 = never gated.
     pulse_flash_min_energy: float = Field(default=0.8, ge=0.0, le=1.0)
 
+    # THE WORD SHAPE TIMINGS (Word Shapes plan W0.3, 2026-11-15 — the
+    # Admiral's Q4 A, and his words for the row: "The shapes should form
+    # smoothly. ... Then once it reaches the shape, it should hold
+    # momentarily, and then release back and smoothly. Generally, the
+    # timing should be such that the trigger lands on where the shape is
+    # first fully formed."). Five numbers, all his to tune through Sonic,
+    # read ONCE per word by the one rule below (word_shape_timing):
+    #   - the FORM paces with the word's Energy: word_shape_form_slow_s at
+    #     Energy 0, down to word_shape_form_fast_s at lyric_events.
+    #     FAST_AT_ENERGY (0.75) and above, linear between. It is also the
+    #     LEAD — the band fires exactly this early so the shape completes
+    #     ON the word (LEAD family, positive = earlier,
+    #     docs/SPECTRA_TIMING_CONVENTIONS.md);
+    #   - the HOLD is the sung phrase's own length, clamped to
+    #     [word_shape_hold_min_s, word_shape_hold_max_s] ("hold through the
+    #     sung phrase");
+    #   - the RELEASE is word_shape_release_ratio x the form.
+    # The effect runs all three on its own clock from one write
+    # (fx/effects/word_shape_keys.py), so a change reaches the very next
+    # shaped word and nothing is re-planned mid-song beyond the next replan.
+    word_shape_form_slow_s: float = Field(default=0.9, ge=0.05, le=5.0)
+    word_shape_form_fast_s: float = Field(default=0.5, ge=0.05, le=5.0)
+    word_shape_hold_min_s: float = Field(default=0.8, ge=0.0, le=10.0)
+    word_shape_hold_max_s: float = Field(default=2.0, ge=0.0, le=10.0)
+    word_shape_release_ratio: float = Field(default=1.5, ge=0.0, le=5.0)
+
     # ENERGY'S LOOK-AHEAD (2026-10-28, the Energy plan's D2 — spectra/
     # services/energy.py is the binding statement): a drop or a scene
     # change within this many seconds of the next section edge reads the
@@ -1793,3 +1819,51 @@ async def apply_patch(body: object, *, ambient_snap: bool = False,
         from spectra.services import known_buffer
         response["known_buffer_reference_ms"] = known_buffer.rebase_reference()
     return response
+
+
+# ── THE WORD SHAPE TIMING (Word Shapes plan W0.3, section 2.4) ──────────────
+
+# Energy at or above this forms as fast as the room allows. lyric_events'
+# own constant, re-read rather than re-typed, so the word-colour transition
+# and the word-shape form pace off ONE number.
+def _fast_at_energy() -> float:
+    from spectra.services.lyric_events import FAST_AT_ENERGY
+    return FAST_AT_ENERGY
+
+
+def word_shape_timing(energy: float, phrase_ms: float,
+                      settings: RoomControlState,
+                      effect_types=None) -> tuple[float, float, float]:
+    """One sung word's (form_s, hold_s, release_s) — the ONE rule, so the
+    Test Bed, the planner, the fire path and the preview can never disagree
+    about how long a shape takes (the Admiral's Q4 A, 2026-11-15):
+
+      form     linear from `word_shape_form_slow_s` at Energy 0 to
+               `word_shape_form_fast_s` at FAST_AT_ENERGY (0.75) and above,
+               then floored at the per-effect minimum
+               (fx.device_model.word_shape_form_min_s — see that accessor's
+               docstring for which half of the plan-time/fire-time split
+               each number comes from). This IS the lead: the band fires
+               `form_s` early so the shape completes ON the word.
+      hold     the sung phrase's own length, clamped to
+               [`word_shape_hold_min_s`, `word_shape_hold_max_s`].
+      release  `word_shape_release_ratio` x the form.
+
+    Pure: every number comes from `settings` or the arguments, nothing is
+    read off disk. An inverted pair (fast slower than slow, min above max)
+    is honoured as written rather than silently re-ordered — both are his
+    to set, and a surprise reorder would hide a typo instead of showing
+    it — except that the clamp itself can't invert, so the max wins when
+    they cross."""
+    from fx import device_model
+    e = max(0.0, min(1.0, float(energy)))
+    fast_at = _fast_at_energy()
+    slow, fast = float(settings.word_shape_form_slow_s), float(settings.word_shape_form_fast_s)
+    frac = 1.0 if fast_at <= 0 else min(1.0, e / fast_at)
+    form_s = slow + (fast - slow) * frac
+    form_s = max(form_s, device_model.word_shape_form_min_s(effect_types))
+    lo, hi = float(settings.word_shape_hold_min_s), float(settings.word_shape_hold_max_s)
+    hold_s = max(0.0, float(phrase_ms or 0.0)) / 1000.0
+    hold_s = min(max(hold_s, lo), hi) if hi >= lo else hi
+    release_s = max(0.0, form_s * float(settings.word_shape_release_ratio))
+    return (round(form_s, 4), round(hold_s, 4), round(release_s, 4))

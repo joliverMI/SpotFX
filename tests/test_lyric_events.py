@@ -14,6 +14,11 @@ WEIGHED", and each one is proven here:
      avoiding the last used, 180 on every drop not imprinted, momentary and held
      colours with their releases, and every hold the room already has.
   5. THE STORE AND THE PAGE: off for every show, per show, and the API.
+  6. WORD SHAPES (plan W0.3) — only the BOUNDARY here: a shape word adds
+     exactly one new output to this engine and changes nothing else, and it
+     takes the phrase and the shared gap like any word that acted. The
+     shape contract itself (the planner's branch, the timing, the told
+     write, P3 A, the preview) is tests/test_word_shape_contract.py.
 """
 from __future__ import annotations
 
@@ -315,6 +320,8 @@ class Rec:
     def __init__(self):
         self.fires: list = []
         self.words: list = []
+        self.shapes: list = []
+        self.colours: list = []
         self.imprints: list = []
         self.hold_released = 0
 
@@ -348,7 +355,22 @@ class Rec:
 
     async def lyric_colour(self, action, ramp_ms):
         self.words.append((action.hit.phrase, ramp_ms, self.pos))
+        # WORD SHAPES (W0.3): what the colour fallback landed, compared
+        # against the control engine's own colour words below.
+        self.colours.append((action.hit.phrase, action.hit.key, action.verdict,
+                             action.momentary, action.transition_ms,
+                             self.pos, ramp_ms, self.pos + ramp_ms))
         return {"result": "jumped", "color_jump": {"picked_id": "red", "set_name": "Red"}}
+
+    shape_result: dict = {"result": "applied", "word_shape": {"virtuals": 0}}
+
+    async def lyric_shape(self, action, ramp_ms):
+        # WORD SHAPES (W0.3): the shape path's own hook, recorded here only
+        # so the boundary proofs below can show it is the ONE new output.
+        # `shape_result` lets a spec put the engine in the "nothing in the
+        # room could draw" state the colour fallback exists for.
+        self.shapes.append((action.hit.phrase, action.hit.shape_id, ramp_ms, self.pos))
+        return dict(self.shape_result)
 
     def lyric_pick(self, set_ids, scene_id, intensity):
         return {"set_id": set_ids[0], "rung": "full"}
@@ -392,6 +414,7 @@ def _engine(triggers, rec, *, hits=(), enabled=True, mode="full", tuning=TUNING,
         clock=lambda: 0.0,
         lyric_enabled=lambda uri: enabled, lyric_settings=lambda: tuning,
         lyric_words=lyric_load or (lambda uri: words), lyric_colour=rec.lyric_colour,
+        lyric_shape=rec.lyric_shape,
         lyric_pick=pick or rec.lyric_pick, lyric_release_hold=rec.release, **kw)
 
 
@@ -528,6 +551,147 @@ def test_with_the_switch_off_the_output_is_exactly_an_engine_without_the_feature
     assert loaded == [], "with the switch off the words are never even read"
     from spectra import config as scfg
     assert not scfg.LYRIC_PLAYS_FILE.exists(), "and no play is ever rolled or written down"
+
+
+def test_a_shape_word_adds_exactly_one_output_and_changes_nothing_else():
+    """WORD SHAPES (plan W0.3) EXTENDS THE PROOF ABOVE. The same show, the
+    same word beside every event — but every word now reaches a SHAPE. The
+    engine's trigger output must be byte-identical to the control's (a shape
+    never imprints, never moves a scene change, a flare or a drop), the
+    colour hook must never be called (a word reaching a shape is a shape,
+    not a colour), and the ONLY new thing the engine does is ask the shape
+    hook. With no Words band on any scene that ask returns `no_class` and
+    no fixture is written at all (WORD_SHAPE_EFFECTS is empty until wave 1
+    — tests/test_word_shape_contract.py holds both halves)."""
+    # Clear of the drop at 12_000's own imprint window, which is the one
+    # event that sends a shape word back to the colour branch (round-2 fix
+    # A — test_a_shaped_word_near_a_drop_still_tints_the_drop covers that).
+    shaped = [replace(_hit(ms, line=i, first=ms // 100, energy=0.6),
+                      shape_id="heart", shape_name="Heart")
+              for i, ms in enumerate((4_100, 6_100, 8_100, 14_100, 16_000))]
+    control = Rec()
+    control_engine = _engine(_show(), control, hits=[])
+    shapes = Rec()
+    shape_engine = _engine(_show(), shapes, hits=shaped)
+    _sweep(control_engine, control)
+    _sweep(shape_engine, shapes)
+    assert shapes.fires == control.fires, "the show itself is untouched"
+    assert control.fires, "the control really fired things"
+    assert shapes.imprints == control.imprints == [None] * len(control.imprints)
+    assert shapes.words == [], "a shape word never takes the colour path"
+    assert shapes.shapes, "and the shape hook is the one new output"
+    assert {s[1] for s in shapes.shapes} == {"heart"}
+
+
+def test_with_no_words_band_anywhere_a_shaped_word_is_todays_colour_word():
+    """THE PRIORITY FIX, FROM THE SHOW SIDE (round-2 review, 2026-11-16).
+    He has word colours switched on for all 57 songs with sung words, and
+    no existing word colour may disappear while the Words sections are
+    built. So: the same show, the same words, every one reaching a SHAPE as
+    well as its colour set — and with no scene able to draw one
+    (`lyric_can_draw` False, which is what the real engine answers with no
+    Words band) the colour output is IDENTICAL to the control engine's,
+    including the TICK IT FIRES ON AND THE RAMP IT IS HANDED. That is the
+    whole point of asking at plan time: the word keeps its own lead, not
+    whatever the shape's lead left over."""
+    shaped_hits = [replace(_hit(ms, line=i, first=ms // 100, energy=0.6),
+                           shape_id="heart", shape_name="Heart")
+                   for i, ms in enumerate((4_000, 14_000, 24_000))]
+    plain_hits = [replace(h, shape_id=None, shape_name=None) for h in shaped_hits]
+    control = Rec()
+    _sweep(_engine([], control, hits=plain_hits), control, stop=30_000)
+    shaped = Rec()
+    _sweep(_engine([], shaped, hits=shaped_hits,
+                   lyric_can_draw=lambda _e: False), shaped, stop=30_000)
+
+    assert len(control.colours) == 3, "the control really changed colours"
+    assert shaped.colours == control.colours, \
+        "same words, same verdict, same momentary rule, same transition, " \
+        "same firing tick, same ramp, same landing moment"
+    assert shaped.shapes == [], "the shape path was never entered at all"
+
+
+@pytest.mark.parametrize("energy,transition", [
+    (0.0, 3000), (0.2, 2240), (0.4, 1480), (0.8, 150)])
+def test_a_quiet_shaped_word_keeps_its_long_colour_glide(energy, transition):
+    """The number the round-2 review caught: a held, quiet colour glides in
+    over 1.5-3 s, and a shape's lead is only 0.5-0.9 s. Deciding at plan
+    time is what keeps the glide; a fire-time fallback could only have
+    handed it the shape's lead."""
+    rec = Rec()
+    hit = replace(_hit(10_000, energy=energy), shape_id="heart")
+    _sweep(_engine([], rec, hits=[hit], lyric_can_draw=lambda _e: False), rec)
+    control = Rec()
+    _sweep(_engine([], control, hits=[replace(hit, shape_id=None)]), control)
+    [(_phrase, _key, verdict, _mom, told, pos, ramp, lands)] = rec.colours
+    assert verdict == le.VERDICT_FIRE
+    assert told == transition, "its own transition, by Energy"
+    assert rec.colours == control.colours, \
+        "the same firing tick and the same ramp as the word without a shape"
+    assert lands == 10_000
+    # The shape's own lead would have been 0.5-0.9 s whatever the Energy;
+    # this word is handed its OWN ramp, which for a quiet word is several
+    # times longer than that and for a loud one much shorter.
+    assert ramp == min(transition, 10_000 - pos)
+
+
+def test_a_shaped_word_near_a_drop_still_tints_the_drop():
+    """Round-2 fix (A) from the show side: his Q5 A skips the SHAPE, not the
+    colour. A word sung within the window of a drop imprints on it exactly
+    as it always has — on every scene, whether or not one can draw."""
+    for can_draw in (True, False):
+        rec = Rec()
+        hit = replace(_hit(10_000, energy=0.6), shape_id="heart")
+        _sweep(_engine([_drop_trig(10_400)], rec, hits=[hit],
+                       lyric_can_draw=lambda _e, v=can_draw: v), rec)
+        assert rec.shapes == [] and rec.colours == [], can_draw
+        assert any(i is not None for i in rec.imprints), can_draw
+        # ... the same as the word without its shape.
+        plain = Rec()
+        _sweep(_engine([_drop_trig(10_400)], plain,
+                       hits=[replace(hit, shape_id=None)]), plain)
+        assert [i is not None for i in rec.imprints] == \
+            [i is not None for i in plain.imprints], can_draw
+
+
+def test_the_fire_time_fallback_is_still_there_for_a_scene_change_mid_plan():
+    """The net for the one race the plan cannot see: planned as a shape
+    (something could draw then), and by the word's own moment the showing
+    scene cannot. The colour still lands — with the shape's lead behind it,
+    which is the best available once the moment has passed."""
+    rec = Rec()
+    rec.shape_result = {"result": "no_class"}
+    hit = replace(_hit(10_000, energy=0.6), shape_id="heart")
+    _sweep(_engine([], rec, hits=[hit], lyric_can_draw=lambda _e: True), rec)
+    assert len(rec.shapes) == 1, "it was planned as a shape"
+    [(_p, _k, verdict, _m, _t, _pos, _ramp, lands)] = rec.colours
+    assert verdict == le.VERDICT_FIRE and lands == 10_000
+
+
+def test_a_shape_only_word_with_no_words_band_anywhere_does_nothing():
+    """The other half of the same boundary: a word reaching a shape and NO
+    colour set has nothing to fall back to, so it does nothing — which is
+    also what it did before this row, since such a word was
+    WHY_NO_COLOUR then."""
+    rec = Rec()
+    rec.shape_result = {"result": "no_class"}
+    shape_only = replace(_hit(10_000, energy=0.6), shape_id="heart",
+                         set_ids=(), set_names=())
+    _sweep(_engine([], rec, hits=[shape_only]), rec)
+    assert len(rec.shapes) == 1
+    assert rec.colours == [] and rec.words == []
+
+
+def test_a_shape_word_still_takes_the_phrase_and_the_gap_from_a_colour_word():
+    """One show, one rule: a shape word that acted blocks a colour word
+    inside the shared minimum gap, exactly as a fired colour word would."""
+    rec = Rec()
+    shape = replace(_hit(10_000, energy=0.6, line=0, first=100),
+                    shape_id="heart", shape_name="Heart")
+    colour = _hit(12_000, energy=0.6, line=1, first=120)
+    _sweep(_engine([], rec, hits=[shape, colour]), rec)
+    assert len(rec.shapes) == 1
+    assert rec.words == [], "the colour word is inside the gap the shape took"
 
 
 def test_switching_a_show_off_mid_song_stops_it():

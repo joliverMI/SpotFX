@@ -115,6 +115,12 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         # 2026-10-26, the Home Drops panel's Testing toggle (predrop plan
         # step 1): every detected drop plays, approved or not
         "drop_testing",
+        # 2026-11-15, the five WORD SHAPE timings (Word Shapes plan W0.3,
+        # his Q4 A: "all Sonic-tunable") — room_controls.word_shape_timing
+        # is the one rule that reads them:
+        "word_shape_form_slow_s", "word_shape_form_fast_s",
+        "word_shape_hold_min_s", "word_shape_hold_max_s",
+        "word_shape_release_ratio",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring
     assert "force_scene_enabled" not in sc.SETTINGS_REGISTRY

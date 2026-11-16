@@ -312,6 +312,98 @@ async def fire_lyric_colour_event(action: Any, ramp_ms: int) -> dict:
     return record
 
 
+def lyric_shape_timing(energy: float, phrase_ms: float) -> tuple:
+    """THE PLANNER'S SHAPE TIMING, with the room attached (W0.3 review,
+    2026-11-16). `room_controls.word_shape_timing` is the one rule; what
+    this adds is the SHOWING SCENE'S OWN live effect types, so the form the
+    planner computes — which is also the LEAD, and therefore in practice
+    the form the effect is told (the time left to the word) — is floored at
+    what is actually on the panel rather than at the whole library's
+    maximum. Without this, one effect declaring a 2.0 s minimum would
+    stretch EVERY scene's shape to 2.0 s (fx.device_model.
+    word_shape_form_min_s' own docstring).
+
+    Wired onto trigger_engine._lyric_shape_timing below, the same way
+    _lyric_colour is: a TriggerEngine with no room keeps its own fallback
+    (the global maximum, since the room is then unknown). Never raises —
+    TriggerEngine._room_shape_timing's own failure path is the model."""
+    from spectra.services.room_controls import (load_room_controls,
+                                                word_shape_timing)
+    live = [st.effect_type for st in conductor.virtuals.values()]
+    return word_shape_timing(energy, phrase_ms, load_room_controls(), live)
+
+
+def lyric_can_draw(energy: float) -> bool:
+    """Could the SHOWING scene draw a shape at this Energy? The planner's
+    own question (W0.3 round-2 review, 2026-11-16), answered by
+    scene_response.words_band_draws over conductor.scene.
+
+    Why it is asked at PLAN time: a word reaching both a shape and a colour
+    set has to pick one, and the pick decides its timing — a shape fires its
+    form (0.5-0.9 s) early, a colour its own transition (0.15-3 s). Asked at
+    the fire instead, the lead has already passed and a quiet colour that
+    should glide in over 2-3 s would get whatever the shape's lead left it.
+    So the planner plans the word it will really be.
+
+    Never raises: unreadable state answers True, which plans the SHAPE —
+    the same direction every other "unknowable" in this feature errs
+    (fire_lyric_shape_event's own fallback then catches it)."""
+    from spectra.services import scene_response
+    try:
+        return scene_response.words_band_draws(conductor.scene, float(energy))
+    except Exception:                                    # noqa: BLE001
+        logger.exception("word shapes: the showing scene's Words band could "
+                         "not be read — planned as a shape")
+        return True
+
+
+async def fire_lyric_shape_event(action: Any, ramp_ms: int) -> dict:
+    """WORD SHAPES (Word Shapes plan W0.3, 2026-11-15): a sung word drawing
+    its shape, reached only from trigger_engine._tick_lyric_words, only on a
+    show switched on. The gates, in this order:
+
+      1. the response gate at the ANALYSED tier — a preview, Absorb, a
+         house mode that ignores music, a closed tier — exactly the gate
+         the word-colour path takes, because a shape is the same size of
+         intervention in the room;
+      2. a house mode that owns the room;
+      3. P3 A (the Admiral's own default on the plan): A CHARGE, LULL OR
+         DROP HAPPENING ON THE SHOWING SCENE SKIPS THE SHAPE, logged with
+         `held_for: "phase"`. A shape forming into a build or out of a drop
+         is the one case the plan's "it should hold momentarily" cannot
+         survive — the phase owns the panel for its whole length and would
+         either swallow the shape or be interrupted by it.
+
+    Then the showing scene's Words section (responses.on_word_shape). THE
+    FORM IS MADE EXACT HERE: the planner's form was the LEAD (how early to
+    fire), and what the effect is actually told is the time LEFT to the word
+    at the tick that fired — floored at the showing effects' own minimum
+    (fx.device_model.word_shape_form_min_s), so an effect is never asked to
+    assemble faster than it can. The hold and release are the planner's,
+    unchanged: only the form has to land on a moment."""
+    from dataclasses import replace
+
+    from fx import device_model
+    from spectra.services import absorb_hold, house
+    hit = action.hit
+    gate = _response_gate(True, True)
+    if gate is not None:
+        if gate == absorb_hold.REASON:
+            absorb_hold.record_deferral("lyric_shape", {"phrase": hit.phrase})
+        return {"result": "held", "held_for": gate}
+    house_reason = house.scene_deferral()
+    if house_reason is not None:
+        return {"result": "held", "held_for": "house_mode", "reason": house_reason}
+    phase = responses.phase_armed()
+    if phase is not None:
+        return {"result": "held", "held_for": "phase", "reason": phase}
+    live = [st.effect_type for st in conductor.virtuals.values()]
+    form_s = max(int(ramp_ms) / 1000.0, device_model.word_shape_form_min_s(live))
+    told = replace(action, form_s=round(form_s, 4),
+                   transition_ms=int(round(form_s * 1000.0)))
+    return await responses.on_word_shape(told)
+
+
 def _schedule_lyric_release(moment) -> None:
     """A momentary word's fade back, once its time is up. Best-effort: a
     failure leaves the word's colour on until the room's next change."""
@@ -346,6 +438,9 @@ def _push_word_colour(record: dict) -> None:
 
 
 trigger_engine._lyric_colour = fire_lyric_colour_event
+trigger_engine._lyric_shape = fire_lyric_shape_event
+trigger_engine._lyric_shape_timing = lyric_shape_timing
+trigger_engine._lyric_can_draw = lyric_can_draw
 trigger_engine._lyric_pick = pick_lyric_colour
 trigger_engine._lyric_fired = _push_word_colour
 trigger_engine._lyric_note_set = responses.note_lyric_set
