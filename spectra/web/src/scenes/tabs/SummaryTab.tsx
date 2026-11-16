@@ -5,7 +5,7 @@ import { LabelsInput } from '../../components/inputs';
 import HelpLink from '../../help/HelpLink';
 import { useRoomJourney, useSequencerConfig } from '../../queries';
 import type { SceneV2 } from '../../types';
-import { isBinding, RESPONSE_CLASSES, sceneDiceLetters } from '../../types';
+import { isBinding, SCENE_RESPONSE_CLASSES, sceneDiceLetters } from '../../types';
 import type { TabName } from '../ScenesPage';
 
 function Card({ title, onClick, children }: {
@@ -68,8 +68,16 @@ export default function SummaryTab({ scene, setScene, goTo }: {
           </div>
         </Card>
 
-        <Card title="Responses" onClick={() => goTo(scene.responses.flare ? 'Flares' : 'Charges/Lulls/Drops')}>
-          {RESPONSE_CLASSES.map((cls) => {
+        {/* THE FIVE SECTIONS a scene may declare (types.ts
+            SCENE_RESPONSE_CLASSES — 'word' included since Word Shapes row
+            W2.1), not the four a trigger may name. The jump lands on
+            whichever tab this scene actually has. */}
+        <Card title="Responses" onClick={() => goTo(
+          scene.responses.flare ? 'Flares'
+            : (scene.responses.charge || scene.responses.lull || scene.responses.drop)
+              ? 'Charges/Lulls/Drops'
+              : scene.responses.word ? 'Words' : 'Flares')}>
+          {SCENE_RESPONSE_CLASSES.map((cls) => {
             const spec = scene.responses[cls];
             const kindCount = spec
               ? new Set(spec.bands.flatMap((b) => Object.keys(b.kinds ?? {}))).size

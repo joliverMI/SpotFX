@@ -111,8 +111,14 @@ time-related.
 
 ## Orientation
 
-- Tests: `pip install -r requirements-dev.txt && python -m pytest` (plain
-  pytest, no async plugin — tests drive their own loop). See
+- Tests: `pip install -r requirements.txt -r requirements-dev.txt &&
+  python -m pytest` (BOTH files — `requirements-dev.txt`'s own header is the
+  authority; app deps such as `markdown` and `mcp` live in
+  `requirements.txt`, and without them ordinary `TestClient` tests fail at
+  import and look like real failures). Plain pytest, no async plugin —
+  tests drive their own loop. A frontend check or
+  `tests/test_spectra_web_typecheck.py` additionally needs
+  `npm --prefix spectra/web install`. See
   `tests/conftest.py` for the fake-LedFX harness and the autouse isolation
   fixtures referenced throughout `docs/agents/`.
 - Before touching anything under `spectra/`, read `docs/SPECTRA_SPEC.md` —

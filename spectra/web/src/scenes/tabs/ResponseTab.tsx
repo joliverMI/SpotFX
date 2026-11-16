@@ -1,4 +1,7 @@
-/** Response tabs — Flares (one class) and Charges/Lulls/Drops (three).
+/** Response tabs — Flares (one class), Charges/Lulls/Drops (three) and
+ * WORDS (one, Word Shapes row W2.1: the fifth response section, which only
+ * a sung word fires — no trigger can name it, and a scene with no Words
+ * band answers a shape word with nothing, so the band IS the switch).
  * The item-8 doctrine: the scene DECLARES named flare kinds (readable
  * cards below — tap/double-click one to rename, delete, or copy it; type/
  * params/gain/hold stay agent-adjustable, no settings forms); the band
@@ -22,21 +25,22 @@ import { useToast } from '../../components/Toast';
 import { readFlareClipboard } from '../../lib/flareClipboard';
 import type { FlareKind, ResponseClass, ResponseSpec, SceneV2 } from '../../types';
 import { emptyBand, emptyResponse } from '../../types';
+import { warningsForKind, warningsNamingNoKind } from './wordShapePreview';
 import FlareKindEditDialog from './FlareKindEditDialog';
 import FlarePreviewOverlay from './FlarePreviewOverlay';
 import {
-  bandPools, deleteFlareKind, moveKindToLane, pasteKind, prunedLanes,
+  bandPools, deleteFlareKind, moveKindToLane, newWordShapeKind, pasteKind, prunedLanes,
   renameFlareKind, setKindEnabled, setKindTriggerOffset,
 } from './flareKindOps';
 import type { LaneRef } from './flareKindOps';
 
 const CLASS_TITLES: Record<ResponseClass, string> = {
   flare: 'Flares', charge: 'Charges', lull: 'Lulls', drop: 'Drops',
-  // The WORDS section (Word Shapes plan W0.3). Its own editing surface is
-  // W2.1; this tab does not list it yet (RESPONSE_CLASSES is still the
-  // four), so these two entries exist only to keep the maps total over a
-  // widened ResponseClass — which is deliberately not the same thing as
-  // the section being buildable here.
+  // The WORDS section (Word Shapes plan W0.3, built here in W2.1 — the
+  // Scenes page's own 'Words' tab mounts this component with
+  // classes={['word']}). types.ts's RESPONSE_CLASSES stays the FOUR a
+  // trigger may name; SCENE_RESPONSE_CLASSES is the five a scene may
+  // declare.
   word: 'Words',
 };
 // The S2 engine executes these: the bridge classifies every spot-effects
@@ -117,11 +121,16 @@ interface DragState {
   over: LaneRef | null;
 }
 
-export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
+export default function ResponseTab({ scene, setScene, classes, helpTopic, warnings }: {
   scene: SceneV2;
   setScene: (s: SceneV2) => void;
   classes: ResponseClass[];
   helpTopic: string;
+  /** The LAST SAVE's advisory notes for this scene (ScenesPage, from
+   * POST /api/scenes → scene_store.scene_warnings). Shown inline on the
+   * kind each one names — never a blocking error: the scene is already
+   * stored. Undefined until he saves. */
+  warnings?: string[];
 }) {
   const toast = useToast();
   const kinds = scene.flare_kinds ?? [];
@@ -134,6 +143,12 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
   const [laneExtra, setLaneExtra] = useState<Record<string, number>>({});
 
   const clipboard = readFlareClipboard();
+  // The Words tab is the one place a kind's TYPE can be chosen here (the
+  // one type with nothing to tune — see flareKindOps.newWordShapeKind).
+  const isWordsTab = classes.includes('word');
+  // A save's advisory notes, split: each kind's own go on its card, and
+  // anything naming no declared kind is shown once rather than dropped.
+  const strayWarnings = warningsNamingNoKind(warnings, kinds.map((k) => k.name));
 
   const setSpec = (cls: ResponseClass, spec: ResponseSpec | null, extraKinds?: FlareKind[]) => {
     const responses = { ...scene.responses };
@@ -158,10 +173,32 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
         attach[name] = 1;
       }
     }
+    if (cls === 'word') {
+      // THE WORDS SECTION ARRIVES READY (the plan's own mock, section 4:
+      // every Words band holds a Word Shape card). A bare Words band would
+      // be a section that answers a sung word with nothing — the one thing
+      // the band is the switch FOR — so adding the section declares the
+      // kind and attaches it across the whole Energy range, the same
+      // "arrive useful" shape the Flares class has always had. He can
+      // detach it, switch it off, or narrow the band like any other.
+      const existing = kinds.find((k) => k.type === 'word_shape');
+      const kind = existing ?? newWordShapeKind(kinds.map((k) => k.name));
+      if (!existing) missing.push(kind);
+      attach[kind.name] = 1;
+    }
     setSpec(cls, {
       ...emptyResponse(),
       bands: [{ ...emptyBand(), kinds: attach }],
     }, missing);
+  };
+
+  /** Declare one more Word Shape kind (no knobs — flareKindOps.
+   * newWordShapeKind). Offered only on the Words tab: the type does
+   * nothing anywhere else, and the save says so. */
+  const addWordShapeKind = () => {
+    const kind = newWordShapeKind(kinds.map((k) => k.name));
+    setScene({ ...scene, flare_kinds: [...kinds, kind] });
+    toast(`Declared "${kind.name}" — drag it into a Words band's lane to use it`, 'success');
   };
 
   const setBandKind = (cls: ResponseClass, bandIdx: number, name: string, scale: number | null) => {
@@ -261,9 +298,19 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
           {kinds.some((k) => k.type === 'pulse_flash' || k.type === 'pulse_flip') && (
             <HelpLink topic="pulse-flares" title="Pulse flash and colour flip" />
           )}
+          {kinds.some((k) => k.type === 'word_shape') && (
+            <HelpLink topic="word-shapes" title="Word shapes" />
+          )}
           <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 'normal' }}>
             tap/double-click a kind to rename, delete, or copy — drag it into a lane below to attach it
           </span>
+          {isWordsTab && (
+            <button style={{ fontSize: 11, padding: '2px 8px' }}
+              title="Declare another Word Shape kind. It has no knobs — the form, hold and release are the room's own Word shape settings, paced by the word's Energy. Drag it into a Words band's lane to use it."
+              onClick={addWordShapeKind}>
+              💟 + Word Shape kind
+            </button>
+          )}
           {clipboard && (
             <button style={{ fontSize: 11, padding: '2px 8px', marginLeft: 'auto' }}
               title={`Paste "${clipboard.kind.name}" (copied from "${clipboard.sourceSceneName}") as a new kind on this scene`}
@@ -274,7 +321,9 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
         </div>
         {kinds.length === 0 && (
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            No kinds declared yet — adding a Flares response seeds the two drift-jumps, tell the agent what this scene should do when the music hits, or paste a kind copied from another scene.
+            No kinds declared yet — adding a Flares response seeds the two drift-jumps, adding a
+            Words response seeds a Word Shape kind, tell the agent what this scene should do when
+            the music hits, or paste a kind copied from another scene.
           </div>
         )}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -306,9 +355,24 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic }: {
                 </span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{kindContent(k)}</div>
+              {/* ADVISORY, from the last save (scene_store.scene_warnings):
+                  legal, stored, and inert. An inline note, never a
+                  blocking error — refusing the save would have lost his
+                  drag, and silence would leave a kind that LOOKS attached
+                  and does nothing. */}
+              {warningsForKind(warnings, k.name).map((w) => (
+                <div key={w} style={{ fontSize: 11, color: 'var(--warning)', marginTop: 3 }}>
+                  ⓘ {w}
+                </div>
+              ))}
             </div>
           ))}
         </div>
+        {strayWarnings.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 6 }}>
+            {strayWarnings.map((w) => <div key={w}>ⓘ {w}</div>)}
+          </div>
+        )}
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 12 }}
           title="Reserved for a future, purpose-built Update effect — not read by fire_scene_update or a dwell hold today. Right now both fire this scene's own Flare response at double intensity instead, whatever's attached to its bands; see the Update effect help topic.">

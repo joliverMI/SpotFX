@@ -5,7 +5,8 @@
  * opens a full-screen drawer (with no selection, the list IS the page).
  * Horizontal tabs replace the legacy long scroll: Summary · Initial Set ·
  * Drift · Flares · Phase Choreography · Sequencing · Colour Sets ·
- * Charges/Lulls/Drops. Edits live in local drafts until Save; the
+ * Charges/Lulls/Drops · Words (the fifth response section, which only a
+ * sung word fires — Word Shapes row W2.1). Edits live in local drafts until Save; the
  * toolbar's intensity slider drives Test Fire (dry-run compile — shows
  * resolved bindings + writes) and the owner's real Fire button. */
 import { useEffect, useMemo, useState } from 'react';
@@ -33,7 +34,7 @@ import SequencerStatusStrip from './SequencerStatusStrip';
 
 const TABS = [
   'Summary', 'Initial Set', 'Drift', 'Flares', 'Phase Choreography',
-  'Sequencing', 'Colour Sets', 'Charges/Lulls/Drops',
+  'Sequencing', 'Colour Sets', 'Charges/Lulls/Drops', 'Words',
 ] as const;
 export type TabName = (typeof TABS)[number];
 
@@ -51,6 +52,13 @@ export default function ScenesPage() {
   const [drafts, setDrafts] = useState<Record<string, SceneV2>>({});
   const [fireResult, setFireResult] = useState<FireResult | null>(null);
   const [intensity, setIntensity] = useState(0.7);
+  // THE SAVE'S ADVISORY WARNINGS, per scene (Word Shapes row W2.1):
+  // scene_store.scene_warnings, returned by POST /api/scenes — legal,
+  // stored, inert. Never a blocking error: the response tabs show each one
+  // as an inline note on the kind it names. Cleared the moment he edits
+  // that scene again (setScene below), so a note never outlives the data
+  // it was measured on.
+  const [saveWarnings, setSaveWarnings] = useState<Record<string, string[]>>({});
   // Per-scene sticky tab: switching scenes returns you to that scene's tab.
   const [tabs, setTabs] = useState<Record<string, TabName>>({});
 
@@ -62,7 +70,10 @@ export default function ScenesPage() {
   }, [serverScenes, drafts]);
 
   const scene = scenes.find((s) => s.id === selectedId) ?? null;
-  const setScene = (next: SceneV2) => setDrafts((d) => ({ ...d, [next.id]: next }));
+  const setScene = (next: SceneV2) => {
+    setDrafts((d) => ({ ...d, [next.id]: next }));
+    setSaveWarnings((w) => (w[next.id] ? { ...w, [next.id]: [] } : w));
+  };
   const tab: TabName = (scene && tabs[scene.id]) || 'Summary';
   const setTab = (t: TabName) => scene && setTabs((m) => ({ ...m, [scene.id]: t }));
 
@@ -83,12 +94,19 @@ export default function ScenesPage() {
   const save = async (s: SceneV2 | null = scene) => {
     if (!s) return false;
     try {
-      await saveMut.mutateAsync(s);
+      const res = await saveMut.mutateAsync(s);
       setDrafts((d) => {
         const { [s.id]: _, ...rest } = d;
         return rest;
       });
-      toast('Saved', 'success');
+      // ADVISORY, never a refusal (scene_store.scene_warnings): the scene
+      // IS saved. The toast says a note arrived; the response tab shows
+      // what it says, on the kind it names.
+      const warnings = res?.warnings ?? [];
+      setSaveWarnings((w) => ({ ...w, [s.id]: warnings }));
+      toast(warnings.length
+        ? `Saved — ${warnings.length} note${warnings.length === 1 ? '' : 's'}`
+        : 'Saved', 'success');
       return true;
     } catch (e) {
       toast(`Save failed: ${e}`, 'error');
@@ -172,6 +190,10 @@ export default function ScenesPage() {
     if (!scene) return null;
     if (t === 'Initial Set') return scene.devices.length ? String(scene.devices.length) : null;
     if (t === 'Flares') return scene.responses.flare?.bands.length ? String(scene.responses.flare.bands.length) : null;
+    // The Words band count — the section IS the switch (his Q6 A), so the
+    // badge is how he sees at a glance whether this scene answers a sung
+    // word at all.
+    if (t === 'Words') return scene.responses.word?.bands.length ? String(scene.responses.word.bands.length) : null;
     if (t === 'Drift') {
       const n = scene.devices.reduce((k, d) => k + Object.keys(d.drift ?? {}).length, 0)
         + (scene.color_journey.mode === 'override' ? 1 : 0);
@@ -353,7 +375,8 @@ export default function ScenesPage() {
           {tab === 'Initial Set' && <InitialSetTab scene={scene} setScene={setScene} registry={registry} />}
           {tab === 'Drift' && <DriftTab scene={scene} setScene={setScene} />}
           {tab === 'Flares' && (
-            <ResponseTab scene={scene} setScene={setScene} classes={['flare']} helpTopic="tab-flares" />
+            <ResponseTab scene={scene} setScene={setScene} classes={['flare']} helpTopic="tab-flares"
+              warnings={saveWarnings[scene.id]} />
           )}
           {tab === 'Phase Choreography' && (
             <PhaseTab scene={scene} setScene={setScene} scenes={scenes} />
@@ -362,7 +385,15 @@ export default function ScenesPage() {
           {tab === 'Colour Sets' && <ColorSetsTab scene={scene} setScene={setScene} />}
           {tab === 'Charges/Lulls/Drops' && (
             <ResponseTab scene={scene} setScene={setScene} classes={['charge', 'lull', 'drop']}
-              helpTopic="tab-responses" />
+              helpTopic="tab-responses" warnings={saveWarnings[scene.id]} />
+          )}
+          {/* THE WORDS SECTION (Word Shapes row W2.1) — the same band strip
+              and lane rack as Flares, on the fifth response class. Only a
+              sung word fires it; no trigger can (types.ts's
+              RESPONSE_CLASSES stays the four). */}
+          {tab === 'Words' && (
+            <ResponseTab scene={scene} setScene={setScene} classes={['word']}
+              helpTopic="tab-words" warnings={saveWarnings[scene.id]} />
           )}
 
           {/* Compiled result from the last (test) fire */}

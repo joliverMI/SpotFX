@@ -117,8 +117,8 @@ def test_fire_is_the_only_route_that_calls_open_hold(monkeypatch):
 
     calls = []
 
-    async def spy(scene, kind, intensity, *, heartbeat_timeout_s):
-        calls.append((scene.id, kind.name, intensity))
+    async def spy(scene, kind, intensity, *, heartbeat_timeout_s, shape=None):
+        calls.append((scene.id, kind.name, intensity, shape))
         return {"held": True, "first_open": True, "fire_record": {"result": "applied"}}
 
     monkeypatch.setattr(flare_preview_hold, "open_hold", spy)
@@ -128,8 +128,20 @@ def test_fire_is_the_only_route_that_calls_open_hold(monkeypatch):
     r = client.post("/api/flare-preview/fire",
                     json={"scene_id": scene.id, "kind_name": "spin-flare", "intensity": 0.7})
     assert r.status_code == 200
-    assert calls == [(scene.id, "spin-flare", 0.7)]
+    assert calls == [(scene.id, "spin-flare", 0.7, None)]
     assert r.json()["held"] is True
+
+    # WORD SHAPES (row W2.1): the Words preview's shape picker rides the
+    # same OpenRequest here as on /open, so the live fire draws the shape
+    # the ruler is drawing instead of the server's default. Ignored by
+    # every other kind type (scene_response.fire_kind only synthesises an
+    # action for `word_shape`) — this proves only that the route carries
+    # it, which is where it was dropped before.
+    r = client.post("/api/flare-preview/fire",
+                    json={"scene_id": scene.id, "kind_name": "spin-flare",
+                          "intensity": 0.7, "shape": "diamond"})
+    assert r.status_code == 200
+    assert calls[-1] == (scene.id, "spin-flare", 0.7, "diamond")
 
     r = client.post("/api/flare-preview/close")
     assert r.status_code == 200

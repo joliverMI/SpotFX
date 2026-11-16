@@ -159,6 +159,35 @@ export function deleteFlareKind(scene: SceneV2, name: string): SceneV2 {
   };
 }
 
+/** THE WORD SHAPE KIND, declared with NO KNOBS (Word Shapes row W2.1).
+ *
+ * The one new-kind flow in this editor, and deliberately narrow: every
+ * other type stays agent-adjustable (this module's own convention), but a
+ * `word_shape` kind has NOTHING to tune — its form, hold and release are
+ * the ROOM's own `word_shape_*` settings, Energy-paced per word — so
+ * declaring one is a pure identity act, exactly like rename/delete/copy.
+ *
+ * jump/params/gain/hold_ms are left at their empty values because the MODEL
+ * REFUSES them for this type (spectra/models/scene.py FlareKind._shape:
+ * "params/gain/hold_ms don't apply here and would silently do nothing") —
+ * a save carrying any of them is a 422, so the editor must never send one.
+ * `min_intensity` and `trigger_offset_ms` stay ordinary fields it may
+ * carry; the offset is inert in the Words section and the save says so
+ * (scene_store.scene_warnings), which is why it starts at 0. */
+export function newWordShapeKind(existingNames: string[],
+                                 base = 'Word Shape'): FlareKind {
+  return {
+    name: dedupeKindName(existingNames, base),
+    type: 'word_shape',
+    jump: null,
+    params: {},
+    gain: 1,
+    hold_ms: null,
+    trigger_offset_ms: 0,
+    enabled: true,
+  };
+}
+
 /** Paste = a genuine PORT: a fresh, independent flare_kinds entry on the
  * TARGET scene (which may be the same scene, a plain duplicate) carrying
  * the copied type/jump/params/gain/hold_ms verbatim. Never auto-attached to
