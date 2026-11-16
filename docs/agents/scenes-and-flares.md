@@ -230,6 +230,90 @@ still forces a `prompt()`-named profile before any edit and has no
 Detach/Promote; left as-is since that Scenes page is frozen pending SPECTRA
 superseding it.
 
+## WORD SHAPES — the fifth response section, "Words" (row W0.3, 2026-11-15)
+
+His ask for the row, verbatim: *"It would operate like a flare in the scenes
+panel, just only fire by sung word. So that infrastructure may need
+building."* and *"Review the markdown file or skill about changing scenes.
+Update it ... to add important info about shape flares."* This is that
+section — the ENGINE half. The per-effect half (what a shape actually looks
+like on Black Hole, STAR, Orbits, Fish, Sauron, Fireworks) is wave 1, and
+each effect's own skill owns it. **Load `.claude/skills/word-shapes/SKILL.md`
+before touching any of this** — its engine-contract section is the binding
+statement; this is the scene author's view of it.
+
+**A scene now has FIVE response sections, not four.**
+`SceneV2.responses` may carry `"word"` beside `flare`/`charge`/`lull`/`drop`
+(`models/scene.py`'s `RESPONSE_CLASSES`). It is an ORDINARY `ResponseSpec` —
+bands over Energy, lanes, kinds, scales — so everything you already know
+about authoring a band applies to it unchanged. What is different is only
+WHO fires it:
+
+- **only a sung word does.** No trigger may name it: `FireResponseAction`
+  refuses `event_class="word"` (`TRIGGER_RESPONSE_CLASSES` is the legal
+  four), and `POST /api/engine/event`'s manual injector leaves it out too.
+  A sung word that reaches a SHAPE label (the `sung-labels` skill's third
+  target kind) is the only way in.
+- **it arms no phase.** `scene_response.PHASE_RAMP_MS` has no `word` key,
+  so a Words band drives no charge/lull/drop choreography and takes no
+  drop-colour claim.
+
+**THE BAND IS THE SWITCH.** His Q6 A: Word Shapes are on "for every song as
+soon as a scene's Words band has a Word Shape kind". A scene without one is
+`no_class` — the word is logged and nothing is written. That is why adding
+the class changed nothing in his room, and it is the thing to check first
+when a shape "isn't firing": does the SHOWING scene have a Words band whose
+Energy range covers the word?
+
+**THE NEW KIND, `word_shape`.** The `firework_burst` shape: no jump,
+params, gain or hold of its own (they are refused by the model, not
+ignored), and it may carry `min_intensity` / `enabled` /
+`trigger_offset_ms` like any kind. Its form, hold and release are ROOM
+settings, Energy-paced per word — `word_shape_form_slow_s` (0.9) /
+`_form_fast_s` (0.5) / `_hold_min_s` (0.8) / `_hold_max_s` (2.0) /
+`_release_ratio` (1.5), all Sonic-tellable, resolved by one pure function
+(`room_controls.word_shape_timing`). **Attached to a Flares, Charges, Lulls
+or Drops band it is accepted and does NOTHING** — a drag into the Flares
+rack must not be a validation error, so instead `scene_store.scene_warnings`
+returns an advisory on every save (and `POST /api/scenes` returns it as
+`warnings`). If you are wondering why a shape kind you attached does
+nothing, that warning is the answer.
+
+**A COLOUR KIND MAY SIT BESIDE IT, and that is how a shape word recolours.**
+His Q5 A. A word that reaches BOTH a shape and colour sets is a SHAPE, not a
+colour — the planner's shape branch runs first, deliberately, because the
+Words band's own colour kinds (a Colour Jump pooled in the same band, or in
+a lane beside the shape) are the colour path for a shape word. **The one
+live consequence of this row**: on a show he has switched ON, a word on a
+shape's seed word (`love`, `heart`, `star`, `shine`, `diamond`, `crystal`,
+...) no longer fires its colour, and until a Words band exists it does
+nothing instead.
+
+**TIMING — the shape completes ON the word.** His words: *"the timing should
+be such that the trigger lands on where the shape is first fully formed."*
+So the form time is a LEAD: the band fires `form_s` EARLY
+(`fire_at = word − form`, LEAD family, positive = earlier) and the effect is
+told the time LEFT at the tick that fired, so a late tick shortens the form
+rather than landing the shape late.
+`docs/SPECTRA_TIMING_CONVENTIONS.md` carries both rows (the form, and the
+hold/release as durations on the effect's own clock) with file:line cites —
+read it before changing any of these numbers.
+
+**SKIPS, each logged as `lyric:shape` on the show log.** A shape word does
+nothing when: it sat out the roll; its phrase already acted; a DROP lands
+inside the imprint window (his Q5 A — the drop is the bigger moment; a flare
+or a scene change does NOT stop a shape); it is inside the shared minimum
+gap; a preview, Absorb or a house mode holds the room; or **a charge, lull
+or drop is happening on the showing scene** (P3 A, `held_for: "phase"`). A
+shape NEVER imprints on an event, and nothing imprints on a shape.
+
+**NOTHING REACHES A FIXTURE YET.** `fx.device_model.WORD_SHAPE_EFFECTS` is
+empty, so the told write lands on no virtual until wave 1 wires its first
+effect — each one behind the Admiral's own tuning gate
+(`docs/ADDING_EFFECTS.md`). Proofs: `tests/test_word_shape_contract.py`
+(the whole contract) and `tests/test_lyric_events.py` (the boundary: a shape
+word adds exactly one output to the engine and changes nothing else).
+
 ## A scene's stored data is not proof he authored it
 
 Found 2026-08-15 (`docs/spectra-star-edges-freeze.md`, `docs/SPECTRA_SPEC.md`

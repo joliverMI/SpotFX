@@ -26,6 +26,10 @@ background fade: how long a live background change takes to land).
 Widened again 2026-10-12 with drop_timing_offset_ms (the Admiral's own
 "shifting the drops so they fire 400ms earlier" — spectra/services/
 drop_timing.py).
+Widened again 2026-11-15 with the five WORD SHAPE timings
+(word_shape_form_slow_s / _form_fast_s / _hold_min_s / _hold_max_s /
+_release_ratio — Word Shapes plan W0.3, his Q4 A: "all Sonic-tunable"),
+each carrying the `word-shapes` Help topic id.
 
 force_scene_scene_id/force_color_target_id STAY OUT OF THIS REGISTRY —
 each targets a scene or colour SET/GROUP by OPAQUE ID, a poor fit for
@@ -98,6 +102,13 @@ class SettingSpec(BaseModel):
     min: Optional[float] = None
     max: Optional[float] = None
     choices: Optional[list[str]] = None
+    # The in-app Help topic that explains this setting in his own words
+    # (spectra/web/src/help/helpContent.ts' entry ids, the same ids an
+    # effect param's `help_topic` names in config/effect_params.json).
+    # None for a setting whose description is the whole story; the Settings
+    # page renders a HelpLink where one is given. Additive: a client that
+    # ignores it is unaffected.
+    help_topic: Optional[str] = None
 
 
 class SettingChangeError(Exception):
@@ -113,6 +124,18 @@ class SettingChangeError(Exception):
 
     def payload(self) -> dict:
         return {"status": "rejected", "reason": self.message, **self.detail}
+
+
+# key -> the Help topic id that explains it. Kept as a map rather than a
+# _spec argument so the registry's own entries stay a flat (key, label,
+# description) list — nothing below had to change to gain one.
+HELP_TOPICS: dict[str, str] = {
+    "word_shape_form_slow_s": "word-shapes",
+    "word_shape_form_fast_s": "word-shapes",
+    "word_shape_hold_min_s": "word-shapes",
+    "word_shape_hold_max_s": "word-shapes",
+    "word_shape_release_ratio": "word-shapes",
+}
 
 
 def _spec(key: str, label: str, description: str) -> SettingSpec:
@@ -170,9 +193,15 @@ def _spec(key: str, label: str, description: str) -> SettingSpec:
             "transition_burst_ms": "ms",
             "transition_land_at": "fraction of the program, 0.1-0.9",
             "transition_graft_ms": "ms",
-            "transition_count_hold_ms": "ms"}.get(key)
+            "transition_count_hold_ms": "ms",
+            "word_shape_form_slow_s": "seconds",
+            "word_shape_form_fast_s": "seconds",
+            "word_shape_hold_min_s": "seconds",
+            "word_shape_hold_max_s": "seconds",
+            "word_shape_release_ratio": "multiple of the form time"}.get(key)
     return SettingSpec(key=key, label=label, kind=kind, description=description,
-                       unit=unit, min=ge, max=le, choices=choices)
+                       unit=unit, min=ge, max=le, choices=choices,
+                       help_topic=HELP_TOPICS.get(key))
 
 
 # The explicit allowlist — the ONLY keys apply_change will ever accept,
@@ -348,6 +377,36 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "darkness allows (half the lull, capped by 'Lull darkness "
         "(max)'). 0 = no breath-hold. Default 0.4. Takes effect on the "
         "very next lull."),
+    "word_shape_form_slow_s": _spec(
+        "word_shape_form_slow_s", "Word shape — forming time, quiet",
+        "How long a sung word's shape takes to form when the music is "
+        "quiet (Energy 0), in seconds. The shape always finishes forming "
+        "exactly ON the word — this is how far ahead of the word it "
+        "starts. Louder words form faster, down to 'Word shape — forming "
+        "time, loud' at Energy 0.75 and above. Default 0.9. An effect that "
+        "needs longer to assemble its shape takes its own longer time "
+        "instead."),
+    "word_shape_form_fast_s": _spec(
+        "word_shape_form_fast_s", "Word shape — forming time, loud",
+        "How long a sung word's shape takes to form at Energy 0.75 and "
+        "above, in seconds — the fast end of the scale that starts at "
+        "'Word shape — forming time, quiet'. Default 0.5. The shape still "
+        "finishes forming on the word."),
+    "word_shape_hold_min_s": _spec(
+        "word_shape_hold_min_s", "Word shape — shortest hold",
+        "The least time a formed shape stands complete before it starts "
+        "letting go, in seconds. A shape holds through the sung phrase, "
+        "never shorter than this. Default 0.8."),
+    "word_shape_hold_max_s": _spec(
+        "word_shape_hold_max_s", "Word shape — longest hold",
+        "The most time a formed shape stands complete before it starts "
+        "letting go, in seconds — a long sung phrase is cut off here. "
+        "Default 2."),
+    "word_shape_release_ratio": _spec(
+        "word_shape_release_ratio", "Word shape — release",
+        "How long a shape takes to let go, as a multiple of its own "
+        "forming time: 1.5 means it releases half again as slowly as it "
+        "formed. Default 1.5; 0 = it vanishes the instant the hold ends."),
     "drop_timing_offset_ms": _spec(
         "drop_timing_offset_ms", "Drop timing",
         "How far off its mark every drop fires, in milliseconds — "

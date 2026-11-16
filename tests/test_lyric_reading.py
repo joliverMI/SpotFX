@@ -320,19 +320,36 @@ def test_a_match_on_a_shape_the_library_does_not_know_is_refused():
         lyric_matches.add(URI, 1, 1, TargetRef(kind="shape", id="octagon"))
 
 
-def test_a_shape_only_match_still_reaches_no_colour_set():
-    """Nothing fires from a shape yet. W0.3 is what makes a shape-reaching
-    word draw; today lyric_events' own reach() reads COLOUR-SET owners only,
-    so a word reaching only a shape plans as "no colour set" — for one of
-    Claude's guesses and for one of his own matches alike."""
+def test_a_shape_only_match_now_reaches_its_shape_and_draws():
+    """W0.3 FLIPPED THIS (Word Shapes row W0.3, 2026-11-15). W0.2 pinned
+    the opposite — a shape-only match planned as `WHY_NO_COLOUR`, because
+    `lyric_events.load_words` read COLOUR-SET owners only — deliberately,
+    so that the row which makes a shape draw would have to change this
+    test. It does: `load_words` now also asks for SHAPE owners, a hit
+    carries `shape_id`, and a hit with a shape and no colour set has
+    something to do, for one of Claude's guesses and for one of his own
+    matches alike. tests/test_word_shape_contract.py owns what happens
+    next; this one owns the seam between the labels and the planner."""
+    from spectra.models.lyric_labels import LyricEventSettings
     from spectra.services import lyric_events
     _shape_song()
     _read([_row(0, "love", "love", 0.95)])
     lyric_matches.add(URI, 5, 5, TargetRef(kind="shape", id="star"))
     hits = {h.label: h for h in lyric_events.load_words(URI).hits}
     assert set(hits) == {"love", "Star"}
+    assert hits["love"].shape_id == "heart", "Claude's guess reaches the Heart"
+    assert hits["Star"].shape_id == "star", "his own match reaches the Star"
     for hit in hits.values():
-        assert hit.set_ids == () and hit.why_not == lyric_events.WHY_NO_COLOUR
+        assert hit.set_ids == (), "neither reaches a colour set"
+        assert hit.why_not is None, "and neither is WHY_NO_COLOUR any more"
+    # ... and the planner draws them, rather than doing nothing. (The two
+    # words are seconds apart in this little song, so the shared minimum
+    # gap is relaxed here to ask only about the shape branch — the gap
+    # itself is tests/test_word_shape_contract.py's own business.)
+    actions = lyric_events.plan_words(list(hits.values()), [],
+                                      LyricEventSettings(min_gap_s=0))
+    assert {a.verdict for a in actions} == {lyric_events.VERDICT_SHAPE}
+    assert {a.shape_id for a in actions} == {"heart", "star"}
 
 
 # ── surviving a recapture ───────────────────────────────────────────────────

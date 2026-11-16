@@ -163,9 +163,14 @@ export interface FlareKind {
    *   settings, so no knobs on the kind.
    * sauron_surge: every live Sauron eye's flames erupt toward the crystal's
    *   edge and burn back over ~0.55 s, scaled by the fire's intensity; no
-   *   knobs on the kind. */
+   *   knobs on the kind.
+   * word_shape: a sung word's SHAPE forms, holds and releases on every
+   *   effect that knows shapes (Word Shapes plan W0.3) — fired ONLY by the
+   *   'word' response class below, and a no-op attached anywhere else. The
+   *   form, hold and release are the room's own word_shape_* settings,
+   *   paced by the word's Energy, so no knobs on the kind. */
   type: 'drift_jump' | 'momentary' | 'permanent' | 'color_rotate' | 'firework_burst' | 'blob_rush'
-    | 'pulse_flash' | 'pulse_flip' | 'big_fish' | 'sauron_surge';
+    | 'pulse_flash' | 'pulse_flip' | 'big_fish' | 'sauron_surge' | 'word_shape';
   jump: 'color_set' | 'dice' | null;
   params: Record<string, ParamTarget>;
   gain: number;
@@ -209,8 +214,18 @@ export interface ResponseSpec {
   color_set_jump: boolean;
 }
 
-export type ResponseClass = 'flare' | 'charge' | 'lull' | 'drop';
+/** The five response sections a scene may declare (models/scene.py's
+ * RESPONSE_CLASSES). 'word' is the WORDS section (Word Shapes plan W0.3):
+ * an ordinary ResponseSpec that ONLY a sung word fires. */
+export type ResponseClass = 'flare' | 'charge' | 'lull' | 'drop' | 'word';
+/** The four sections the Responses tab builds and a TRIGGER may fire —
+ * deliberately NOT every ResponseClass (models/scene.py's
+ * TRIGGER_RESPONSE_CLASSES): a sung word is the only thing that fires
+ * 'word', so it must not appear in a trigger's event_class picker, and its
+ * own editing surface is the Words section (W2.1). Widening the TYPE here
+ * without widening this list is the whole shape of W0.3's frontend half. */
 export const RESPONSE_CLASSES: ResponseClass[] = ['flare', 'charge', 'lull', 'drop'];
+export const WORD_RESPONSE_CLASS: ResponseClass = 'word';
 
 export interface ColorJourneySpec { degrees_per_min: number; }
 

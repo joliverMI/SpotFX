@@ -5,13 +5,18 @@ description: >
   registry of every shape an effect can draw: heart, star, diamond, and the
   three derived views radius-per-angle / along-the-outline / signed
   distance), its told-key helper `fx/effects/word_shape_keys.py`, and the
-  hex check `scripts/check_word_shapes.py`.
+  hex check `scripts/check_word_shapes.py` — AND the engine contract that
+  drives them (row W0.3): the "word" response class, the `word_shape` flare
+  kind, the five room timings, the planner's shape branch and the one told
+  write.
   TRIGGER — load BEFORE adding or changing a shape, before making any
   effect draw one (Black Hole's shaped horizon, STAR's shaped radius,
   Orbits' tethers, Fish's procession, Sauron's shaped iris and pupil,
   Fireworks' shaped burst), before touching the six `word_shape_*` told
-  keys or the form/hold/release envelope, and before changing any number
-  that a wave-1 "outline coverage" clarity bar is measured against.
+  keys or the form/hold/release envelope, before touching the Words
+  response section or anything that decides WHEN a shape fires, and before
+  changing any number that a wave-1 "outline coverage" clarity bar is
+  measured against.
   SKIP for the sung-word side of Word Shapes (which words reach which
   shape, the roll, the planner) — that is the sung-labels skill; and for
   the hex panel's own geometry, which is the crystal-hex-grid skill this
@@ -28,8 +33,11 @@ effects would form an outline that represents those. ... Make it easy to
 add more shapes and associations down the road."* and *"Remember to use the
 crystal hex skill/info so that things look representational."*
 
-Nothing renders differently yet: W0.1 is the library plus the told-key
-helper plus the check. No effect is wired to it until wave 1.
+Nothing renders differently yet, and that is still true after W0.3: W0.1 is
+the library plus the told-key helper plus the check, W0.3 is the whole
+engine contract above it, and NO EFFECT IS WIRED until wave 1 —
+`fx.device_model.WORD_SHAPE_EFFECTS` is empty, so even a scene with a Words
+band and a Word Shape kind writes to no fixture.
 
 ## What the library is
 
@@ -192,6 +200,123 @@ band EARLY by the form time (a LEAD: positive = earlier,
 `docs/SPECTRA_TIMING_CONVENTIONS.md`) so the shape completes ON the word;
 the effect runs the whole thing on its own clock and resets itself after.
 
+## The engine contract (row W0.3, merged 2026-11-15)
+
+Everything between a sung word and the told write. Read this before
+touching the Words section, the `word_shape` kind, or any timing.
+
+**THE FIFTH RESPONSE CLASS.** `models/scene.py`'s `RESPONSE_CLASSES` is now
+five: `flare, charge, lull, drop, word`. `responses["word"]` is an
+ORDINARY `ResponseSpec` — bands over Energy, lanes, kinds — so a colour
+kind pooled beside the shape fires exactly as it would anywhere (his Q5 A),
+and a momentary kind beside it still spikes and releases. Two deliberate
+asymmetries, each proven by test rather than left to convention:
+
+- **no trigger may name it.** `FireResponseAction` refuses
+  `event_class="word"` (`TRIGGER_RESPONSE_CLASSES` is the legal four), and
+  `spectra/api/engine.py`'s manual event injector leaves it out too — a
+  bare class+intensity injection has no shape and no envelope to carry. A
+  sung word is the only way in.
+- **the phase machinery never sees it.** `scene_response.PHASE_RAMP_MS` has
+  no `word` key, so a Words band arms no charge/lull/drop choreography and
+  takes no drop-colour claim. The flare PUNCH stays ALLOWED (set
+  explicitly, not left to the default) because the reason `on_event`
+  suppresses it for a phase — a phase's own band must not hold its own
+  start lit — does not apply to a word; in practice it is unreachable,
+  since P3 A skips a shape outright while a phase is armed.
+
+**THE KIND.** `FlareKind.type` gains `word_shape`: the `firework_burst`
+shape — no jump, params, gain or hold of its own; it may carry
+`min_intensity`, `enabled`, `trigger_offset_ms` like any kind. Attached to
+a flare/charge/lull/drop band it is ACCEPTED (a drag into the Flares rack
+must not be a validation error) and a NO-OP at fire time, and
+`scene_store.scene_warnings` says so on every save.
+
+**THE BAND IS THE SWITCH** (his Q6 A). A scene with no Words band is
+`no_class` and writes nothing. That, plus the empty `WORD_SHAPE_EFFECTS`,
+is why this row changed nothing in his room.
+
+**WHERE EACH NUMBER COMES FROM.** The five timings are ROOM settings
+(Sonic-tellable, Help topic `word-shapes`), resolved by ONE pure function,
+`room_controls.word_shape_timing(energy, phrase_ms, settings,
+effect_types)`:
+
+| number | default | rule |
+|---|---|---|
+| `word_shape_form_slow_s` | 0.9 | the form at Energy 0 |
+| `word_shape_form_fast_s` | 0.5 | the form at `lyric_events.FAST_AT_ENERGY` (0.75) and above, linear between |
+| `word_shape_hold_min_s` / `_hold_max_s` | 0.8 / 2.0 | the hold is the sung phrase's own length, clamped |
+| `word_shape_release_ratio` | 1.5 | the release is this × the form |
+
+The form is floored at `fx.device_model.word_shape_form_min_s` — a
+per-effect minimum (`WORD_SHAPE_FORM_MIN_S`, empty until Fish's wave-1 row
+gives it 2.0 s). **That accessor is where the plan-time / fire-time split
+lives, and it is the one thing easiest to get wrong here:**
+
+- **PLAN TIME is conservative.** The planner has no idea which scene will
+  be showing when the word is sung, so it asks with no effect types and
+  gets the GLOBAL maximum. A lead that is too long is harmless; one that
+  is too short lands the shape late, which is the one thing "complete on
+  the word" cannot survive.
+- **FIRE TIME is exact.** `engine.fire_lyric_shape_event` tells the effect
+  the time LEFT to the word (`word − position` at the firing tick),
+  floored at the SHOWING effects' own minimum. So a late tick shortens the
+  form rather than landing the shape late — the same shape the word-colour
+  ramp already has.
+
+**THE LEAD.** The form IS the lead: `fire_at = word − form` (LEAD family,
+positive = earlier — `docs/SPECTRA_TIMING_CONVENTIONS.md` has both rows
+with file:line cites). One loop in
+`trigger_engine._tick_lyric_words` fires a colour word and a shape word
+with the same arithmetic; only the hook differs.
+
+**THE PLANNER'S SHAPE BRANCH** (`lyric_events.plan_words`), in order, and
+BEFORE the colour branch:
+
+1. sat out (the roll — unchanged, `chance_for`/`roll_hits` untouched) →
+   nothing;
+2. phrase taken → nothing;
+3. **a DROP inside the imprint window → nothing, `WHY_DROP_WINS`** (his
+   Q5 A: the drop is the bigger moment). Blind to `can_carry`: that flag is
+   about carrying a COLOUR. A flare or a scene change does NOT stop a
+   shape, and **a shape never imprints on anything**;
+4. too soon (the SHARED minimum gap — a shape counts against the next word
+   and takes its line, exactly like a fired colour word) → nothing;
+5. otherwise `VERDICT_SHAPE`, with `transition_ms = form_s × 1000`.
+
+**A word reaching BOTH a shape and colour sets is a SHAPE** — the Words
+band's own colour kinds are how a shape word recolours the room. This is
+the row's one live-behaviour consequence: on a show he has switched ON, a
+word on a shape seed word (`love`, `heart`, `star`, `shine`, `diamond`,
+`crystal`, …) no longer fires its colour, and until a scene has a Words
+band (W2.1) it does nothing instead.
+
+**P3 A, THE FIRE-TIME SKIP.** `engine.fire_lyric_shape_event` takes the
+gates in this order: the response gate at the ANALYSED tier (a preview,
+Absorb, a house mode that ignores music, a closed tier) → a house mode that
+owns the room → **a charge, lull or drop happening on the showing scene,
+skipped with `held_for: "phase"`** (`ResponseEngine.phase_armed()`: the
+`_phase_armed` flag for a charge/lull, and a drop's own ramp window, since
+a drop arms no phase of its own). Every outcome is logged as `lyric:shape`
+on the show log and pushed to every open page.
+
+**THE WRITE.** `_word_shape` reads the action off the `WORD_SHAPE_ACTIVE`
+ContextVar (the `lyric_events.ACTIVE` pattern — the kind pipeline is shared
+by five classes and must not grow a per-class argument) and makes ONE
+instant jump of all six keys, through `word_shape_keys.keys_for`, on every
+`WORD_SHAPE_EFFECTS` virtual in `_flare_states()` (so a Light Show
+"flares off" target gets none). Nothing carried, nothing released. No
+action (the kind on a flare band, or a preview with nothing synthesised) →
+no write, named `no_word`.
+
+**THE PREVIEW.** `kind_lead_ms` returns the form for this type, so the
+existing ruler already draws the three marks: start = word − form,
+trigger = word, end = word + hold + release. `fire_kind` synthesises a
+`PreviewWordShape` (deliberately NOT a fabricated `WordHit` — a preview
+must never flow into the show log looking like a real word), default shape
+heart, and `POST /api/flare-preview/open` takes an optional `shape` the
+W2.1 picker will pass.
+
 ## Related
 
 - `.claude/skills/crystal-hex-grid/SKILL.md` — the panel this is all
@@ -202,5 +327,10 @@ the effect runs the whole thing on its own clock and resets itself after.
   siblings whose rules this one keeps.
 - `docs/SPECTRA_TIMING_CONVENTIONS.md` — the LEAD/OFFSET sign conventions
   the form time rides.
+- `docs/agents/scenes-and-flares.md` — the Words section beside the other
+  four, from the scene-authoring side.
+- `tests/test_word_shape_contract.py` — the engine contract's own proofs;
+  `tests/test_word_shapes.py` the library's.
 - The plan: https://claude.ai/artifact/FdeYJz4kXLt2QamYR8wSDB (section 2.1
-  is this row; 2.3 and 2.4 are the keys and the timing).
+  is the library; 2.3 and 2.4 are the keys and the timing; 2.3-2.5 are the
+  engine contract).

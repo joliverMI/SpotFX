@@ -111,7 +111,7 @@ _KeyEnum = Literal[tuple(sorted(settings_console.SETTINGS_REGISTRY))]
 _SceneKeyEnum = Literal[tuple(sorted(scene_console.SCENE_SETTINGS_REGISTRY))]
 _FlareTypeEnum = Literal["drift_jump", "momentary", "permanent",
                          "pulse_flash", "pulse_flip", "big_fish",
-                         "sauron_surge"]
+                         "sauron_surge", "word_shape"]
 _JumpEnum = Literal["color_set", "dice"]
 _PreDropKindEnum = Literal[tuple(scene_console._PRE_DROP_KINDS)]
 _CopyFieldEnum = Literal[tuple(scene_console.COPYABLE_DEVICE_ENTRY_FIELDS)]
@@ -371,6 +371,8 @@ async def set_flare_kind(scene_id: str, name: str, type: _FlareTypeEnum,  # noqa
     big_fish sends one really large fish across the Fish panel behind the
     others (its look is Fish's own big_fish_* settings). sauron_surge
     makes every Sauron eye's flames erupt and burn back (~0.55s).
+    word_shape draws a sung word's shape (form, hold, release — the room's
+    own Word shape settings); only a Words band fires it.
     On an update, params, gain, jump, hold_ms and min_intensity are
     omit-means-keep too: send only what changes."""
     return await _call("set_flare_kind", scene_id=scene_id, name=name, type=type,

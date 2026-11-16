@@ -66,6 +66,44 @@ def group_ids_in_filter(scene: SceneV2) -> list[str]:
             if i in cards and cards[i].kind == "group"]
 
 
+def scene_warnings(scene: SceneV2) -> list[str]:
+    """ADVISORY, never a refusal: things about this scene that are legal,
+    stored faithfully, and will quietly do nothing. Pure — no store read —
+    so any caller can ask.
+
+    Today's one warning is the WORD SHAPE KIND ON THE WRONG BAND (Word
+    Shapes plan W0.3): `word_shape` is accepted on a flare/charge/lull/drop
+    band on purpose — dragging a kind into the Flares rack must not be a
+    validation error, and his own authored data must never be refused by a
+    rule that arrived after it — but only the Words section carries a
+    shape to write (scene_response.on_word_shape), so anywhere else the
+    kind is a no-op. Saying so beats either of the alternatives: refusing
+    the save (losing his drag) or silence (a kind that looks attached and
+    does nothing, which is exactly the "silently-inert field is a trap"
+    rule this codebase already states for SpectraTrigger.trigger_offset_ms).
+
+    Logged on every save path (validate_for_save, below) and returned by
+    POST /api/scenes so the editor can show it."""
+    out: list[str] = []
+    shapes = {k.name for k in scene.flare_kinds if k.type == "word_shape"}
+    if shapes:
+        misplaced: dict[str, set[str]] = {}
+        for event_class, spec in (scene.responses or {}).items():
+            if event_class == "word":
+                continue
+            for band in (spec.bands if spec else []):
+                for name in band.kinds:
+                    if name in shapes:
+                        misplaced.setdefault(name, set()).add(event_class)
+        for name in sorted(misplaced):
+            classes = ", ".join(sorted(misplaced[name]))
+            out.append(
+                f"flare kind '{name}' is a word_shape — only the Words "
+                f"section fires a shape, so its attachment to {classes} "
+                f"does nothing")
+    return out
+
+
 def validate_for_save(scene: SceneV2) -> None:
     """The two integrity guards a scene must pass before it may be
     written — the exact checks spectra/api/scenes.py::upsert_scene has
@@ -92,6 +130,8 @@ def validate_for_save(scene: SceneV2) -> None:
                        if ref.profile is not None and ref.profile not in known})
     if dangling:
         raise ValueError(f"unknown drift profile id(s): {', '.join(dangling)}")
+    for warning in scene_warnings(scene):
+        logger.warning("SPECTRA scene %r: %s", scene.name, warning)
 
 
 def _load_raw() -> dict:

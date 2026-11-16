@@ -9,6 +9,11 @@ one SPECTRA-native action:
   fire_response      event_class (flare/charge/lull/drop) + intensity —
                      through the S2 response engine, the same path the
                      bridge's classified trigger_fired events already drive.
+                     NOT "word": the fifth response class (the Words
+                     section, Word Shapes plan W0.3) is fired by a SUNG
+                     WORD and nothing else, so naming it here is refused
+                     rather than silently accepted — see
+                     FireResponseAction._not_the_word_class below.
   select_color_set   set_id — the room's supported manual-apply surface
                      (drift_conductor.apply_set_directly), the same one
                      POST /api/room-color/apply uses.
@@ -93,7 +98,7 @@ from typing import Annotated, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
-from spectra.models.scene import ResponseClass
+from spectra.models.scene import TRIGGER_RESPONSE_CLASSES, ResponseClass
 
 TriggerActionKind = Literal["fire_scene", "fire_response", "select_color_set",
                             "fire_scene_update"]
@@ -137,6 +142,23 @@ class FireResponseAction(BaseModel):
     kind: Literal["fire_response"] = "fire_response"
     event_class: ResponseClass
     intensity: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    @field_validator("event_class")
+    @classmethod
+    def _not_the_word_class(cls, v: str) -> str:
+        """A SUNG WORD is the only thing that fires the Words section (Word
+        Shapes plan W0.3, the Admiral's Q2 A: "only a sung word fires it").
+        `event_class` is typed as the whole ResponseClass on purpose — one
+        vocabulary for "which response section" across the model — so the
+        one class a trigger may not name is refused HERE, loudly, instead
+        of being accepted and then quietly doing nothing at fire time.
+        TRIGGER_RESPONSE_CLASSES (models/scene.py) is the legal set."""
+        if v == "word":
+            raise ValueError(
+                "event_class 'word' is the Words section — only a sung "
+                "word fires it, never a trigger; legal classes are "
+                + ", ".join(TRIGGER_RESPONSE_CLASSES))
+        return v
 
 
 class SelectColorSetAction(BaseModel):

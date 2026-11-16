@@ -491,6 +491,62 @@ BIG_FISH_EFFECTS = frozenset({"fish"})
 # (spectra scene_response._sauron_surge).
 SAURON_SURGE_EFFECTS = frozenset({"sauron"})
 
+# THE WORD SHAPE EFFECTS (Word Shapes plan W0.3, 2026-11-15): the effects
+# that know how to draw a sung word's shape and are therefore told
+# fx/effects/word_shape_keys.py's six keys on a `word_shape` flare-kind
+# fire (spectra scene_response._word_shape, over _flare_states() so a Light
+# Show "flares off" target gets none). Same membership-gate shape as the
+# sets above, and like them the keys are deliberately absent from the
+# effect-parameter registry: they ride ONLY that one write.
+#
+# EMPTY ON PURPOSE IN THIS ROW. W0.3 builds the whole engine contract — the
+# class, the kind, the planner's shape branch, the fire path, the told
+# write — and wires NO effect to it: wave 1 adds each effect (Black Hole's
+# shaped horizon, STAR's shaped radius, Orbits' tethers, Fish's procession,
+# Sauron's shaped iris, Fireworks' shaped burst) one row at a time, each
+# behind the Admiral's own tuning gate (docs/ADDING_EFFECTS.md). So even a
+# scene with a Words band and a Word Shape kind writes to no fixture until
+# the first wave-1 row lands. To join, follow fx/effects/word_shape_keys.py's
+# own "HOW AN EFFECT OPTS IN".
+WORD_SHAPE_EFFECTS: frozenset = frozenset()
+
+# THE PER-EFFECT MINIMUM FORM (plan section 2.4): an effect whose shape
+# cannot credibly assemble inside the Energy-paced form time (the plan gives
+# Fish 2.0 s — a procession of fish has to swim into place) declares its own
+# floor here, in seconds, keyed by registry name. The planner's timing takes
+# the LARGER of the Energy-paced form and this (room_controls.
+# word_shape_timing), so the band fires early enough for whatever is
+# showing. EMPTY now; Fish's own wave-1 row fills it.
+WORD_SHAPE_FORM_MIN_S: dict[str, float] = {}
+
+
+def word_shape_form_min_s(effect_types=None) -> float:
+    """The longest minimum form among `effect_types`, or — with none given
+    — among EVERY effect that declares one.
+
+    THE TWO HALVES (the "conservative at plan time, exact at fire time"
+    split the word-colour path already uses, spectra/services/
+    lyric_events.py):
+      * PLAN TIME has no idea which scene will be showing when the word is
+        sung, so it asks with no effect types and gets the global maximum —
+        a LEAD that is too LONG is harmless (the form actually told is the
+        time LEFT to the word at the tick that fires it, so the shape still
+        completes ON the word), while one that is too short lands the shape
+        late, which is the one thing the plan's "complete on the word"
+        promise cannot survive.
+      * FIRE TIME knows the showing scene's live effects and asks with
+        exactly those, so the floor applied to the told form is the real
+        one.
+    0.0 with nothing declared (this row) — the Energy-paced form stands
+    alone, and the whole mechanism is inert."""
+    if not WORD_SHAPE_FORM_MIN_S:
+        return 0.0
+    if effect_types is None:
+        return max(WORD_SHAPE_FORM_MIN_S.values())
+    mins = [WORD_SHAPE_FORM_MIN_S[e] for e in effect_types
+            if e in WORD_SHAPE_FORM_MIN_S]
+    return max(mins) if mins else 0.0
+
 
 # ── effect-parameter registry ────────────────────────────────────────────────
 

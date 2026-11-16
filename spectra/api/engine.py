@@ -29,13 +29,20 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from spectra.models.scene import RESPONSE_CLASSES
+from spectra.models.scene import TRIGGER_RESPONSE_CLASSES
 from spectra.services import engine, scene_compiler, scene_store
 from spectra.services.binding_resolver import FireContext
 
 router = APIRouter(prefix="/api/engine", tags=["spectra-engine"])
 
-EVENT_CLASSES = (*RESPONSE_CLASSES, "update")
+# The four fireable classes + "update". DELIBERATELY NOT the whole
+# RESPONSE_CLASSES (Word Shapes plan W0.3): the fifth class, "word", is the
+# Words section, and a word shape needs a WORD — a shape id and its
+# Energy-paced form/hold/release (ResponseEngine.on_word_shape) — which a
+# bare class+intensity injection cannot supply. Previewing a Words band is
+# the flare preview's job (flare_preview.build_timeline, which synthesises
+# an action with a shape), not this injector's.
+EVENT_CLASSES = (*TRIGGER_RESPONSE_CLASSES, "update")
 
 
 class EventRequest(BaseModel):

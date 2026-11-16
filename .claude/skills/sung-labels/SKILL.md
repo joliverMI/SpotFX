@@ -3,9 +3,10 @@ name: sung-labels
 description: >
   Sung labels, Claude's colour meanings and a song's word matches (lyrics
   plan step 3, PR #499), AND word colours and imprints (lyrics plan step
-  4, PR #504), THE ROLL (word chance per play, 2026-11-12) and SHAPE
+  4, PR #504), THE ROLL (word chance per play, 2026-11-12), SHAPE
   labels (Word Shapes row W0.2, the third target kind beside a colour set
-  and an effect):
+  and an effect) and the SHAPE VERDICT a shape-reaching word plans as
+  (row W0.3):
   spectra/services/sung_labels.py, lyric_matches.py,
   lyric_reading.py, color_meanings.py, colour_words.py, claude_text.py and
   lyric_events.py; the /sung-labels correction page; the Test Bed's Sung
@@ -102,11 +103,35 @@ the road."
   other carrying the same word, so whoever resolves a match to an owner gets
   the shape first. The effect KEEPS its seed word: those are his to take off
   on the page, never ours to delete.
-- **NOTHING FIRES FROM A SHAPE YET.** `lyric_events.load_words`' own `reach`
-  reads COLOUR-SET owners only, so a word reaching only a shape plans as
-  `WHY_NO_COLOUR` ("no colour set") and does nothing. W0.3 is the row that
-  changes that; today's behaviour is pinned by a test, so changing it is a
-  visible change.
+- **A SHAPE WORD NOW DRAWS (row W0.3, 2026-11-15).** W0.2's pin — a
+  shape-only match planning as `WHY_NO_COLOUR` — is gone:
+  `lyric_events.load_words` asks for SHAPE owners beside colour-set owners
+  (`hits_from_matches`' own `shapes` argument, omitted = the old
+  behaviour), a hit carries `shape_id`, and a hit with a shape and no
+  colour set is NOT `WHY_NO_COLOUR` any more. The planner then has a
+  FOURTH VERDICT, `VERDICT_SHAPE` ("shape"), taken BEFORE the colour
+  branch:
+    - **a word reaching BOTH a shape and colour sets is a SHAPE** — the
+      Words response band's own colour kinds are how a shape word
+      recolours the room, so there is no second colour path and no
+      fallback. This is the one live-behaviour consequence of W0.3: on a
+      show he has switched ON, a word on a shape's seed word (`love`,
+      `heart`, `star`, `shine`, `diamond`, `crystal`, ...) stops firing
+      its colour, and until a scene has a Words band (W2.1) it does
+      nothing instead;
+    - a DROP inside the imprint window WINS and the shape is skipped
+      (`WHY_DROP_WINS`); a flare or a scene change does not, and a shape
+      NEVER imprints;
+    - a shape takes its phrase's one event and counts toward the SHARED
+      minimum gap, exactly like a fired colour word. `chance_for` and
+      `roll_hits` are untouched — the roll decides a shape word's play
+      the same way it decides a colour word's.
+  `describe`, `action_payload` (`shape`, `form_s`/`hold_s`/`release_s`),
+  `word_marks` (a shape word is a `kind: "word"` marker carrying `shape`)
+  and `fired_payload` (`verdict == "shape"`, `shape`) all carry it. What
+  happens NEXT — the Words response class, the `word_shape` kind, the
+  timings, the told write — is the `word-shapes` skill's engine-contract
+  section, not this one's.
 - **Everything else about a shape is an effect's shape, exactly**: his edits
   are deltas (`ShapeLabels.labels`, the `EffectLabels` shape), one chip
   payload, labels only (a meaning kind is refused), an unknown shape id is
