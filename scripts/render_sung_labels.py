@@ -58,6 +58,13 @@ FACTS = """(() => {
     }).length,
     draftButton: [...document.querySelectorAll('.sung-toolbar button')].map((b) => b.textContent)[0],
     heads: [...document.querySelectorAll('.sung-heading')].map((h) => h.textContent),
+    glyphs: [...document.querySelectorAll('.sung-glyph')].map((g) => g.textContent).join(''),
+    notes: [...document.querySelectorAll('.sung-note')].map((n) => n.textContent),
+    heartWords: (() => {
+      const card = [...document.querySelectorAll('.sung-card')]
+        .find((c) => c.querySelector('strong') && c.querySelector('strong').textContent === 'Heart');
+      return card ? card.querySelector('.sung-chips').textContent : '';
+    })(),
     labels: [...document.querySelectorAll('.sung-card')][0]
       ? [...document.querySelectorAll('.sung-card')][0].querySelector('.sung-chips').textContent : '',
   };
@@ -66,6 +73,31 @@ FACTS = """(() => {
 REMOVE_CHERRY = """(() => {
   const chip = [...document.querySelectorAll('.sung-chip')].find((c) => c.firstChild.textContent === 'cherry');
   chip.querySelector('button').click();
+  return true;
+})()"""
+
+HEART_CARD = """[...document.querySelectorAll('.sung-card')].find(
+  (c) => c.querySelector('strong') && c.querySelector('strong').textContent === 'Heart')"""
+
+# The row's own acceptance: a word added to the Heart and a seed word taken off
+# it both outlast the page reading the list again.
+EDIT_HEART = """(() => {
+  const card = %s;
+  const kiss = [...card.querySelectorAll('.sung-chip')].find((c) => c.firstChild.textContent === 'kiss');
+  kiss.querySelector('button').click();
+  const input = card.querySelector('.sung-add');
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  setter.call(input, 'sweetheart');
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  return true;
+})()""" % HEART_CARD
+
+SEARCH_LOVE = """(() => {
+  const box = document.querySelector('.sung-toolbar input');
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  setter.call(box, 'love');
+  box.dispatchEvent(new Event('input', { bubbles: true }));
   return true;
 })()"""
 
@@ -141,7 +173,15 @@ async def run() -> int:
                     continue
                 await asyncio.sleep(0.4)
                 facts = await ev(FACTS)
-                check("every card is shown", facts["cards"] == 7, str(facts["cards"]))
+                check("every card is shown", facts["cards"] == 11, str(facts["cards"]))
+                check("each shape draws its glyph", facts["glyphs"] == "♥★◆", facts["glyphs"])
+                check("the rows are headed, shapes last",
+                      [h.split(" (")[0] for h in facts["heads"]] == ["Colour sets", "Effects", "Shapes"]
+                      and facts["heads"][-1].endswith("?"),   # the Shapes row's own help link
+                      str(facts["heads"]))
+                check("only the shape sharing a word with an effect says who wins",
+                      len(facts["notes"]) == 1 and "the shape is the one the show follows" in facts["notes"][0],
+                      str(facts["notes"]))
                 check("chips say where they came from", facts["seed"] > 0 and facts["claude"] > 0, str(facts))
                 check("it does not scroll sideways", not facts["pageWide"], facts["page"])
                 check("no chip leaves its card", facts["chipsOutside"] == 0, str(facts["chipsOutside"]))
@@ -149,6 +189,26 @@ async def run() -> int:
                       facts["draftButton"])
                 if shots:
                     await shoot(ws, nid, OUT_DIR / f"page-{width}.png")
+
+                await ev(EDIT_HEART)
+                await asyncio.sleep(0.3)
+                heart = await ev(FACTS)
+                check("a word added to the Heart and a seed word taken off both survive the re-read",
+                      "sweetheart" in heart["heartWords"] and "kiss" not in heart["heartWords"],
+                      heart["heartWords"])
+
+                await ev(SEARCH_LOVE)
+                await asyncio.sleep(0.3)
+                searched = await ev(FACTS)
+                check("the search box filters shapes too",
+                      searched["heads"][-1].startswith("Shapes (1)") and searched["glyphs"] == "♥",
+                      str(searched["heads"]) + " " + searched["glyphs"])
+                if shots:
+                    await shoot(ws, nid, OUT_DIR / f"shapes-search-{width}.png")
+                if not await goto(ws, nid, base, READY):
+                    failures.append(f"{width}: the page never came back after the search")
+                    continue
+                await asyncio.sleep(0.4)
 
                 await ev(REMOVE_CHERRY)
                 await asyncio.sleep(0.3)

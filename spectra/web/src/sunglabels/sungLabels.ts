@@ -1,6 +1,6 @@
 /** The Sung labels page's pure parts, so scripts/check_sung_labels_page.mjs can
  * drive them. spectra/services/sung_labels.py is the binding statement. */
-import type { SungColorSet, SungEffect, SungChip } from '../types';
+import type { SungColorSet, SungEffect, SungShape, SungChip } from '../types';
 
 export const SOURCE_WORDS: Record<SungChip['source'], string> = {
   seed: 'From its colours and name',
@@ -25,6 +25,57 @@ export function filterEffects(effects: SungEffect[], query: string): SungEffect[
   const q = query.trim().toLowerCase();
   if (!q) return effects;
   return effects.filter((e) => [e.name, ...e.labels.map((l) => l.text)].join(' ').toLowerCase().includes(q));
+}
+
+/** Each shape's glyph, by the id the shape library gives it
+ * (fx/effects/word_shapes.py's `build(...)` calls). A shape the library grows
+ * later still gets a card and a mark the moment it is added there — that is
+ * what `SHAPE_FALLBACK_GLYPH` is for ("make it easy to add more shapes and
+ * associations down the road"); give the new one its own glyph here when it
+ * deserves better than the fallback. */
+export const SHAPE_GLYPHS: Record<string, string> = {
+  heart: '♥', star: '★', diamond: '◆',
+};
+export const SHAPE_FALLBACK_GLYPH = '◇';
+
+export function shapeGlyph(id: string): string {
+  return SHAPE_GLYPHS[id] ?? SHAPE_FALLBACK_GLYPH;
+}
+
+export function filterShapes(shapes: SungShape[], query: string): SungShape[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return shapes;
+  return shapes.filter((s) => [s.name, ...s.labels.map((l) => l.text)].join(' ').toLowerCase().includes(q));
+}
+
+/** The form two words are compared in, mirroring
+ * spectra/services/colour_words.py's `word_key`: lower case, no accents, no
+ * apostrophes, other punctuation as a space. So "Corazón" and "corazon" are
+ * one word here exactly as they are one label there. */
+export function wordKey(text: string): string {
+  return (text || '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase()
+    .replace(/['’`]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+/** The words on this shape that an effect answers to as well ("star" on the
+ * Star shape and on the radial effect). Computed over EVERY effect, never the
+ * search's filtered list: the note on a card must not change as he types.
+ * spectra/services/sung_labels.py's PRECEDENCE is the rule it reports — the
+ * shape owns a shared word, and the effect keeps it on its own card until he
+ * takes it off. */
+export function shapeClashWords(shape: SungShape, effects: SungEffect[]): string[] {
+  const taken = new Set(effects.flatMap((e) => e.labels.map((l) => wordKey(l.text))));
+  return shape.labels.map((l) => l.text).filter((text) => taken.has(wordKey(text)));
+}
+
+/** That precedence, as the one line the card prints. */
+export function shapeClashNote(words: string[]): string | null {
+  if (!words.length) return null;
+  const quoted = words.map((w) => `“${w}”`);
+  const list = quoted.length === 1 ? quoted[0]
+    : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
+  const names = words.length === 1 ? 'also names an effect' : 'also name an effect';
+  return `${list} ${names} — the shape is the one the show follows.`;
 }
 
 /** A card waiting for Claude's draft. One with no colours has nothing to mean. */
