@@ -13,6 +13,7 @@ screenshot can hide:
   - a song with no words, or stale ones, not saying so;
   - the roll (2026-11-12): the playing song not saying which play its plan
     is for, a chip without its chance, a word sitting out not looking it,
+    a drawing word's chip or glyph missing its shape (WORD SHAPES, W2.3),
     "Keep this roll" not keeping it, or the Always / Chance / Never control
     not answering.
 
@@ -136,6 +137,11 @@ LANE_FACTS = """(() => {
     wordRows: rows.filter((r) => r === 'Word events').length,
     wordEvents: document.querySelectorAll('.testbed-word-event').length,
     haloed: document.querySelectorAll('.testbed-word-event.imprinted').length,
+    // WORD SHAPES (row W2.3): the mark a DRAWING word gets is the shape's
+    // own glyph, in the word's colour, where the colour diamond would be.
+    shaped: [...document.querySelectorAll('.testbed-word-event.word.shaped')]
+      .map((el) => [el.dataset.shape, el.textContent, getComputedStyle(el).color]),
+    plainWordMarks: document.querySelectorAll('.testbed-word-event.word:not(.shaped)').length,
     wordedGuides: document.querySelectorAll('.testbed-lyric-guide.worded').length,
     notes,
     pageWide: de.scrollWidth > de.clientWidth + 1,
@@ -193,6 +199,9 @@ ROLL_FACTS = """(() => {
   return {
     line: document.querySelector('.testbed-roll')?.textContent ?? null,
     chips: chips.map((c) => c.textContent),
+    // the full sentence each chip carries on hover — what a crowded lane
+    // leaves as the only copy, since a chip with no room is a bare tick
+    chipTitles: [...document.querySelectorAll('.testbed-word-action')].map((c) => c.title),
     // a crowded lane draws a word as a bare tick: its phrase is in its title
     satOut: [...document.querySelectorAll('.testbed-word-action.sat-out')]
       .map((c) => c.textContent || (c.title || '').split(' · ')[1]),
@@ -201,6 +210,8 @@ ROLL_FACTS = """(() => {
       return c ? getComputedStyle(c).borderTopStyle : null;
     })(),
     panel: panel?.textContent ?? '',
+    summary: [...document.querySelectorAll('.testbed-match-status span')]
+      .map((s) => s.textContent || '').find((t) => t.includes('Events in this song')) ?? null,
     pins: document.querySelectorAll('.testbed-pin').length,
     pressed,
     pageWide: de.scrollWidth > de.clientWidth + 1,
@@ -333,14 +344,20 @@ async def run() -> int:
                 check("the lane is drawn", whole["hasLane"])
                 check("every word is drawn faintly", whole["words"] > 100, f"{whole['words']} words")
                 check("emphasized words are marked", whole["marks"] > 0, f"{whole['marks']} marks")
-                check("the word events are guide lines through the lane", whole["guides"] == 3,
+                check("the word events are guide lines through the lane", whole["guides"] == 5,
                       f"{whole['guides']} guides")
                 check("the Word events row sits under it", whole["wordRows"] == 1)
                 check("it draws the events a word reaches and the words firing alone",
-                      whole["wordEvents"] == 3, f"{whole['wordEvents']} events")
+                      whole["wordEvents"] == 5, f"{whole['wordEvents']} events")
                 check("an event a word gives its colour to is haloed, on the row and in the lane",
-                      whole["haloed"] == 1 and whole["wordedGuides"] == 2,
+                      whole["haloed"] == 1 and whole["wordedGuides"] == 4,
                       f"{whole['haloed']} haloed, {whole['wordedGuides']} worded guides")
+                # WORD SHAPES (row W2.3): the drawing word's mark IS its shape.
+                check("a word that draws a shape is drawn as that shape's glyph",
+                      whole["shaped"] == [["heart", "♥", "rgb(200, 30, 30)"]],
+                      str(whole["shaped"]))
+                check("and a word that only changes a colour keeps the diamond",
+                      whole["plainWordMarks"] == 2, f"{whole['plainWordMarks']} plain word marks")
                 check("no printed word overlaps another", whole["overlaps"] == 0)
                 check("no printed word leaves the lane", whole["outside"] == 0, str(whole.get("outsideList")))
                 check("it does not scroll sideways", not whole["pageWide"], whole["page"])
@@ -408,8 +425,22 @@ async def run() -> int:
                 await settle()
                 roll = await ev(ROLL_FACTS)
                 check("the playing song says which play its plan is for",
-                      (roll["line"] or "").startswith("This play #") and "3 of 4 words play" in roll["line"],
+                      (roll["line"] or "").startswith("This play #") and "5 of 6 words play" in roll["line"],
                       str(roll["line"]))
+                # WORD SHAPES (row W2.3): the chip reads the word AND the
+                # shape, and a shaped word doing its colour says why it is.
+                check("a drawing word's chip names the word and the shape",
+                      any(c.startswith("love → ♥ heart") for c in roll["chips"]),
+                      str(roll["chips"]))
+                # Its chip loses its printed name on the narrowest lane (every
+                # chip does, by rank), and the sentence on hover is then the
+                # only copy — so either one satisfies this.
+                check("and a shaped word doing its colour says the shape was skipped",
+                      any("★ skipped: no Words band" in c for c in roll["chips"])
+                      or any("Star shape is skipped" in t for t in roll["chipTitles"]),
+                      str(roll["chips"]))
+                check("the summary counts the words that draw",
+                      "1 word draws a shape" in (roll["summary"] or ""), str(roll["summary"]))
                 check("a chip carries its chance", any(c.endswith("· 91%") for c in roll["chips"]),
                       str(roll["chips"]))
                 check("a word sitting out this play is drawn quieter, dotted",

@@ -299,3 +299,79 @@ def test_upcoming_reads_no_words_while_the_show_is_off(monkeypatch):
     body = _client().get("/api/upcoming", params={"uri": URI}).json()
     assert len(body["events"]) == 2
     assert upcoming.word_plan(URI) is None
+
+
+# ── word SHAPES on the strip (Word Shapes plan, row W2.3) ───────────────────
+
+
+def _shape_hit(ms, key, phrase, shape, *, swatch=None, sets=True):
+    from spectra.services import lyric_events as le
+    return le.WordHit(
+        key=key, first_word=int(ms // 100), last_word=int(ms // 100), phrase=phrase,
+        label=phrase, line=int(ms // 10_000), ms=float(ms), end_ms=float(ms + 300),
+        emphasis=0.5, strength=0.9, his=False,
+        set_ids=(f"set-{phrase}",) if sets else (),
+        set_names=(phrase.title(),) if sets else (),
+        swatches=(swatch,) if sets else (), energy=0.3,
+        shape_id=shape, shape_name=shape.title())
+
+
+def test_upcoming_names_the_shape_a_drawing_word_draws(monkeypatch):
+    """WORD SHAPES (W2.3): a word that DRAWS is the same `kind: "word"` row a
+    colour word firing alone is — one row, one idea — and it carries the
+    shape, its name and its own sentence, so the strip can draw the glyph
+    and the next-event box can print the word and the shape with no second
+    request."""
+    _mode("triggers_only")
+    from spectra.api import upcoming
+    from spectra.services import lyric_events as le
+    hits = [_shape_hit(12_000, "120-120", "love", "heart", swatch="#ff0000")]
+    plan = le.plan_words(hits, [], le.LyricEventSettings())
+    assert [a.verdict for a in plan] == [le.VERDICT_SHAPE], "the plan this row draws"
+    monkeypatch.setattr(upcoming, "word_plan",
+                        lambda uri: le.Preview(True, le.SongWords(uri, "ok", hits=tuple(hits)),
+                                               actions=plan))
+
+    body = _client().get("/api/upcoming", params={"uri": URI}).json()
+    row = next(e for e in body["events"] if e["kind"] == "word")
+    assert row["id"] == "lyric:120-120" and row["word"] == "love"
+    assert row["shape"] == "heart" and row["shape_name"] == "Heart"
+    assert row["words"] == le.describe(plan[0]), "the Test Bed's own sentence, not a second one"
+    assert "Heart shape" in row["words"] and row["swatch"] == "#ff0000"
+
+
+def test_a_colour_word_row_carries_no_shape_of_its_own(monkeypatch):
+    """A song whose words reach no shape sends exactly what it sends today:
+    `shape` is None on the mark and the two joined-on fields are absent."""
+    _mode("triggers_only")
+    from spectra.api import upcoming
+    from spectra.services import lyric_events as le
+    hits = [_hit(12_000, "120-120", "roses", "#ff0000")]
+    plan = le.plan_words(hits, [], le.LyricEventSettings())
+    monkeypatch.setattr(upcoming, "word_plan",
+                        lambda uri: le.Preview(True, le.SongWords(uri, "ok", hits=tuple(hits)),
+                                               actions=plan))
+    row = next(e for e in _client().get("/api/upcoming", params={"uri": URI}).json()["events"]
+               if e["kind"] == "word")
+    assert row["shape"] is None
+    assert "shape_name" not in row and "words" not in row
+
+
+def test_a_shaped_word_doing_its_colour_draws_as_a_colour_word(monkeypatch):
+    """`shape_skipped` is the Test Bed's business, not the strip's: a word
+    that reaches a shape and is firing its COLOUR instead (nothing showing
+    can draw one) is a plain colour marker here — the glyph would promise a
+    shape the room is not going to draw."""
+    _mode("triggers_only")
+    from spectra.api import upcoming
+    from spectra.services import lyric_events as le
+    hits = [_shape_hit(12_000, "120-120", "love", "heart", swatch="#ff0000")]
+    plan = le.plan_words(hits, [], le.LyricEventSettings(), can_draw=lambda _e: False)
+    assert [a.verdict for a in plan] == [le.VERDICT_FIRE]
+    assert plan[0].shape_skipped == le.WHY_CANNOT_DRAW
+    monkeypatch.setattr(upcoming, "word_plan",
+                        lambda uri: le.Preview(True, le.SongWords(uri, "ok", hits=tuple(hits)),
+                                               actions=plan))
+    row = next(e for e in _client().get("/api/upcoming", params={"uri": URI}).json()["events"]
+               if e["kind"] == "word")
+    assert row["shape"] is None and "shape_name" not in row

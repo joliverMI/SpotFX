@@ -23,11 +23,11 @@ import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   countdownParts, eventFireMs, eventLabel, FINAL_STRETCH_MS, kindGlyphSvg, NEXT_EVENT_BOX_WIDTH,
-  pickNext, wordColour, type UpcomingEvent,
+  pickNext, shapeGlyph, wordColour, type UpcomingEvent,
 } from './songStrip';
 import { getShowClockMs } from '../lib/showClock';
 import useMediaQuery from '../lib/useMediaQuery';
-import { flashInWordColour, onWordColour } from '../lib/wordColourPush';
+import { flashInWordColour, onWordColour, pulseWords, WORD_FLASH_MS } from '../lib/wordColourPush';
 
 /** The width band where the box belongs to the BAR rather than the
  * timeline row — EXACTLY the band tokens.css gives its deliberate two
@@ -72,6 +72,11 @@ export default function SongNextBox({
   const unitRef = useRef<HTMLElement>(null);
   const flashedKeyRef = useRef<string | null>(null);
   const lastGlyphRef = useRef<string | null>(null);
+  // What the live pulse SAID, for as long as it is pulsing: the box's own
+  // hover text while the flash runs, so "love -> heart - drew" is readable
+  // rather than only coloured. The rAF loop owns `title`, so the pulse
+  // cannot simply write it once and expect it to survive the next frame.
+  const pulseRef = useRef<string | null>(null);
 
   // THE LIVE PULSE (option E, the Admiral's pick 2026-11-12): the moment a
   // matched word fires or imprints the box flashes in THE WORD'S COLOUR —
@@ -82,7 +87,12 @@ export default function SongNextBox({
   // whichever event it was counting to.
   useEffect(() => onWordColour((push) => {
     if (!boxRef.current || !uri || push.uri !== uri) return;
-    flashInWordColour(boxRef.current, 'song-strip-next-flash-word', push.swatch);
+    const words = pulseWords(push);
+    flashInWordColour(boxRef.current, 'song-strip-next-flash-word', push.swatch, words);
+    pulseRef.current = words;
+    setTimeout(() => {
+      if (pulseRef.current === words) pulseRef.current = null;
+    }, WORD_FLASH_MS);
   }), [uri]);
 
   useEffect(() => {
@@ -99,20 +109,37 @@ export default function SongNextBox({
         // highlight the blue square, like you do in the strip" — and the
         // word itself printed under it; no second swatch, no "→ scene".
         const halo = wordColour(next);
-        const glyphKey = `${next.kind}:${next.num ?? ''}:${halo ?? ''}:${next.word ?? ''}`;
+        const glyphKey = `${next.kind}:${next.num ?? ''}:${halo ?? ''}:${next.word ?? ''}`
+          + `:${next.shape ?? ''}`;
         if (iconRef.current && lastGlyphRef.current !== glyphKey) {
           lastGlyphRef.current = glyphKey;
-          iconRef.current.innerHTML = kindGlyphSvg(next.kind, next.num, halo);
+          iconRef.current.innerHTML = kindGlyphSvg(next.kind, next.num, halo, next.shape);
+          // WORD SHAPES (W2.3): the box PRINTS THE WORD AND THE SHAPE —
+          // the shape's own glyph above (kindGlyphSvg), and "love → ♥"
+          // under it, where a plain colour word prints only itself. The
+          // shape's NAME rides in the hover label (eventLabel), which is
+          // where every other detail of this box already lives.
+          const glyph = shapeGlyph(next.shape);
           if (wordRef.current) {
-            wordRef.current.textContent = next.word ?? '';
+            wordRef.current.textContent = next.word
+              ? (glyph ? `${next.word} → ${glyph}` : next.word)
+              : '';
             wordRef.current.style.color = halo ?? '';
           }
           boxRef.current?.classList.toggle('song-strip-next-worded', !!next.word);
+          boxRef.current?.classList.toggle('song-strip-next-shaped', !!glyph);
         }
         const parts = countdownParts(remaining);
         if (countRef.current) countRef.current.textContent = parts.value;
         if (unitRef.current) unitRef.current.textContent = parts.unit ?? '';
-        if (boxRef.current) boxRef.current.title = eventLabel(next);
+        if (boxRef.current) {
+          // The hover text: whatever the live pulse last said while it is
+          // still pulsing, else the row's own label — plus, for a shaped
+          // word, the Test Bed's own sentence for it, which the row carries
+          // (spectra/api/upcoming.py's `with_words`).
+          const label = next.words ? `${eventLabel(next)} — ${next.words}` : eventLabel(next);
+          boxRef.current.title = pulseRef.current ?? label;
+        }
         const soon = remaining <= FINAL_STRETCH_MS;
         if (fillRef.current) {
           fillRef.current.style.transform =
@@ -130,8 +157,10 @@ export default function SongNextBox({
         if (iconRef.current) { iconRef.current.innerHTML = ''; lastGlyphRef.current = null; }
         if (wordRef.current) wordRef.current.textContent = '';
         if (boxRef.current) {
-          boxRef.current.title = durationMs > 0 ? 'Nothing left this song' : 'Nothing playing';
+          boxRef.current.title = pulseRef.current
+            ?? (durationMs > 0 ? 'Nothing left this song' : 'Nothing playing');
           boxRef.current.classList.remove('song-strip-next-worded');
+          boxRef.current.classList.remove('song-strip-next-shaped');
         }
         if (fillRef.current) fillRef.current.style.transform = 'scaleX(0)';
         boxRef.current?.classList.remove('song-strip-next-soon');

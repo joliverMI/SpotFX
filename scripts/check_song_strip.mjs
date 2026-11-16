@@ -20,6 +20,12 @@
  *           window-mapped x, and skips anything the mapping puts off the
  *           visible canvas — proven against a recording fake ctx, no real
  *           <canvas>.
+ *   SIX   — WORD COLOURS (option A): the halo, the fire-alone diamond and
+ *           the next-event box's own glyph.
+ *   SEVEN — WORD SHAPES (row W2.3): a word that DRAWS a shape is that
+ *           shape's own glyph, from its id, in the word's colour — on the
+ *           canvas, in the next-event box's glyph and in its hover label —
+ *           and an id with no glyph yet falls back to the colour diamond.
  *
  * The original stretched-icon fix (the Admiral's report, 2026-10-14) was a
  * per-axis `axisScale`/`compensate` compensation over a stretched
@@ -53,7 +59,8 @@ execFileSync('npx', ['esbuild', TS, '--bundle', '--format=esm', '--platform=node
 const mod = await import(js);
 const { fmtCountdown, fmtMMSS, eventLabel, pickNext, markerSizePx, markerOpacity,
        xFraction, FINAL_STRETCH_MS, NEXT_EVENT_BOX_WIDTH, drawShapeMarkers, KIND_COLOR,
-       wordColour, kindGlyphSvg, HALO_GAP } = mod;
+       wordColour, kindGlyphSvg, HALO_GAP, SHAPE_GLYPH, SHAPE_GLYPH_PX, shapeGlyph,
+       shapeName, shapeWords } = mod;
 
 // THE BOUNDARY IS 99.95s, THE APPROVED MOCKUP'S OWN (`cd()`), not 60s —
 // changed in the 2026-10-14 design-fidelity pass. It is what makes
@@ -235,6 +242,77 @@ console.log('SIX — word colours (data/word-effect-highlight-options, option A)
   ok(!kindGlyphSvg('scene', null, null).includes('stroke='), 'and draws no ring without a word');
   ok(kindGlyphSvg('word', null, '#ff0000').includes('fill="#ff0000"') && kindGlyphSvg('word').includes(`fill="${KIND_COLOR.word}"`),
     'a word\'s glyph is a diamond in its colour, falling back to the kind\'s');
+}
+
+// WORD SHAPES (row W2.3): the one drawing rule for a word that DRAWS — the
+// shape's own glyph from its id, in the word's colour, in all three places
+// the colour diamond is drawn today.
+console.log('SEVEN — word shapes (Word Shapes plan W2.3): the glyph, the label, the box');
+{
+  const makeCtx = () => {
+    const calls = [];
+    const rec = (name) => (...a) => { calls.push([name, ...a]); };
+    return {
+      calls,
+      set fillStyle(v) { calls.push(['fillStyle', v]); }, set strokeStyle(v) { calls.push(['strokeStyle', v]); },
+      set globalAlpha(v) { calls.push(['globalAlpha', v]); }, set lineWidth(v) { calls.push(['lineWidth', v]); },
+      set font(v) { calls.push(['font', v]); }, set textAlign(v) { calls.push(['textAlign', v]); },
+      set textBaseline(v) { calls.push(['textBaseline', v]); },
+      fillRect: rec('fillRect'), beginPath: rec('beginPath'), arc: rec('arc'), fill: rec('fill'),
+      moveTo: rec('moveTo'), lineTo: rec('lineTo'), closePath: rec('closePath'), stroke: rec('stroke'),
+      fillText: rec('fillText'),
+    };
+  };
+  const shaped = (over = {}) => ({
+    ms: 30_000, kind: 'word', rank: null, rank_of: null, source: 'word',
+    id: 'lyric:300-300', word: 'love', word_ms: 30_000, swatch: '#ff0000',
+    shape: 'heart', shape_name: 'Heart', ...over,
+  });
+
+  ok(SHAPE_GLYPH.heart === '♥' && SHAPE_GLYPH.star === '★' && SHAPE_GLYPH.diamond === '◆',
+    'one glyph per shape in the library');
+  ok(shapeGlyph('heart') === '♥' && shapeGlyph('cloud') === null && shapeGlyph(null) === null,
+    'the glyph is looked up by id; an unknown one has none');
+  ok(shapeName('heart') === 'heart' && shapeName('heart', 'Heart') === 'heart'
+    && shapeName('cloud', null) === 'cloud',
+    'the name is the row\'s own when it carries one, else the library\'s');
+  ok(shapeWords('love', 'heart', 'Heart') === 'love → ♥ heart'
+    && shapeWords(null, 'heart') === '♥ heart' && shapeWords('love', null) === null,
+    'the word and the shape, one string');
+
+  ok(eventLabel(shaped()) === 'Word “love” → heart',
+    'the box\'s hover label names the shape');
+  ok(eventLabel(shaped({ shape: null, shape_name: null })) === 'Word “love”',
+    'a colour word\'s label is unchanged');
+
+  {
+    const ctx = makeCtx();
+    drawShapeMarkers(ctx, [shaped()], (ms) => ms / 100, 1000);
+    const text = ctx.calls.find((c) => c[0] === 'fillText');
+    ok(text && text[1] === '♥' && Math.abs(text[2] - 300) < 1e-9,
+      'on the canvas a shaped word is its glyph, at the word\'s own x');
+    ok(ctx.calls.some((c) => c[0] === 'fillStyle' && c[1] === '#ff0000'),
+      'in the word\'s own colour');
+    ok(!ctx.calls.some((c) => c[0] === 'closePath'), 'and no diamond is drawn as well');
+    ok(ctx.calls.some((c) => c[0] === 'font' && c[1].startsWith(`${SHAPE_GLYPH_PX}px`)),
+      'at the one shared glyph size');
+  }
+  {
+    const ctx = makeCtx();
+    drawShapeMarkers(ctx, [shaped({ shape: 'cloud' })], (ms) => ms / 100, 1000);
+    ok(!ctx.calls.some((c) => c[0] === 'fillText') && ctx.calls.some((c) => c[0] === 'closePath'),
+      'a shape with no glyph falls back to the diamond rather than drawing nothing');
+  }
+  for (const [id, glyph] of Object.entries(SHAPE_GLYPH)) {
+    const svg = kindGlyphSvg('word', null, '#ff0000', id);
+    ok(svg.includes(glyph) && svg.includes('fill="#ff0000"') && svg.includes('<text'),
+      `the box glyph for "${id}" is ${glyph} in the word's colour`);
+  }
+  ok(kindGlyphSvg('word', null, '#ff0000', null).includes('<path'),
+    'and a colour word keeps its diamond path');
+  ok(kindGlyphSvg('scene', null, '#5a14b4', 'heart').includes(`fill="${KIND_COLOR.scene}"`)
+    && !kindGlyphSvg('scene', null, '#5a14b4', 'heart').includes('♥'),
+    'a shape never replaces another kind\'s own glyph');
 }
 
 console.log(failures === 0 ? '\nALL OK' : `\n${failures} FAILURE(S)`);

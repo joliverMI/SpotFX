@@ -46,7 +46,7 @@ import SongNextBox, { useNextBoxInBar } from './SongNextBox';
 import { paintTrack, type MarkNode } from './trackPainter';
 import { useEnergyTimeline, useEngineStatus, useUpcoming } from '../queries';
 import { getPositionMs, getShowClockMs } from '../lib/showClock';
-import { flashInWordColour, onWordColour } from '../lib/wordColourPush';
+import { flashInWordColour, onWordColour, pulseWords } from '../lib/wordColourPush';
 import InfoTip from './InfoTip';
 import { kindShown, useSongTimelineView } from './songTimelineView';
 
@@ -132,9 +132,14 @@ export default function SongStrip() {
   useEffect(() => onWordColour((push) => {
     if (!uri || push.uri !== uri) return;
     const at = push.event_kind === 'word' ? push.word_ms : push.event_ms;
+    // WORD SHAPES (W2.3): a shape word pushes with `event_kind: "word"` and
+    // `verdict: "shape"` — the same marker, found the same way; what it
+    // SAYS is the pulse's own words ("love -> heart - drew"), which ride on
+    // the flashed node for as long as it pulses.
+    const words = pulseWords(push);
     for (const m of markNodesRef.current) {
       const hit = m.id ? m.id === push.event_id : Math.abs(m.ms - at) <= 400;
-      if (hit) flashInWordColour(m.node, 'song-strip-mk-flash-word', push.swatch);
+      if (hit) flashInWordColour(m.node, 'song-strip-mk-flash-word', push.swatch, words);
     }
   }), [uri]);
 

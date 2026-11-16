@@ -18,8 +18,8 @@
  * fired without re-reading the DOM. */
 import {
   diamondPath, DROP_BAND_Y, dropBands, HALO_GAP, HALO_STROKE, haloFilter, KIND_COLOR, MARKER_CY,
-  markerOpacity, markerSizePx, TERRAIN_FILL, terrainPath, TRACK_FILL, TRACK_HEIGHT, TRACK_STROKE,
-  trackX, WORD_DIAMOND_R, wordColour, type UpcomingEvent,
+  markerOpacity, markerSizePx, SHAPE_GLYPH_PX, shapeGlyph, TERRAIN_FILL, terrainPath, TRACK_FILL,
+  TRACK_HEIGHT, TRACK_STROKE, trackX, WORD_DIAMOND_R, wordColour, type UpcomingEvent,
 } from './songStrip';
 import type { EnergySection } from '../types';
 
@@ -199,13 +199,22 @@ export function paintTrack(
       });
     } else if (e.kind === 'word') {
       const colour = wordColour(e) ?? KIND_COLOR.word;
-      marks.push({
-        node: add('path', {
+      // WORD SHAPES (W2.3): the shape's own glyph where the word DRAWS one,
+      // the colour diamond where it changes a colour — the same rule
+      // songStrip's canvas and the next-event box's glyph follow.
+      const glyph = shapeGlyph(e.shape);
+      const node = glyph
+        ? add('text', {
+          x: x(e.ms), y: MARKER_CY * k, 'font-size': SHAPE_GLYPH_PX * k,
+          'text-anchor': 'middle', 'dominant-baseline': 'central', fill: colour,
+          class: 'song-strip-mk-word shaped', style: `filter:${haloFilter(colour)}`,
+        })
+        : add('path', {
           d: diamondPath(x(e.ms), MARKER_CY * k, WORD_DIAMOND_R), fill: colour,
           class: 'song-strip-mk-word', style: `filter:${haloFilter(colour)}`,
-        }),
-        ms: e.ms, id: e.id,
-      });
+        });
+      if (glyph) node.textContent = glyph;
+      marks.push({ node, ms: e.ms, id: e.id });
     }
   }
   return marks;

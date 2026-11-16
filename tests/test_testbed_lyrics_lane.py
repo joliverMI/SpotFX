@@ -370,3 +370,55 @@ def test_the_spot_effects_sidecar_index_skips_it_too(tmp_path, monkeypatch):
 def test_the_engine_is_on_the_no_shift_list():
     from spectra.services import testbed_engines
     assert testbed_engines.ENGINE_LYRICS in testbed_engines.SONG_TIME_ENGINES
+
+
+# ── the Word actions row's own wire shape (Word Shapes plan, row W2.3) ──────
+
+
+def _lyric_event_action_interface() -> str:
+    """`LyricEventAction` as spectra/web/src/types.ts declares it — the one
+    the Word actions row's chips are typed against."""
+    src = (REPO / "spectra" / "web" / "src" / "types.ts").read_text()
+    head = "export interface LyricEventAction {"
+    start = src.index(head) + len(head)
+    return src[start:src.index("\n}", start)]
+
+
+def test_every_field_the_word_actions_row_is_sent_is_one_its_type_declares():
+    """The chips read `action.shape`, `action.shape_name` and
+    `action.shape_skipped` (W2.3), and the engine writes all three plus the
+    told envelope (W0.3's `action_payload`). The two halves are in two
+    languages, so nothing else proves they still agree: a payload key with
+    no field is a chip reading `undefined`, and `tsc` cannot see it."""
+    from spectra.services import lyric_events as le
+    hit = le.WordHit(key="2-2", first_word=2, last_word=2, phrase="love", label="love",
+                     line=0, ms=2000.0, end_ms=2400.0, emphasis=0.5, strength=0.8, his=False,
+                     set_ids=("rose",), set_names=("Rose",), swatches=("#ff0000",), energy=0.3,
+                     shape_id="heart", shape_name="Heart")
+    payload = le.action_payload(le.WordAction(hit, le.VERDICT_SHAPE, energy=0.3,
+                                              transition_ms=740, form_s=0.74, hold_s=0.8,
+                                              release_s=1.11))
+    declared = _lyric_event_action_interface()
+    missing = [key for key in payload if f"{key}:" not in declared]
+    assert not missing, f"types.ts's LyricEventAction declares no field for: {missing}"
+    for key in ("shape", "shape_name", "shape_skipped", "form_s", "hold_s", "release_s"):
+        assert key in payload, f"the Word actions row needs {key}"
+    assert payload["shape"] == "heart" and payload["shape_name"] == "Heart"
+    assert payload["verdict"] == "shape" and payload["shape_skipped"] is None
+    assert "'shape'" in declared.split("verdict:")[1].split(";")[0], \
+        "the verdict union must admit 'shape'"
+
+
+def test_a_shaped_word_doing_its_colour_tells_the_row_why():
+    """`shape_skipped` is what the chip's "heart skipped: ..." tail is drawn
+    from, so the row never shows a shaped word as an ordinary colour one."""
+    from spectra.services import lyric_events as le
+    hit = le.WordHit(key="2-2", first_word=2, last_word=2, phrase="love", label="love",
+                     line=0, ms=2000.0, end_ms=2400.0, emphasis=0.5, strength=0.8, his=False,
+                     set_ids=("rose",), set_names=("Rose",), swatches=("#ff0000",), energy=0.3,
+                     shape_id="heart", shape_name="Heart")
+    plan = le.plan_words([hit], [], le.LyricEventSettings(), can_draw=lambda _e: False)
+    payload = le.action_payload(plan[0])
+    assert payload["verdict"] == le.VERDICT_FIRE
+    assert payload["shape"] == "heart" and payload["shape_skipped"] == le.WHY_CANNOT_DRAW
+    assert "Heart shape is skipped" in payload["words"]

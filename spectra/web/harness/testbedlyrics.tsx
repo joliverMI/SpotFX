@@ -118,7 +118,9 @@ function lyrics(uri: string) {
 // shape GET /api/testbed/lyric-events returns — one word imprinting on the
 // scene change at 8 s (haloed in its colour on the Word events row and the
 // lane's guide lines), one firing on its own, one sitting out this play
-// (THE ROLL, 2026-11-12), and one naming a flare that cannot carry colour.
+// (THE ROLL, 2026-11-12), one naming a flare that cannot carry colour, one
+// DRAWING A SHAPE and one reaching a shape it cannot draw (WORD SHAPES, row
+// W2.3).
 // The song is "playing", so the plan is this play's roll; a kept roll and a
 // sample play are kept in memory, so the page's own presses change it.
 const WORD_EVENTS = [
@@ -142,7 +144,11 @@ function wordAction(over: Record<string, unknown>) {
       : `Plays on about ${Math.round(chance * 100)}% of plays (Claude's confidence).`,
     set_names: ['Blood Red'], set_ids: ['red1'], swatch: '#c81e1e',
     verdict: 'imprint', why: null, words: 'Gives its colour to the scene change at 0:08.0 (+0.4 s from the word).',
-    energy: 0.3, momentary: false, transition_ms: 1800, blocked_by: null, event: WORD_EVENTS[0], ...over,
+    energy: 0.3, momentary: false, transition_ms: 1800, blocked_by: null, event: WORD_EVENTS[0],
+    // WORD SHAPES (row W2.3): every action carries these, a shape-reaching
+    // word or not, exactly as `lyric_events.action_payload` writes them.
+    shape: null, shape_name: null, shape_skipped: null, form_s: 0, hold_s: 0, release_s: 0,
+    ...over,
   };
 }
 function roll(uri: string, sample: number | null, actions: { won: boolean | null }[]) {
@@ -182,6 +188,24 @@ function lyricActions() {
                    match_id: 'g4', strength: 0.75,
                    set_names: ['Gold'], set_ids: ['gold1'], swatch: '#d9a441', verdict: 'nothing', why: 'event_cannot_carry',
                    event: WORD_EVENTS[1], words: 'The flare cannot carry colour (no colour jump), so nothing fires.' }),
+      // WORD SHAPES (row W2.3): a word that DRAWS, and a word that reaches a
+      // shape and is doing its COLOUR instead — the two the Word actions row
+      // has to tell apart, and the glyph the strip draws for the first.
+      wordAction({ key: '80-80', first_word: 80, last_word: 80, phrase: 'love', label: 'love', ms: 45_000, end_ms: 45_400,
+                   match_id: 'g5', strength: 0.88,
+                   set_names: ['Blood Red'], set_ids: ['red1'], swatch: '#c81e1e',
+                   verdict: 'shape', event: null,
+                   shape: 'heart', shape_name: 'Heart',
+                   transition_ms: 740, form_s: 0.74, hold_s: 0.8, release_s: 1.11,
+                   words: 'Draws the Heart shape: it forms over 0.74 s, finishing on the word, holds 0.8 s and releases over 1.11 s.' }),
+      wordAction({ key: '90-90', first_word: 90, last_word: 90, phrase: 'star', label: 'star', ms: 55_000, end_ms: 55_400,
+                   match_id: 'g6', strength: 0.72,
+                   set_names: ['Gold'], set_ids: ['gold1'], swatch: '#d9a441',
+                   verdict: 'fire', event: null,
+                   shape: 'star', shape_name: 'Star', shape_skipped: 'nothing_can_draw',
+                   words: 'Fires on its own: low energy (0.30), so it holds until the next scene change or '
+                     + 'matched word, changing over 1.8 s. The Star shape is skipped: no scene showing can '
+                     + 'draw one at this Energy (give a scene a Words band with a Word Shape kind).' }),
   ];
 }
 
