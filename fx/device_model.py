@@ -508,7 +508,12 @@ SAURON_SURGE_EFFECTS = frozenset({"sauron"})
 # scene with a Words band and a Word Shape kind writes to no fixture until
 # the first wave-1 row lands. To join, follow fx/effects/word_shape_keys.py's
 # own "HOW AN EFFECT OPTS IN".
-WORD_SHAPE_EFFECTS: frozenset = frozenset()
+WORD_SHAPE_EFFECTS: frozenset = frozenset({
+    # W1.6 — STAR: the shape joins the radial's own angle divisor and the
+    # rotation governor eases the spin to a stop, so the shape stands
+    # upright through the hold (fx/effects/radial.py's WORD SHAPES block).
+    "radial",
+})
 
 # THE PER-EFFECT MINIMUM FORM (plan section 2.4): an effect whose shape
 # cannot credibly assemble inside the Energy-paced form time (the plan gives

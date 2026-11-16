@@ -33,11 +33,14 @@ sung word and that write:
      marks, Sonic's reach, and a `responses["word"]` round-trip.
 
 THE ROW'S OWN GATE, proven here and in tests/test_lyric_events.py's
-switch-off proof: `WORD_SHAPE_EFFECTS` is EMPTY on master, so even a scene
-with a Words band writes to no fixture until wave 1. Every test below that
-watches a real write says so by monkeypatching that set — which is also how
-anyone reading this can see at a glance that nothing in his room moves
-today.
+switch-off proof: `WORD_SHAPE_EFFECTS` held exactly the effects WAVE 1 has
+wired and nothing else — EMPTY on W0.3, and from W1.6 onward the `WIRED`
+tuple below, which each wave-1 row appends its own registry name to as it
+lands. A scene with a Words band therefore writes to no fixture but those,
+and the one proof that has to be edited to change that is this one. Every
+test below that watches a real write monkeypatches the set to its own test
+effect, which is also how anyone reading this can see at a glance which
+effects a Words band can move.
 """
 from __future__ import annotations
 
@@ -148,14 +151,28 @@ def _words_scene(name="Shape Scene", *, kinds=None, lanes=None,
         flare_kinds=declared, responses=responses)
 
 
+# Every effect a wave-1 row has WIRED to the told keys, in landing order.
+# A row that opts an effect in adds its registry name here, on its own line,
+# in the same change — the assertion below is what makes that deliberate
+# rather than discovered later (W0.3 shipped this as "the set is empty"; the
+# first wave-1 row to merge turned it into this tuple).
+#   W1.6 — STAR, fx/effects/radial.py (the shape divisor, spin to rest)
+WIRED = (
+    "radial",
+)
+
+
 @pytest.fixture()
 def shape_effects(monkeypatch):
-    """The one thing wave 1 will change: the test effect knows shapes.
-    EMPTY on master — see this module's own docstring."""
-    assert device_model.WORD_SHAPE_EFFECTS == frozenset(), (
-        "W0.3 ships no wired effect: an empty WORD_SHAPE_EFFECTS is the "
-        "row's own acceptance criterion, so a non-empty one here means a "
-        "wave-1 row landed without updating this proof")
+    """The one thing a wave-1 row changes: the test effect knows shapes.
+    `WORD_SHAPE_EFFECTS` must be exactly `WIRED` — see this module's own
+    docstring."""
+    assert device_model.WORD_SHAPE_EFFECTS == frozenset(WIRED), (
+        "WORD_SHAPE_EFFECTS is the Word Shapes switch: it must hold exactly "
+        "the effects wave 1 has wired (this module's WIRED tuple), so a row "
+        "that opts an effect in appends its name there in the same change. "
+        f"Wired here: {sorted(WIRED)}; in fx.device_model: "
+        f"{sorted(device_model.WORD_SHAPE_EFFECTS)}")
     monkeypatch.setattr(device_model, "WORD_SHAPE_EFFECTS", frozenset({EFFECT}))
 
 

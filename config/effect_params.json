@@ -1296,6 +1296,17 @@
           "help_topic": "star-shape-morph",
           "note": "Seconds a change of Edges (STAR's dice re-roll) glides from the old shape to the new one instead of cutting in one frame. 0 = the old instant cut. The star plan, 2026-10-13."
         },
+        "word_shape_size": {
+          "label": "Word Shape Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.1,
+          "max": 1,
+          "aspect": "shape",
+          "default": 0.62,
+          "help_topic": "word-shapes",
+          "note": "Word Shapes (plan row W1.6, 2026-11-15; his Q7 A: \"the outline morphs into the shape, the spin eases to a stop so the shape stands upright, resumes on release\"): the heart, star or diamond a sung word draws, as a fraction of the panel's half-height in the effect's own normalized space \u2014 0.62 is 11.2 rows tall and 22 columns wide on the crystal, the panel's own anisotropy as every circle here has it. The shape joins the radial's angle divisor in the SAME harmonic blend an Edges change uses, so the outline bends into it. The six word_shape_* told keys ride only the Words band's own write and are deliberately NOT registered here."
+        },
         "ring_reveal_front_s": {
           "label": "Into Star: Grow-In (s)",
           "type": "numeric",

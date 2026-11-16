@@ -307,6 +307,128 @@ release 0 = ease+clamp alone, the law to 1e-12, burst spread with the turn
 kept, energy linear / snappier-lazier / never a step, the data script, the
 registry). Help topic `star-spin-smooth`.
 
+## WORD SHAPES — the third divisor, and the spin eased to rest (row W1.6, 2026-11-15)
+
+His words for the row: *"STAR: change the radial shape so it matches the
+shape if possible. This one might be excluded or need some thought"*, and
+his Q7 A: *"include — the outline morphs into the shape, the spin eases to
+a stop so the shape stands upright, resumes on release."* Load
+`.claude/skills/word-shapes` first — it is the binding statement of the
+library, the six told keys and the engine contract above them. Star is in
+`fx.device_model.WORD_SHAPE_EFFECTS`; one registered param,
+`word_shape_size` (0.62); no `WORD_SHAPE_FORM_MIN_S` entry (STAR takes the
+approved Energy-paced 0.5-0.9 s form). The WORD SHAPES block comment above
+`DEFAULT_WORD_SHAPE_SIZE` in `fx/effects/radial.py` is the binding
+statement. Seven things not visible cold:
+
+- **IT IS A DIVISOR, IN THE BLEND THE EFFECT ALREADY HAD.** Star's picture
+  is the source strip sampled at a shaped radius `u = r / (max_radius x
+  div(angle))`, the `u = 1` contour IS the visible outline, and the effect
+  already blends two divisors on an `edges` change (`shape_morph_s`,
+  harmonically, because `r / div` is what blends linearly). The shape is a
+  THIRD divisor in that same blend: `div_shape(psi) = SIZE x polar(theta_n)
+  / (max_radius x k(psi))`. It is a function of the **screen** angle, not
+  Star's rotating frame, so the polygon keeps turning under it and **the
+  shape stands upright** whatever Star was doing when the word arrived.
+  Placed on STAR'S OWN centre (`cx`, `cy`) with the canonical normalized
+  denominators (`ax = (r_width - 1) / 2`, `ay = (r_height - 1) / 2`) — the
+  check script measures the same placement, so the two can never disagree.
+  Two code paths carry the one law and are proven equal to each other and
+  to the library: the per-cell field (`_word_shape_shaped`, cached per
+  shape and size — a holding shape costs one divide a frame) and the
+  angle-space divisor (`_word_shape_div`, which `_shape_div(phi, theta)`
+  feeds so a lull piece and a transition program ride the shape too).
+- **THE DIVISOR ALONE IS NOT THE SHAPE — THE EDGE IS HALF THE WORK.** `u`
+  keeps rising past 1 and the strip REPEATS (`twist_index % 1.0`), so a
+  divisor on its own leaves the whole panel lit and the shape is an
+  iso-contour rather than a shape; the plan's "95% of the lit cells lie
+  inside the shape" is unreachable that way. So a soft CUT sweeps inward to
+  exactly `u = 1`, feathered over `WORD_SHAPE_EDGE_U` (0.09 u, about one
+  cell pitch at the default size). **It is paced by CELLS and falls
+  GEOMETRICALLY** — `u_cut` is the `share ** m` quantile of this frame's
+  own `u` field. Both halves were measured, not guessed: a cut swept
+  linearly in `u` held still for half the form and then took two thirds of
+  the panel out in six frames, and an even share of the CELLS still spent
+  15% of the lit cells in one frame at the envelope's steepest, because
+  what reads as a jump is the RELATIVE change in what is lit. The
+  cells-not-radius half is the RingFormer's own lesson re-learnt (see "Into
+  Star" below). Nothing INSIDE the outline is ever touched.
+- **THE ROTATION GOVERNOR EASES THE TURN TO ZERO.** `_govern_rotation`
+  scales the whole governed advance by `1 - m` — the audio spin, the base
+  floor and anything else that moved the pattern this frame, together — so
+  the turn fades out over the form, is EXACTLY zero through the hold and
+  comes back from the music over the release. Applied AFTER the release
+  low-pass on purpose: the filter's state keeps integrating the music's own
+  advance while the shape stands, so the resume is the song's current speed
+  rather than a lag, and `m = 1` is a true zero rather than a decaying
+  tail. **A PHASE TAKES THE GOVERNOR BACK**: a shape is never TOLD during a
+  charge, lull or drop (P3 A, the engine's gate), but one can ARRIVE
+  mid-shape, and then the phase's own choreography owns the motion
+  unscaled. **A stopped spin on STAR is not always the shape's doing** — a
+  scene fire's `random_sign` roll on `spin` used to resolve to 0 about half
+  the time (fixed in `binding_resolver`, "THE STAR IMPROVE PLAN" above):
+  assert against the governor, never against the roll.
+- **THE STAR WAVE IS HELD, BY FREEZING ITS PHASE.** `_star_wave_step` stops
+  advancing `_wave_phase` while a shape stands and still recomputes
+  `self.star` from it, so a config write landing mid-shape (which re-reads
+  the stored `star`) cannot step the picture either; it carries on from the
+  same point on the release.
+- **AN EDGE MORPH ARRIVING MID-SHAPE IS DEFERRED TO THE RELEASE.**
+  `config_updated` holds the new `edges` in `_shape_edges_defer` and leaves
+  `self.edges` alone; `_shape_apply_deferred_edges` starts the ordinary
+  `shape_morph_s` glide as the release begins (also on a clearing write, on
+  reset and on `deactivate`), so the release morphs back into the NEW edge
+  count. Applying it at the hold would be a step nobody sees followed by a
+  second morph on the way out.
+- **WHAT WRONG LOOKS LIKE.** A shape that spins is the governor not being
+  reached (a phase armed, or `_shape_m` stuck at 0 because the SEQ never
+  edged). A heart with bands sliding across it rather than out through it
+  is the band scroll stopped — that is the strip's, and Melt is never
+  touched by this row. A lull landing mid-shape cuts the SHAPE's rim inward
+  (lull B's cut rides the same blended field) and its pieces fall along the
+  shape too; a drop on a half-formed shape blooms from whatever outline is
+  standing, then the release finishes under it. Nothing in this row ever
+  writes a told key back.
+- **THE CLARITY BAR AND WHY ONE NUMBER IS READ DIFFERENTLY.** Measured by
+  `scripts/check_star_word_shape.py` on his real `crystal-mapper` mask, all
+  three shapes at Energy 0.2 and 0.8, at the word and at mid-hold: lit
+  cells **inside the shape 97.1-100%** (bar 95%), the outline within
+  **0.000 cells** of `SIZE x polar(theta)` on 360 angles (bar half a cell)
+  with the rendered field within 1.3e-06 of the same law, **no white**, and
+  **+0.22 ms** p50 per frame with a shape holding (bar 1 ms). Two numbers
+  are honest deviations, both printed by the script rather than moved:
+  * **"90% of the shape's area cells are lit" is read against the cells
+    the STRIP lights** (97.3-100%). Star has no light of its own: a dark
+    band of Melt is a dark band of the heart exactly as it is a dark ring
+    across the panel today, and Melt's own lit share swings between about a
+    third and three quarters. The absolute figure (32-45%) tracks the
+    strip's own share to within a point or two and is reported, not
+    asserted.
+  * **the 8%-per-frame "nothing jumps" bar is not reachable on STAR** and
+    the script says so with the arithmetic: the rest state lights the WHOLE
+    panel and a shape is a fifth to a third of it, so the form must take
+    the lit count from ~745 real cells to ~172 inside its own length, and
+    at the crystal's 30 fps a 0.5 s form is 15 frames (0.92 ** 15 = 0.29).
+    Measured with the strip FROZEN (so the only moving thing is the shape):
+    **6.9-14.4% at 60 fps, 9.4-25.4% at 30 fps**, against the effect's own
+    UNTOLD worst of 18.2% / 26.6% — Melt's breathing alone moves the lit
+    count that much with no shape anywhere. What does hold, and is
+    asserted: the hold does not move at all (0.0%, and the pattern's
+    advance is exactly 0), and no frame of a form or a release is worse
+    than the effect's own untold worst. The lever if he ever wants the
+    ramp gentler is a `WORD_SHAPE_FORM_MIN_S` entry for `radial` — a
+    change to the timing he approved, so his call, not this row's.
+
+Proofs: `tests/test_star_word_shape.py` (untold byte-identity against the
+PINNED module hosted beside today's in the same room on the same strip,
+with the `random_sign` spin roll both ways and at its historical zero; the
+form completing on the word at 0.5 s and 0.9 s; the clarity bar; the
+governor's curve frame by frame and a charge taking it back; the wave held;
+the deferred Edge Morph; the band scroll still advancing; two words back to
+back, a second inside the release, a clearing write, a stale SEQ, an
+unknown id; the wiring). Evidence:
+`.venv/bin/python scripts/check_star_word_shape.py [--ascii]`.
+
 ## Out of Star: the bands release (transition programs)
 
 A program out of Star captures `_program_snapshot(settings)` — NOT
