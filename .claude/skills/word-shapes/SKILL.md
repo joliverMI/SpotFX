@@ -467,7 +467,10 @@ which names where each claim's behaviour is proven.
 - `tests/test_word_shape_contract.py` — the engine contract's own proofs;
   `tests/test_word_shapes.py` the library's;
   `tests/test_scenes_words_tab.py` + `scripts/check_scenes_words_tab.mjs`
-  the Words tab's, the picker's and the two class lists'.
+  the Words tab's, the picker's and the two class lists';
+  `scripts/render_words_tab.py` (+ `spectra/web/harness/wordstab.html`)
+  drives the real tab and preview in a browser and measures that the
+  "forms" span ends ON the word — shots in `docs/evidence/words-tab/`.
 - The plan: https://claude.ai/artifact/FdeYJz4kXLt2QamYR8wSDB (section 2.1
   is the library; 2.3 and 2.4 are the keys and the timing; 2.3-2.5 are the
   engine contract).

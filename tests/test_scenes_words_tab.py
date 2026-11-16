@@ -9,6 +9,11 @@ its three ruler marks, the no-knobs Word Shape kind, the save's advisory
 notes, and the help topic the tab links. Skipped (not failed) with no
 frontend toolchain, the posture every .mjs check in this repo takes.
 
+IN A REAL BROWSER — scripts/render_words_tab.py drives the REAL tab and the
+REAL preview overlay against a mocked backend and measures what a
+screenshot hides, above all that the "forms" span ENDS ON the word's own
+mark. It skips, saying why, with no Chromium or no harness build.
+
 BACKEND — the two wires the UI depends on, exercised through the HTTP routes
 the editor itself calls:
 
@@ -32,6 +37,7 @@ import json
 import pathlib
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -241,4 +247,14 @@ def test_the_words_tab_and_the_shape_picker():
     result = subprocess.run(
         ["node", str(REPO / "scripts" / "check_scenes_words_tab.mjs")],
         cwd=REPO, capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+
+
+def test_the_words_tab_in_a_real_browser():
+    """The ruler's own geometry — the form ending ON the word — plus the
+    picker, the add flow and the inline note, at 1440/820/390. The script
+    skips cleanly (exit 0, saying why) with no Chromium or harness build."""
+    result = subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "render_words_tab.py"), "--no-shots"],
+        cwd=REPO, capture_output=True, text=True, timeout=600)
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
