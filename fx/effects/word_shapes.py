@@ -24,59 +24,92 @@ the direction of increasing `theta`); drawn on the panel with y downward
 that reads as clockwise. `build()` enforces the box and the orientation, so
 a new entry can be written in whatever units and winding are natural for it.
 
-THE CONVENTION AN EFFECT USES. A view is in unit coordinates; an effect
-scales it to its own size, with SIZE the shape's half-height in that
-effect's own coordinates:
+THE CONVENTION AN EFFECT USES — NORMALIZED SPACE, NOT CELLS. A view is in
+unit coordinates; an effect scales it by SIZE, **the shape's half-height in
+the effect's own NORMALIZED coordinates, where 1.0 is the panel's own
+half-height**:
 
     r      = SIZE * shape.polar(theta)        # radius per angle
     x, y   = SIZE * shape.at(s)               # a point along the outline
-    d      = shape.sdf(x / SIZE, y / SIZE) * SIZE   # distance in cells
+    d      = shape.sdf(x / SIZE, y / SIZE) * SIZE   # distance, normalized
 
-The plan's default SIZE is 0.62 of the panel's half-height
-(`word_shape_size`, a per-effect registered param added in wave 1) — on his
-live crystal-mapper that is 0.62 * (37 - 1) / 2 = 11.16 cells. Nothing in
-this module knows about a panel, a device or a told key: it is pure
-geometry, and `scripts/check_word_shapes.py` is what measures a shape
-against the real hex mask.
+Those are the coordinates every Twod effect already works in: it turns a
+cell into `(col - cx) / ((cols - 1) / 2)`, `(row - cy) / ((rows - 1) / 2)`
+— the familiar `sx`/`sy` pair — so x and y each run -1..1 across the panel
+whatever its shape. SIZE is therefore a FRACTION (the plan's default 0.62,
+`word_shape_size`, a per-effect registered param added in wave 1), never a
+number of cells: on his crystal `SIZE = 0.62` means 0.62 x 35.5 = 22.0
+columns of half-width and 0.62 x 18 = 11.2 rows of half-height for the
+same unit length.
 
-ACCURACY AND COST, measured (both pinned by tests/test_word_shapes.py, so
-a change that makes either worse is a visible one):
+**The effect's own sx/sy carry the panel's anisotropy, and so does the
+shape.** A crystal column is half a real-cell pitch and a row is sqrt(3)/2
+of one (the hex lattice: `.claude/skills/crystal-hex-grid/SKILL.md`), so a
+shape drawn with one SIZE in normalized space comes out about 14% wider
+than tall in the room — the panel's own aspect, the same way every other
+effect's circle is. Measuring it in raw grid cells instead, with one size
+for both axes, draws it squashed to barely half its width: that was a real
+bug in this module's check script (caught in review of PR 519), and
+`scripts/check_word_shapes.py` now measures in normalized space with
+distances in PHYSICAL pitch units.
 
-- `polar` is exact to 1e-13 at every whole degree (its own bin) and within
-  1.0% of a direct ray cast at the worst half-bin offset — a tenth of a
-  cell at the plan's default size, and only across a kink.
-- `sdf` over the whole crystal panel (2,664 cells) costs ~10 ms for the
-  heart, ~11 ms for the star and ~8 ms for the diamond in float64, and
-  about 60% of that in float32 (pass float32 arrays and the pass stays
-  float32). That is per CALL, not per frame: an effect that needs the
-  field every frame should hold it and rebuild it only when the shape,
-  size or offset actually moves.
+Nothing in this module knows about a panel, a device or a told key: it is
+pure geometry, and that check script is what measures a shape against the
+real hex mask.
 
-THE THREE VIEWS, each built once per shape at import and cached on the
-entry (numpy throughout — no per-frame Python loops):
+ACCURACY AND COST, measured (all pinned by tests/test_word_shapes.py, so a
+change that makes any of them worse is a visible one):
+
+- `polar` is exact at every whole degree (every one is its own bin, and
+  the table is the analytic ray cast) and within 1.0% of that cast at the
+  worst half-bin offset — a tenth of a cell at the plan's default size,
+  and only across a kink.
+- `sdf` is EXACT and costs ~10 ms (heart), ~11 ms (star), ~8 ms (diamond)
+  over the whole crystal panel (2,664 cells) in float64, about 60% of that
+  in float32 (the dtype follows the inputs). Right for a check, a
+  measurement or a one-off target; far too slow for a frame.
+- `sdf_fast` is the per-frame field: ~0.13 ms for the same 2,664 cells,
+  within FAST_TOLERANCE (0.01 units; measured worst 0.009, the star's) of
+  `sdf`. Its grid costs ~200 ms to build, once, on first use — `prime()`
+  moves that off the render path. FAST_SPACING is 0.02 rather than 0.01 on
+  purpose: 0.01 is four times the build for an error already well inside
+  the bar.
+
+LAZY ON PURPOSE. `build()` does only the cheap work (normalise, orient,
+arc lengths, segment constants); the star-shaped verdict, the polar table
+and the `sdf_fast` grid are each built on first use and kept on the entry.
+Importing this module is ~3 ms however many shapes it ships — it used to
+be 0.5 s, which every LedFX start and every SPECTRA import of the word
+seeds would have paid for shapes it never draws (PR 519 review).
+
+THE THREE VIEWS (numpy throughout — no per-frame Python loops):
 
 - `polar(theta)` — the radius of the outline along the ray at `theta`, from
-  a POLAR_BINS-bin table built by bisection on the signed distance and
-  linearly interpolated, plus `polar_mean`. Black Hole's shaped horizon and
+  a POLAR_BINS-bin table (the analytic `ray_radius` at each bin) read with
+  linear interpolation, plus `polar_mean`. Black Hole's shaped horizon and
   STAR's shaped radius read this. It is only defined for a shape that is
   STAR-SHAPED about its own centre (every ray from (0, 0) crosses the
-  outline exactly once); `build()` measures that and records it as
-  `star_shaped`, and `polar()` raises ValueError for a shape that is not.
-  All three shipped shapes are star-shaped — the heart's cleft is a notch,
-  not a fold, which is measured here rather than assumed.
+  outline exactly once); `star_shaped` measures that on first read, and
+  `polar()` raises ValueError for a shape that is not. All three shipped
+  shapes are star-shaped — the heart's cleft is a notch, not a fold, which
+  is measured rather than assumed.
 - `at(s)` — the point a fraction `s` of the way round the outline BY ARC
   LENGTH (`s` wraps, so `at(1.0) == at(0.0)`), from a cumulative-length
   table, plus `tangent(s)` (a unit heading). Orbits' tethers, Fish's
   procession and Fireworks' spark targets read these.
-- `sdf(x, y)` — the signed distance to the outline, negative inside,
-  vectorised over arrays of any shape (an even-odd inside test plus the
-  minimum distance to the polyline's segments). Sauron's shaped iris and
-  pupil, and Fireworks' fill test, read this.
+- `sdf(x, y)` / `sdf_fast(x, y)` — the signed distance to the outline,
+  negative inside, vectorised over arrays of any shape (an even-odd inside
+  test plus the minimum distance to the polyline's segments; the fast one
+  is bilinear from a lookup grid of that same field). Sauron's shaped iris
+  and pupil, and Fireworks' fill test, read these.
 
-`ray_radius()` is the independent reference the star-shaped check and the
-tests use: a direct ray/segment cast over the polyline, which is NOT how
-the polar table is built (bisection on the sdf), so the two agreeing is
-real evidence rather than one implementation checking itself.
+TWO IMPLEMENTATIONS, ON PURPOSE. `ray_radius()` — a direct ray/segment
+cast over the polyline — is what the polar table is built from, and
+`polar_table_by_bisection()` is the same quantity found the slow way, by
+bisecting the signed distance along each ray. They share no code, so the
+tests holding them to 1e-12 of each other is real evidence rather than one
+implementation checking itself; `scripts/check_word_shapes.py` re-measures
+the star-shaped verdict a third way (an sdf step-walk).
 
 WHO READS THE WORDS. `words` are the shape's STARTING sung words, exactly
 as `spectra/services/sung_labels.py`'s `EFFECT_SEEDS` holds an effect's —
@@ -87,18 +120,18 @@ ADDING A SHAPE (the whole job):
   1. one `build(...)` call in `_SHAPES` below, with the outline in whatever
      units suit it and its starting words;
   2. run `.venv/bin/python scripts/check_word_shapes.py` — the outline must
-     be at least `min_stroke_px` lit cells thick everywhere on the real hex
-     mask, and the script says whether it is star-shaped;
+     have at least `min_stroke_px` real cells within one pitch everywhere
+     on the real hex mask (`--ascii` draws it), and the script says
+     whether it is star-shaped;
   3. if it is not star-shaped that is fine, but no effect may call
      `polar()` on it — it has the outline and distance views only;
-  4. update `.claude/skills/word-shapes/SKILL.md` in the same change.
+  4. re-pin the new shape's numbers in tests/test_word_shapes.py, and
+     update `.claude/skills/word-shapes/SKILL.md`, in the same change.
 """
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Optional
-
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
@@ -122,6 +155,18 @@ _STAR_CHECK_RAYS = 1440
 # Two hits this close together along the same ray are the same crossing
 # (a ray through a vertex), not two.
 _SAME_HIT_EPS = 1e-6
+
+# The lookup grid behind `sdf_fast`: spacing in unit coordinates, and how
+# far out it reaches in both axes. The extent covers the whole crystal
+# panel for any shape size down to 0.5 of the panel's half-height (a panel
+# corner is 1/SIZE out in shape coordinates); past it, `sdf_fast` falls
+# back to the exact field. The spacing is measured, not guessed — see
+# ACCURACY AND COST in the module docstring.
+FAST_SPACING = 0.02
+FAST_EXTENT = 2.0
+# What `sdf_fast` is worth: the measured worst error of the bilinear
+# lookup against the exact field, rounded up. Pinned by the tests.
+FAST_TOLERANCE = 0.01
 
 # Points this close together are the same point (a repeated closing point).
 _SAME_POINT_EPS = 1e-9
@@ -254,13 +299,48 @@ class Shape:
     upright: bool = True
 
     # ── derived, filled in by build() ──────────────────────────────────
-    star_shaped: bool = field(default=False, repr=False)
     perimeter: float = field(default=0.0, repr=False)
-    polar_mean: float = field(default=float("nan"), repr=False)
     _cum: NDArray[np.float64] = field(default=None, repr=False)  # type: ignore[assignment]
     _seg: tuple = field(default=(), repr=False)
     _closed: NDArray[np.float64] = field(default=None, repr=False)  # type: ignore[assignment]
-    _polar_table: Optional[NDArray[np.float64]] = field(default=None, repr=False)
+    # Everything expensive lives here, built on first use and kept (LAZY, in
+    # the module docstring): "star_shaped", "polar_table", "fast". A frozen
+    # entry with one mutable cache is what lets import stay cheap. Two
+    # threads racing to build the same key both compute the same value and
+    # the dict write is atomic, so the race is harmless.
+    _lazy: dict = field(default_factory=dict, repr=False)
+
+    # ── the star-shaped verdict (lazy) ─────────────────────────────────
+    @property
+    def star_shaped(self) -> bool:
+        """Whether every ray from (0, 0) crosses the outline exactly once,
+        so the shape HAS a radius per angle. Measured on first read, from
+        _STAR_CHECK_RAYS rays, and kept."""
+        verdict = self._lazy.get("star_shaped")
+        if verdict is None:
+            rays = np.arange(_STAR_CHECK_RAYS) * (2.0 * math.pi
+                                                  / _STAR_CHECK_RAYS)
+            _, counts = ray_radius(self.points, rays)
+            verdict = bool(np.all(counts == 1))
+            self._lazy["star_shaped"] = verdict
+        return verdict
+
+    @property
+    def polar_mean(self) -> float:
+        """The mean radius over the whole table — NaN for a shape that is
+        not star-shaped, which has no radius per angle at all."""
+        if not self.star_shaped:
+            return float("nan")
+        return float(self._polar_table().mean())
+
+    def prime(self) -> "Shape":
+        """Build everything lazy now and return self — for a caller that
+        wants the cost on ITS thread (a config write, a test, a check
+        script) rather than on the first frame that needs it."""
+        if self.star_shaped:
+            self._polar_table()
+        self._fast_grid()
+        return self
 
     # ── the radius per angle ───────────────────────────────────────────
     def polar(self, theta: ArrayLike) -> NDArray[np.float64]:
@@ -268,18 +348,32 @@ class Shape:
         0 = +x, y DOWN as the effects use), linearly interpolated from the
         POLAR_BINS table. Raises ValueError for a shape that is not
         star-shaped about its centre, where no such radius exists."""
-        if self._polar_table is None:
-            raise ValueError(
-                f"shape {self.id!r} is not star-shaped about its centre: it "
-                f"has no radius per angle. Use at(s) or sdf(x, y) instead."
-            )
-        table = self._polar_table
+        table = self._polar_table()
         f = np.asarray(theta, dtype=np.float64) / (2.0 * math.pi) * POLAR_BINS
         i0 = np.floor(f)
         frac = f - i0
         lo = (i0.astype(np.int64)) % POLAR_BINS
         hi = (lo + 1) % POLAR_BINS
         return table[lo] * (1.0 - frac) + table[hi] * frac
+
+    def _polar_table(self) -> NDArray[np.float64]:
+        """The POLAR_BINS-bin radius table, built on first use from
+        `ray_radius` — the analytic ray/segment cast, which is exact at a
+        bin and costs a few milliseconds once.
+        `polar_table_by_bisection()` is the independent second
+        implementation the tests check this one against."""
+        table = self._lazy.get("polar_table")
+        if table is None:
+            if not self.star_shaped:
+                raise ValueError(
+                    f"shape {self.id!r} is not star-shaped about its "
+                    f"centre: it has no radius per angle. Use at(s) or "
+                    f"sdf(x, y) instead."
+                )
+            thetas = np.arange(POLAR_BINS) * (2.0 * math.pi / POLAR_BINS)
+            table, _ = ray_radius(self.points, thetas)
+            self._lazy["polar_table"] = table
+        return table
 
     # ── the walk along the outline ─────────────────────────────────────
     def at(self, s: ArrayLike) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
@@ -340,42 +434,87 @@ class Shape:
             out[start:start + _SDF_CHUNK] = np.where(inside, -dist, dist)
         return out.reshape(xa.shape)
 
+    # ── the per-frame-safe signed distance ─────────────────────────────
+    def _fast_grid(self) -> tuple:
+        """The lookup grid `sdf_fast` reads, built on first use: the exact
+        field sampled every FAST_SPACING over [-FAST_EXTENT, FAST_EXTENT]
+        in both axes, in float32."""
+        grid = self._lazy.get("fast")
+        if grid is None:
+            n = int(round(2.0 * FAST_EXTENT / FAST_SPACING)) + 1
+            axis = np.linspace(-FAST_EXTENT, FAST_EXTENT, n)
+            gx, gy = np.meshgrid(axis, axis)
+            table = self.sdf(gx, gy).astype(np.float32)
+            grid = (table, np.float32(axis[0]),
+                    np.float32(axis[1] - axis[0]), n)
+            self._lazy["fast"] = grid
+        return grid
+
+    def sdf_fast(self, x: ArrayLike, y: ArrayLike) -> NDArray[np.float32]:
+        """`sdf` for a render frame: bilinear from the lookup grid, always
+        float32, within FAST_TOLERANCE of the exact field (measured; the
+        tests pin it). A point outside the grid's own box falls back to the
+        exact `sdf`, so the answer is never wrong, only slower for those
+        points.
+
+        Use `sdf` for a check, a measurement or a one-off target, and this
+        one for a field evaluated every frame (Sauron's shaped iris and
+        pupil under a moving gaze). Its only real cost is the first call,
+        which builds the grid — call `prime()` off the render path if that
+        matters.
+
+        Within about FAST_TOLERANCE of the outline the interpolated sign
+        can differ from the exact one; that is what the tolerance means,
+        and nothing should decide "inside" from this at sub-cell distances.
+        """
+        table, origin, step, n = self._fast_grid()
+        xa, ya = np.broadcast_arrays(np.asarray(x, dtype=np.float32),
+                                     np.asarray(y, dtype=np.float32))
+        fx = (xa - origin) / step
+        fy = (ya - origin) / step
+        i0 = np.clip(fx.astype(np.int32), 0, n - 2)
+        j0 = np.clip(fy.astype(np.int32), 0, n - 2)
+        tx = np.clip(fx - i0, 0.0, 1.0).astype(np.float32)
+        ty = np.clip(fy - j0, 0.0, 1.0).astype(np.float32)
+        out = (table[j0, i0] * (1.0 - tx) * (1.0 - ty)
+               + table[j0, i0 + 1] * tx * (1.0 - ty)
+               + table[j0 + 1, i0] * (1.0 - tx) * ty
+               + table[j0 + 1, i0 + 1] * tx * ty)
+        outside = (fx < 0.0) | (fx > n - 1) | (fy < 0.0) | (fy > n - 1)
+        if outside.any():
+            out = np.array(out, dtype=np.float32, copy=True)
+            out[outside] = self.sdf(xa[outside], ya[outside]).astype(np.float32)
+        return out
+
+
 
 def build(id: str, name: str, points: ArrayLike, words: tuple[str, ...],
           upright: bool = True) -> Shape:
-    """One shape entry, normalised into the unit box and oriented, with all
-    three views derived and cached (module docstring). This is the only way
-    a Shape is made — `SHAPES` uses it, and so does any test or script that
-    wants a shape the registry does not ship."""
+    """One shape entry, normalised into the unit box and oriented. This is
+    the only way a Shape is made — `SHAPES` uses it, and so does any test
+    or script that wants a shape the registry does not ship. It does only
+    the cheap work: every derived view is built on first use (LAZY, in the
+    module docstring), so importing this module stays a few milliseconds
+    however many shapes it ships."""
     pts = _orient(_normalise_box(_as_points(points)))
     cum = _cum_lengths(pts)
     closed = np.concatenate([pts, pts[:1]])
     perimeter = float(cum[-1])
 
-    shape = Shape(id=id, name=name, points=pts, words=tuple(words),
-                  upright=bool(upright), star_shaped=False,
-                  perimeter=perimeter, polar_mean=float("nan"),
-                  _cum=cum, _seg=_segments(pts), _closed=closed,
-                  _polar_table=None)
-
-    # Star-shaped? Every ray from the centre crosses the outline exactly
-    # once (measured, never assumed — the heart's cleft is the case this
-    # exists for).
-    rays = np.arange(_STAR_CHECK_RAYS) * (2.0 * math.pi / _STAR_CHECK_RAYS)
-    _, counts = ray_radius(pts, rays)
-    star_shaped = bool(np.all(counts == 1))
-    object.__setattr__(shape, "star_shaped", star_shaped)
-
-    if star_shaped:
-        table = _polar_table(shape)
-        object.__setattr__(shape, "_polar_table", table)
-        object.__setattr__(shape, "polar_mean", float(table.mean()))
-    return shape
+    return Shape(id=id, name=name, points=pts, words=tuple(words),
+                 upright=bool(upright), perimeter=perimeter,
+                 _cum=cum, _seg=_segments(pts), _closed=closed)
 
 
-def _polar_table(shape: Shape) -> NDArray[np.float64]:
-    """The radius per angle, by bisection on the signed distance: for every
-    bin, the r where `sdf` changes sign along that bin's ray."""
+def polar_table_by_bisection(shape: Shape) -> NDArray[np.float64]:
+    """The radius per angle the SLOW, independent way: for every bin, the r
+    where `sdf` changes sign along that bin's ray, found by bisection.
+
+    Not what `Shape.polar` uses (that is the analytic `ray_radius`, which
+    is exact and cheap) — this is the second implementation the tests check
+    the live table against, and the reason a wrong outline cannot agree
+    with itself.
+    """
     thetas = np.arange(POLAR_BINS) * (2.0 * math.pi / POLAR_BINS)
     ux, uy = np.cos(thetas), np.sin(thetas)
     if shape.sdf(0.0, 0.0) >= 0.0:
@@ -468,6 +607,7 @@ def has(id: str) -> bool:
 
 
 __all__ = [
-    "POLAR_BINS", "Shape", "SHAPES", "build", "get", "has", "ray_radius",
-    "shape_ids",
+    "FAST_EXTENT", "FAST_SPACING", "FAST_TOLERANCE", "POLAR_BINS", "Shape",
+    "SHAPES", "build", "get", "has", "polar_table_by_bisection",
+    "ray_radius", "shape_ids",
 ]

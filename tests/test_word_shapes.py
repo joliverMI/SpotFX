@@ -31,6 +31,7 @@ from __future__ import annotations
 import math
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -46,16 +47,17 @@ from scripts import check_word_shapes as check  # noqa: E402
 
 SHIPPED = ("heart", "star", "diamond")
 
-# The check script's measurements at the plan's default size (0.62 x the
-# panel's half-height) on his live crystal-mapper mask. The outline count
-# is the denominator of every wave-1 outline-coverage bar; changing one of
-# these numbers means a shape's drawn outline moved, which is never
-# accidental.
+# The check script's measurements at the plan's default size (SIZE 0.62 of
+# the panel's half-height, in the effects' own NORMALIZED space) on his
+# live crystal-mapper mask, with every distance in physical pitch units.
+# The outline count is the denominator of every wave-1 outline-coverage
+# bar, so changing one of these numbers means a shape's drawn outline
+# moved, which is never accidental.
 PINNED = {
     #            outline, inside, thinnest
-    "heart":   (109, 168, 2),
-    "star":    (115, 100, 2),
-    "diamond": (79, 97, 2),
+    "heart":   (168, 332, 3),
+    "star":    (176, 196, 3),
+    "diamond": (119, 191, 3),
 }
 
 
@@ -170,7 +172,64 @@ def test_all_three_shipped_shapes_are_star_shaped_about_their_centre():
         assert word_shapes.get(shape_id).star_shaped is True
 
 
+def test_nothing_expensive_is_built_until_it_is_used():
+    # W0.2 imports this module inside SPECTRA just for the word seeds, and
+    # every fx module loads at LedFX start, so importing it must not build
+    # a table for a shape nobody draws (PR 519 review: it used to cost
+    # 0.5 s). The registry's own entries are already primed by the tests
+    # around this one, so this is checked on a fresh build.
+    shape = word_shapes.build("fresh", "Fresh",
+                              word_shapes._heart_points(), ("x",))
+    assert shape._lazy == {}
+    assert shape.star_shaped is True
+    assert set(shape._lazy) == {"star_shaped"}
+    shape.polar(0.0)
+    assert set(shape._lazy) == {"star_shaped", "polar_table"}
+    shape.sdf_fast(0.0, 0.0)
+    assert set(shape._lazy) == {"star_shaped", "polar_table", "fast"}
+    # and the exact views never need any of it
+    plain = word_shapes.build("plain", "Plain",
+                              word_shapes._heart_points(), ("x",))
+    plain.at(0.3)
+    plain.tangent(0.3)
+    plain.sdf(0.0, 0.0)
+    assert plain._lazy == {}
+
+
+def test_building_every_shipped_shape_is_cheap():
+    # this IS the import cost: `_SHAPES` is three build() calls
+    outlines = [word_shapes.get(i).points for i in SHIPPED]
+    start = time.perf_counter()
+    for i, pts in zip(SHIPPED, outlines):
+        word_shapes.build(i, i, pts, ("x",))
+    elapsed = time.perf_counter() - start
+    assert elapsed < 0.1, f"building three shapes took {elapsed * 1000:.0f} ms"
+
+
+def test_prime_builds_everything_so_a_frame_does_not_have_to():
+    shape = word_shapes.build("primed", "Primed",
+                              word_shapes._heart_points(), ("x",)).prime()
+    assert set(shape._lazy) == {"star_shaped", "polar_table", "fast"}
+    # a shape with no radius per angle still primes what it does have
+    crescent = _crescent().prime()
+    assert "polar_table" not in crescent._lazy
+    assert set(crescent._lazy) == {"star_shaped", "fast"}
+
+
+def test_the_live_polar_table_agrees_with_the_slow_bisection():
+    # two implementations sharing no code: the analytic ray/segment cast
+    # the table is built from, and bisection on the signed distance
+    for shape_id in SHIPPED:
+        shape = word_shapes.get(shape_id)
+        assert np.allclose(shape._polar_table(),
+                           word_shapes.polar_table_by_bisection(shape),
+                           atol=1e-12)
+
+
 def test_polar_matches_a_direct_ray_cast_of_the_polyline():
+    # the table IS that cast at each bin, so this is the reading path
+    # (wrapping, indexing, interpolation) rather than the geometry — the
+    # geometry is checked against bisection in the test above.
     thetas = np.radians(np.arange(360.0))
     for shape_id in SHIPPED:
         shape = word_shapes.get(shape_id)
@@ -182,9 +241,10 @@ def test_polar_matches_a_direct_ray_cast_of_the_polyline():
 
 
 def test_polar_is_read_exactly_at_a_bin_and_pinned_between_two():
-    # every whole degree IS a bin (720 bins = half a degree), so those are
-    # exact; between two bins the radius is interpolated, which errs only
-    # across a kink. Pinned so a coarser table or a kinkier outline shows up.
+    # every whole degree IS a bin (720 bins = half a degree), so those read
+    # exactly; between two bins the radius is interpolated, which errs only
+    # across a kink. Pinned so a coarser table or a kinkier outline shows up
+    # — at the plan's default size 1% of the radius is a tenth of a cell.
     thetas = np.radians(np.arange(360.0))
     offset = np.linspace(0.0, 2.0 * math.pi, 7200, endpoint=False)
     worst = {}
@@ -363,6 +423,59 @@ def test_sdf_agrees_with_the_radius_per_angle():
         assert np.all(inside < 0.0)
 
 
+def test_sdf_fast_is_within_its_tolerance_of_the_exact_field():
+    rng = np.random.default_rng(20261116)
+    inside_grid = word_shapes.FAST_EXTENT - 1e-3
+    for shape_id in SHIPPED:
+        shape = word_shapes.get(shape_id)
+        px = rng.uniform(-inside_grid, inside_grid, 20_000)
+        py = rng.uniform(-inside_grid, inside_grid, 20_000)
+        err = np.abs(shape.sdf_fast(px, py) - shape.sdf(px, py))
+        assert err.max() <= word_shapes.FAST_TOLERANCE, (
+            f"{shape_id}: sdf_fast is off by {err.max():.4f}")
+
+
+def test_sdf_fast_over_the_whole_crystal_panel_is_accurate_and_quick():
+    # the case that pays for it: Sauron re-evaluating the shaped iris and
+    # pupil over every cell, every frame, under a moving gaze
+    panel = check.load_panel()
+    size = check.DEFAULT_SIZE_FRACTION
+    norm_x, norm_y = panel.normalized()
+    x = (norm_x / size).astype(np.float32)
+    y = (norm_y / size).astype(np.float32)
+    assert x.size == 2664
+    for shape_id in SHIPPED:
+        shape = word_shapes.get(shape_id).prime()
+        err = np.abs(shape.sdf_fast(x, y)
+                     - shape.sdf(x.astype(np.float64), y.astype(np.float64)))
+        assert err.max() <= word_shapes.FAST_TOLERANCE
+        start = time.perf_counter()
+        for _ in range(20):
+            shape.sdf_fast(x, y)
+        fast = (time.perf_counter() - start) / 20
+        start = time.perf_counter()
+        shape.sdf(x, y)
+        exact = time.perf_counter() - start
+        assert fast < 0.002, f"{shape_id}: sdf_fast took {fast * 1e3:.2f} ms"
+        assert fast < exact / 10.0
+
+
+def test_sdf_fast_is_float32_and_falls_back_outside_its_grid():
+    heart = word_shapes.get("heart")
+    assert heart.sdf_fast(np.zeros(5), np.zeros(5)).dtype == np.float32
+    assert heart.sdf_fast(0.0, 0.0).shape == ()
+    assert heart.sdf_fast(np.zeros((3, 4)), np.zeros((3, 4))).shape == (3, 4)
+    far = word_shapes.FAST_EXTENT + 7.0
+    # outside the grid it is the exact field, not a clamped edge value
+    assert float(heart.sdf_fast(far, far)) == pytest.approx(
+        float(heart.sdf(far, far)), rel=1e-5)
+    mixed_x = np.array([0.0, far, 0.5])
+    mixed_y = np.array([0.0, far, -0.5])
+    assert np.allclose(heart.sdf_fast(mixed_x, mixed_y),
+                       heart.sdf(mixed_x, mixed_y),
+                       atol=word_shapes.FAST_TOLERANCE)
+
+
 # ── a shape that is not star-shaped ────────────────────────────────────────
 
 def test_a_crescent_is_not_star_shaped_and_polar_refuses_it():
@@ -378,16 +491,16 @@ def test_a_crescent_is_not_star_shaped_and_polar_refuses_it():
 
 
 def test_the_check_script_reports_a_crescent_and_fails_a_false_claim():
-    panel = check.load_panel(check.DEFAULT_PROFILE)
-    size = check.DEFAULT_SIZE_FRACTION * panel.half_height
+    panel = check.load_panel()
+    size = check.DEFAULT_SIZE_FRACTION
     crescent = _crescent()
-    measured, _ = check.measure(crescent, panel, size)
+    measured, _, _ = check.measure(crescent, panel, size)
     assert measured.walked_star_shaped is False
     assert measured.worst_ray_crossings != 1
     # honest about it = not a failure; claiming otherwise = a failure
     assert measured.claims_star_shaped is False
-    object.__setattr__(crescent, "star_shaped", True)
-    forged, _ = check.measure(crescent, panel, size)
+    crescent._lazy["star_shaped"] = True      # forge the claim on purpose
+    forged, _, _ = check.measure(crescent, panel, size)
     assert forged.claims_star_shaped is True
     assert forged.ok is False
 
@@ -513,14 +626,62 @@ def test_the_envelope_returns_a_float_for_a_scalar_and_an_array_otherwise():
 
 # ── the check script ───────────────────────────────────────────────────────
 
+def test_the_pitch_constants_match_the_real_lattice():
+    # a real cell's neighbours are 2 columns along its own row, and one
+    # column / one row diagonally — both exactly one pitch away. That is
+    # what makes a column half a pitch and a row sqrt(3)/2 of one.
+    panel = check.load_panel()
+    assert check.COLUMN_PITCH * 2 == pytest.approx(check.CELL_PITCH)
+    assert math.hypot(check.COLUMN_PITCH, check.ROW_PITCH) == pytest.approx(
+        check.CELL_PITCH)
+    # and the mask really is that lattice: pick a real cell in an interior
+    # row and both neighbours are real
+    row = panel.rows // 2
+    cols = np.nonzero(panel.grid[row])[0]
+    col = int(cols[len(cols) // 2])
+    assert panel.grid[row, col + 2]
+    assert panel.grid[row + 1, col + 1] or panel.grid[row + 1, col - 1]
+
+
+def test_a_drawn_shape_is_not_squashed_on_the_panel():
+    # the PR 519 review's defect: measuring in raw grid cells with one
+    # size for both axes drew every shape at about half its real width
+    # (0.577x, the column/row pitch ratio). In normalized space the panel's
+    # own aspect makes it slightly WIDER than its unit box, never narrower.
+    panel = check.load_panel()
+    size = check.DEFAULT_SIZE_FRACTION
+    for shape_id in SHIPPED:
+        shape = word_shapes.get(shape_id)
+        _, outline, _ = check.measure(shape, panel, size)
+        rows_idx, cols_idx = np.nonzero(outline)
+        drawn_w = (cols_idx.max() - cols_idx.min()) * check.COLUMN_PITCH
+        drawn_h = (rows_idx.max() - rows_idx.min()) * check.ROW_PITCH
+        unit = shape.points
+        unit_w = unit[:, 0].max() - unit[:, 0].min()
+        unit_h = unit[:, 1].max() - unit[:, 1].min()
+        # expected, from the two coordinate systems alone
+        want_w = unit_w * size * panel.half_width * check.COLUMN_PITCH
+        want_h = unit_h * size * panel.half_height * check.ROW_PITCH
+        assert drawn_w == pytest.approx(want_w, abs=2.0)
+        assert drawn_h == pytest.approx(want_h, abs=2.0)
+        # the panel's aspect widens every shape by the same ~14%
+        aspect = (drawn_w / drawn_h) / (unit_w / unit_h)
+        assert 1.05 < aspect < 1.25
+
+
 def test_the_check_scripts_numbers_for_the_three_shapes_are_pinned():
-    panel = check.load_panel(check.DEFAULT_PROFILE)
+    panel = check.load_panel()
     assert (panel.rows, panel.cols) == (37, 72)
     assert int(panel.grid.sum()) == 976
-    size = check.DEFAULT_SIZE_FRACTION * panel.half_height
-    assert size == pytest.approx(11.16)
+    # SIZE is a FRACTION of the panel's half-height in normalized space,
+    # not a count of cells: the same unit length is 22.0 columns across and
+    # 11.2 rows down, and the effect's own sx/sy carry that anisotropy
+    size = check.DEFAULT_SIZE_FRACTION
+    assert size == pytest.approx(0.62)
+    assert size * panel.half_width == pytest.approx(22.01)
+    assert size * panel.half_height == pytest.approx(11.16)
     for shape_id, (outline, inside, thinnest) in PINNED.items():
-        m, _ = check.measure(word_shapes.get(shape_id), panel, size)
+        m, _, _ = check.measure(word_shapes.get(shape_id), panel, size)
         assert (m.outline_cells, m.inside_cells) == (outline, inside), (
             f"{shape_id}: the outline moved — every wave-1 coverage bar is a "
             f"fraction of the outline count, so update PINNED deliberately")
@@ -530,16 +691,18 @@ def test_the_check_scripts_numbers_for_the_three_shapes_are_pinned():
         assert m.ok
 
 
-def test_the_thinnest_point_does_not_depend_on_how_finely_it_is_sampled():
-    panel = check.load_panel(check.DEFAULT_PROFILE)
-    size = check.DEFAULT_SIZE_FRACTION * panel.half_height
+def test_the_measurements_do_not_depend_on_how_finely_it_is_sampled():
+    panel = check.load_panel()
+    size = check.DEFAULT_SIZE_FRACTION
     original = check.OUTLINE_SAMPLES
     try:
-        for samples in (360, 720, 1440):
+        for samples in (720, 1440, 2880):
             check.OUTLINE_SAMPLES = samples
             for shape_id in SHIPPED:
-                m, _ = check.measure(word_shapes.get(shape_id), panel, size)
-                assert m.thinnest == PINNED[shape_id][2]
+                m, _, _ = check.measure(word_shapes.get(shape_id), panel,
+                                        size)
+                assert (m.outline_cells, m.inside_cells, m.thinnest) == \
+                    PINNED[shape_id]
     finally:
         check.OUTLINE_SAMPLES = original
 

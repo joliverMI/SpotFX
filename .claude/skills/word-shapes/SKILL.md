@@ -42,7 +42,7 @@ that outline:
 |---|---|---|
 | radius per angle | `shape.polar(theta)`, `shape.polar_mean` | Black Hole's shaped horizon, STAR's shaped radius |
 | a point along the outline, by arc length | `shape.at(s)`, `shape.tangent(s)` | Orbits' tethers, Fish's procession, Fireworks' spark targets |
-| signed distance (negative inside) | `shape.sdf(x, y)` | Sauron's shaped iris and pupil, Fireworks' fill test |
+| signed distance (negative inside) | `shape.sdf(x, y)` exact, `shape.sdf_fast(x, y)` per frame | Sauron's shaped iris and pupil, Fireworks' fill test |
 
 The module's own docstring is the binding statement for the unit box, the
 y-DOWN convention, the winding, and the measured accuracy and cost. The
@@ -50,15 +50,44 @@ short version an effect needs:
 
 - the outline lives in a **unit box**: centred on (0, 0), height exactly
   2.0, width whatever the shape needs; **y points DOWN**, as on the panel;
-- an effect scales a view to its own size, with `SIZE` the shape's
-  half-height in that effect's coordinates:
+- an effect scales a view by `SIZE`, **the shape's half-height in the
+  effect's own NORMALIZED coordinates, where 1.0 is the panel's own
+  half-height** — the same `sx`/`sy` space every Twod effect already works
+  in (`(col - cx) / ((cols - 1) / 2)`, `(row - cy) / ((rows - 1) / 2)`):
   `SIZE * polar(theta)`, `SIZE * at(s)`, `sdf(x / SIZE, y / SIZE) * SIZE`;
-- the plan's default `SIZE` is **0.62 of the panel's half-height**
-  (`word_shape_size`, a per-effect registered param in wave 1) — 11.16
-  cells on his crystal;
+- the plan's default is `word_shape_size` **= 0.62**, a FRACTION, never a
+  number of cells: on his crystal that one unit of shape height is 0.62 x
+  18 = 11.2 rows, while one unit of shape WIDTH is 0.62 x 35.5 = 22.0
+  columns;
 - `polar` only exists for a shape that is **star-shaped about its centre**
-  (`shape.star_shaped`, measured at build); it raises for one that is not,
-  which still has the other two views.
+  (`shape.star_shaped`, measured on first read); it raises for one that is
+  not, which still has the other two views;
+- **`sdf` is exact but costs ~10 ms over the whole panel — never call it
+  per frame.** `sdf_fast` is the same field from a lazily built lookup
+  grid: ~0.13 ms for the panel's 2,664 cells, within `FAST_TOLERANCE`
+  (0.01 units) of the exact value, always float32, exact outside its grid.
+  Sauron's shaped iris and pupil are the case it exists for. `prime()`
+  builds the lazy parts on the caller's own thread so the first frame
+  does not pay for them.
+
+### Two things that are easy to get wrong
+
+**The panel is anisotropic and the shape inherits that.** A crystal column
+is half a real-cell pitch and a row is sqrt(3)/2 of one, so a shape drawn
+with one `SIZE` in normalized space comes out about 14% wider than tall in
+the room — exactly as every other effect's circle does, because the
+effect's `sx`/`sy` carry it. Measuring in raw grid cells with one size for
+both axes instead draws the shape squashed to 0.577 of its width; that was
+a real defect in this check script (PR 519 review), and
+`tests/test_word_shapes.py::test_a_drawn_shape_is_not_squashed_on_the_panel`
+is what keeps it fixed.
+
+**Nothing expensive happens at import.** `build()` does only the cheap
+work; the star-shaped verdict, the polar table and the `sdf_fast` grid are
+each built on first use and kept on the entry's `_lazy` cache. Importing
+the module is ~3 ms — it was 0.5 s before the same review, which every
+LedFX start and every SPECTRA import of the word seeds would have paid for
+shapes it never draws. Keep any new derived view lazy the same way.
 
 ## Adding a shape (the whole job)
 
@@ -68,6 +97,8 @@ short version an effect needs:
 2. `.venv/bin/python scripts/check_word_shapes.py`. It must PASS: the
    thinnest point of the outline needs at least 2 real cells within one
    cell pitch, or the outline breaks into dashes on the hex lattice.
+   `--ascii` draws it on the real mask — look at it; `--rows` prints the
+   per-row counts.
 3. Update `PINNED` in `tests/test_word_shapes.py` with the new shape's
    numbers (deliberately — see the next section).
 4. Update this skill, and the Sung labels seed for the new shape's words
@@ -86,9 +117,9 @@ his REAL `crystal-mapper` mask:
 
 | shape | outline cells | inside cells | thinnest point |
 |---|---|---|---|
-| heart | 109 | 168 | 2 |
-| star | 115 | 100 | 2 |
-| diamond | 79 | 97 | 2 |
+| heart | 168 | 332 | 3 |
+| star | 176 | 196 | 3 |
+| diamond | 119 | 191 | 3 |
 
 **Every wave-1 "outline coverage" clarity bar in the plan is a fraction of
 that outline count** ("at the hold, at least 65% of the shape's outline
@@ -98,9 +129,11 @@ A changed outline therefore has to be a deliberate change to that test
 too — which is the point: a bar whose denominator drifts silently is not a
 bar. Definitions:
 
-- **one cell pitch** = `sqrt(2)` addressable cells, because the real-column
-  parity flips row to row on this lattice, so a real cell's nearest real
-  neighbour is one column AND one row away (`crystal-hex-grid` skill);
+- the shape is PLACED in the effects' normalized space, and every
+  DISTANCE is measured in **physical pitch units**: a column is 0.5 of a
+  real-cell pitch, a row is sqrt(3)/2 of one, and one cell pitch (1.0) is
+  the distance between two neighbouring real cells in any of the six
+  lattice directions (`crystal-hex-grid` skill);
 - **outline cells** = real cells within one cell pitch of the outline;
 - **inside cells** = real cells strictly inside it;
 - **thinnest point** = the fewest real cells within one cell pitch of any
