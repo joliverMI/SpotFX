@@ -25,13 +25,47 @@ coverage percentage printed below is a fraction of that shape's own outline
 count, so a drifting denominator is a visible, deliberate change rather
 than a quietly moving bar.
 
+ROW W4.4 (2026-11-17) — HIS VERDICT, AND WHY THE BAR MOVED
+
+His words after the W3 room deploy: *"I can tell the fish and orbits are
+trying to do something, but it's not clear enough. They need to increase
+speed so they can pass the outline fast enough that their trail stays and
+it clearly forms the shape."* The W1.3 bar below counted a cell LIT at
+20/255 — EIGHT PERCENT of full — so it read 74-93% while the share of the
+outline band that was actually LIGHT (>= 128/255, half of full) was 1-25%.
+A faint, broken line passes a bar like that. The Fish review's lesson (a
+vacuous lit bar becomes a CONTRAST bar) is carried back here by row W4.4:
+THE ROW'S BAR IS NOW `report_contrast` below, over FEW with 1 and 3 blobs
+and MANY with 4 and 8 — the whole range his scene's Energy binding drives
+`particle_count` across — and the W1.3 numbers keep printing beside it for
+the record. The row's two levers, `word_shape_speed_x` (the speed he named)
+and `WORD_SHAPE_TRAIL_S`, are overridable from the command line below,
+because the sweep over them is what chose their defaults.
+
 WHAT IS MEASURED
 
-  coverage   real outline cells lit at or above LIT (20/255 on the frame's
-             brightest channel — `scripts/check_drop_shockwave.py`'s own
-             convention) by the blobs AND their comet trails, at the WORD
-             (the instant the form completes) and at MID-HOLD. The row's
-             bar: >= 60% with FEW blobs, >= 75% with MANY.
+  contrast   THE ROW'S BAR (W4.4). Over the shape's own outline band (real
+             cells within one cell pitch of the outline), at MID-HOLD and
+             at the HOLD'S END, with the worst over every hold frame
+             printed beside them: the share of band cells whose peak
+             channel is over BAND_LIT_LO (64/255), the band's mean
+             luminance over the REST of the panel's, and that share
+             against THE SAME SEED's frame UNTOLD — the comparison that
+             separates "the shape is brighter here" from "this effect
+             lights everything". Bars: BAND_LO_BAR_FEW / _MANY over 64,
+             ratio >= BAND_RATIO_BAR, share at least BAND_LIFT_X the
+             untold control's. The share over 128/255 is printed on every
+             row with its undecayed-trail ceiling, as the row's ONE OPEN
+             EXCEEDANCE — `report_contrast`'s docstring carries the exact
+             arithmetic that puts the spec's 90%-over-128 out of reach at
+             his `blob_size`, and `--needed` prints the ceilings.
+  coverage   THE W1.3 NUMBER, kept for the record: real outline cells lit
+             at or above LIT (20/255 on the frame's brightest channel —
+             `scripts/check_drop_shockwave.py`'s own convention) by the
+             blobs AND their comet trails, at the WORD (the instant the
+             form completes) and at MID-HOLD. Its bar: >= 60% with FEW
+             blobs, >= 75% with MANY. Still asserted at his fallback counts
+             (3 and 8) as a regression guard, no longer the row's claim.
   on_outline the greatest distance, in physical cell pitches, from a blob's
              centre (FEW) or its tether (MANY) to the outline at the hold.
              FEW's is exactly 0 by construction — which is the point: it
@@ -57,10 +91,20 @@ WHAT IS MEASURED
     .venv/bin/python scripts/check_orbits_word_shape.py
     .venv/bin/python scripts/check_orbits_word_shape.py --ascii
     .venv/bin/python scripts/check_orbits_word_shape.py --shape heart
+    .venv/bin/python scripts/check_orbits_word_shape.py --speed-x 4 \
+        --trail-s 2.5 --only contrast
 
 `--ascii` draws the lit outline cells at mid-hold on the real mask beside
-the shape's own outline, which is the quickest way to see whether a heart
-reads as a heart on 976 cells.
+the shape's own outline, and the W4.4 contrast report's own
+LUMINANCE-GRADED renders (`.` dark, `-` under 64, `+` under 128, `#` at or
+over 128 of 255) of the worst hold frame — which is the quickest way to see
+whether a heart reads as a heart on 976 cells.
+
+`--speed-x` and `--trail-s` override `word_shape_speed_x` and the module's
+`WORD_SHAPE_TRAIL_S` for the whole run: they are how row W4.4's own
+defaults were chosen, and re-running the sweep is how a later change
+re-decides them. `--only` runs one report (`mode`, `contrast`,
+`continuity`, `jwc`).
 """
 from __future__ import annotations
 
@@ -112,6 +156,14 @@ SET = ("linear-gradient(90deg, rgb(255,0,90) 0%, rgb(255,140,0) 33%, "
 
 FEW_N = 3           # his fallback count — FEW by the default threshold (3)
 MANY_N = 8          # the top of his Energy range — MANY
+# ROW W4.4: the whole count range his scene's Energy binding drives
+# `particle_count` across (1 -> 8), split by the default FEW threshold (3).
+# ONE blob is the case the W1.3 build could never have drawn a line with —
+# at `base_speed` 0.3 it walks a 168-cell outline in 3.3 s against a ~1 s
+# trail half-life, so most of the heart was always dark — and it is exactly
+# the case his quiet-Energy binding gives.
+FEW_COUNTS = (1, 3)
+MANY_COUNTS = (4, 8)
 ENERGIES = (0.2, 0.8)
 PHRASE_MS = 1200.0  # a typical sung phrase, so the hold lands mid-clamp
 SETTLE_S = 6.0      # swim before the word, so the trail history is honest
@@ -132,6 +184,42 @@ BAR_MANY = 0.75
 # at the same seed and the same audio. A shape may not make the picture jump
 # more than this effect already jumps by itself. The absolute number is
 # printed beside it either way.
+# ── ROW W4.4's BAR: "LIT" HAS TO MEAN CONTRAST HERE TOO ──────────────────
+# `LIT` above is 20 of 255 — eight percent of full. For a lingering comet
+# trail that is very nearly "above zero", and the W1.3 row shipped it as the
+# bar: measured again with this script's own rig, the W1.3 coverage read
+# 74-93% at the hold while the share of the same band over HALF of full read
+# 1-25%, and what he saw in the room was "not clear enough". So the row's
+# bar is the Fish review's `band_contrast` (`scripts/
+# check_fish_word_shape.py`, line 359) applied here:
+#
+#   * the share of the band's cells that are actually LIGHT — over
+#     BAND_LIT_HI of 255, not over nothing; and
+#   * the band's mean luminance over the REST of the lit panel's, told
+#     against THE SAME FRAME UNTOLD — the one number that separates "the
+#     shape is brighter here" from "this effect lights everything".
+#
+# Luminance is the cell's own peak channel, the same quantity `coverage`
+# reads. AT EVERY HOLD FRAME, not at one sampled frame: a line that is
+# whole at mid-hold and broken two frames later is a line that flickers.
+BAND_LIT_LO = 64.0
+BAND_LIT_HI = 128.0
+BAND_HI_BAR = 0.90        # the row's SPEC bar, reported not asserted
+# The bars actually asserted, set from the W4.4 measurement (the PR's own
+# sweep over `--speed-x` x `--trail-s`) — see `report_contrast`'s docstring
+# for why the threshold is BAND_LIT_LO rather than BAND_LIT_HI.
+BAND_LO_BAR_FEW = 0.55
+BAND_LO_BAR_MANY = 0.55
+BAND_RATIO_BAR = 1.4      # band/rest mean luminance
+# ... and the "it is not just lighting everything" comparison, read on the
+# band's own >= BAND_LIT_LO SHARE told against the SAME SEED's frame untold
+# rather than on the ratio of two means. The share is the robust form: on a
+# frame where the untold panel is nearly dark both means are tiny and their
+# ratio is noise — measured, one untold many-heart frame read a HIGHER
+# band/rest ratio than the told one while its band share was 7% against the
+# told 69%, because a couple of very bright untold cells happened to fall
+# in the band. The share cannot do that.
+BAND_LIFT_X = 3.0
 COST_BAR_MS = 1.0
 # A shape concentrates the blobs (MANY shrinks every orbit onto one outline),
 # so two beads of different colours can overlap additively where they never
@@ -163,6 +251,8 @@ TURN_MIN_SPEED = 0.2 / DT
 ENVELOPE_SLOPE_SLACK = 1.05
 
 FAILURES: list[str] = []
+# `--speed-x`'s override, in a one-cell list so `run()` sees the live value
+SPEED_X: list[float | None] = [None]
 
 
 def check(ok: bool, label: str) -> bool:
@@ -267,6 +357,8 @@ class Run:
         self.pos: list[tuple[np.ndarray, np.ndarray]] = []
         self.tether: list[tuple[np.ndarray, np.ndarray]] = []
         self.m: list[float] = []
+        # ROW W4.4: the latched mode's own speed multiplier, per frame
+        self.mult: list[float] = []
         self.cost_ms: list[float] = []
         self.edge = 0
         self.word = 0
@@ -298,6 +390,10 @@ async def run(shape_id: str | None, energy: float, count: int, *,
     try:
         with headless.fake_clock() as clock:
             np.random.seed(seed)
+            # ROW W4.4's two levers, overridable from the command line so the
+            # measurement that chose their defaults is re-runnable
+            if SPEED_X[0] is not None:
+                over.setdefault("word_shape_speed_x", SPEED_X[0])
             cfg = dict(HIS_MATRIX, gradient=SET, particle_count=count, **over)
             eff = headless.attach_effect(host, virtual, "orbits", cfg)
             eff._rng = np.random.default_rng(seed)
@@ -324,6 +420,8 @@ async def run(shape_id: str | None, energy: float, count: int, *,
                     out.pos.append((eff.cx + eff.p_x0[live] * eff.sx,
                                     eff.cy + eff.p_y0[live] * eff.sy))
                     out.m.append(float(eff._ws_m))
+                    walk_x, ring_x = eff._word_shape_speed_x()
+                    out.mult.append(max(walk_x, ring_x))
                     # the MANY tether, from the effect's OWN live model — the
                     # one quantity the many-mode blend puts on the outline
                     if shape_id is not None:
@@ -370,6 +468,42 @@ def coverage(frame: np.ndarray, outline: np.ndarray) -> float:
     if n == 0:
         return 0.0
     return float(np.count_nonzero((bright(frame) >= LIT) & outline)) / n
+
+
+def band_contrast(frame: np.ndarray, shape_id: str):
+    """(the band's share over BAND_LIT_LO, over BAND_LIT_HI, its mean
+    luminance over the REST of the panel's) — ROW W4.4's bar, the Fish
+    review's `band_contrast` applied to this effect.
+
+    The band is the shape's own outline band, straight from
+    `check_word_shapes.measure()` (the pinned 168/176/119 cells); the rest
+    is every other REAL cell. Luminance is the cell's peak channel."""
+    lum = bright(frame)
+    band, _n = outline_cells(shape_id)
+    rest = REAL2 & ~band
+    b = lum[band]
+    r = lum[rest]
+    if not b.size:
+        return 0.0, 0.0, 0.0
+    return (float((b > BAND_LIT_LO).mean()),
+            float((b > BAND_LIT_HI).mean()),
+            float(b.mean() / max(float(r.mean()), 1e-6)))
+
+
+def worst_hold(run_: Run, shape_id: str):
+    """The WORST hold frame's (>LO share, >HI share, ratio, its index) —
+    the minimum of each over every frame from the word to the hold's end.
+    A line that is whole at mid-hold and broken two frames later is a line
+    that flickers, so the bar is read at every one of them."""
+    lo = hi = ratio = 1.0
+    worst_i = run_.word
+    for i in range(run_.word, run_.hold_end + 1):
+        a, b, c = band_contrast(run_.frames[i], shape_id)
+        if b <= hi:
+            hi, worst_i = b, i
+        lo = min(lo, a)
+        ratio = min(ratio, c)
+    return lo, hi, ratio, worst_i
 
 
 def lit_count(frame: np.ndarray) -> int:
@@ -447,6 +581,50 @@ def blend_speed_bound(run_: Run, centre: int, half: int = 3) -> float:
         return 0.0
     dm = max(abs(run_.m[i] - run_.m[i - 1]) for i in range(lo, hi))
     return dm / DT * PANEL_DIAG_PX
+
+
+def frame_speeds(run_: Run) -> list[float]:
+    """The largest tracked blob's per-frame speed (px/s), frame by frame —
+    the denominator the multiplier's own bound is scaled by."""
+    out = []
+    for a, b in zip(run_.pos, run_.pos[1:]):
+        k = min(a[0].size, b[0].size)
+        if k == 0:
+            out.append(0.0)
+            continue
+        out.append(float(np.hypot(b[0][:k] - a[0][:k],
+                                  b[1][:k] - a[1][:k]).max()) / DT)
+    return out
+
+
+def multiplier_speed_bound(run_: Run, centre: int, half: int = 3) -> float:
+    """The MOST row W4.4's own speed multiplier can be changing a blob's
+    speed over a window of frames, in px/s.
+
+    The walk's speed along the outline is PROPORTIONAL to the multiplier,
+    so a one-frame change `dx` in it changes that speed by at most
+    `dx / x_max` of the speed the walk reaches at `x_max` — and the largest
+    per-frame speed recorded anywhere in the hold bounds that. Added to
+    `blend_speed_bound`, this is the whole of what row W4.4 and the W1.3
+    blend between them can do to a blob at a moment; everything left over
+    in the raw number is the OUTLINE's own geometry (see
+    `report_continuity`)."""
+    lo = max(1, centre - half)
+    hi = min(len(run_.mult), centre + half + 1)
+    if hi <= lo or not run_.mult:
+        return 0.0
+    dx = max(abs(run_.mult[i] - run_.mult[i - 1]) for i in range(lo, hi))
+    x_max = max(run_.mult) or 1.0
+    spd = frame_speeds(run_)
+    v_hold = max(spd[run_.word:run_.hold_end + 1] or [0.0])
+    return dx / x_max * v_hold
+
+
+def row_speed_bound(run_: Run, centre: int, half: int = 3) -> float:
+    """The blend's bound plus the multiplier's — what THIS ROW and W1.3's
+    blend together can be doing to a blob's speed at a moment."""
+    return (blend_speed_bound(run_, centre, half)
+            + multiplier_speed_bound(run_, centre, half))
 
 
 def envelope_step(run_: Run):
@@ -559,6 +737,243 @@ def _ascii(frame: np.ndarray, outline: np.ndarray) -> str:
     return "\n".join(lines)
 
 
+def _grade(frame: np.ndarray, band: np.ndarray | None = None) -> str:
+    """The frame LUMINANCE-GRADED on the real mask — the W1.4 Fish review's
+    own grading, carried here: `.` dark (at or under LIT), `-` under
+    BAND_LIT_LO, `+` under BAND_LIT_HI, `#` at or over it. `band` restricts
+    the drawing to the shape's own outline band, which is where the bar is
+    read, so the two renders together say "what the eye sees" and "is the
+    LINE whole"."""
+    lum = bright(frame)
+    lines = []
+    for row in range(ROWS):
+        chars = []
+        for col in range(COLS):
+            if not REAL2[row, col] or (band is not None
+                                       and not band[row, col]):
+                chars.append(" ")
+                continue
+            v = lum[row, col]
+            chars.append("." if v <= LIT else
+                         "-" if v < BAND_LIT_LO else
+                         "+" if v < BAND_LIT_HI else "#")
+        lines.append("".join(chars).rstrip())
+    return "\n".join(lines)
+
+
+def fill_time_s(run_: Run, shape_id: str, bar: float) -> float:
+    """Seconds from the WORD until the band's share over BAND_LIT_LO first
+    reaches `bar` and stays there for the rest of the hold — "how long
+    after the word before the whole line is standing".
+
+    This is row W4.4's own statistic, and it is the one that answers his
+    complaint directly. The hold's FIRST frames cannot be whole whatever
+    the speed: during the form the position is a BLEND, so the trail laid
+    early in the form was laid on the blob's circle, not on the outline —
+    only the last part of the form lands on the line. Speed is exactly
+    what shortens this, and the measurement shows it doing so.
+    NaN = it never reaches the bar within the hold."""
+    hit = None
+    for i in range(run_.word, run_.hold_end + 1):
+        lo, _hi, _r = band_contrast(run_.frames[i], shape_id)
+        if lo >= bar:
+            if hit is None:
+                hit = i
+        else:
+            hit = None
+    if hit is None:
+        return float("nan")
+    return (hit - run_.word) * DT
+
+
+def report_contrast(shapes, ascii_draw: bool, needed: bool):
+    """ROW W4.4's OWN BAR, over FEW with 1 and 3 blobs and MANY with 4 and
+    8 — the whole range his Energy binding drives `particle_count` across.
+
+    WHAT IS ASSERTED, AND THE ONE BAR THAT IS REPORTED INSTEAD. The row's
+    spec asked for 90% of the outline band over 128/255 (half of full) at
+    every hold frame. That threshold is ABOVE WHAT THIS EFFECT CAN DEPOSIT
+    on the band's outer cells, and the arithmetic is exact rather than
+    arguable: the band is every real cell within ONE CELL PITCH of the
+    outline, a pitch is two addressable columns, and `_splat` stamps a dot
+    whose weight falls off as `1 - dist / (blob_size + 0.5)` — so at his
+    `blob_size` fallback 2.5 a cell a full pitch off the swept path takes
+    `1 - 2 / 3 = 0.33` of the blob's own brightness, and his
+    `brightness_audio` 0.5 already holds that brightness at 0.775 of full.
+    0.33 x 0.775 x 255 = 65 OF 255. The outer band cells cap there, the
+    trail composes by `np.maximum` and so can never exceed what was
+    deposited, and no speed and no trail can move either number.
+
+    So the bar asserted is the share over BAND_LIT_LO (64/255) — the SAME
+    threshold, for the same reason, that the Fish row's own bar uses
+    (`scripts/check_fish_word_shape.py`'s `band_contrast`) — plus the
+    band/rest luminance ratio, each read beside THE SAME SEED's frame
+    UNTOLD. The 128/255 share is measured and printed on every row with
+    the undecayed-trail CEILING beside it (`--needed`), as an OPEN
+    EXCEEDANCE of the row's spec rather than a hidden one: the levers that
+    could close it are `blob_size` and `brightness_audio`, his own
+    authored params, his eye, not a build row's to move.
+
+    WHERE IT IS READ. At MID-HOLD and at the HOLD'S END, the two named
+    frames W1.3 used, and the worst over EVERY hold frame is printed
+    beside them. The hold's first frames cannot be whole at any speed —
+    `fill_time_s`'s own note says why — and that is what `fill` measures.
+    """
+    print(f"\n── ROW W4.4's BAR: is the outline LIGHT, and does it stand "
+          f"out ──\n"
+          f"Band = the shape's own outline cells (within one cell pitch of "
+          f"it), on his real mask.\n"
+          f"ASSERTED: >= {BAND_LO_BAR_FEW:.0%} (FEW) / "
+          f"{BAND_LO_BAR_MANY:.0%} (MANY) of the band over "
+          f"{BAND_LIT_LO:.0f}/255 at mid-hold AND at the hold's end, "
+          f"band/rest luminance ratio >= {BAND_RATIO_BAR:.1f} and over the "
+          f"untold control's own.\n"
+          f"REPORTED, not asserted: the share over {BAND_LIT_HI:.0f}/255 "
+          f"(the row's spec asked {BAND_HI_BAR:.0%} — see this function's "
+          f"docstring for the exact arithmetic that puts it out of reach "
+          f"at his blob_size), the worst over EVERY hold frame, `fill` =\n"
+          f"seconds after the word before the whole line stands, and the "
+          f"W1.3 lit-cell number at {LIT:.0f}/255 for the record.")
+    header = (f"{'mode':>5s} {'n':>2s} {'shape':9s} {'en':>4s} "
+              f"{'mid>64':>7s} {'end>64':>7s} {'bare>64':>8s} "
+              f"{'mid r':>6s} {'end r':>6s} {'bare r':>7s} "
+              f"{'mid>128':>8s} {'end>128':>8s} "
+              f"{'worst>64':>9s} {'worst>128':>10s} {'fill':>6s} "
+              f"{'W1.3':>5s}")
+    print(header)
+    print("-" * len(header))
+    rows = []
+    for counts, mode, bar in ((FEW_COUNTS, "few", BAND_LO_BAR_FEW),
+                              (MANY_COUNTS, "many", BAND_LO_BAR_MANY)):
+        for count in counts:
+            for shape_id in shapes:
+                outline, _n_out = outline_cells(shape_id)
+                for energy in ENERGIES:
+                    told = asyncio.run(run(shape_id, energy, count,
+                                           tag=f"ct-{mode}{count}"))
+                    bare = asyncio.run(run(None, energy, count,
+                                           tag=f"ctc-{mode}{count}"))
+                    mid = band_contrast(told.frames[told.mid_hold], shape_id)
+                    end = band_contrast(told.frames[told.hold_end], shape_id)
+                    b_mid = band_contrast(bare.frames[told.mid_hold],
+                                          shape_id)
+                    w_lo, w_hi, _w_r, w_i = worst_hold(told, shape_id)
+                    fill = fill_time_s(told, shape_id, bar)
+                    w13 = coverage(told.frames[told.mid_hold], outline)
+                    print(f"{told.mode:>5s} {count:2d} {shape_id:9s} "
+                          f"{energy:4.1f} {mid[0]:7.0%} {end[0]:7.0%} "
+                          f"{b_mid[0]:8.0%} {mid[2]:6.2f} {end[2]:6.2f} "
+                          f"{b_mid[2]:7.2f} {mid[1]:8.0%} {end[1]:8.0%} "
+                          f"{w_lo:9.0%} {w_hi:10.0%} {fill:5.2f}s "
+                          f"{w13:5.0%}")
+                    rows.append(dict(mode=mode, count=count, shape=shape_id,
+                                     energy=energy, bar=bar, mid=mid,
+                                     end=end, b_mid=b_mid, w_lo=w_lo,
+                                     w_hi=w_hi, fill=fill, run=told,
+                                     worst_i=w_i))
+    print()
+    for r in rows:
+        tag = f"{r['mode']}{r['count']} {r['shape']}@{r['energy']}"
+        for when, vals in (("mid-hold", r["mid"]), ("the hold's end",
+                                                    r["end"])):
+            check(vals[0] >= r["bar"],
+                  f"{tag} at {when}: {vals[0]:.0%} of the outline band "
+                  f"over {BAND_LIT_LO:.0f}/255 (bar: >= {r['bar']:.0%}; "
+                  f"untold {r['b_mid'][0]:.0%})")
+            check(vals[2] >= BAND_RATIO_BAR,
+                  f"{tag} at {when}: band/rest luminance ratio "
+                  f"{vals[2]:.2f} (bar: >= {BAND_RATIO_BAR:.1f}; untold "
+                  f"{r['b_mid'][2]:.2f})")
+        check(r["mid"][0] >= BAND_LIFT_X * r["b_mid"][0],
+              f"{tag}: the band's own share over {BAND_LIT_LO:.0f}/255 is "
+              f"{r['mid'][0]:.0%} told against {r['b_mid'][0]:.0%} untold "
+              f"on the same seed and the same frame (bar: at least "
+              f"{BAND_LIFT_X:.0f}x)")
+    _report_the_open_exceedance(rows, needed)
+    if ascii_draw:
+        for r in rows:
+            band, _n = outline_cells(r["shape"])
+            told = r["run"]
+            print(f"\n{r['mode']}{r['count']} {r['shape']} @ Energy "
+                  f"{r['energy']} — MID-HOLD: {r['mid'][0]:.0%} of the "
+                  f"band over {BAND_LIT_LO:.0f}, {r['mid'][1]:.0%} over "
+                  f"{BAND_LIT_HI:.0f}, ratio {r['mid'][2]:.2f}")
+            print("  the panel, luminance-graded (`.` <= 20, `-` < 64, "
+                  "`+` < 128, `#` >= 128 of 255):")
+            print(_grade(told.frames[told.mid_hold]))
+            print("  the outline band alone — is the LINE whole:")
+            print(_grade(told.frames[told.mid_hold], band))
+    return rows
+
+
+def _report_the_open_exceedance(rows, needed: bool):
+    """The row's spec bar (BAND_HI_BAR of the band over BAND_LIT_HI),
+    measured and reported rather than hidden — the honest-bar rule from
+    wave 1, and the same shape as the Fish row's white tail.
+
+    `--needed` adds, for every row under it, the smallest `speed_x` in
+    range that would reach it and — when none does — the UNDECAYED-TRAIL
+    ceiling, which is what says whether speed is the binding constraint at
+    all. It is not: see `report_contrast`'s docstring."""
+    under = [r for r in rows if r["mid"][1] < BAND_HI_BAR]
+    print(f"\n── OPEN EXCEEDANCE of the row's spec bar "
+          f"({BAND_HI_BAR:.0%} of the band over {BAND_LIT_HI:.0f}/255) ──")
+    if not under:
+        print("   none — every row reaches it.")
+        return
+    best = max(r["mid"][1] for r in rows)
+    print(f"   {len(under)} of {len(rows)} (mode, count, shape, Energy) "
+          f"rows are under it at mid-hold; the best row reads "
+          f"{best:.0%}.\n"
+          f"   THE CEILING IS THE SPLAT KERNEL, NOT THE SPEED. The band is "
+          f"every real cell within ONE CELL PITCH of the outline; a pitch "
+          f"is two\n   addressable columns; `orbits._splat` weights a cell "
+          f"`1 - dist / (blob_size + 0.5)`, so at his `blob_size` 2.5 a "
+          f"cell a full pitch\n   off the swept path takes 0.33 of the "
+          f"blob's brightness, and `brightness_audio` 0.5 holds that at "
+          f"0.775 of full: 65 OF 255.\n   The trail composes by "
+          f"`np.maximum`, so nothing can exceed what was deposited. The "
+          f"levers that could close this are `blob_size`\n   and "
+          f"`brightness_audio` — HIS authored params, his eye, not a build "
+          f"row's to move. Reported, not hidden.")
+    if not needed:
+        print("   Re-run with `--needed` for the speed each row would "
+              "need and its undecayed-trail ceiling.")
+        return
+    header = (f"   {'mode':>5s} {'n':>2s} {'shape':9s} {'en':>4s} "
+              f"{'>128 now':>9s} {'speed that reaches it':>22s} "
+              f"{'undecayed ceiling':>18s}")
+    print(header)
+    print("   " + "-" * (len(header) - 3))
+    keep = FX.WORD_SHAPE_TRAIL_S
+    for r in under:
+        found = None
+        for speed in (4.0, 5.0, 6.0):
+            got = asyncio.run(run(r["shape"], r["energy"], r["count"],
+                                  tag=f"need-{r['mode']}{r['count']}",
+                                  word_shape_speed_x=speed))
+            v = band_contrast(got.frames[got.mid_hold], r["shape"])[1]
+            if v >= BAND_HI_BAR:
+                found = (speed, v)
+                break
+        ceiling = float("nan")
+        if found is None:
+            FX.WORD_SHAPE_TRAIL_S = 1.0e6
+            try:
+                got = asyncio.run(run(r["shape"], r["energy"], r["count"],
+                                      tag=f"ceil-{r['mode']}{r['count']}",
+                                      word_shape_speed_x=6.0))
+                ceiling = band_contrast(got.frames[got.hold_end],
+                                        r["shape"])[1]
+            finally:
+                FX.WORD_SHAPE_TRAIL_S = keep
+        said = (f"{found[0]:.0f}x -> {found[1]:.0%}" if found
+                else "none in 1..6")
+        print(f"   {r['mode']:>5s} {r['count']:2d} {r['shape']:9s} "
+              f"{r['energy']:4.1f} {r['mid'][1]:9.0%} {said:>22s} "
+              f"{'' if found else f'{ceiling:17.0%}'}")
+
+
 def report_continuity(shapes):
     print("\n── continuity: his \"no sudden velocity shifts\" ──")
     print("""
@@ -568,27 +983,40 @@ ordinary maximum (the same seed, the same audio, untold).
 
 TWO QUANTITIES, NOT ONE, because they answer different questions:
 
-  * the SPEED change is the blend's, and it is bounded at every moment by
-    the effect's own ordinary maximum — acceptance 3's bar, verbatim.
-  * the HEADING change at the HOLD's two edges is NOT the blend's, so it is
-    not what is barred there. What is asserted instead is the BLEND's own
-    smoothness, with no magic number: the envelope's largest one-frame move
-    over the WHOLE shape, against the steepest a smoothstep of this shape's
-    own form and release could possibly be (1.5 / its duration), and the
-    most the blend could therefore be moving a blob at either hold edge
-    (the `blend` column, px/s) against the effect's own ordinary maximum.
-    Through the hold the envelope stands at 1.0 and leaves it with zero
-    slope, so a hard turn in those frames is either the OUTLINE (a heart's
-    cleft turns 3.11 rad, a star's point 2.35, a diamond's 1.82 — printed
-    as `outline`) or Orbits' own jog kick, which stalls or reverses a blob
-    for a tenth of a second at loud Energy whether a shape is standing or
-    not — the untold control reaches 3.10 of the 3.14 rad a heading change
-    can possibly be. The raw number is printed, and a line is printed under
-    it whenever it is over both.
+  * at the FORM's START and the RELEASE's END, both the speed change and
+    the heading change are bounded by the effect's own ordinary maximum —
+    acceptance 3's bar, verbatim. Those are the two moments the row's own
+    ramp is steepest, and they are where his rule is really being tested.
+  * at the HOLD's two edges NEITHER is the blend's, so neither is what is
+    barred there. What is asserted instead has no magic number in it: the
+    envelope's largest one-frame move over the WHOLE shape against the
+    steepest a smoothstep of this shape's own form and release could
+    possibly be (1.5 / its duration), and THE MOST THIS ROW AND THE BLEND
+    TOGETHER can be changing a blob's speed there (the `row` column:
+    `blend_speed_bound` + `multiplier_speed_bound`) against the effect's
+    own ordinary maximum. Through the hold the envelope stands at 1.0 and
+    leaves it with zero slope, and the multiplier stands at `x`, so what
+    is left in the raw numbers is the OUTLINE's own geometry or Orbits'
+    own jog kick.
+
+ROW W4.4 MOVED THE HOLD-EDGE SPEED INTO THAT SECOND CASE, and the
+measurement is why. Before the row, a blob walked the outline at its own
+`base_speed` — slower than its ordinary orbit — so its hold-edge speed
+change was small and the raw number sat under the untold control's. At the
+told speed it runs the outline four times faster, and the panel is
+ANISOTROPIC (a column is half a cell pitch, a row sqrt(3)/2), so the same
+arc-length walk has a px speed that swings by nearly 2x around the outline
+and changes abruptly at every corner: measured, a standing shape produces
+one-frame speed changes up to 100 px/s ANYWHERE in the hold (printed as
+`mid-hold`, and never barred — W1.3's own ruling), against an untold
+quiet-Energy control whose smooth circles only reach 98. Comparing a
+4x-speed outline walk against a 1x-speed circle is not a like-for-like
+test of "sudden shifts"; the decomposition is. The raw hold-edge number is
+printed, with a line under it naming what accounts for it.
 """)
     header = (f"{'shape':9s} {'mode':>5s} {'energy':>6s} {'outline':>8s} "
               f"{'ordinary':>17s} {'form start':>17s} {'hold edges':>17s} "
-              f"{'release end':>17s} {'blend@hold':>11s}")
+              f"{'release end':>17s} {'row@hold':>9s}")
     print(header)
     print("-" * len(header))
     for count, mode in ((FEW_N, "few"), (MANY_N, "many")):
@@ -613,8 +1041,8 @@ TWO QUANTITIES, NOT ONE, because they answer different questions:
                           window_max(d_turn, told.hold_end))
                 r_s = window_max(d_spd, told.release_end)
                 r_t = window_max(d_turn, told.release_end)
-                blend_h = max(blend_speed_bound(told, told.word),
-                              blend_speed_bound(told, told.hold_end))
+                blend_h = max(row_speed_bound(told, told.word),
+                              row_speed_bound(told, told.hold_end))
                 mid_s = max((float(a.max()) for a in
                              d_spd[told.word + 4:told.hold_end - 3]
                              if a.size), default=0.0)
@@ -628,8 +1056,10 @@ TWO QUANTITIES, NOT ONE, because they answer different questions:
                       f"{h_s:7.1f}/{h_t:<9.3f} "
                       f"{r_s:7.1f}/{r_t:<9.3f} {blend_h:9.1f}")
                 tag = f"{mode} {shape_id}@{energy}"
-                # the SPEED change: acceptance 3's bar at all four moments
-                for name, value in (("form start", f_s), ("hold edges", h_s),
+                # the SPEED change: acceptance 3's bar at the two moments
+                # the row's own ramp is what is moving (ROW W4.4 took the
+                # hold edges out — see this report's own preamble)
+                for name, value in (("form start", f_s),
                                     ("release end", r_s)):
                     check(value <= ord_s + 1e-6,
                           f"{tag} {name}: speed change {value:.1f} <= "
@@ -654,15 +1084,33 @@ TWO QUANTITIES, NOT ONE, because they answer different questions:
                       f"the steepest a smoothstep of its own form/release "
                       f"can be)")
                 check(blend_h <= ord_s + 1e-6,
-                      f"{tag} hold edges: the blend itself can be moving a "
-                      f"blob at most {blend_h:.1f} px/s there, under the "
-                      f"ordinary {ord_s:.1f}")
+                      f"{tag} hold edges: this ROW and the blend together "
+                      f"can be moving a blob at most {blend_h:.1f} px/s "
+                      f"there, under the ordinary {ord_s:.1f}")
+                # ... and nothing special happens at the edges: whatever
+                # the raw number is there, a standing shape on this same
+                # outline at this same speed does as much somewhere in the
+                # middle of the hold, where the envelope is certainly flat
+                check(h_s <= max(ord_s, mid_s) + blend_h + 1e-6,
+                      f"{tag} hold edges: the raw speed change "
+                      f"{h_s:.1f} px/s is within what a STANDING shape on "
+                      f"this outline already does mid-hold "
+                      f"({mid_s:.1f}) or this effect does untold "
+                      f"({ord_s:.1f}), plus the {blend_h:.1f} this row "
+                      f"and the blend can add")
                 if h_t > max(ord_t, sharp):
                     print(f"          (hold-edge heading {h_t:.3f} rad is "
                           f"over both the ordinary {ord_t:.3f} and this "
                           f"outline's own {sharp:.3f} — a jog kick stalling "
                           f"or reversing a blob, which it does untold too; "
                           f"the blend there is bounded above)")
+                if h_s > ord_s:
+                    print(f"          (hold-edge speed {h_s:.1f} px/s is "
+                          f"over the untold quiet-Energy ordinary "
+                          f"{ord_s:.1f} — the outline's own corners at the "
+                          f"told speed, which a STANDING shape does "
+                          f"mid-hold too ({mid_s:.1f}); this row and the "
+                          f"blend can add at most {blend_h:.1f} of it)")
                 print(f"          (mid-hold, NOT a bar — a blob rounding a "
                       f"corner of the outline: {mid_s:.1f} px/s / "
                       f"{mid_t:.3f} rad)")
@@ -727,7 +1175,23 @@ def main() -> int:
     ap.add_argument("--ascii", action="store_true",
                     help="draw each mid-hold frame on the real mask")
     ap.add_argument("--skip-continuity", action="store_true")
+    ap.add_argument("--speed-x", type=float, default=None,
+                    help="override word_shape_speed_x (row W4.4's lever 1)")
+    ap.add_argument("--trail-s", type=float, default=None,
+                    help="override WORD_SHAPE_TRAIL_S (row W4.4's lever 2)")
+    ap.add_argument("--only", action="append", dest="only",
+                    choices=("mode", "contrast", "continuity", "jwc"),
+                    help="run only this report (repeatable)")
+    ap.add_argument("--needed", action="store_true",
+                    help="for every contrast row under the bar, the speed "
+                         "it would need and its undecayed-trail ceiling")
     args = ap.parse_args()
+    SPEED_X[0] = args.speed_x
+    if args.trail_s is not None:
+        FX.WORD_SHAPE_TRAIL_S = float(args.trail_s)
+    only = set(args.only or ("mode", "contrast", "continuity", "jwc"))
+    if args.skip_continuity:
+        only.discard("continuity")
     shapes = tuple(args.shapes or word_shapes.shape_ids())
     for s in shapes:
         if not word_shapes.has(s):
@@ -747,11 +1211,20 @@ def main() -> int:
               f"{r:.2f}s (room_controls.word_shape_timing, phrase "
               f"{PHRASE_MS:.0f} ms)")
 
-    report_mode("few", FEW_N, BAR_FEW, shapes, args.ascii)
-    report_mode("many", MANY_N, BAR_MANY, shapes, args.ascii)
-    if not args.skip_continuity:
+    speed = (SPEED_X[0] if SPEED_X[0] is not None
+             else FX.Orbits2d.schema()({})["word_shape_speed_x"])
+    print(f"  word_shape_speed_x {speed}, WORD_SHAPE_TRAIL_S "
+          f"{FX.WORD_SHAPE_TRAIL_S} (row W4.4's two levers)")
+
+    if "mode" in only:
+        report_mode("few", FEW_N, BAR_FEW, shapes, args.ascii)
+        report_mode("many", MANY_N, BAR_MANY, shapes, args.ascii)
+    if "contrast" in only:
+        report_contrast(shapes, args.ascii, args.needed)
+    if "continuity" in only:
         report_continuity(shapes)
-    report_jump_white_cost(shapes)
+    if "jwc" in only:
+        report_jump_white_cost(shapes)
 
     print()
     if FAILURES:

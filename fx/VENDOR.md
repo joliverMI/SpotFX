@@ -3258,3 +3258,83 @@ against that commit.
      the new rule — shortened, never killed; launches withheld; everything
      else additive and `_capacity()` unchanged across the edge. Cost +0.09
      ms p50 (bar 1.0).
+
+102. `effects/orbits.py` (SpotFX-authored on top of #97): W4.4 — THE SHAPE IS
+     RUN FAST ENOUGH FOR THE TRAIL TO CLOSE IT (his room verdict,
+     2026-11-17, verbatim: "I can tell the fish and orbits are trying to do
+     something, but it's not clear enough. They need to increase speed so
+     they can pass the outline fast enough that their trail stays and it
+     clearly forms the shape. Start with orbits and when we get that dialed
+     in, we will do fish." plus his standing rule for the feature, "they
+     need to smoothly accelerate and not have sudden velocity shifts").
+     ONE new registered param, `word_shape_speed_x` (1.0-6.0, default 4.0,
+     `WORD_SHAPE_SPEED_X`), resolved per frame by `_word_shape_speed_x()`
+     as `1 + (x - 1) * m` and applied to exactly ONE rate per LATCHED mode:
+     FEW's `omega` (its walk along the outline IS its orbit rate, by arc
+     length — #97's own blend) and MANY's `ring_phase` advance (its
+     circulation IS the ring's). Never both, because the position blend is
+     multiplying the other one towards zero anyway. `WORD_SHAPE_TRAIL_S`
+     0.9 -> 1.8, the row's SECOND lever and only as far as the bar needed;
+     #97's decay-blend rule (the per-frame decay, never the half-life) is
+     unchanged, and a new test pins the concavity that makes it the right
+     formulation. Ramped by #95's envelope, so the acceleration is
+     continuous, the speed leaves and returns to today's rate with no step,
+     and it is back to today's by the release's end. UNTOLD IS BYTE FOR
+     BYTE TODAY'S: both multipliers are exactly 1.0 with nothing told (and
+     for the mode that is not latched), so the ring's multiply is an exact
+     IEEE no-op and the `omega` array multiply is skipped outright — proven
+     against the pinned pre-#97 module, as #97 was.
+     THE W1.3 BAR WAS VACUOUS AND THAT IS THE ROW'S FIRST FINDING: it
+     counted a cell LIT at 20/255, eight percent of full, and read 74-93%
+     while the share of the SAME outline band over half of full read
+     1-25% — the faint, broken line he saw. Carried over from the Fish
+     review's `band_contrast` (#99), and #101 reached the same conclusion
+     independently on Fireworks in the same wave.
+     THE SWEEP THAT CHOSE THE NUMBERS (16 configurations of speed x trail
+     over 24 (mode, count, shape, Energy) rows, `scripts/
+     check_orbits_word_shape.py --speed-x ... --trail-s ...`): the WORST
+     row's band share is the SPEED's and almost not the trail's at all —
+     43% at speed 3 and 60-61% at speed 4 at EVERY trail from 0.9 to 5.0 —
+     while the trail moves the MEDIAN and the hold's END and saturates by
+     3.0. His own estimate of 3.0 leaves the ONE-blob rows (his
+     quiet-Energy `particle_count` binding) and the FOUR-bead rows under
+     the bar at any trail; 6.0 buys the worst row 8 more points and costs
+     band/rest contrast. The ADAPTIVE rule the row's spec offered as an
+     alternative was measured and REFUSED with numbers: its premise is that
+     the revisit GAP binds, and the DEPOSIT does.
+     ONE OPEN EXCEEDANCE, reported not hidden (the honest-bar rule, as #99's
+     white tail): the spec's "90% of the band over 128/255" is above what
+     this effect can DEPOSIT. The band is every real cell within ONE CELL
+     PITCH of the outline, a pitch is two addressable columns, and `_splat`
+     weights a cell `1 - dist / (blob_size + 0.5)` — so at his `blob_size`
+     2.5 a cell a full pitch off the swept path takes 0.33 of the blob's
+     brightness and `brightness_audio` 0.5 holds that at 0.775 of full:
+     65 OF 255. The trail composes by `np.maximum`, so nothing exceeds what
+     was deposited; with an UNDECAYING trail at speed 6 the over-128 share
+     ceilings at 43-99% by row and 23 of 24 rows reach no speed in 1..6
+     that meets it. The bar asserted is the share over 64/255, as #99's is.
+     `blob_size` and `brightness_audio` are HIS authored params.
+     THE HOLD-EDGE CONTINUITY BAR MOVED, and it is the trap for W4.6: a 4x
+     arc-length walk on the ANISOTROPIC hex panel (a column is half a cell
+     pitch, a row sqrt(3)/2) has a px speed that swings nearly 2x round the
+     outline and changes abruptly at every corner, so a STANDING shape —
+     envelope flat at 1.0 — makes one-frame speed changes up to 100 px/s
+     against an untold quiet-Energy control's 98. Comparing a 4x outline
+     walk with a 1x circle is not a like-for-like test of "sudden shifts",
+     so at the hold's edges what is asserted is the DECOMPOSITION
+     (`row_speed_bound` = the blend's own bound plus the multiplier's,
+     39 of the measured 129); the plain speed-and-heading bar against the
+     effect's own ordinary maximum STANDS at the form's start and the
+     release's end, met with room to spare (2.8-11.7 px/s of 98-488).
+     Measured at the shipped defaults, share of the outline band over
+     64/255 at mid-hold 60-100% (bar 55%), ratios 1.53-11.97 against
+     0.00-2.22 untold, the whole line standing 0.00-0.05 s after the word
+     with three blobs or eight beads and 0.30-0.58 s with one; white 0 of
+     976 cells (1 on many-diamond at Energy 0.8, as #97); cost +0.03 to
+     +0.18 ms p50 (bar 1.0); the lit-cell jump 6.5-27.2% against this
+     effect's own 16.7-33.3% untold. `orbits1d` is untouched — a strip has
+     no outline to run. Evidence `scripts/check_orbits_word_shape.py`
+     (`--only contrast`, `--needed`, `--ascii`), proofs
+     `tests/test_orbits_word_shape.py`'s ROW W4.4 sections;
+     `.claude/skills/orbits-effect/SKILL.md`'s ROW W4.4 section is the
+     binding record.

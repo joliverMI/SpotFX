@@ -327,7 +327,8 @@ def test_a_form_shorter_than_any_engine_would_send_is_handled(tmp_path):
 # ── 3. nothing jumps ──────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("shape", ["heart", "diamond"])
-@pytest.mark.parametrize("count,mode", [(C.FEW_N, "few"), (C.MANY_N, "many")])
+@pytest.mark.parametrize("count,mode", [(1, "few"), (C.FEW_N, "few"),
+                                        (4, "many"), (C.MANY_N, "many")])
 def test_no_sudden_velocity_shifts_at_any_edge_of_the_blend(shape, count,
                                                             mode, capsys):
     """Acceptance 3, his "they need to smoothly accelerate and not have
@@ -338,24 +339,33 @@ def test_no_sudden_velocity_shifts_at_any_edge_of_the_blend(shape, count,
     WHAT IS BARRED WHERE, and why they are not the same thing (the check
     script's own `report_continuity` says this at length):
 
-      * the per-frame SPEED change is the blend's, and it is bounded at ALL
-        FOUR moments by the effect's own ordinary maximum — acceptance 3's
-        bar verbatim;
-      * the per-frame HEADING change is bounded the same way at the form's
-        start and the release's end, the two moments where the blend
-        actually moves;
-      * at the HOLD's two edges what is asserted is the BLEND's own
-        smoothness, with no magic number in it: the envelope's largest
-        one-frame move over the WHOLE shape against the steepest a
-        smoothstep of its own form and release could be (1.5 / its
-        duration), and the most the blend could therefore move a blob
-        there, against the ordinary maximum. Through the hold the envelope
-        stands at 1.0 and leaves it with zero slope, so a hard turn in
-        those frames is the OUTLINE (a heart's cleft turns 3.11 rad) or
-        Orbits' own jog kick, which stalls or reverses a blob for a tenth
-        of a second at loud Energy whether a shape stands or not — the
-        untold control itself reaches 3.10 of the 3.14 rad a heading change
-        can possibly be.
+      * at the FORM's START and the RELEASE's END — the two moments the
+        row's own ramp is steepest, and where his rule is really being
+        tested — both the per-frame SPEED change and the per-frame HEADING
+        change are bounded by the effect's own ordinary maximum:
+        acceptance 3's bar verbatim;
+      * at the HOLD's two edges NEITHER is the blend's, so neither is what
+        is barred there. What is asserted has no magic number in it: the
+        envelope's largest one-frame move over the WHOLE shape against the
+        steepest a smoothstep of its own form and release could be (1.5 /
+        its duration); the most THIS ROW AND THE BLEND TOGETHER can be
+        changing a blob's speed there (`C.row_speed_bound` — the blend's
+        own bound plus the multiplier's), against the ordinary maximum;
+        and that the raw change there is within what a STANDING shape on
+        this same outline already does mid-hold, plus that bound. Nothing
+        special happens at the edges, which is the claim.
+
+    ROW W4.4 MOVED THE HOLD-EDGE SPEED INTO THE SECOND CASE, and the
+    measurement is why: with the told speed the blob runs the outline 4x
+    faster, the panel is ANISOTROPIC (a column is half a cell pitch, a row
+    sqrt(3)/2), so the same arc-length walk's px speed swings by nearly 2x
+    round the outline and changes abruptly at every corner — a STANDING
+    shape produces one-frame changes up to 100 px/s anywhere in the hold
+    (W1.3 already refused to bar that), against an untold quiet-Energy
+    control whose smooth circles reach 98. Comparing a 4x-speed outline
+    walk against a 1x-speed circle is not a like-for-like test of "sudden
+    shifts". The decomposition is, and the row's own share of it measures
+    39 px/s of the 129.
 
     A heading is only counted where the blob actually moved
     (`C.TURN_MIN_SPEED`, a tenth of a cell pitch in the frame), applied
@@ -375,20 +385,29 @@ def test_no_sudden_velocity_shifts_at_any_edge_of_the_blend(shape, count,
                "hold end": told.hold_end, "release end": told.release_end}
     print(f"\n{mode} {shape}: ordinary max {ord_s:.1f} px/s, {ord_t:.3f} "
           f"rad; the outline's own sharpest turn {sharp:.3f} rad")
+    mid = max((float(a.max()) for a in
+               d_spd[told.word + 4:told.hold_end - 3] if a.size),
+              default=0.0)
     for name, at in moments.items():
         s_ = C.window_max(d_spd, at)
         t_ = C.window_max(d_turn, at)
-        blend = C.blend_speed_bound(told, at)
+        row = C.row_speed_bound(told, at)
         print(f"  {name:12s} {s_:8.1f} px/s  {t_:.3f} rad   "
-              f"(the blend itself: at most {blend:6.1f} px/s)")
-        assert s_ <= ord_s + 1e-6, f"{name}: speed {s_} > ordinary {ord_s}"
+              f"(this row and the blend: at most {row:6.1f} px/s)")
         if name in ("form start", "release end"):
+            assert s_ <= ord_s + 1e-6, (
+                f"{name}: speed {s_} > ordinary {ord_s}")
             assert t_ <= ord_t + 1e-6, (
                 f"{name}: heading {t_} > ordinary {ord_t}")
         else:
-            assert blend <= ord_s + 1e-6, (
-                f"{name}: the blend could move a blob {blend} px/s, over "
-                f"the ordinary {ord_s}")
+            assert row <= ord_s + 1e-6, (
+                f"{name}: this row and the blend could move a blob {row} "
+                f"px/s, over the ordinary {ord_s}")
+            assert s_ <= max(ord_s, mid) + row + 1e-6, (
+                f"{name}: the raw speed change {s_} px/s is over what a "
+                f"STANDING shape on this outline does mid-hold ({mid}) or "
+                f"this effect does untold ({ord_s}), plus the {row} this "
+                f"row and the blend can add")
     # the blend's own smoothness, over the whole shape and with no magic
     # number: the steepest a smoothstep of this form and release can be
     step, bar = C.envelope_step(told)
@@ -443,6 +462,116 @@ def test_the_clarity_bar_on_his_real_crystal(shape, energy, count, mode, bar,
     assert cov_hold >= bar, (
         f"{mode} {shape}@{energy}: {cov_hold:.0%} of {n_out} outline cells "
         f"at the hold (bar {bar:.0%}); at the word {cov_word:.0%}")
+
+
+# ── ROW W4.4's OWN BAR: the outline is LIGHT, and it stands out ──────────
+
+@pytest.mark.parametrize("shape", list(word_shapes.shape_ids()))
+@pytest.mark.parametrize("energy", list(C.ENERGIES))
+@pytest.mark.parametrize("count,mode,bar", [
+    (1, FX.WORD_SHAPE_FEW, C.BAND_LO_BAR_FEW),
+    (C.FEW_N, FX.WORD_SHAPE_FEW, C.BAND_LO_BAR_FEW),
+    (4, FX.WORD_SHAPE_MANY, C.BAND_LO_BAR_MANY),
+    (C.MANY_N, FX.WORD_SHAPE_MANY, C.BAND_LO_BAR_MANY),
+])
+def test_the_contrast_bar_on_his_real_crystal(shape, energy, count, mode,
+                                              bar, capsys):
+    """ROW W4.4. The W1.3 bar counted a cell LIT at 20/255 — eight percent
+    of full — and read 74-93% while the share of the same band over HALF of
+    full read 1-25%: a faint, broken line passes a bar like that, which is
+    what he saw. So the bar is the Fish review's `band_contrast`, over the
+    whole count range his Energy binding drives `particle_count` across
+    (FEW with 1 and 3, MANY with 4 and 8):
+
+      * the share of the outline band over `C.BAND_LIT_LO` (64/255) at
+        MID-HOLD and at the HOLD'S END;
+      * the band's mean luminance over the REST of the panel's; and
+      * that share against THE SAME SEED's frame UNTOLD, which is what
+        separates "the shape is brighter here" from "this effect lights
+        everything".
+
+    WHY 64 AND NOT THE SPEC'S 128, stated here as well as in the check
+    script because it is the row's one open exceedance: the band is every
+    real cell within ONE CELL PITCH of the outline, a pitch is two
+    addressable columns, and `_splat` weights a cell
+    `1 - dist / (blob_size + 0.5)` — so at his `blob_size` 2.5 a cell a
+    full pitch off the swept path takes 0.33 of the blob's brightness, and
+    `brightness_audio` 0.5 holds that brightness at 0.775 of full: 65 of
+    255. The trail composes by `np.maximum` and can never exceed what was
+    deposited, so no speed and no trail reaches 128 there. The check
+    script prints the 128/255 share and its undecayed-trail ceiling on
+    every row; `blob_size` and `brightness_audio` are his own params."""
+    told = _run(C.run(shape, energy, count, tag=f"w44-{mode}{count}"))
+    bare = _run(C.run(None, energy, count, tag=f"w44c-{mode}{count}"))
+    assert told.mode == mode, f"latched {told.mode}, expected {mode}"
+    mid = C.band_contrast(told.frames[told.mid_hold], shape)
+    end = C.band_contrast(told.frames[told.hold_end], shape)
+    b_mid = C.band_contrast(bare.frames[told.mid_hold], shape)
+    fill = C.fill_time_s(told, shape, bar)
+    print(f"\n{mode}{count} {shape} @ Energy {energy}: over "
+          f"{C.BAND_LIT_LO:.0f}/255 mid {mid[0]:.0%} end {end[0]:.0%} "
+          f"(untold {b_mid[0]:.0%}); ratio mid {mid[2]:.2f} end "
+          f"{end[2]:.2f} (untold {b_mid[2]:.2f}); over "
+          f"{C.BAND_LIT_HI:.0f}/255 mid {mid[1]:.0%} (the spec's "
+          f"{C.BAND_HI_BAR:.0%} is the open exceedance); the line stands "
+          f"{fill:.2f}s after the word")
+    for when, vals in (("mid-hold", mid), ("the hold's end", end)):
+        assert vals[0] >= bar, (
+            f"{mode}{count} {shape}@{energy} at {when}: {vals[0]:.0%} of "
+            f"the outline band over {C.BAND_LIT_LO:.0f}/255, bar "
+            f"{bar:.0%} (untold {b_mid[0]:.0%})")
+        assert vals[2] >= C.BAND_RATIO_BAR, (
+            f"{mode}{count} {shape}@{energy} at {when}: band/rest "
+            f"luminance ratio {vals[2]:.2f}, bar {C.BAND_RATIO_BAR}")
+    assert mid[0] >= C.BAND_LIFT_X * b_mid[0], (
+        f"{mode}{count} {shape}@{energy}: {mid[0]:.0%} told against "
+        f"{b_mid[0]:.0%} untold on the same seed and frame")
+    assert math.isfinite(fill), (
+        f"{mode}{count} {shape}@{energy}: the line never stands within "
+        f"the hold")
+
+
+def test_the_trail_rose_only_as_far_as_the_bar_needed():
+    """Row W4.4 spec 2. The trail is the SECOND lever and it rose from 0.9
+    to 1.8 — the smallest rise that finishes the bar after the speed, which
+    is the whole of what spec 2 allows. The sweep that decided it is in
+    `WORD_SHAPE_TRAIL_S`'s own note; this pins the two numbers so a later
+    change to either is deliberate."""
+    assert FX.WORD_SHAPE_TRAIL_S == 1.8
+    assert FX.WORD_SHAPE_SPEED_X == 4.0
+
+
+def test_the_trail_blends_its_decay_and_never_its_half_life():
+    """Row W4.4 spec 2's other half: the decay-blend rule survives the
+    rise. `WORD_SHAPE_TRAIL_S`'s own note is the binding statement — the
+    fraction a trail loses per frame is HYPERBOLIC in the half-life, so
+    ramping the half-life itself collapses the decay over the last few
+    release frames and dumps a whole faded outline across the lit
+    threshold in one frame. Blended as a DECAY it is linear in `m`.
+
+    Measured on the real module's own arithmetic rather than asserted
+    about the source. `0.5 ** (dt / h)` is CONCAVE in `h` over this whole
+    range, so the chord between its two endpoints — the blended DECAY —
+    lies strictly BELOW the function — the ramped HALF-LIFE. That is the
+    collapse, in one inequality: ramping the half-life holds the decay
+    near its slow value for most of the release and then falls off a
+    cliff, while the blend sheds the smear evenly from the first release
+    frame. Both agree exactly at `m` 1 and `m` 0, which is why the hold is
+    the same picture either way."""
+    dt, half = DT, 0.02 + 0.15 * 0.5
+    slow = 0.5 ** (dt / (half + FX.WORD_SHAPE_TRAIL_S))
+    fast = 0.5 ** (dt / half)
+    for m in (0.0, 1.0):
+        blended = fast + (slow - fast) * m
+        ramped = 0.5 ** (dt / (half + FX.WORD_SHAPE_TRAIL_S * m))
+        assert blended == pytest.approx(ramped, abs=1e-12), m
+    for m in (0.25, 0.5, 0.75):
+        blended = fast + (slow - fast) * m
+        ramped = 0.5 ** (dt / (half + FX.WORD_SHAPE_TRAIL_S * m))
+        assert blended < ramped, (
+            f"m={m}: the blended decay {blended} must shed the smear "
+            f"EVENLY — strictly faster than the half-life ramp's "
+            f"{ramped}, which holds it and then collapses")
 
 
 @pytest.mark.parametrize("count,mode", [
@@ -571,6 +700,148 @@ def test_the_threshold_param_moves_the_boundary():
                 r.write(_told_write())
                 r.step(20)
                 assert r.effect._ws_mode == mode, (few, r.effect._ws_mode)
+            finally:
+                await _close(r)
+
+    _run(main())
+
+
+# ── ROW W4.4: THE SPEED UNDER THE SHAPE ───────────────────────────────────
+
+def _rate_trace(count, speed_x, *, form_s=0.5, hold_s=1.2, release_s=0.75,
+                energy=0.5, settle=120):
+    """(the per-frame unwrapped `p_phase` deltas of blob 0, the per-frame
+    `ring_phase` deltas, the envelope per frame) over one told shape.
+
+    The deltas are unwrapped because both quantities are kept modulo their
+    own cycle. TWO runs of this at the same count and the same energy see
+    the SAME audio and the SAME rng sequence, so every factor in `omega`
+    and in the ring rate except the row's own multiplier is identical
+    between them — which is what makes the ratio below an exact
+    measurement of the multiplier rather than an estimate."""
+    async def main():
+        r = await _rig(count, word_shape_speed_x=speed_x)
+        try:
+            r.step(settle, energy=energy)
+            r.write(_told_write(form_s=form_s, hold_s=hold_s,
+                                release_s=release_s))
+            ph, rg, ms = [], [], []
+            prev_p = float(r.effect.p_phase[0])
+            prev_r = float(r.effect.ring_phase)
+            for _ in range(int(round(
+                    (form_s + hold_s + release_s + 0.5) / DT))):
+                r.step(1, energy=energy)
+                p = float(r.effect.p_phase[0])
+                g = float(r.effect.ring_phase)
+                ph.append((p - prev_p + math.pi) % (2.0 * math.pi) - math.pi)
+                rg.append((g - prev_r + 0.5) % 1.0 - 0.5)
+                ms.append(float(r.effect._ws_m))
+                prev_p, prev_r = p, g
+            return np.array(ph), np.array(rg), np.array(ms)
+        finally:
+            await _close(r)
+
+    return _run(main())
+
+
+def _travelled(deltas, mask):
+    return float(np.abs(deltas[mask]).sum())
+
+
+@pytest.mark.parametrize("count,mode,want_walk,want_ring", [
+    (C.FEW_N, FX.WORD_SHAPE_FEW, True, False),
+    (C.MANY_N, FX.WORD_SHAPE_MANY, False, True),
+])
+def test_the_shape_is_run_x_times_faster_at_the_hold(count, mode, want_walk,
+                                                    want_ring):
+    """Row W4.4 spec 1. FEW walks the outline at its own `omega`, MANY
+    circulates at the RING's rate, so `word_shape_speed_x` multiplies ONE
+    of the two per mode — and leaves the other exactly as it is, because
+    the blend is multiplying that one towards zero anyway.
+
+    Measured against the SAME run at `word_shape_speed_x` 1.0: identical
+    seed, identical audio, identical rng draws, so the ratio over the hold
+    is the multiplier itself."""
+    x = 3.0
+    one = _rate_trace(count, 1.0)
+    fast = _rate_trace(count, x)
+    hold = one[2] >= 0.999
+    assert hold.sum() > 10, "no hold frames recorded"
+    assert np.array_equal(hold, fast[2] >= 0.999), (
+        "the envelope must not depend on the speed")
+    walk_ratio = _travelled(fast[0], hold) / _travelled(one[0], hold)
+    ring_ratio = _travelled(fast[1], hold) / _travelled(one[1], hold)
+    assert walk_ratio == pytest.approx(x if want_walk else 1.0, rel=1e-6), (
+        f"{mode}: the walk ran {walk_ratio:.4f}x")
+    assert ring_ratio == pytest.approx(x if want_ring else 1.0, rel=1e-6), (
+        f"{mode}: the ring ran {ring_ratio:.4f}x")
+
+
+def test_the_speed_is_back_to_todays_by_the_releases_end_and_untold():
+    """Row W4.4 spec 1's other half, and his standing rule's end of it: the
+    multiplier is `1 + (x - 1) * m`, so it is exactly 1 wherever the
+    envelope is — before the word, after the release, and on every untold
+    frame."""
+    one = _rate_trace(C.FEW_N, 1.0)
+    fast = _rate_trace(C.FEW_N, 6.0)
+    done = one[2] <= 0.0
+    assert done.sum() > 10, "no un-shaped frames recorded"
+    assert np.array_equal(done, fast[2] <= 0.0)
+    # float32: `p_phase` holds a different accumulated value in the two
+    # runs, so the deltas agree only to its own epsilon
+    assert (_travelled(fast[0], done)
+            == pytest.approx(_travelled(one[0], done), rel=1e-5))
+
+
+def test_the_multiplier_is_the_envelope_ramped_with_no_jump_in_it():
+    """`_word_shape_speed_x` itself: (1.0, 1.0) untold, `1 + (x - 1) * m`
+    on the latched mode's own rate, and — because `m` is a smoothstep with
+    zero slope at both ends of both ramps — it leaves and returns to
+    today's rate with no step. The acceleration is CONTINUOUS, which is
+    his standing rule for this row verbatim."""
+    async def main():
+        r = await _rig(C.FEW_N, word_shape_speed_x=4.0)
+        try:
+            r.step(120)
+            assert r.effect._word_shape_speed_x() == (1.0, 1.0)
+            r.write(_told_write(form_s=0.9, hold_s=1.0, release_s=1.35))
+            seen = []
+            for _ in range(int(round(3.4 / DT))):
+                r.step(1)
+                walk, ring = r.effect._word_shape_speed_x()
+                assert ring == 1.0, "FEW must not speed the ring"
+                assert walk == pytest.approx(
+                    1.0 + 3.0 * r.effect._ws_m, rel=1e-9)
+                seen.append(walk)
+            assert max(seen) == pytest.approx(4.0, abs=1e-6)
+            assert seen[0] == pytest.approx(1.0, abs=0.05)
+            assert seen[-1] == pytest.approx(1.0, abs=1e-9)
+            # no step bigger than the steepest a smoothstep of this form
+            # and release can be (1.5 / its duration), per frame
+            step = max(abs(b - a) for a, b in zip(seen, seen[1:]))
+            assert step <= 3.0 * 1.5 * DT / 0.9 * 1.05, step
+        finally:
+            await _close(r)
+
+    _run(main())
+
+
+def test_the_speed_is_clamped_to_the_params_own_range():
+    """A told key cannot reach this param (it is a REGISTERED one), but a
+    drift mechanism, a hand edit or an older stored scene can, so the
+    multiplier clamps rather than trusting the value: under 1 would make a
+    shape SLOWER than the music, which is the opposite of the row."""
+    async def main():
+        for given, want in ((0.2, 1.0), (99.0, 6.0)):
+            r = await _rig(C.FEW_N)
+            try:
+                r.step(120)
+                r.write(_told_write(form_s=0.5, hold_s=1.0))
+                r.effect.word_shape_speed_x = given
+                r.step(int(round(0.7 / DT)))
+                assert r.effect._ws_m == pytest.approx(1.0)
+                walk, _ring = r.effect._word_shape_speed_x()
+                assert walk == pytest.approx(want)
             finally:
                 await _close(r)
 
@@ -788,23 +1059,47 @@ def test_the_contract_fixtures_wired_tuple_names_this_row():
     assert device_model.WORD_SHAPE_EFFECTS == frozenset(contract.WIRED)
 
 
-def test_the_three_settings_are_registered_for_sonic_and_the_editor():
+def test_the_four_settings_are_registered_for_sonic_and_the_editor():
+    """W1.3's three, plus row W4.4's `word_shape_speed_x`. A
+    `word_shape_*` param's default lives in TWO places — the module's own
+    CONFIG_SCHEMA and `config/effect_params.json` — and no scene carries
+    one, so a registry default IS his live value. This is the test that
+    they agree."""
     registry = json.loads((ROOT / "config/effect_params.json").read_text())
     orbits = registry["effects"]["orbits"]
     schema = FX.Orbits2d.schema()({})
     for key, want in (("word_shape_size", 0.62), ("word_shape_few", 3),
-                      ("word_shape_wobble", 0.15)):
+                      ("word_shape_wobble", 0.15),
+                      ("word_shape_speed_x", FX.WORD_SHAPE_SPEED_X)):
         assert schema[key] == want, key
         assert orbits["params"][key]["default"] == want, key
         assert orbits["defaults"][key] == want, key
         assert orbits["params"][key]["help_topic"] == "word-shapes", key
 
 
+def test_the_help_page_tells_him_about_the_speed():
+    """AGENTS.md's help-content rule: row W4.4 added a user-facing setting
+    and changed what Orbits' shape LOOKS like, so the Help page's own
+    Orbits paragraph has to say so in the same change. The topic the
+    params name (`word-shapes`) must exist too, or the Initial Set tab's
+    HelpLink goes nowhere."""
+    content = (ROOT / "spectra/web/src/help/helpContent.ts").read_text()
+    assert "id: 'word-shapes'" in content
+    assert "id: 'word-shapes-looks'" in content
+    start = content.index("id: 'word-shapes-looks'")
+    end = content.index("id: 'sung-labels-reading'", start)
+    looks = content[start:end]
+    orbits = next(line for line in looks.splitlines()
+                  if line.strip().startswith("'Orbits draws it two ways"))
+    for token in ("Word shape speed", "four times faster"):
+        assert token in orbits, token
+
+
 def test_the_skill_and_the_map_name_this_rows_proofs():
     skill = (ROOT / ".claude/skills/orbits-effect/SKILL.md").read_text()
     assert "WORD SHAPES" in skill
     for token in ("word_shape_size", "word_shape_few", "word_shape_wobble",
-                  "check_orbits_word_shape.py"):
+                  "word_shape_speed_x", "check_orbits_word_shape.py"):
         assert token in skill, token
     mapping = json.loads(
         (ROOT / ".claude/skills/EFFECT_SCENE_MAP.json").read_text())

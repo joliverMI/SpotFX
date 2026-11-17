@@ -715,14 +715,15 @@ that effect:
   worst over the same span, and prints W1.2's form of the number beside it
   rather than dropping it.
 
-### Orbits V2 / `orbits` (row W1.3, 2026-11-16) — few trace it, many become it
+### Orbits V2 / `orbits` (row W1.3, 2026-11-16; row W4.4, 2026-11-17) — few trace it, many become it, FAST
 
 `.claude/skills/orbits-effect/SKILL.md`'s "WORD SHAPES" section;
 `fx/effects/orbits.py`'s WORD SHAPES block comment; evidence
 `scripts/check_orbits_word_shape.py`, proofs
-`tests/test_orbits_word_shape.py`. Three registered params —
-`word_shape_size` (0.62), `word_shape_few` (3) and `word_shape_wobble`
-(0.15); no `WORD_SHAPE_FORM_MIN_S` entry. The 2-D Matrix effect only:
+`tests/test_orbits_word_shape.py`. **Four** registered params —
+`word_shape_size` (0.62), `word_shape_few` (3), `word_shape_wobble`
+(0.15) and, since row W4.4, `word_shape_speed_x` (**4.0**); no
+`WORD_SHAPE_FORM_MIN_S` entry. The 2-D Matrix effect only:
 **`orbits1d` knows no shapes**, and a strip has no outline to draw one on.
 
 TWO MODES, LATCHED AT THE EDGE from the live blob count (`<=
@@ -737,7 +738,10 @@ at the ring's own speed, orbits shrunk to `word_shape_wobble`. Both are
 POSITION blends on the envelope's smoothstep — Orbits is position-driven,
 so continuity is a property of the blend (the velocity graft's own reason).
 
-Measured at the hold on the real mask at SIZE 0.62: outline lit **74-93%**
+Measured at the hold on the real mask at SIZE 0.62 — W1.3's own numbers,
+at its own vacuous 20/255 threshold and before row W4.4's speed, kept here
+for the record (`.claude/skills/orbits-effect/SKILL.md`'s ROW W4.4 section
+carries the contrast table that replaced them): outline lit **74-93%**
 with FEW (bar 60%) and **77-88%** with MANY (bar 75%), 100% by the hold's
 END; every blob's centre (FEW) or tether (MANY) within **0.02 cell
 pitches** of the outline; **+0.00 to +0.33 ms** p50 (bar 1 ms); white 0 of
@@ -763,7 +767,60 @@ honestly rather than moved, all printed by the check script:
   reverses a blob at loud Energy told or not — the untold control reaches
   3.10 of the 3.14 rad a heading change can be.
 
-THREE DEFECTS THIS ROW FOUND BY MEASURING, each one a trap for the next
+**ROW W4.4 (2026-11-17) — HIS VERDICT, AND THE THREE THINGS EVERY LATER ROW
+SHOULD READ BEFORE REPEATING THEM.** His words after the W3 room deploy:
+*"I can tell the fish and orbits are trying to do something, but it's not
+clear enough. They need to increase speed so they can pass the outline fast
+enough that their trail stays and it clearly forms the shape."* The row gave
+this effect one new registered param, `word_shape_speed_x` (4.0), applied as
+`1 + (x - 1) * m` to FEW's `omega` and MANY's `ring_phase` rate — ramped by
+the envelope, so the acceleration is continuous and the speed is back to
+today's by the release's end — and raised `WORD_SHAPE_TRAIL_S` 0.9 -> 1.8.
+Three findings that are about THIS CONTRACT rather than that effect:
+
+1. **A "LIT" BAR AT 20/255 IS VACUOUS FOR A TRAIL, AND W1.3 SHIPPED ONE.**
+   Re-measured, its 74-93% sat beside a share of the SAME band over half of
+   full of 1-25% — which is the faint, broken line he saw. The Fish review
+   had already learned this (`band_contrast`) and nothing carried it back.
+   **W4.3 reached the same conclusion independently on Fireworks in the
+   same wave** (its own bullet above: a bare ">= LIT" share read 99-100%
+   while his eye called the panel unreadable) — two rows, two effects, one
+   lesson, which is the strongest reason to treat it as a rule of this
+   contract rather than a per-effect quirk. **Every "outline coverage"
+   number in this skill is a fraction of the pinned band; grade it by
+   LUMINANCE or it says nothing.**
+2. **128/255 IS THE WRONG THRESHOLD FOR A ONE-PITCH BAND ON A BLOB EFFECT,
+   and the arithmetic says so exactly.** The band is every real cell within
+   ONE CELL PITCH of the outline, a pitch is two addressable columns, and
+   Orbits' `_splat` weights a cell `1 - dist / (blob_size + 0.5)` — so at
+   his `blob_size` 2.5 the band's OUTER cells cap at 0.33 x 0.775 x 255 =
+   65 of 255 whatever the speed or the trail (an undecaying trail at speed 6
+   ceilings at 46-83%). The bar asserted is the share over 64/255, as the
+   Fish row's is; the 128 share is printed with its ceiling as an OPEN
+   EXCEEDANCE. **Any later row owes the same sum before promising a
+   brightness bar: the band's width against the effect's own kernel.**
+3. **SPEED AND TRAIL ARE NOT INTERCHANGEABLE LEVERS, measured.** Over 16
+   configurations x 24 (mode, count, shape, Energy) rows: the WORST row's
+   band share is the SPEED's and almost not the trail's at all (43% at
+   speed 3 and 60-61% at speed 4 at every trail from 0.9 to 5.0), while the
+   trail moves the MEDIAN and the hold's END and saturates by 3.0. And the
+   ADAPTIVE rule ("make the revisit gap a fraction of the half-life") was
+   refused with numbers: its premise is that the gap binds, and the DEPOSIT
+   does. His own estimate of 3.0 was not enough for the one-blob and
+   four-bead rows; 6.0 costs band contrast.
+
+Row W4.4 also moved this effect's HOLD-EDGE continuity bar, and **that is
+the trap waiting for W4.6 (Fish)**: a 4x arc-length walk on an ANISOTROPIC
+panel (a column is half a pitch, a row sqrt(3)/2) has a px speed that swings
+nearly 2x round the outline and changes abruptly at every corner — a
+STANDING shape makes one-frame speed changes up to 100 px/s, against an
+untold quiet-Energy control's 98. Comparing a 4x outline walk with a 1x
+circle is not a like-for-like test of "no sudden velocity shifts". What is
+asserted at the hold's edges is the DECOMPOSITION (the blend's own bound
+plus the multiplier's, `row_speed_bound`), with the plain bar kept where the
+ramp really is moving — the form's start and the release's end.
+
+THREE DEFECTS THE W1.3 ROW FOUND BY MEASURING, each one a trap for the next
 effect: **SIZE must be divided by the effect's own space** (Orbits' `sx`/
 `sy` carry `radius_scale`, so a heart at 0.62 came out at 1.12 of the panel
 and spilled off three sides — coverage read 15%); **a walk along the
