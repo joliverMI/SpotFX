@@ -929,6 +929,13 @@ class PreviewWordShape:
     # silent about that, which is the W4.1 diagnosis's fourth finding. Read
     # off the server like every other number on that ruler
     # (PreviewRuler.tsx's rule: the frontend computes no time of its own).
+    #
+    # IT CARRIES THE PER-EFFECT HOLD STRETCH TOO (row W4.2): both numbers in
+    # that sentence have to come from the same rule, or a Black Hole scene
+    # would show a 1.2 s hold and claim a real word holds "up to 2000 ms"
+    # when its real ceiling is 3000 ms. `hold_s` is already stretched — it
+    # comes straight out of `word_shape_timing` — so the maximum is
+    # stretched by the same `device_model.word_shape_hold_x(types)`.
     hold_max_s: float = word_shape_keys.DEFAULT_HOLD_MAX_S
 
 
@@ -944,13 +951,24 @@ def preview_word_shape(intensity: float, shape: Optional[str] = None,
     try:
         from spectra.services.room_controls import (load_room_controls,
                                                     word_shape_timing)
+        from fx import device_model
         room = load_room_controls()
         form_s, hold_s, release_s = word_shape_timing(
             intensity, phrase_ms, room, types)
-        hold_max_s = float(room.word_shape_hold_max_s)
+        # The SAME stretch `word_shape_timing` just applied to `hold_s`, so
+        # the two numbers the preview's sentence prints can never disagree
+        # (row W4.2; `tests/test_word_shape_contract.py` pins this against
+        # the one rule's own saturated ceiling rather than against a second
+        # hand-written multiply).
+        hold_max_s = (float(room.word_shape_hold_max_s)
+                      * device_model.word_shape_hold_x(types))
     except Exception:                                    # noqa: BLE001
         logger.exception("word shapes: room controls unreadable — the "
                          "plan's default timing for this preview")
+        # DELIBERATELY UNSTRETCHED HERE: this fallback's `hold_s` comes from
+        # `default_shape_timing`, which is room-less and does not stretch
+        # either, so stretching only the maximum would make the sentence
+        # claim a ceiling the shape on screen is not being held to.
         form_s, hold_s, release_s = lyric_events.default_shape_timing(
             intensity, phrase_ms)
     return PreviewWordShape(shape_id=str(shape or PREVIEW_SHAPE),

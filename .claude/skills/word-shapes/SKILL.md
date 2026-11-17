@@ -257,6 +257,40 @@ effect_types)`:
 | `word_shape_hold_min_s` / `_hold_max_s` | 0.8 / 2.0 | the hold is the sung phrase's own length, clamped |
 | `word_shape_release_ratio` | 1.5 | the release is this × the form |
 
+**THE HOLD STRETCH (row W4.2, his room verdict 2026-11-17).** The clamped
+hold is then MULTIPLIED by `fx.device_model.word_shape_hold_x(effect_types)`
+— `WORD_SHAPE_HOLD_X = {"radial": 1.5, "blackhole": 1.5, "fireworks":
+1.5}`, from his own words ("star and black hole look pretty good, but could
+last a little longer" / Fireworks "have it hold 50% longer"). So those three
+hold **1.2–3.0 s**; Sauron, Orbits and Fish still hold 0.8–2.0 s. Four
+things to know, every one of them a place to go wrong:
+
+- **AFTER the clamp, on purpose**, so the MAXIMUM stretches too. Clamping
+  after multiplying would cut his half-again back to 2.0 s on exactly the
+  long phrases he was watching.
+- **the LARGEST stretch among the showing types**, so a panel showing a
+  stretched effect beside an unstretched one holds long enough for the one
+  that needs it.
+- **no effect types at all → 1.0, NOT the global maximum** — the OPPOSITE
+  of the form floor's fallback below, and deliberately so: "longest is
+  safest" protects a shape's LANDING, and the hold begins once the shape is
+  already complete, so it has no landing to protect.
+- **decided at PLAN time and never re-made exact.** The fire path keeps the
+  planner's hold (`engine.fire_lyric_shape_event` re-floors only the form),
+  so a scene change between the plan and the word carries the PLANNED
+  scene's stretch — at most one scene's difference, the same trade the
+  colour path already makes.
+
+It is a code constant, **not Sonic-tellable**, for the form floor's own
+reason; the two hold settings' Sonic text and the `word-shapes` Help topic
+both say "STAR, Black Hole and Fireworks hold half again as long as this."
+A live knob would be a per-effect registry param read off
+`conductor.virtuals[...].param_baseline` (the `pulse_effect_ms` pattern),
+not this constant. The preview (`scene_response.preview_word_shape`) and
+the Test Bed pass the showing types through the same one function, so both
+show the stretched hold unasked. The RELEASE is a multiple of the FORM, so
+the stretch never reaches it.
+
 The form is floored at `fx.device_model.word_shape_form_min_s` — a
 per-effect minimum (`WORD_SHAPE_FORM_MIN_S`; **two are declared**, the
 Fish's 2.0 s since row W1.4 and FIREWORKS' 2.0 s since row W4.3 — STAR,

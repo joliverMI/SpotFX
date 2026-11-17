@@ -396,12 +396,14 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "word_shape_hold_min_s", "Word shape — shortest hold",
         "The least time a formed shape stands complete before it starts "
         "letting go, in seconds. A shape holds through the sung phrase, "
-        "never shorter than this. Default 0.8."),
+        "never shorter than this. Default 0.8. STAR, Black Hole and "
+        "Fireworks hold half again as long as this."),
     "word_shape_hold_max_s": _spec(
         "word_shape_hold_max_s", "Word shape — longest hold",
         "The most time a formed shape stands complete before it starts "
         "letting go, in seconds — a long sung phrase is cut off here. "
-        "Default 2."),
+        "Default 2. STAR, Black Hole and Fireworks hold half again as long "
+        "as this."),
     "word_shape_release_ratio": _spec(
         "word_shape_release_ratio", "Word shape — release",
         "How long a shape takes to let go, as a multiple of its own "

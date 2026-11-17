@@ -318,6 +318,13 @@ match the shape. The particles in the event horizon flow around in this
 shape, as the event horizon beats to the music."* and *"The shapes should
 form smoothly. ... hold momentarily, and then release back and smoothly."*
 
+**ITS HOLD IS STRETCHED ×1.5 (row W4.2, his room verdict 2026-11-17).**
+`blackhole` is in `fx.device_model.WORD_SHAPE_HOLD_X`, so the
+`word_shape_hold_s` this effect is TOLD is already 1.2–3.0 s rather than
+0.8–2.0 s — "star and black hole look pretty good, but could last a
+little longer". Nothing in this module changed: it runs whatever hold it is
+told (`.claude/skills/word-shapes`, THE HOLD STRETCH).
+
 **ONE CHANGE, AND EVERYTHING ELSE FOLLOWS FROM IT: the horizon radius
 became a radius PER ANGLE.** `_horizon_radius()` is still today's scalar
 and still what every reader with no angle to offer asks for; it is now

@@ -617,6 +617,65 @@ def word_shape_form_min_s(effect_types=None) -> float:
     return max(mins) if mins else 0.0
 
 
+# THE PER-EFFECT HOLD STRETCH (his room verdict, 2026-11-17, row W4.2):
+# "star and black hole look pretty good, but could last a little longer" /
+# Fireworks "have it hold 50% longer". An effect whose shape reads well but
+# too briefly declares its own multiplier here, keyed by registry name.
+# `room_controls.word_shape_timing` multiplies the CLAMPED hold by it, so
+# the maximum stretches too: today's 0.8-2.0 s hold becomes 1.2-3.0 s on
+# these three, and Sauron, Orbits and Fish are untouched.
+#
+# ONE FACTOR, 1.5, FOR ALL THREE: his own Fireworks number, so there is one
+# number for his eye to learn and one constant to retune. Not the room's two
+# hold settings, which would stretch every wired effect, which he did not
+# ask for.
+#
+# LIKE THE FORM FLOOR ABOVE, IT LIVES HERE AND IS NOT SONIC-TELLABLE: it is
+# a code constant the planner needs before it has asked any effect anything.
+# If he later wants to tune it live, the follow-up is a per-effect registry
+# param read off `conductor.virtuals[...].param_baseline` (the
+# `pulse_effect_ms` pattern) — not this constant.
+WORD_SHAPE_HOLD_X: dict[str, float] = {
+    "radial": 1.5,      # STAR
+    "blackhole": 1.5,   # the Black Hole's event horizon
+    "fireworks": 1.5,   # his own number
+}
+
+
+def word_shape_hold_x(effect_types=None) -> float:
+    """The LARGEST hold stretch among `effect_types` — 1.0 with none of them
+    declaring one, and 1.0 with NO TYPES GIVEN AT ALL.
+
+    TWO THINGS TO STATE, because they differ from the form floor above:
+
+      * THE LARGEST among the showing types, for the same reason the form
+        takes the longest minimum: a panel showing a stretched effect beside
+        an unstretched one holds the shape long enough for the one that
+        needs it.
+      * NO EFFECT TYPES AT ALL — a bare TriggerEngine with no room wired —
+        is 1.0, **not** the global maximum, which is the OPPOSITE of the
+        form floor's fallback. The floor's "longest is safest" reasoning is
+        about protecting a LANDING: a shape given too little time to
+        assemble lands half-formed on the word, so when the room is unknown
+        the long form is the safe answer. A hold has no landing to protect
+        — it begins once the shape is already complete — so an unknown room
+        gets the unstretched hold, and only an effect we can SEE on the
+        panel stretches it.
+
+    Plan time asks with the SHOWING scene's types
+    (`engine.lyric_shape_timing`), the same "conservative at plan time,
+    exact at fire time" split the form floor makes — except that the fire
+    path keeps the PLANNER'S hold (only the form is re-made exact,
+    `engine.fire_lyric_shape_event`), so a scene change between the plan and
+    the word carries the planned scene's stretch. That errs by at most one
+    scene's difference, which is the same trade the colour path already
+    makes."""
+    if effect_types is None:
+        return 1.0
+    xs = [WORD_SHAPE_HOLD_X[e] for e in effect_types if e in WORD_SHAPE_HOLD_X]
+    return max(xs) if xs else 1.0
+
+
 # ── effect-parameter registry ────────────────────────────────────────────────
 
 def effect_types() -> list[str]:
