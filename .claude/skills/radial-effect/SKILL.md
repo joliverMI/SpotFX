@@ -328,7 +328,7 @@ statement.
 little longer". Nothing in this module changed: it runs whatever hold it is
 told (`.claude/skills/word-shapes`, THE HOLD STRETCH).
 
-Seven things not visible cold:
+Eight things not visible cold:
 
 - **IT IS A DIVISOR, IN THE BLEND THE EFFECT ALREADY HAD.** Star's picture
   is the source strip sampled at a shaped radius `u = r / (max_radius x

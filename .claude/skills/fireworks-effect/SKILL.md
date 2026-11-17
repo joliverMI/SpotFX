@@ -247,8 +247,21 @@ the strip's schema does not carry the keys.
 **ITS HOLD IS STRETCHED ×1.5 (row W4.2, his room verdict 2026-11-17).**
 `fireworks` is in `fx.device_model.WORD_SHAPE_HOLD_X`, so the
 `word_shape_hold_s` this effect is TOLD is already 1.2–3.0 s rather than
-0.8–2.0 s — "have it hold 50% longer". Nothing in this module changed: it runs whatever
-hold it is told (`.claude/skills/word-shapes`, THE HOLD STRETCH).
+0.8–2.0 s — "have it hold 50% longer". Nothing in this module changed: it
+runs whatever hold it is told (`.claude/skills/word-shapes`, THE HOLD
+STRETCH), and the W4.3 block in `fx/effects/fireworks.py` says the same
+("the longer hold is the ROOM's ... nothing here stretches it"), so there
+is exactly ONE stretch in the system and no double-counting.
+
+**IT COMPOSES WITH W4.3's FORM FLOOR, AND LENGTHENS THE HUSH WITH IT.** The
+two wave-4 rows are orthogonal in what they set — W4.3 floors the FORM at
+2.0 s, W4.2 multiplies the HOLD — but the HUSH spans both
+(`_ws_hush_until = form + hold`), so no ordinary launch happens for
+**3.2–5.0 s** from the SEQ edge rather than W4.3's own 2.8–4.0 s. Both of
+his asks pull the same way here (a dark canvas AND a longer hold), so that
+is the intended direction; `tests/test_word_shape_contract.py`'s
+`test_the_stretch_composes_with_fireworks_own_form_floor` pins it so a
+later change to either constant has to notice the other.
 
 **ONE BURST PER TOLD WORD, from the centre.** The SEQ edge (never the id —
 two hearts back to back both fire) arms `_ws_pending` in `config_updated`,

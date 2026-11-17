@@ -54,6 +54,7 @@ from __future__ import annotations
 import asyncio
 import json
 from random import Random
+from types import SimpleNamespace
 
 import pytest
 
@@ -672,6 +673,81 @@ def test_the_stretched_hold_rides_the_preview_and_the_fire_path(monkeypatch):
     _run(engine_mod.fire_lyric_shape_event(action, 310))
     assert _told(executor)[-1]["params"][wsk.HOLD_KEY] == 1.2
 
+def test_the_previews_longest_hold_carries_the_stretch_too():
+    """W4.1 gave the preview's sentence a SECOND number — the room's longest
+    hold, so a ruler showing the clamp's floor can say a real sung phrase
+    holds longer. Both numbers must come from the one rule, or a Black Hole
+    scene shows a 1.2 s hold and claims "up to 2000 ms" when its real
+    ceiling is 3000 ms.
+
+    Pinned against `word_shape_timing`'s OWN saturated ceiling rather than
+    against a second hand-written multiply, so the two cannot drift apart
+    if the stretch ever moves relative to the clamp."""
+    st = RoomControlState()
+    for types, stretched in ((["blackhole"], True), (["radial"], True),
+                             (["fireworks"], True), (["sauron"], False),
+                             ([EFFECT], False), (["fish"], False)):
+        virtuals = {"v1": SimpleNamespace(effect_type=types[0])}
+        preview = sr.preview_word_shape(0.5, "heart", virtuals)
+        ceiling = word_shape_timing(0.5, 10_000_000, st, types)[1]
+        assert preview.hold_max_s == pytest.approx(ceiling), types
+        assert preview.hold_max_s == pytest.approx(3.0 if stretched else 2.0), \
+            types
+        # the floor the ruler actually draws is stretched by the same factor,
+        # so the sentence's two numbers always agree about which room it is
+        assert preview.hold_s == pytest.approx(1.2 if stretched else 0.8), types
+        assert preview.hold_max_s > preview.hold_s, types
+
+    # NO VIRTUALS AT ALL — the stretch is 1.0 there, so the preview shows
+    # the bare room maximum (word_shape_hold_x' own no-room answer).
+    assert sr.preview_word_shape(0.5, "heart", None).hold_max_s == \
+        pytest.approx(2.0)
+
+
+def test_the_previews_longest_hold_follows_his_own_retuned_maximum():
+    """It is the ROOM's maximum times the stretch, never a constant: a
+    retune has to carry through to both numbers."""
+    from spectra.services import room_controls as rc
+    import unittest.mock as mock
+    room = RoomControlState(word_shape_hold_min_s=1.0, word_shape_hold_max_s=1.4)
+    virtuals = {"v1": SimpleNamespace(effect_type="blackhole")}
+    with mock.patch.object(rc, "load_room_controls", lambda: room):
+        preview = sr.preview_word_shape(0.5, "heart", virtuals)
+    assert preview.hold_max_s == pytest.approx(2.1), "1.4 x 1.5"
+    assert preview.hold_s == pytest.approx(1.5), "1.0 x 1.5"
+def test_the_stretch_composes_with_fireworks_own_form_floor():
+    """W4.2 and W4.3 landed in the same wave and both touch Fireworks, so
+    pin that they compose rather than interfere. They are ORTHOGONAL by
+    construction: W4.3's floor raises the FORM (and the release with it,
+    being a multiple of the form), W4.2's stretch multiplies the HOLD, and
+    neither reaches the other's quantity.
+
+    `fx/effects/fireworks.py`'s own W4.3 block says the longer hold is the
+    ROOM's and "nothing here stretches it", so there is exactly one stretch
+    in the system — this one — and no double-counting."""
+    st = RoomControlState()
+    assert device_model.WORD_SHAPE_FORM_MIN_S["fireworks"] == 2.0, "W4.3's"
+    assert device_model.WORD_SHAPE_HOLD_X["fireworks"] == 1.5, "W4.2's"
+
+    short = word_shape_timing(0.8, 0, st, ["fireworks"])
+    long = word_shape_timing(0.8, 5000, st, ["fireworks"])
+    assert short == (2.0, 1.2, 3.0), "W4.3's form, W4.2's floor hold"
+    assert long == (2.0, 3.0, 3.0), "W4.3's form, W4.2's ceiling hold"
+
+    # THE FORM FLOOR DOES NOT MOVE THE HOLD, and the stretch does not move
+    # the form: Fish declares the same 2.0 s floor and no stretch, so its
+    # form matches Fireworks' while its hold stays unstretched.
+    fish = word_shape_timing(0.8, 5000, st, ["fish"])
+    assert fish[0] == long[0] and fish[2] == long[2], "the same form/release"
+    assert fish[1] == 2.0 and long[1] == 3.0, "only the hold differs"
+
+    # CONSEQUENCE WORTH PINNING: the effect's hush runs from the SEQ edge to
+    # the END OF THE HOLD (`fireworks._ws_hush_until = form + hold`), so the
+    # stretch lengthens the dark canvas too — 3.2 s to 5.0 s rather than
+    # W4.3's own 2.8 s to 4.0 s. Both of his asks pull the same way here, so
+    # this is the intended direction, not a surprise.
+    assert short[0] + short[1] == pytest.approx(3.2)
+    assert long[0] + long[1] == pytest.approx(5.0)
 
 def test_the_hold_stretch_never_moves_the_planned_lead():
     """The lead is the FORM (LEAD family, positive = earlier). The stretch
