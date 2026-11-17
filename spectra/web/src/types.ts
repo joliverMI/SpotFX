@@ -253,6 +253,13 @@ export interface WordShapePreview {
   form_s: number;
   hold_s: number;
   release_s: number;
+  /** THE ROOM'S LONGEST HOLD (`word_shape_hold_max_s`, row W4.1). A
+   * preview has no sung phrase, so its own `hold_s` is always the clamp's
+   * FLOOR — the room's shortest hold — while a real sung phrase holds up to
+   * this. Carried so the sentence under the ruler can say so without the
+   * frontend computing a second of time of its own. Optional: an older
+   * server's timeline has no such field. */
+  hold_max_s?: number | null;
 }
 
 /** What `POST /api/scenes` answers (spectra/api/scenes.py::upsert_scene).

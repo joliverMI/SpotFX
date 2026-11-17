@@ -426,7 +426,7 @@ from typing import Any, Awaitable, Callable, Mapping, NamedTuple, Optional
 
 from fx import device_model
 from fx.effects import drop_colour_resample, lull_dark, lull_handoff, \
-    phase_grammar, strip_phase
+    phase_grammar, strip_phase, word_shape_keys
 from fx.effects import pre_drop as fx_pre_drop
 from spectra.models.binding import ValueBinding
 from spectra.models.scene import (FlareBand, FlareKind, ParamTarget,
@@ -921,6 +921,15 @@ class PreviewWordShape:
     form_s: float
     hold_s: float
     release_s: float
+    # THE ROOM'S LONGEST HOLD (row W4.1) — `word_shape_hold_max_s`, carried
+    # so the preview's own sentence can say that the hold it is showing is
+    # the room's SHORTEST one. A preview passes `phrase_ms=0.0`, so its
+    # `hold_s` is always the clamp's FLOOR (`word_shape_hold_min_s`, 0.8 s)
+    # while a real sung phrase holds up to this. The ruler was truthful but
+    # silent about that, which is the W4.1 diagnosis's fourth finding. Read
+    # off the server like every other number on that ruler
+    # (PreviewRuler.tsx's rule: the frontend computes no time of its own).
+    hold_max_s: float = word_shape_keys.DEFAULT_HOLD_MAX_S
 
 
 def preview_word_shape(intensity: float, shape: Optional[str] = None,
@@ -931,11 +940,14 @@ def preview_word_shape(intensity: float, shape: Optional[str] = None,
     ruler and its write can never disagree)."""
     types = (None if virtuals is None
              else [st.effect_type for st in virtuals.values()])
+    hold_max_s = word_shape_keys.DEFAULT_HOLD_MAX_S
     try:
         from spectra.services.room_controls import (load_room_controls,
                                                     word_shape_timing)
+        room = load_room_controls()
         form_s, hold_s, release_s = word_shape_timing(
-            intensity, phrase_ms, load_room_controls(), types)
+            intensity, phrase_ms, room, types)
+        hold_max_s = float(room.word_shape_hold_max_s)
     except Exception:                                    # noqa: BLE001
         logger.exception("word shapes: room controls unreadable — the "
                          "plan's default timing for this preview")
@@ -943,7 +955,8 @@ def preview_word_shape(intensity: float, shape: Optional[str] = None,
             intensity, phrase_ms)
     return PreviewWordShape(shape_id=str(shape or PREVIEW_SHAPE),
                             energy=max(0.0, min(1.0, float(intensity))),
-                            form_s=form_s, hold_s=hold_s, release_s=release_s)
+                            form_s=form_s, hold_s=hold_s, release_s=release_s,
+                            hold_max_s=hold_max_s)
 
 
 # WORD COLOURS (spectra/services/lyric_events.py): how a word's colour is named
@@ -1466,10 +1479,14 @@ class ResponseEngine:
         # _color_rotate's own docstring.
         self._pending_color_rotates: list[tuple[str, str, float, int]] = []
         self._phase_armed: Optional[str] = None  # "charge"|"lull" awaiting payoff
-        # WORD SHAPES (W0.3): the counter the told keys carry so two words
-        # of the SAME shape back to back both read as a fresh edge in the
-        # effect (word_shape_keys' SEQ_KEY rule). Monotonic per engine.
-        self._word_shape_seq = 0
+        # WORD SHAPES (W0.3): the LAST seq this engine wrote — a record for
+        # the fire record, never the source. The counter itself is
+        # word_shape_keys.next_seq(), ONE clock-seeded source for the whole
+        # process (row W4.1): a per-engine counter made the preview's fresh
+        # scratch engine write 1 on every lap, so only its first lap ever
+        # edged, and a persisted 1 swallowed the first sung word after a
+        # restart. 0 means this engine has written none.
+        self._last_word_shape_seq = 0
         # ... and when the last DROP this engine armed stops counting as
         # "a drop is happening" for P3 A's skip (phase_armed below). A drop
         # arms no phase of its own (_drive_phase sets _phase_armed only for
@@ -2150,7 +2167,11 @@ class ResponseEngine:
             action = preview_word_shape(intensity, shape, self.conductor.virtuals)
             record["word_shape_preview"] = {
                 "shape": action.shape_id, "form_s": action.form_s,
-                "hold_s": action.hold_s, "release_s": action.release_s}
+                "hold_s": action.hold_s, "release_s": action.release_s,
+                # the room's LONGEST hold too (row W4.1), so the overlay's
+                # sentence can say the hold it is showing is the room's
+                # shortest without computing a second of time itself
+                "hold_max_s": action.hold_max_s}
             shape_token = WORD_SHAPE_ACTIVE.set(action)
         fire_seq = self._begin_fire()
         try:
@@ -2892,6 +2913,15 @@ class ResponseEngine:
         the model but a no-op anywhere but a Words band (FlareKind's own
         docstring, and scene_store.scene_warnings says so on save).
 
+        THE SEQ IS THE PROCESS'S, NOT THIS ENGINE'S (row W4.1). An effect
+        edges on the SEQ CHANGING against the value it holds, so the counter
+        has to be unique against every other engine in this process and
+        against a persisted config from an earlier process life —
+        word_shape_keys.next_seq() is that one clock-seeded source, and
+        `self._last_word_shape_seq` is only a record of what this engine
+        last wrote. A per-engine 1, 2, 3 is what made every preview lap
+        after the first draw nothing at all.
+
         The six keys are deliberately absent from the effect-parameter
         registry, so they never enter the param/gain kinds' jumps/glides
         dicts: a shape composes with every other kind in the band, exactly
@@ -2902,8 +2932,9 @@ class ResponseEngine:
         shape = None if action is None else getattr(action, "shape_id", None)
         if not shape:
             return {"result": "no_word", "shape": None, "virtuals": 0}
-        self._word_shape_seq += 1
-        keys = wsk.keys_for(shape, self._word_shape_seq,
+        seq = wsk.next_seq()
+        self._last_word_shape_seq = seq
+        keys = wsk.keys_for(shape, seq,
                             float(action.form_s), float(action.hold_s),
                             float(action.release_s), float(intensity))
         targets = 0
@@ -2912,7 +2943,7 @@ class ResponseEngine:
                 continue
             await self._jump(vid, state.effect_type, dict(keys))
             targets += 1
-        return {"shape": shape, "seq": self._word_shape_seq,
+        return {"shape": shape, "seq": seq,
                 "form_s": keys[wsk.FORM_KEY], "hold_s": keys[wsk.HOLD_KEY],
                 "release_s": keys[wsk.RELEASE_KEY],
                 "level": keys[wsk.LEVEL_KEY], "virtuals": targets}

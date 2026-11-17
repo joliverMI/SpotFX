@@ -189,7 +189,10 @@ effect drawing a shape — the shape of `fx/effects/pre_drop.py` and
    byte what the effect renders today.
 
 The six keys are `word_shape` (id, "" = none), `word_shape_seq` (an effect
-watches the SEQ, not the id, so two words of the same shape both edge),
+watches the SEQ, not the id, so two words of the same shape both edge;
+`next_seq()` is the one source — **monotonic per PROCESS, clock-seeded, so a
+fresh engine or a restart never repeats the seq a running or persisted
+effect already holds**, row W4.1),
 `word_shape_form_s` / `_hold_s` / `_release_s`, and `word_shape_level` (the
 word's Energy, 0..1, for size and counts; 0 = not told). `told(config)`
 returns a `WordShapeTold` or None — and it returns **None for a shape id
@@ -374,6 +377,29 @@ instant jump of all six keys, through `word_shape_keys.keys_for`, on every
 action (the kind on a flare band, or a preview with nothing synthesised) →
 no write, named `no_word`.
 
+**THE SEQ BELONGS TO THE PROCESS, NOT TO AN ENGINE** (row W4.1, 2026-11-17
+— the fix for his "the preview of the flare doesn't seem to work").
+`word_shape_keys.next_seq()` is the one source: seeded from the wall clock
+in milliseconds on first use, +1 per write, re-seeded forward whenever the
+clock passes it. Every `ResponseEngine` draws from it — the live one, the
+preview's scratch one, the dark timeline's — and keeps only
+`_last_word_shape_seq`, a record for its fire record. It has to be unique
+against TWO things, and a per-engine 1, 2, 3 was unique against neither:
+
+- **another engine in the same process.** `open_program_hold` seeds a fresh
+  scratch engine on EVERY `/fire`, so the old counter wrote 1 on every lap:
+  lap 1 edged against the effect's 0 baseline and lap 2 onward wrote 1 to an
+  effect already holding 1 — no edge, no shape. All six effects share the
+  edge rule, so all six were affected.
+- **a persisted config.** The in-process fx host persists each effect's
+  config, the six keys included, so a fresh instance's creation baseline (the
+  no-fire rule) could be exactly the seq a restarted SpotFX was about to
+  write first — one swallowed shape, on a tuning day.
+
+Still a plain int (SEQ's schema is `int, min 0`) and still landed by a JUMP,
+never a tween. `tests/test_flare_preview_hold.py`'s section 10 proves the
+whole of it on the real headless host.
+
 **THE PREVIEW.** `kind_lead_ms` returns the form for this type, so the
 existing ruler already draws the three marks: start = word − form,
 trigger = word, end = word + hold + release. `fire_kind` synthesises a
@@ -400,6 +426,35 @@ change must keep:
   "forms" / "holds" / "releases" and the trigger mark "the word".
 - **that mark does not drag** — the Words section ignores a per-kind
   offset, so authoring one here would be a number the engine ignores.
+
+**WHAT ROW W4.1 ADDED TO THE PREVIEW** (2026-11-17, after his first room
+test: "the preview of the flare doesn't seem to work"). Four facts, and
+anything that touches this path has to keep all four:
+
+1. **A shape on EVERY lap.** The loop calls `/fire` once per lap, each one
+   through a fresh scratch engine — the process-wide seq above is what makes
+   each one an edge. Nothing about the hold changed: still the snapshot once
+   per session, the deadline, the 3-minute ceiling, the sweep, the
+   `apply_scene` per fire.
+2. **The close hands the room back with NO shape told.**
+   `flare_preview_hold._revert_writes` replaces the six keys in the snapshot
+   (only where the snapshot HAS them — an effect that knows no shapes would
+   reject them and lose the whole validated write) with
+   `word_shape_keys.NOT_TOLD`, and `recover_stale_hold` lands the same way.
+   A standing preview shape then RELEASES from its fraction (the clearing
+   write every effect already honours; Fireworks' sparks finish on their own
+   clock), and the last sung word's shape never re-forms as a parting gift.
+3. **The hold is always the room's SHORTEST.** `preview_word_shape` passes
+   `phrase_ms=0.0`, so the clamp returns `word_shape_hold_min_s` (0.8 s). The
+   ruler used to be truthful but silent about it; `PreviewWordShape` now
+   carries `hold_max_s` too, the timeline's `word_shape` block passes it on,
+   and the sentence under the ruler says both numbers. Read off the server
+   like every other time on that ruler — the frontend computes none.
+4. **The room is NOT moved on `/open`** (the overlay opens dark by design),
+   so on a scene that is not the one showing, lap 1's shape forms while the
+   scene itself is still fading in over its stored crossfade; laps 2+ are
+   clean. Stated in the overlay's own sentence and in the help topic rather
+   than left for him to wonder about.
 
 The kind itself is declared with **no knobs** (`flareKindOps.
 newWordShapeKind`) and adding the Words section seeds one attached across

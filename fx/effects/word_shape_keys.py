@@ -17,7 +17,12 @@ THE KEYS
   it cannot build).
 - `word_shape_seq` (int): a counter SpotFX bumps per shape event, so two
   words of the SAME shape back to back both read as a fresh edge. An effect
-  watches this, never the id, to decide "a new shape just arrived".
+  watches this, never the id, to decide "a new shape just arrived". It comes
+  from `next_seq()` below — ONE source for the whole SpotFX process,
+  clock-seeded, never a per-engine 1, 2, 3 (row W4.1: a per-engine counter
+  made every preview fire write seq 1, so only the FIRST lap of a preview
+  session ever drew a shape, and the first sung word after a restart was
+  swallowed by a persisted 1).
 - `word_shape_form_s` (float s): the forming time, already Energy-paced by
   the engine (0.9 s quiet to 0.5 s loud) and already the larger of that and
   the showing effect's own minimum. The engine fires the band EARLY by
@@ -78,6 +83,8 @@ HOW AN EFFECT OPTS IN (`fish` is the first, plan row W1.4):
 """
 from __future__ import annotations
 
+import threading
+import time
 from typing import Mapping, NamedTuple, Optional
 
 import numpy as np
@@ -97,6 +104,10 @@ KEYS = (SHAPE_KEY, SEQ_KEY, FORM_KEY, HOLD_KEY, RELEASE_KEY, LEVEL_KEY)
 # not a time — never as a substitute for being told.
 DEFAULT_FORM_S = 0.9
 DEFAULT_HOLD_S = 0.8
+# The longest a sung phrase may hold a shape — the room's own
+# `word_shape_hold_max_s` default, and the number the preview's ruler quotes
+# when it says its own 0.8 s is the room's SHORTEST hold (row W4.1).
+DEFAULT_HOLD_MAX_S = 2.0
 DEFAULT_RELEASE_RATIO = 1.5
 
 # Longest anything here may be told, so a bad number cannot leave a shape
@@ -109,6 +120,43 @@ LEVEL_FLOOR = 0.01
 
 NOT_TOLD = {SHAPE_KEY: "", SEQ_KEY: 0, FORM_KEY: 0.0, HOLD_KEY: 0.0,
             RELEASE_KEY: 0.0, LEVEL_KEY: 0.0}
+
+# THE ONE SEQ SOURCE FOR THE WHOLE PROCESS (row W4.1, 2026-11-17). The SEQ
+# has to be unique against two things at once, and a per-engine counter was
+# unique against neither:
+#
+#   * a SECOND ENGINE in the same process. The flare preview seeds a FRESH
+#     scratch ResponseEngine on every /fire (flare_preview._scratch_engine),
+#     so a per-engine counter wrote 1 on every lap: lap 1 edged against the
+#     effect's 0 baseline, and lap 2 onward wrote 1 to an effect already
+#     holding 1 — no edge, no shape. His own report ("the preview of the
+#     flare doesn't seem to work").
+#   * a PERSISTED config. The in-process fx host persists each effect's
+#     config, the six keys included, so a fresh instance's creation baseline
+#     (the no-fire rule) can be the seq a restarted SpotFX is about to write
+#     first — one swallowed shape, exactly on a tuning day.
+#
+# So: seeded from the wall clock in MILLISECONDS on first use and re-seeded
+# forward whenever the clock passes the counter, which makes it monotonic
+# within the process AND larger than anything any earlier process life
+# wrote. Still a plain int inside SEQ_KEY's schema (int, min 0), and still
+# landed by a JUMP, never a tween — an interpolated counter would edge on
+# every intermediate frame.
+_SEQ_MODULUS = 2 ** 31
+_seq_lock = threading.Lock()
+_seq = 0
+
+
+def next_seq() -> int:
+    """The next SEQ to write — monotonic per PROCESS, clock-seeded. Every
+    ResponseEngine (the live one, a preview's scratch one, the dark
+    timeline's) draws from here instead of counting on its own; an engine
+    keeps only a RECORD of the last seq it wrote, for its fire record."""
+    global _seq
+    with _seq_lock:
+        stamp = int(time.time() * 1000) % _SEQ_MODULUS
+        _seq = stamp if stamp > _seq else _seq + 1
+        return _seq
 
 
 class WordShapeTold(NamedTuple):
@@ -267,7 +315,9 @@ def release_s_for(form_s: float,
 __all__ = [
     "SHAPE_KEY", "SEQ_KEY", "FORM_KEY", "HOLD_KEY", "RELEASE_KEY",
     "LEVEL_KEY", "KEYS", "NOT_TOLD", "LEVEL_FLOOR", "MAX_SECONDS",
-    "DEFAULT_FORM_S", "DEFAULT_HOLD_S", "DEFAULT_RELEASE_RATIO",
-    "WordShapeTold", "envelope", "keys_for", "release_s_for",
+    "DEFAULT_FORM_S", "DEFAULT_HOLD_S", "DEFAULT_HOLD_MAX_S",
+    "DEFAULT_RELEASE_RATIO",
+    "WordShapeTold", "envelope", "keys_for", "next_seq",
+    "release_s_for",
     "schema_fields", "told",
 ]
