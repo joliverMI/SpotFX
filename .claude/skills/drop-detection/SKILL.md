@@ -579,7 +579,7 @@ widened for free the moment `TRIGGERS` grew — `show_status` already
 surfaces each armed set's `on` plus the song's own per-phase countdown
 (`arms.song.phases`) too. **What did NOT widen automatically**: the two
 hand-written MCP tool wrapper DOCSTRINGS in `settings_mcp_server.py`
-(`arm_show_set`/`show_status` — the CLI/subscription backend's own tool
+(`arm_show_set`/`show_status` — the CLI backend's own tool
 *descriptions*, which a model reads, as distinct from the enum TYPE those
 same functions declare) still said only "scene change, or High/Low" after
 this shipped — found live, fixed as a sonic-ops follow-up (prose updated

@@ -64,6 +64,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import pathlib
 import sys
 import tempfile
 from pathlib import Path
@@ -497,30 +498,43 @@ try:
 except tr.TranscriptionUnavailable:
     print("ok: connection-refused (the real bridge's current state) is the honest 503 path, not chased")
 
-# ═══ 7. the "cli" (subscription) backend switch defaults safe ═══════════
+# ═══ 7. the "cli" backend pays with HIS API KEY and nothing else ════════
 # Full argv/env/transcript-parsing proof lives in
 # tests/test_settings_agent_cli.py (offline, against real captured
 # transcripts) and is not duplicated here — this is the one property every
-# other check in this repo needs to be able to assume without re-deriving it.
+# other check in this repo needs to be able to assume without re-deriving
+# it. Since the Admiral's 2026-11-17 order, that property is "no API key,
+# no Sonic, and no fallback to a subscription login".
 
 os.environ.pop("SPECTRA_SETTINGS_AGENT_BACKEND", None)
-os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+os.environ.pop("ANTHROPIC_API_KEY", None)
+# A subscription token exported here is deliberately left in place: it must
+# make no difference to anything below.
+os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = "sk-ant-oat-should-never-be-used"
+os.environ["SPECTRA_ANTHROPIC_API_KEY_FILE"] = "/nonexistent/anthropic-api-key"
 
 from spectra.services import settings_agent_cli as sac  # noqa: E402
 
-check(scfg.settings_agent_backend() == "api",
-      "settings-agent backend defaults to \"api\" — a subscription CLI backend never enables itself")
-check(scfg.settings_agent_cli_oauth_token() == "",
-      "no CLAUDE_CODE_OAUTH_TOKEN configured by default")
+check(scfg.settings_agent_backend() == "api", "settings-agent backend defaults to \"api\"")
+check(not hasattr(scfg, "settings_agent_cli_oauth_token"),
+      "the subscription credential reader is gone, not merely unused")
+check(scfg.settings_agent_api_key() == "",
+      "no API key resolves when neither the env var nor the key file has one")
 
 try:
     run(sac.run_turn(None, "set brightness to half"))
-    raise SystemExit("FAIL: the cli backend ran without a token")
+    raise SystemExit("FAIL: the cli backend ran without an API key")
 except sa.SettingsAgentUnavailable as e:
-    check("CLAUDE_CODE_OAUTH_TOKEN" in str(e),
-          "cli backend refuses before any subprocess without an explicit token")
+    check("ANTHROPIC_API_KEY" in str(e),
+          "cli backend refuses before any subprocess without his API key")
 
-check("--bare" not in sac._argv("hi", None), "the cli backend never passes --bare (can't read the OAuth token)")
+env = sac._subprocess_env("sk-ant-api03-a-real-key", pathlib.Path("/tmp/spectra-check-workdir"))
+check(env["ANTHROPIC_API_KEY"] == "sk-ant-api03-a-real-key",
+      "the subprocess is handed his API key in its environment")
+check("CLAUDE_CODE_OAUTH_TOKEN" not in env and "ANTHROPIC_AUTH_TOKEN" not in env,
+      "no subscription credential survives into the subprocess")
+check("sk-ant-" not in " ".join(sac._argv("hi", None)),
+      "the credential is never on the command line (it would be in every `ps` line)")
 check(sac._argv("hi", None)[sac._argv("hi", None).index("--tools") + 1] == "",
       "the cli backend strips every built-in tool")
 mcp_cfg = json.loads(sac._mcp_config_json())

@@ -225,6 +225,23 @@ def fresh_ledfx_client():
 
 
 @pytest.fixture(autouse=True)
+def _no_real_anthropic_key(tmp_path, monkeypatch):
+    """HIS REAL API KEY IS OFF LIMITS TO THE TEST SUITE. Every Claude-calling
+    feature now reads the key through config.settings_agent_api_key(), which
+    falls back to the FILE at config.anthropic_api_key_file() —
+    ~/.config/anthropic/api-key, which genuinely exists on his machine. Without
+    this fixture, a test that proves "no key configured" by deleting
+    ANTHROPIC_API_KEY from the environment would quietly find the real key on
+    disk instead and either fail here or, far worse, pass while making a real
+    billed call. Autouse, pointing the override env var at a path inside
+    tmp_path that is never created, so the fallback resolves to "" for every
+    test in the suite. A test that wants a key sets ANTHROPIC_API_KEY (which
+    wins) or writes its own file and points this var at it."""
+    monkeypatch.setenv("SPECTRA_ANTHROPIC_API_KEY_FILE",
+                       str(tmp_path / "no-such-anthropic-api-key"))
+
+
+@pytest.fixture(autouse=True)
 def _isolated_capture_health(tmp_path, monkeypatch):
     """The camera-host presence record (spectra/services/capture_health.py)
     is written from inside `mapping_session`'s own hello/close and from the

@@ -1,13 +1,20 @@
-"""The "cli" (subscription) settings-agent backend
-(spectra/services/settings_agent_cli.py) -- offline proof that the hard
-line holds structurally, no live `claude` call required for the bulk of
-this file:
+"""The "cli" settings-agent backend (spectra/services/
+settings_agent_cli.py) -- offline proof that the hard line holds
+structurally, no live `claude` call required for the bulk of this file.
 
-  1. The backend defaults to "api" (config.settings_agent_backend()) and
-     the "cli" backend refuses to even build a subprocess argv without an
-     explicit CLAUDE_CODE_OAUTH_TOKEN -- the same fail-before-any-state-
-     changes posture settings_agent._client() uses for a missing
-     ANTHROPIC_API_KEY.
+WHO PAYS, AND THE PROOF THAT NOTHING ELSE CAN (the Admiral's 2026-11-17
+order): section 2 and section 4 below are the ones that moved. This
+backend bills HIS OWN API KEY -- it reads no subscription credential at
+all any more, strips CLAUDE_CODE_OAUTH_TOKEN/ANTHROPIC_AUTH_TOKEN out of
+the child environment, and refuses a turn whose own apiKeySource says
+anything other than ANTHROPIC_API_KEY (section 8). A missing key is a
+stated refusal before any subprocess exists; there is no second
+credential left in the codebase to fall back to.
+
+  1. The backend switch (config.settings_agent_backend()) still defaults
+     to "api", and the "cli" backend refuses to even build a subprocess
+     argv without a configured API key -- the same fail-before-any-state-
+     changes posture settings_agent._client() uses.
   2. The dedicated working directory is created and verified clean on
      every call -- a stray .claude/, .mcp.json, or CLAUDE.md refuses the
      call rather than risking a non-bare `claude -p` session auto-running
@@ -17,10 +24,22 @@ this file:
      --allowedTools naming exactly settings_agent.TOOL_NAMES (originally
      the two settings tools; widened 2026-08-15 to Sonic's full cross-
      domain operation set, see settings_agent.py / scene_console.py).
-  4. The subprocess environment strips ANTHROPIC_API_KEY/AUTH_TOKEN and
-     points CLAUDE_CONFIG_DIR at an isolated directory -- an ambient
-     interactive `/login` session on the host can never be silently used
-     instead of the explicitly-configured token.
+  4. The subprocess environment carries his API key and NOTHING else
+     that could pay for the call (CLAUDE_CODE_OAUTH_TOKEN and
+     ANTHROPIC_AUTH_TOKEN are popped), with CLAUDE_CONFIG_DIR pointed at
+     an isolated directory -- an ambient interactive `/login` session on
+     the host can never be silently used instead.
+  4b. EVERY fixture here was captured or hand-built while this backend
+     ran on the subscription, and the real captures record what that
+     looked like: `apiKeySource: "none"`. The 13 explicitly-synthetic
+     fixtures whose tests assert a SUCCESSFUL parse were updated to
+     `"ANTHROPIC_API_KEY"` on 2026-11-17, the same way earlier widenings
+     updated their recorded tool manifests — a synthetic fixture has to
+     model what a real call looks like NOW, or it stops proving anything.
+     The four REAL captures are untouched, as always: editing a capture
+     would falsify the evidence, and they already refuse on the older
+     stale-manifest diagnosis anyway (section 5).
+
   5. _parse_transcript() reads ONLY structured tool_use/tool_result
      blocks and the system/init event's own `tools` field -- never the
      model's prose. Section 5 below proves this against four REAL,
@@ -54,9 +73,9 @@ this file:
      full mechanism).
 
 One test (test_live_cli_can_apply_a_change) additionally proves the real
-subprocess loop end to end -- SKIPPED here (no CLAUDE_CODE_OAUTH_TOKEN in
-this sandbox, and none is ever minted by this suite); it would run this
-exact assertion against a real `claude -p` call when a token is present.
+subprocess loop end to end -- SKIPPED unless SPECTRA_LIVE_CLAUDE=1 is
+exported, because it spends real money on his API key and (unlike every
+other test here) drives the real stored room controls.
 """
 from __future__ import annotations
 
@@ -86,6 +105,7 @@ def _isolated_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(scfg, "SPECTRA_STORAGE", tmp_path)
     monkeypatch.delenv("SPECTRA_SETTINGS_AGENT_BACKEND", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
 
 # ═══ 1. the backend switch itself defaults to "api" ═══════════════════
@@ -103,19 +123,47 @@ def test_backend_selects_cli_only_with_explicit_env(monkeypatch):
     assert scfg.settings_agent_backend() == "cli"
 
 
-# ═══ 2. unavailable without an explicit token -- before anything else ═
+# ═══ 2. unavailable without his API key -- before anything else ══════
 
-def test_run_turn_refuses_without_token_before_any_subprocess(monkeypatch):
+def test_run_turn_refuses_without_an_api_key_before_any_subprocess(monkeypatch):
+    """No key, no subprocess, and the refusal says what to do about it --
+    naming ANTHROPIC_API_KEY and the key file, because either is a
+    legitimate way to configure it. The autouse _no_real_anthropic_key
+    fixture in conftest.py is what makes "no key" true here even though
+    his real key file exists on this machine."""
+    from spectra.services import anthropic_key
     from spectra.services import settings_agent_cli as sac
     from spectra.services.settings_agent import SettingsAgentUnavailable
 
     def _boom(*a, **k):
-        raise AssertionError("must not spawn a subprocess without a token")
+        raise AssertionError("must not spawn a subprocess without an API key")
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _boom)
 
-    with pytest.raises(SettingsAgentUnavailable, match="CLAUDE_CODE_OAUTH_TOKEN"):
+    with pytest.raises(SettingsAgentUnavailable, match="ANTHROPIC_API_KEY") as exc:
         _run(sac.run_turn(None, "set brightness to half"))
+    assert str(anthropic_key.config.anthropic_api_key_file()) in str(exc.value)
+
+
+def test_a_missing_key_never_falls_back_to_a_subscription_credential(monkeypatch):
+    """THE no-fallback property stated as a test: a CLAUDE_CODE_OAUTH_TOKEN
+    exported in this process is not a credential any more. With one present
+    and no API key, the backend must still refuse -- nothing in this module
+    reads it (config.settings_agent_cli_oauth_token() no longer exists)."""
+    from spectra.services import settings_agent_cli as sac
+    from spectra.services.settings_agent import SettingsAgentUnavailable
+
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-should-never-be-used")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("must not spawn a subprocess")))
+
+    with pytest.raises(SettingsAgentUnavailable, match="ANTHROPIC_API_KEY"):
+        _run(sac.run_turn(None, "set brightness to half"))
+
+    from spectra import config as scfg
+    assert not hasattr(scfg, "settings_agent_cli_oauth_token"), \
+        "the subscription credential reader must stay deleted, not merely unused"
 
 
 # ═══ 3. the dedicated working directory is created and verified clean ═
@@ -191,19 +239,36 @@ def test_argv_resumes_an_existing_session():
     assert argv[argv.index("--resume") + 1] == "some-session-id"
 
 
-def test_subprocess_env_strips_api_key_and_isolates_config_dir(monkeypatch, tmp_path):
+def test_subprocess_env_carries_the_api_key_and_strips_every_subscription_credential(
+        monkeypatch, tmp_path):
+    """The 2026-11-17 inversion: the child gets his API key and loses every
+    credential that could bill anything else. A host that still exports a
+    subscription token (this one does, for other tools) must not be able to
+    pay for a Sonic turn with it."""
     from spectra.services import settings_agent_cli as sac
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-never-reach-the-child")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-should-never-reach-the-child")
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "also-should-never-reach-the-child")
 
     workdir = tmp_path / "workdir"
-    env = sac._subprocess_env("a-real-token", workdir)
+    env = sac._subprocess_env("sk-ant-api03-a-real-key", workdir)
 
-    assert "ANTHROPIC_API_KEY" not in env
+    assert env["ANTHROPIC_API_KEY"] == "sk-ant-api03-a-real-key"
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
     assert "ANTHROPIC_AUTH_TOKEN" not in env
-    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "a-real-token"
     assert env["CLAUDE_CONFIG_DIR"] == str(workdir / ".claude-config")
+
+
+def test_the_key_is_never_passed_on_the_command_line():
+    """A credential in argv is visible in every `ps` line on the host for
+    the length of the call. _argv() must carry none."""
+    from spectra.services import settings_agent_cli as sac
+
+    argv = sac._argv("set brightness to half", None)
+    joined = " ".join(argv)
+    assert "ANTHROPIC_API_KEY" not in joined
+    assert "sk-ant-" not in joined
+    assert not any(a.startswith("--api-key") for a in argv)
 
 
 def test_settings_mcp_server_starts_from_a_clean_cwd(tmp_path):
@@ -556,11 +621,11 @@ def test_every_declared_operation_including_the_device_domain_is_in_the_manifest
         assert f"mcp__{sac.MCP_SERVER_NAME}__{name}" in sac.TOOL_NAMES
 
 
-# ═══ 6. live smoke test (skipped: no CLAUDE_CODE_OAUTH_TOKEN here, and ═══
-# this suite never mints one -- see module docstring) ═══════════════════
+# ═══ 6. live smoke test (skipped unless SPECTRA_LIVE_CLAUDE=1 -- it ═══
+# spends real API credits and writes the real stored room controls) ════
 
-@pytest.mark.skipif(not os.getenv("CLAUDE_CODE_OAUTH_TOKEN"),
-                    reason="needs a real CLAUDE_CODE_OAUTH_TOKEN -- live CLI smoke test")
+@pytest.mark.skipif(os.getenv("SPECTRA_LIVE_CLAUDE") != "1",
+                    reason="spends real API credits -- export SPECTRA_LIVE_CLAUDE=1 to run")
 def test_live_cli_can_apply_a_change():
     from spectra.services import room_controls as rc
     from spectra.services import settings_agent_cli as sac
@@ -870,3 +935,136 @@ def test_the_band_attachment_widening_parses_from_its_structured_tool_result():
     assert change["response_class"] == "word"
     assert change["backup_id"] == "synthetic-backup-1"
     assert not result["rejected"]
+
+
+# ═══ 9. WHO PAID (the Admiral's 2026-11-17 order) ════════════════════════
+# The structural half is section 2 (no key -> no subprocess) and section 4
+# (the child's environment carries his API key and nothing else that could
+# pay). This section is the DETECTOR on top of it: `claude -p --output-
+# format json`'s system/init event reports `apiKeySource`, and a turn that
+# says it billed anything other than ANTHROPIC_API_KEY refuses rather than
+# passing quietly. An ABSENT field warns instead of refusing, on purpose —
+# the no-fallback guarantee rests on the environment, not on this field, and
+# a CLI that stopped emitting it must not switch a working feature off.
+
+def _init_with_key_source(source, tools=None):
+    event = _init_event(tools if tools is not None else [])
+    if source is not None:
+        event["apiKeySource"] = source
+    return event
+
+
+def test_an_api_key_billed_turn_is_accepted():
+    """The shape a real call produces — verified live against the real CLI
+    (2.1.326) with the key file in place: apiKeySource "ANTHROPIC_API_KEY",
+    total_cost_usd populated."""
+    from spectra.services import settings_agent_cli as sac
+
+    sac._verify_api_key_source([_init_with_key_source("ANTHROPIC_API_KEY")])
+
+
+@pytest.mark.parametrize("source", ["subscription", "claude.ai", "bedrock", "none", "apiKeyHelper"])
+def test_a_turn_billed_to_anything_else_refuses(source, caplog):
+    """A subscription login, a keychain entry, a Bedrock/Vertex credential:
+    the order says that is an error, not a fallback. The message names what
+    it actually billed so the cause is in the text, not in a guess."""
+    from spectra.services import settings_agent_cli as sac
+    from spectra.services.settings_agent import SettingsAgentUnavailable
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(SettingsAgentUnavailable, match="ANTHROPIC_API_KEY"):
+            sac._verify_api_key_source([_init_with_key_source(source)])
+    assert any(source in r.getMessage() for r in caplog.records if r.levelname == "WARNING")
+
+
+def test_an_absent_api_key_source_warns_but_does_not_break_the_turn(caplog):
+    from spectra.services import settings_agent_cli as sac
+
+    with caplog.at_level("WARNING"):
+        sac._verify_api_key_source([_init_with_key_source(None)])
+    assert any("apiKeySource" in r.getMessage()
+               for r in caplog.records if r.levelname == "WARNING")
+
+
+def test_parse_transcript_refuses_a_subscription_billed_turn_even_with_a_perfect_manifest():
+    """End to end through the real parse path: the manifest is exactly
+    right, the MCP server is connected, a real change was applied — and the
+    turn is STILL refused, because it was not his API key that paid for it.
+    `changes` is never returned from a refused turn."""
+    from spectra.services import settings_agent_cli as sac
+    from spectra.services.settings_agent import SettingsAgentUnavailable
+
+    init = _init_event(sac.TOOL_NAMES)
+    init["apiKeySource"] = "subscription"
+    events = [
+        init,
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_1",
+             "name": "mcp__settings-console__set_setting"}]}},
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_1", "content": [
+                {"type": "text", "text": json.dumps({"status": "applied"})}]}]}},
+        _result_event("Set it."),
+    ]
+    with pytest.raises(SettingsAgentUnavailable, match="not 'ANTHROPIC_API_KEY'"):
+        sac._parse_transcript(events)
+
+
+def test_a_stale_manifest_is_still_diagnosed_before_the_billing_check():
+    """Ordering, stated as a test: a stale-restart manifest mismatch is the
+    older and more specific diagnosis, so it must still be the message he
+    gets even when the billing field is also wrong."""
+    from spectra.services import settings_agent_cli as sac
+    from spectra.services.settings_agent import SettingsAgentUnavailable
+
+    init = _init_event([t for t in sac.TOOL_NAMES if t != sac.TOOL_NAMES[0]])
+    init["apiKeySource"] = "subscription"
+    with pytest.raises(SettingsAgentUnavailable, match="tool manifest"):
+        sac._parse_transcript([init, _result_event("hi")])
+
+
+def test_a_rejected_key_surfaces_the_clis_own_words_redacted(monkeypatch):
+    """An invalid key is `claude -p`'s own is_error result (exit 1, parseable
+    JSON on stdout). It must reach him verbatim — not flattened into a
+    generic failure, not retried against anything else — and with any
+    credential scrubbed out of it."""
+    from spectra.services import settings_agent_cli as sac
+    from spectra.services.settings_agent import SettingsAgentUnavailable
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-the-real-one")
+    events = [_init_with_key_source("ANTHROPIC_API_KEY", sac.TOOL_NAMES),
+              {"type": "result", "subtype": "error_during_execution", "is_error": True,
+               "result": "Invalid API key · Please run /login (key sk-ant-api03-the-real-one)"}]
+    with pytest.raises(SettingsAgentUnavailable) as exc:
+        sac._parse_transcript(events)
+    assert "Invalid API key" in str(exc.value), "the CLI's own words, kept"
+    assert "sk-ant-api03-the-real-one" not in str(exc.value), "the key, never"
+    assert "[redacted]" in str(exc.value)
+
+
+def test_subprocess_stderr_is_redacted_before_it_reaches_an_exception(monkeypatch, tmp_path):
+    """The other leak path: a non-0/1 exit puts the child's stderr in the
+    exception message. A CLI that ever echoes the credential it was handed
+    must not be able to leak it through us."""
+    import stat
+    import textwrap
+
+    from spectra.services import settings_agent_cli as sac
+    from spectra.services.settings_agent import SettingsAgentUnavailable
+
+    script = tmp_path / "claude"
+    script.write_text("#!" + sys.executable + "\n" + textwrap.dedent("""
+        import os, sys
+        sys.stderr.write("boom, key was " + os.environ["ANTHROPIC_API_KEY"])
+        sys.exit(2)
+    """), encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-the-real-one")
+    monkeypatch.setattr(sac.config, "settings_agent_cli_binary", lambda: str(script))
+    monkeypatch.setattr(sac.config, "settings_agent_cli_workdir", lambda: tmp_path / "work")
+
+    with pytest.raises(SettingsAgentUnavailable) as exc:
+        _run(sac.run_turn(None, "hi"))
+    assert "boom" in str(exc.value)
+    assert "sk-ant-api03-the-real-one" not in str(exc.value)

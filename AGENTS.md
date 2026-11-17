@@ -71,9 +71,22 @@
   bearer token, or other secret. Every secret-bearing value in this
   codebase (`SPECTRA_HA_TOKEN`, `SPECTRA_PRETAKE_TOKEN`,
   `SPECTRA_WITNESS_TOKEN`, `SPECTRA_NIGHT_RUN_TOKEN`, `ANTHROPIC_API_KEY`,
-  `CLAUDE_CODE_OAUTH_TOKEN`, etc.) is read from the environment at call
-  time — never hardcoded, never logged, never written to a committed file.
+  etc.) is read at call time from the environment or, for his Anthropic
+  key, from `~/.config/anthropic/api-key` (mode 600, outside this repo) —
+  never hardcoded, never logged, never written to a committed file.
   Preserve that pattern in any new secret-bearing code.
+- **Every Claude call this repo makes bills HIS OWN API KEY** (the
+  Admiral's order, 2026-11-17): Sonic on either transport and the lyric
+  readings / sung labels / colour meanings. There is NO subscription-login
+  path left — nothing reads `CLAUDE_CODE_OAUTH_TOKEN`, and a missing or
+  rejected key is a stated, visible refusal, never a quiet fallback to
+  `claude -p` on his subscription. If you add a Claude call, get the key
+  from `spectra/services/anthropic_key.py` (the one shared reader) and do
+  not invent a second credential or a second "unavailable" message. Tests
+  never read the real key: `tests/conftest.py`'s autouse
+  `_no_real_anthropic_key` fixture points the key-file override at a path
+  that does not exist. Details: `docs/agents/sonic-and-colour.md`'s "WHO
+  PAYS" section.
 - **Merging a PR does not deploy it.** The live `spotfx.service` (port
   8000) and `spectra.service` (port 8010) run whatever was last deployed
   and restarted on the host, independent of what's merged to `master`.

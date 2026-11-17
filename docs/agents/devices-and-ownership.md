@@ -736,9 +736,13 @@ event's own `usage`/`modelUsage`/`total_cost_usd`) — never estimated; a
 call the runtime doesn't report usage for records nothing, no fabricated
 zero. **Day/week are FIXED periods anchored Monday 22:00 America/New_York
 (stdlib `zoneinfo`, DST-aware), NOT rolling 24h/7d** — his own overruling
-ask, because that boundary is presumed aligned to his subscription's own
-quota reset, so the figure reads as "how much is left," not just "how
-much was spent." Bucketed at READ time against stored `wall_ms`
+ask, because that boundary was aligned to his subscription's own quota
+reset, so the figure read as "how much is left," not just "how much was
+spent." (Since 2026-11-17 every call bills his API key instead, so the
+anchor no longer lines up with a quota — the window is kept because it is
+his stated preference and because re-bucketing history is a read-time
+decision, not because of the quota. The `backend` field now means
+transport, not billing: `docs/agents/sonic-and-colour.md`'s "WHO PAYS".) Bucketed at READ time against stored `wall_ms`
 timestamps (`storage/spectra/sonic_usage.json`), never pre-assigned at
 write time, so a future anchor correction re-buckets history correctly.
 No DI seam (same class as `fire_history.py`) — `tests/conftest.py`'s

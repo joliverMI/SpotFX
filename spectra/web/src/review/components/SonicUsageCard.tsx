@@ -4,10 +4,18 @@
  * model runtime's own response for that call (spectra/services/
  * sonic_usage.py) — never estimated from character counts. `day`/`week`
  * are FIXED periods anchored Monday 22:00 America/New_York, not rolling —
- * his own ruling, because that boundary is almost certainly aligned to
- * his subscription's own quota reset, so "what THIS PERIOD has used" also
- * reads as "roughly how much he has left" — the number that matters after
- * a quota exhausted on him without warning. */
+ * his own ruling, because that boundary was aligned to his subscription's
+ * own quota reset, so "what THIS PERIOD has used" also reads as "roughly
+ * how much he has left" — the number that matters after a quota exhausted
+ * on him without warning.
+ *
+ * THE BADGE SAYS TRANSPORT, NOT BILLING, since 2026-11-17: every Sonic
+ * call bills his own API credits now (the Admiral's order moved all of
+ * these features off the subscription login), so a `backend` of 'cli'
+ * means "via the claude CLI", not "via the subscription". It used to mean
+ * the latter, and a badge still reading 'subscription' would now be
+ * telling him the wrong thing about who pays — see
+ * spectra/services/settings_agent_cli.py's docstring. */
 import HelpLink from '../../help/HelpLink';
 import { useSonicUsage } from '../../queries';
 import type { SonicUsagePeriod } from '../../types';
@@ -69,7 +77,7 @@ export default function SonicUsageCard() {
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span className={`badge ${data.last_query.backend === 'cli' ? 'badge-blue' : 'badge-gray'}`}>
-                    {data.last_query.backend === 'cli' ? 'subscription' : 'API credits'}
+                    {data.last_query.backend === 'cli' ? 'API credits · CLI' : 'API credits · SDK'}
                   </span>
                   <span>{fmtAgo(data.last_query.wall_ms)}</span>
                   {data.last_query.cost_usd != null && <span>· ${data.last_query.cost_usd.toFixed(3)}</span>}

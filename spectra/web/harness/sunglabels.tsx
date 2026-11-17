@@ -52,7 +52,7 @@ const page = () => ({
   color_sets: cards, effects, shapes, labels_hash: 'h', auto_read: state.auto_read,
   n_labels: new Set([...cards.flatMap((c) => c.labels.map((l) => l.text))]).size,
   claude: state.claude ? { available: true, reason: null, backend: 'api', model: 'harness-model' }
-    : { available: false, reason: 'No Claude API key is set up on this machine.', backend: 'api', model: 'x' },
+    : { available: false, reason: 'no Claude API key configured — set ANTHROPIC_API_KEY for the service or put the key in /home/you/.config/anthropic/api-key (mode 600). Nothing is billed to a Claude subscription any more, so there is nothing to fall back to.', backend: 'api', model: 'x' },
   draft_batch_size: 2,
 });
 

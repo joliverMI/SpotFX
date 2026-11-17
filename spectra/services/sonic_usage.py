@@ -1,10 +1,19 @@
 """Sonic's durable token-usage record — the Admiral's own ask, review page:
 "how much token usage Sonic has used for the last query, the last day, and
-the last week." He runs Sonic against a subscription (the "cli" backend,
-settings_agent_cli.py — not yet authorised against his real account) or API
-credits (the "api" backend, settings_agent.py, today's default), and was
-already burned once by a model quota exhausting without warning — this is
-him watching consumption before it bites, not curiosity after the fact.
+the last week." He was already burned once by a model quota exhausting
+without warning — this is him watching consumption before it bites, not
+curiosity after the fact.
+
+THE `backend` FIELD IS TRANSPORT, NOT BILLING, since 2026-11-17. Every
+entry in this store is billed to HIS OWN API KEY now (the Admiral's order
+moved Sonic, the lyric readings and the sung labels off the subscription
+login); "cli" means the `claude` CLI subprocess with the settings MCP
+server (settings_agent_cli.py, what his live instance runs) and "api"
+means the Anthropic SDK in-process (settings_agent.py). Historical
+entries written before that date WERE subscription-billed — the field
+cannot tell you which, so the date is the only divider, and the Review
+page's badge deliberately says "API credits · CLI/SDK" rather than
+claiming a billing route per entry.
 
 THE BAR THIS MODULE EXISTS TO CLEAR: every figure is REAL REPORTED USAGE
 read off the model runtime's own response for that call, captured at the

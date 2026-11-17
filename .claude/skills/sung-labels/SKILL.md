@@ -53,9 +53,17 @@ and a preview of what each word would do is the "Sonic reach" section below.
    word_keys`/`lyrics_timeline.timeline_for_uri`) and the current label
    list, once (`build_system_prompt`/`build_user_prompt`); `parse_reply`
    throws away and counts any row naming a line/phrase/label that isn't
-   really there. `claude_text.py` is the one Claude client (same account/
-   model switch as Sonic, `config.lyric_agent_model()`), shared by
-   `color_meanings.draft` too.
+   really there. `claude_text.py` is the one Claude client (same key and
+   same transport switch as Sonic, `config.lyric_agent_model()`), shared by
+   `color_meanings.draft` too. **Every read is billed to HIS OWN API KEY**
+   (2026-11-17, the Admiral's order): the key comes from
+   `spectra/services/anthropic_key.py` — `ANTHROPIC_API_KEY` else
+   `~/.config/anthropic/api-key` — and a missing or rejected key is a
+   stated refusal on `availability()` and on the read routes, never a
+   silent fallback to a subscription login (there is none left to fall
+   back to). `docs/agents/sonic-and-colour.md`'s "WHO PAYS" section has
+   the mechanism; a real read costs real money per song, which is why the
+   automatic lane is one song a minute and Sonic's read op asks first.
 3. **THERE IS NO WEAK-MATCH THRESHOLD ANY MORE** (2026-11-12, the Admiral:
    "no cutoff anymore"). Every guess is kept with its confidence, and the
    confidence is the share of plays the word acts on (`lyric_events.

@@ -57,8 +57,34 @@ prove this without a network call (fabricated tool names/keys rejected,
 nothing persists on rejection) plus one live-model smoke test skipped
 without `ANTHROPIC_API_KEY`. Model id from `spectra.config.
 settings_agent_model()` (env `SPECTRA_SETTINGS_AGENT_MODEL`, default
-`claude-sonnet-5`); API key from `settings_agent_api_key()` (env
-`ANTHROPIC_API_KEY`) — unset means a stated 503, never a silent no-op.
+`claude-sonnet-5`); the API key from `settings_agent_api_key()` — env
+`ANTHROPIC_API_KEY` if set, else the file at
+`config.anthropic_api_key_file()` (`~/.config/anthropic/api-key`, mode
+600, overridable by `SPECTRA_ANTHROPIC_API_KEY_FILE`), read fresh on
+every call. Unset means a stated 503, never a silent no-op.
+
+**WHO PAYS, AND WHAT CHANGED ON 2026-11-17 (the Admiral's order, PR
+fm/api-credits).** Every Claude call this repo makes — Sonic on either
+transport, and the lyric readings / sung labels / colour meanings through
+`spectra/services/claude_text.py` — bills HIS OWN API KEY. The
+subscription-login path (`CLAUDE_CODE_OAUTH_TOKEN`) is GONE, not merely
+off: `config.settings_agent_cli_oauth_token()` is deleted, nothing in the
+tree reads that env var (`tests/test_anthropic_key.py` asserts it
+repo-wide), and `settings_agent_cli._subprocess_env()` strips it and
+`ANTHROPIC_AUTH_TOKEN` OUT of the `claude` child's environment while
+setting `ANTHROPIC_API_KEY` — so there is no second credential to fall
+back to, by construction. `spectra/services/anthropic_key.py` is the ONE
+shared reader (key, the single plain-language missing-key sentence every
+surface shows, and `redact()` for the one place a subprocess could echo a
+credential back at us); `tests/conftest.py`'s autouse
+`_no_real_anthropic_key` fixture points the key-file override at a
+nonexistent path so no test can ever read his real key. The `claude` CLI
+reports which credential it actually used in its own `system/init`
+event's `apiKeySource`, and `_verify_api_key_source()` refuses any turn
+that says anything other than `ANTHROPIC_API_KEY` (an absent field only
+warns — the no-fallback guarantee rests on the child's environment, not
+on that field). Proven live at the effect, one small real call per
+feature, on 2026-11-17 — the PR body carries the per-call cost.
 
 **The 2026-10-06 Sonic coverage audit build widened four domains at
 once** (Pulse/every effect's per-entry params, Force Scene/Force Colour by
@@ -198,30 +224,30 @@ silently diverge on what a legal scene save requires. The editor itself
 judged more than the small addition the ask called for; the Sonic path is
 what he asked for. Spec: `tests/test_scene_console.py` §12.
 
-**Subscription (CLI) backend — built, default OFF, not yet authorised
-against his real account** (`data/spectra-console-subscription-backend/`:
-scout report + the captain's ruling that provisioning an `ANTHROPIC_API_KEY`
-is refused as an answer to "use my subscription, not credits"). `spectra/
+**The CLI backend — what his live instance actually runs.** `spectra/
 services/settings_agent_cli.py` is a second `run_turn()` implementation
-driving the real `claude` CLI headlessly (`-p`, non-interactive), authenticated
-by `CLAUDE_CODE_OAUTH_TOKEN` (a `claude setup-token` long-lived token —
-Anthropic's own documented mechanism for billing Claude Code automation to a
-Pro/Max/Team/Enterprise subscription instead of API credits). `spectra/api/
-settings_console.py`'s `POST /message` picks it over the API backend only
-when `config.settings_agent_backend()` (env `SPECTRA_SETTINGS_AGENT_BACKEND`)
-reads `"cli"` — default `"api"`, so this is inert until BOTH that env var is
-set AND a token is provisioned; neither this file nor anything else in the
-repo ever runs `claude setup-token` or reads an existing interactive `/login`
-session itself. **THE WIDENED SURFACE IS STRUCTURAL, not a deploy note**: a
+driving the real `claude` CLI headlessly (`-p`, non-interactive),
+authenticated by `ANTHROPIC_API_KEY` in the subprocess environment (see
+"WHO PAYS" above; it was built as a SUBSCRIPTION backend —
+`data/spectra-console-subscription-backend/` and that module's own
+docstring carry that history, which is why the default is still `"api"`
+and why so much of the code reads as a safety latch). `spectra/api/
+settings_console.py`'s `POST /message` picks it over the API backend when
+`config.settings_agent_backend()` (env `SPECTRA_SETTINGS_AGENT_BACKEND`)
+reads `"cli"` — default `"api"`; his live `spectra.service` sets `"cli"`
+via a drop-in. **THE WIDENED SURFACE IS STRUCTURAL, not a deploy note**: a
 subprocess with its own working directory can auto-run project hooks and
-auto-connect `.mcp.json` servers it finds there (non-bare `-p` mode — `--bare`
-can't be used, it refuses to read the OAuth token at all), so every call
-creates/verifies a dedicated, code-owned, empty working directory
-(`config.settings_agent_cli_workdir()`, refuses if it ever contains a stray
-`.claude/`, `.mcp.json`, or `CLAUDE.md`), passes `--strict-mcp-config` +
-`--tools ""` + `--allowedTools` naming exactly the tools its own MCP
-server (`spectra/services/settings_mcp_server.py`, a stdio wrapper around the
-SAME `settings_agent._dispatch()` the API backend uses — no second authority;
+auto-connect `.mcp.json` servers it finds there (non-bare `-p` mode —
+`--bare` was impossible while this was OAuth-authenticated and is
+deliberately still not adopted, see `config.settings_agent_cli_workdir()`),
+so every call creates/verifies a dedicated, code-owned, empty working
+directory (refuses if it ever contains a stray `.claude/`, `.mcp.json`, or
+`CLAUDE.md`), points `CLAUDE_CONFIG_DIR` at an isolated directory inside
+it so this host's real interactive `/login` session can never be picked
+up, passes `--strict-mcp-config` + `--tools ""` + `--allowedTools` naming
+exactly the tools its own MCP server (`spectra/services/
+settings_mcp_server.py`, a stdio wrapper around the SAME
+`settings_agent._dispatch()` the API backend uses — no second authority;
 one hand-written function per `ALL_OPERATIONS` entry, see that file's own
 docstring for why it's not generated) exposes, and re-verifies the live
 `system/init` tool manifest on every single response before trusting
@@ -241,10 +267,9 @@ real captured transcripts in `tests/fixtures/cli_transcript_*.json` for the
 original two-tool surface — now correctly refused as a stale manifest once
 the tool set widened — plus hand-built, explicitly-labelled
 `cli_transcript_synthetic_*.json` fixtures re-proving the same properties
-against the current, wider surface) + a live smoke test skipped without
-`CLAUDE_CODE_OAUTH_TOKEN`. **Enabling this against the captain's real account
-is his call, not a deploy default** — flipping `SPECTRA_SETTINGS_AGENT_BACKEND`
-and minting a token are both separate, deliberate, human actions.
+against the current, wider surface; section 9 covers who paid) + a live
+smoke test skipped unless `SPECTRA_LIVE_CLAUDE=1`, since it now spends
+real money.
 
 **THE CLI BACKEND'S TOOLS RUN IN THE MAIN PROCESS (2026-10-04, Light Show
 proof D1).** `settings_mcp_server.py` is a subprocess with no live stack

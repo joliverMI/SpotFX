@@ -264,14 +264,52 @@ def handover_armed() -> bool:
     return os.getenv("SPECTRA_HANDOVER_ARMED", "") == "1"
 
 
+# His own Anthropic API key, on THIS machine, placed by hand (mode 600) —
+# the credential every Claude-calling feature in SPECTRA bills to, since
+# the Admiral's 2026-11-17 order moved Sonic, the lyric readings and the
+# sung labels off the subscription login and onto his API credits. A FILE,
+# not a repo path and not a settings.py field: same posture as
+# handover_armed(), a credential belongs outside anything this codebase's
+# own agent-facing writes could touch, and a public repo must never carry
+# it. Overridable per-process by SPECTRA_ANTHROPIC_API_KEY_FILE — that is
+# what the test suite points at a path that does not exist, so no test can
+# ever read his real key (tests/conftest.py's autouse fixture).
+ANTHROPIC_API_KEY_FILE_DEFAULT = Path.home() / ".config" / "anthropic" / "api-key"
+
+
+def anthropic_api_key_file() -> Path:
+    """Where his API key lives on this machine. Read at CALL time, never
+    cached at import, so rotating the key is a file edit with no code path
+    that could keep serving the old one from a module global — the same
+    posture night_run_token() documents."""
+    override = os.getenv("SPECTRA_ANTHROPIC_API_KEY_FILE", "").strip()
+    return Path(override).expanduser() if override else ANTHROPIC_API_KEY_FILE_DEFAULT
+
+
 def settings_agent_api_key() -> str:
-    """API key for the settings-console agent (spectra/services/
-    settings_agent.py) — a small Sonnet-class model whose only tool is a
-    validated setting write (spectra/services/settings_console.py). Not a
-    settings.py field: same posture as handover_armed(), a credential
-    belongs in the environment, not a file an agent's own writes could
-    touch."""
-    return os.getenv("ANTHROPIC_API_KEY", "")
+    """THE ONE READER of his Anthropic API key — Sonic (spectra/services/
+    settings_agent.py and settings_agent_cli.py) and the lyric features
+    (spectra/services/claude_text.py) all come through here, so there is a
+    single place that decides what counts as configured.
+
+    ANTHROPIC_API_KEY in the environment wins when it is set and non-empty
+    (that is the route a service unit's own EnvironmentFile takes, and the
+    route every existing test takes); otherwise the key is read fresh off
+    anthropic_api_key_file(). Returns "" when neither is available —
+    callers turn that into a stated, user-visible refusal via
+    spectra/services/anthropic_key.py's `missing_reason()`, never a silent
+    fallback to some other credential.
+
+    Never logged, never returned to the web app, never put in an
+    exception: spectra/services/anthropic_key.redact() exists for the one
+    place a subprocess could echo it back at us."""
+    from_env = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if from_env:
+        return from_env
+    try:
+        return anthropic_api_key_file().read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 def settings_agent_model() -> str:
@@ -442,27 +480,27 @@ def lyric_agent_model() -> str:
 
 def settings_agent_backend() -> str:
     """"api" (default) or "cli" -- which settings_agent* module
-    spectra/api/settings_console.py's POST /message dispatches to. MUST
-    default to "api": the captain's ruling (data/spectra-console-
-    subscription-backend/) is that a subscription-authenticated CLI
-    backend may be built ready-to-enable but never enables itself. Flipping
-    this to "cli" is inert on its own -- see settings_agent_cli_oauth_token()."""
+    spectra/api/settings_console.py's POST /message dispatches to. BOTH
+    bill his own API credits since the Admiral's 2026-11-17 order; the
+    choice is now purely about TRANSPORT, not about who pays:
+
+      "api" -- the Anthropic SDK, tools dispatched in-process
+               (settings_agent.py).
+      "cli" -- the real `claude` CLI in -p mode with the settings MCP
+               server (settings_agent_cli.py), authenticated by
+               ANTHROPIC_API_KEY in the subprocess environment. This is
+               what his live instance runs.
+
+    HISTORY, so the default's shape is not mistaken for a live safety
+    latch: this used to default to "api" because the "cli" backend was
+    subscription-authenticated (CLAUDE_CODE_OAUTH_TOKEN, data/spectra-
+    console-subscription-backend/) and the captain's ruling then was that
+    such a backend must never enable itself. That subscription path is
+    GONE -- settings_agent_cli.py reads no OAuth token any more and
+    strips every subscription credential out of the child environment --
+    so the two backends differ only in transport, and neither can run
+    without a configured API key (settings_agent_api_key())."""
     return os.getenv("SPECTRA_SETTINGS_AGENT_BACKEND", "api")
-
-
-def settings_agent_cli_oauth_token() -> str:
-    """CLAUDE_CODE_OAUTH_TOKEN for the "cli" settings-agent backend
-    (spectra/services/settings_agent_cli.py) -- Anthropic's own env var
-    name for a long-lived token from `claude setup-token`
-    (code.claude.com/docs/en/authentication#generate-a-long-lived-token),
-    which bills to the subscription that minted it, not API credits. Same
-    posture as settings_agent_api_key(): a credential belongs in the
-    environment, never a file this repo's own agent could write. Nothing
-    in this codebase ever runs `claude setup-token` or reads an existing
-    interactive `/login` session on its own -- minting a token is a
-    deliberate, human, browser-based act, and the captain has not
-    authorised pointing this at his real account yet."""
-    return os.getenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
 
 def settings_agent_cli_binary() -> str:
@@ -473,12 +511,21 @@ def settings_agent_cli_workdir() -> Path:
     """A dedicated, empty, code-owned working directory for the settings-
     agent CLI subprocess (spectra/services/settings_agent_cli.py) --
     never the repo root or any directory that might carry a stray
-    .claude/settings.json, .mcp.json, or CLAUDE.md. Bare mode (which
-    would skip all of that) can't be used here because it also refuses to
-    read CLAUDE_CODE_OAUTH_TOKEN, so this directory's cleanliness is the
-    actual safety boundary against `claude -p` auto-running a hook or
-    auto-connecting a stray MCP server it happens to find -- see
-    settings_agent_cli.py's module docstring."""
+    .claude/settings.json, .mcp.json, or CLAUDE.md. This directory's
+    cleanliness is the actual safety boundary against `claude -p`
+    auto-running a hook or auto-connecting a stray MCP server it happens
+    to find -- see settings_agent_cli.py's module docstring.
+
+    STILL THE BOUNDARY AFTER THE 2026-11-17 MOVE TO API CREDITS, and
+    deliberately so. Bare mode (which would skip hook/.mcp.json
+    auto-discovery altogether) was impossible while this backend was
+    subscription-authenticated -- "bare mode never reads OAuth
+    credentials or the system keychain" -- and an API key IS readable in
+    bare mode, so it is now technically available. It was NOT adopted in
+    that change: the order was to change who pays, not to re-shape
+    Sonic's live-proven tool loop, and swapping transports would put the
+    whole MCP manifest/permission surface back in play unproven. The
+    clean-workdir check therefore stays exactly as it was."""
     return SPECTRA_STORAGE / "settings-agent-cli-workdir"
 
 

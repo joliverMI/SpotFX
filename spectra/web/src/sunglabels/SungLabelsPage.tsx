@@ -217,7 +217,7 @@ export default function SungLabelsPage() {
           />
           <span>
             Read songs automatically when these words change. Off, Claude reads a song only when you press Read on
-            the test bed. On, it goes through one song a minute, which spends your Claude allowance.
+            the test bed. On, it goes through one song a minute, each a real billed Claude call on your own API key.
           </span>
           <HelpLink topic="sung-labels-reading" title="Reading songs" />
         </div>

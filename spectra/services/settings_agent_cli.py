@@ -1,50 +1,69 @@
-"""The settings-console CHAT LOOP, "cli" (subscription) backend --
-standing order 5 plus the captain's ruling on data/spectra-console-
-subscription-backend/report.md: he wants his own Claude subscription
-usage, not API credits, and refused provisioning an ANTHROPIC_API_KEY as
-the answer. This module is the alternative run_turn() spectra/api/
-settings_console.py dispatches to when config.settings_agent_backend()
-is "cli" (default "api" -- see config.py). It drives the real, official
-`claude` CLI as a subprocess in non-interactive mode (`-p`), authenticated
-by a CLAUDE_CODE_OAUTH_TOKEN minted with `claude setup-token` -- Anthropic's
-own documented mechanism for running Claude Code headlessly against a
-Pro/Max/Team/Enterprise subscription instead of API billing
-(code.claude.com/docs/en/authentication, code.claude.com/docs/en/
-github-actions: "If you authenticate with an OAuth token, runs use your
-Claude subscription instead of API billing").
+"""The settings-console CHAT LOOP, "cli" backend -- the real, official
+`claude` CLI driven as a subprocess in non-interactive mode (`-p`) with
+the settings MCP server, which is what his live instance runs. This is
+the alternative run_turn() spectra/api/settings_console.py dispatches to
+when config.settings_agent_backend() is "cli".
 
-THE HARD LINE, BY THE CAPTAIN'S EXPLICIT ORDER: this module must never
-turn itself on against his real account. Two independent gates enforce
-that, both required, neither a config file this repo's own agent-facing
-writes could flip:
-  1. config.settings_agent_backend() defaults to "api" -- selecting "cli"
-     needs an env var change outside this codebase's own write surface.
-  2. Even with "cli" selected, _client_available() below refuses (raises
-     SettingsAgentUnavailable, same 503 the API backend gives for a
-     missing key) unless CLAUDE_CODE_OAUTH_TOKEN is actually present.
-Nothing in this file, or anywhere else in this repo, ever runs
-`claude setup-token` or reads an existing interactive `/login` session on
-its own -- minting a token is a deliberate, human, browser-based act (the
-CLI opens a real browser tab for it), so this code structurally cannot
-mint one for itself, and _subprocess_env() below goes one step further:
-it does not inherit the parent process's ambient credentials at all. It
-points CLAUDE_CONFIG_DIR at a directory under this module's OWN dedicated
-workdir (see below) and sets CLAUDE_CODE_OAUTH_TOKEN explicitly, so even
-if this machine also has a real interactive `~/.claude/.credentials.json`
-sitting around (it does, on the machine this was built and re-proved on),
-the subprocess cannot silently authenticate against it -- only the
-explicitly-configured token, if any, is ever used. It also strips
-ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN from the child's environment,
-because Claude Code's own auth precedence puts an API key ahead of the
-OAuth token -- if this process happens to also carry the "api" backend's
-key, that must never silently hijack the "cli" backend away from
-subscription billing.
+WHO PAYS: HIS OWN API CREDITS, since the Admiral's order of 2026-11-17
+("switch these Spectra/SpotFX features from the Claude subscription login
+(claude -p) to his own API credits"). The subprocess is authenticated by
+ANTHROPIC_API_KEY, read fresh on every call from spectra/services/
+anthropic_key.py (which reads config.settings_agent_api_key(): the
+environment if a service unit supplies it, else ~/.config/anthropic/
+api-key, mode 600, never a file in this repo). Claude Code's own auth
+precedence puts an API key ahead of every subscription credential, and
+the init event's own `apiKeySource` field reports which one it actually
+used -- _verify_api_key_source() below re-checks that on every single
+call, so a turn that somehow billed anything other than the key refuses
+instead of passing quietly (proven live: `apiKeySource":"ANTHROPIC_API_KEY"`
+with `total_cost_usd` populated).
+
+WHAT THIS BACKEND USED TO BE, because the shape of the code only makes
+sense with it written down: it was the SUBSCRIPTION backend
+(CLAUDE_CODE_OAUTH_TOKEN minted by `claude setup-token`, data/
+spectra-console-subscription-backend/report.md), built because the
+captain wanted his subscription usage rather than API credits and had
+refused provisioning an ANTHROPIC_API_KEY as the answer. He provisioned
+one on 2026-11-17 and reversed that order. THE SUBSCRIPTION PATH IS NOW
+GONE, not merely unused: nothing in this repo reads
+CLAUDE_CODE_OAUTH_TOKEN any more (config.settings_agent_cli_oauth_token()
+is deleted), and _subprocess_env() below strips
+CLAUDE_CODE_OAUTH_TOKEN/ANTHROPIC_AUTH_TOKEN OUT of the child's
+environment -- the exact inverse of what it used to strip -- so even a
+machine that still has a token exported cannot silently bill it. There is
+no credential left to fall back to, which is the structural half of the
+order's "handle a missing/invalid key with a clear error, not a silent
+fallback to claude -p".
+
+A MISSING KEY IS A STATED REFUSAL BEFORE ANYTHING ELSE: _api_key_available()
+raises SettingsAgentUnavailable carrying anthropic_key.missing_reason()
+(the same sentence claude_text.availability() shows the lyric pages), so
+no subprocess is even built. A REJECTED key is `claude -p`'s own error,
+surfaced verbatim through anthropic_key.redact() -- never retried against
+something else.
+
+THE CREDENTIAL NEVER GETS WIDER THAN THE SUBPROCESS: it is passed in the
+child's environment only (never an argv flag, which would put it in every
+`ps` line on the host), never logged, never returned to the web app, and
+every stderr/CLI text that reaches an exception message goes through
+anthropic_key.redact() first.
+
+STILL ISOLATED FROM AMBIENT CREDENTIALS. _subprocess_env() points
+CLAUDE_CONFIG_DIR at a directory under this module's OWN dedicated
+workdir, so even though this machine also has a real interactive
+~/.claude/.credentials.json sitting around, the subprocess cannot
+authenticate against it -- only the explicitly-passed key is ever used.
 
 THE WIDENED SURFACE IS STRUCTURAL, NOT A README FOOTNOTE. `--bare` mode
-is documented as "the recommended mode for scripted and SDK calls" but
-explicitly cannot be used here -- "bare mode never reads OAuth credentials
-or the system keychain" (code.claude.com/docs/en/headless). Plain,
-non-bare `-p` mode is therefore forced, and non-bare mode auto-runs a
+is documented as "the recommended mode for scripted and SDK calls" and
+was impossible while this backend was subscription-authenticated ("bare
+mode never reads OAuth credentials or the system keychain",
+code.claude.com/docs/en/headless). An API key IS readable in bare mode,
+so it became available on 2026-11-17 -- and was deliberately NOT adopted
+there: that order was to change who pays, not to re-shape a live-proven
+tool loop, and switching transports would put this whole manifest and
+permission surface back in play unproven. Plain, non-bare `-p` mode
+therefore stays, and non-bare mode auto-runs a
 project's .claude/settings.json hooks and auto-connects its .mcp.json
 servers with NO trust-dialog to catch a mistake (there is no human in a
 service to answer one). Five things below are what actually hold that
@@ -158,7 +177,7 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 from spectra import config
-from spectra.services import settings_agent, sonic_usage
+from spectra.services import anthropic_key, settings_agent, sonic_usage
 from spectra.services.settings_agent import SYSTEM_PROMPT, TOOLS, SettingsAgentUnavailable
 
 logger = logging.getLogger(__name__)
@@ -240,20 +259,21 @@ def _classify_manifest(events: list[dict]) -> _ManifestVerdict:
     return _ManifestVerdict("ok", None)
 
 
-def _client_available() -> str:
-    """Returns the token, or raises SettingsAgentUnavailable -- the SAME
-    fail-before-any-state-changes posture settings_agent._client() uses
-    for a missing ANTHROPIC_API_KEY. Called before anything else in
-    run_turn() so an unconfigured backend can never even reach the
-    subprocess-launch code below."""
-    token = config.settings_agent_cli_oauth_token()
-    if not token:
+def _api_key_available() -> str:
+    """Returns his API key, or raises SettingsAgentUnavailable carrying
+    anthropic_key.missing_reason() -- the SAME fail-before-any-state-
+    changes posture settings_agent._client() uses, and the same sentence
+    every other Claude-calling feature shows, because both come from the
+    one helper. Called before anything else in run_turn(), so an
+    unconfigured key can never even reach the subprocess-launch code
+    below, and there is nothing else for it to try: no subscription
+    credential is read anywhere in this module (see the module
+    docstring)."""
+    key = anthropic_key.read()
+    if not key:
         raise SettingsAgentUnavailable(
-            "settings-agent backend is \"cli\" but no CLAUDE_CODE_OAUTH_TOKEN is "
-            "configured -- the settings console has no model to talk to yet. "
-            "This is intentional: nothing in this codebase mints or reads a "
-            "token on its own (see settings_agent_cli.py's module docstring).")
-    return token
+            f"Sonic cannot run: {anthropic_key.missing_reason()}")
+    return key
 
 
 def _workdir() -> Path:
@@ -346,14 +366,27 @@ def _argv(prompt: str, resume_session_id: Optional[str]) -> list[str]:
     return argv
 
 
-def _subprocess_env(token: str, workdir: Path) -> dict:
-    """See module docstring's "THE HARD LINE" section -- explicit token,
-    isolated CLAUDE_CONFIG_DIR, and no API-key credential that could
-    silently outrank the subscription token."""
+def _subprocess_env(api_key: str, workdir: Path) -> dict:
+    """The child's environment: his API key explicitly set, every
+    subscription credential removed, an isolated CLAUDE_CONFIG_DIR.
+
+    THE POPS ARE THE POINT, and they are the exact inverse of what this
+    function used to do (it set CLAUDE_CODE_OAUTH_TOKEN and popped the API
+    key, because billing the subscription was then the whole object). Now
+    the child cannot bill a subscription even on a host that still exports
+    a token, because the token is not in its environment and
+    CLAUDE_CONFIG_DIR is not the real ~/.claude -- so an ambient
+    interactive `/login` session on this machine (there is one) cannot be
+    picked up either. That is "no silent fallback" as a property of the
+    process, not a promise in a comment; _verify_api_key_source() then
+    re-checks the CLI's own report of what it actually used.
+
+    IN THE ENVIRONMENT, NEVER IN ARGV -- an argv credential would be
+    visible in every `ps` line on the host for the length of the call."""
     env = dict(os.environ)
-    env.pop("ANTHROPIC_API_KEY", None)
+    env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
     env.pop("ANTHROPIC_AUTH_TOKEN", None)
-    env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+    env["ANTHROPIC_API_KEY"] = api_key
     env["CLAUDE_CONFIG_DIR"] = str(workdir / ".claude-config")
     env[settings_agent.DISPATCH_URL_ENV] = settings_agent.dispatch_url()
     env[settings_agent.DISPATCH_TOKEN_ENV] = settings_agent.DISPATCH_TOKEN
@@ -379,6 +412,53 @@ def _verify_tool_manifest(events: list[dict]) -> Optional[str]:
     if verdict.outcome == "refused":
         raise SettingsAgentUnavailable(verdict.notice)
     return verdict.notice
+
+
+API_KEY_SOURCE = "ANTHROPIC_API_KEY"
+
+
+def _verify_api_key_source(events: list[dict]) -> None:
+    """WHO ACTUALLY PAID FOR THIS TURN, checked on every single call
+    against the CLI's own report rather than assumed from the environment
+    we handed it. `claude -p --output-format json`'s system/init event
+    carries `apiKeySource`, and a real call made the way _subprocess_env()
+    makes it reports exactly "ANTHROPIC_API_KEY" (verified live, 2026-11-17,
+    with total_cost_usd populated). Anything else present in that field
+    means the CLI authenticated by some route we did not intend -- a
+    subscription login, a keychain entry, a Bedrock/Vertex credential --
+    and the Admiral's order says that is an error, not something to pass
+    along quietly, so the whole turn refuses.
+
+    WHY AN ABSENT FIELD IS A WARNING AND NOT A REFUSAL: the no-fallback
+    guarantee does not rest on this check. It rests on the child's
+    environment having no other credential in it at all
+    (_subprocess_env()). This field is the independent DETECTOR on top of
+    that, and a future CLI that stopped emitting it (or a hand-built
+    transcript in the test suite, which is where most absent-field cases
+    come from) must not turn a working feature off. It is logged at
+    WARNING so a real disappearance is visible in the journal rather than
+    silent.
+
+    Runs AFTER _record_usage() and AFTER the tool-manifest check: tokens
+    were genuinely spent either way, and a stale-manifest refusal is the
+    older, more specific diagnosis of the two."""
+    init = next((e for e in events
+                 if e.get("type") == "system" and e.get("subtype") == "init"), None)
+    reported = (init or {}).get("apiKeySource")
+    if reported == API_KEY_SOURCE:
+        return
+    if reported in (None, ""):
+        logger.warning(
+            "settings-agent CLI reported no apiKeySource this turn -- cannot confirm "
+            "the call billed his API key (the subprocess environment carries no other "
+            "credential, see _subprocess_env)")
+        return
+    logger.warning("settings-agent CLI billed %r, expected %r", reported, API_KEY_SOURCE)
+    raise SettingsAgentUnavailable(
+        f"Sonic refused this turn: the `claude` CLI authenticated as {reported!r}, "
+        f"not {API_KEY_SOURCE!r} — his API key must be what pays for Sonic, and a "
+        "call that billed anything else is an error, not a fallback. Check "
+        "ANTHROPIC_API_KEY / the key file on the service's environment.")
 
 
 def _record_usage(events: list[dict]) -> None:
@@ -440,8 +520,12 @@ def _parse_transcript(events: list[dict]) -> dict:
     to decide what changed -- EXCEPT for a degraded-manifest notice
     (below), which is prepended to it so the reduced-mode warning is
     visible in the one place a chat UI always renders without any
-    frontend change: the reply area itself."""
+    frontend change: the reply area itself.
+
+    Also the gate for WHO PAID: _verify_api_key_source() refuses a turn
+    the CLI reports it billed to anything other than his API key."""
     degraded_notice = _verify_tool_manifest(events)
+    _verify_api_key_source(events)
 
     tool_use_names: dict[str, str] = {}
     applied: list[dict] = []
@@ -473,7 +557,12 @@ def _parse_transcript(events: list[dict]) -> dict:
 
     final = next((e for e in reversed(events) if e.get("type") == "result"), {})
     if final.get("is_error"):
-        raise SettingsAgentUnavailable(str(final.get("result") or "settings-agent CLI call failed"))
+        # The CLI's OWN words (an invalid/revoked key, a rate limit, a
+        # credit balance too low) surfaced verbatim rather than flattened
+        # into a generic failure -- redacted, because this is the branch a
+        # rejected credential comes out of.
+        raise SettingsAgentUnavailable(anthropic_key.redact(
+            str(final.get("result") or "settings-agent CLI call failed")))
 
     reply = final.get("result", "")
     if degraded_notice:
@@ -493,10 +582,10 @@ async def run_turn(session_id: Optional[str], text: str) -> dict:
     with the same {session_id, reply, changes} shape run_turn() returns
     in settings_agent.py -- spectra/api/settings_console.py doesn't need
     to know which backend answered."""
-    token = _client_available()
+    api_key = _api_key_available()
     workdir = _workdir()
     argv = _argv(text, session_id)
-    env = _subprocess_env(token, workdir)
+    env = _subprocess_env(api_key, workdir)
 
     process = await asyncio.create_subprocess_exec(
         *argv, cwd=str(workdir), env=env,
@@ -516,10 +605,16 @@ async def run_turn(session_id: Optional[str], text: str) -> dict:
 
     if process.returncode not in (0, 1):
         # 1 is claude -p's own "run failed" exit code, still followed by a
-        # parseable JSON result on stdout (e.g. not-logged-in, quota
-        # exhausted); anything else means it never got that far.
+        # parseable JSON result on stdout (e.g. an invalid API key, a
+        # credit balance too low, a rate limit) -- that path is handled by
+        # _parse_transcript's is_error branch, which surfaces the CLI's own
+        # redacted message. Anything else means it never got that far.
+        # redact() before the text goes anywhere a human or the web app
+        # can read it: an invalid-key run is exactly when a CLI is most
+        # likely to quote the credential it was handed back at us.
+        detail = anthropic_key.redact(stderr.decode("utf-8", "replace"))[:500]
         raise SettingsAgentUnavailable(
-            f"settings-agent CLI exited {process.returncode}: {stderr.decode('utf-8', 'replace')[:500]}")
+            f"settings-agent CLI exited {process.returncode}: {detail}")
 
     try:
         events = json.loads(stdout.decode("utf-8"))
