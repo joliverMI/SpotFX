@@ -1359,6 +1359,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'scene-change-planner',
+        title: 'Scene changes per minute — an optional ceiling',
+        keywords: 'scene change planner ceiling scene changes per minute optional 0 off strongest fill ranked analysed flares',
+        body: [
+          'Settings → "Scenes & drops" → "Scene changes per minute" (0–30, default 0 = off). "Total actions per minute" decides how many of a song\'s moments are actions at all; this setting optionally caps how many of THOSE become real scene changes rather than analysed flares.',
+          'The ranked actions fill strongest-first: each becomes a scene change if it fits the hold (the scene\'s own dwell at the moment\'s intensity) around the scene changes already chosen, up to this ceiling — scaled the same way "Total actions per minute" is, by the song\'s own length and its intensity-scale factor ("Mark"), rounded and kept to at least 1 whenever the ceiling is on. Every action past the ceiling fires as an analysed flare instead — see "Analysed flares" for what that means and when it fires.',
+          'At 0 (off), the ceiling plays no part: the hold-fit rule alone decides how many of the ranked actions become scene changes, same as before this setting existed.',
+          'Like the other analysed settings, a change here re-plans an out-of-date song the next time it plays — see "Re-analysing songs after a settings change".',
+        ],
+      },
+      {
         id: 'analysed-refresh',
         title: 'Re-analysing songs after a settings change',
         keywords: 'refresh reanalyse reanalyze re-analyse regenerate analysed analyzed triggers cues stale stamp settings change next play sonic dry run backup library update all',

@@ -572,7 +572,9 @@ shape's hue and a passing burst's hue from a neighbouring frame has every
 channel high whatever this frame did. **Any effect here that leaves
 something STANDING STILL over a show that keeps drawing through it will meet
 the same wall** — the lever is the effect's trailing, which is its look, and
-so the Admiral's call rather than a build row's.
+so the Admiral's call rather than a build row's. **His ruling, 2026-11-17:
+option A, ship as built, his to judge by eye** — no trail rework, this
+stays as measured in the W3 room deploy.
 
 ### Orbits V2 / `orbits` (row W1.3, 2026-11-16) — few trace it, many become it
 
@@ -688,17 +690,34 @@ because it is about this contract rather than that effect:
   (`WS_TURN_X`, the pre-drop's own mechanism) and by reading both distance
   bars off the fish that law allows on the line. Budget for this before
   promising a distance bar.
-- **Measured** (20 seeds, Energy 0.2 and 0.8, his real mask): on the word
-  0.4-1.4 cell pitches median, at mid-hold 0.2-1.8, the outline **99.4 to
-  100% lit** against bars of 60% (few) and 70% (many), white 18.96%/15.96%
-  against this effect's own worst busy frame today (21.75%/28.29%),
-  +0.72/+0.34 ms p50, and untold byte-identical over both real-audio arcs.
-- **A tighter follower is a whiter one.** Sections 4 and 5 pull against
-  each other here: the better the fish hug the loop, the more of the
-  shoal's light lands in the same cells. The plan's suggested 1.2-1.5 s
-  trail half-life measured 5 (few) to 13 (many) points MORE white for ZERO
-  outline gain, so it ships at 0.6 s. Any effect that concentrates its own
-  light onto the outline should expect the same trade.
+- **"100% lit" on this effect is vacuous — ITS WAKE SATURATES AN
+  "above-zero" SHARE** on the same frame untold, which is what the clarity
+  bar was first read against (the squadron leader caught this, PR 532
+  review). The bar is now the share of the band ABOVE A LIGHT THRESHOLD
+  (64 and 128 of 255) plus the band-to-rest luminance ratio, each read
+  beside the SAME SEED's frame UNTOLD — `band_contrast`. Measured (20
+  seeds, his real mask, medians): on the word 0.4-1.4 cell pitches, at
+  mid-hold 0.2-1.8 (worst bound on the word, median at mid-hold — the
+  plan's own two statistics); band>64 told/untold 91-100%/4-25% against
+  bars of 60% (few)/70% (many), ratio at least 2.5x and at least 1.4x the
+  untold ratio on the same seed; many-star is MARGINAL (median 1.8-2.4
+  depending on seed count, bound by a star notch's own 2.0-3.4-pitch
+  geometry at this SIZE); untold byte-identical over both real-audio arcs.
+- **THE WHITE TAIL IS AN OPEN EXCEEDANCE, not a pass — his 2026-11-17
+  ruling, option A, ship as built, his to judge by eye.** The half-life
+  ships as a (FEW 0.6 s, MANY 1.0 s) pair, chosen on the `band_contrast`
+  metric (the plan's suggested 1.2-1.5 s bought 10-17 points of real light
+  for 2.6-3.2 points MORE white with only 1.5 points of headroom). Across
+  8 seeds the shaped worst is 23.9-33.8% against this effect's own worst
+  busy frame today (26.0% few, 24.5% many) — five of six (mode, shape)
+  rows exceed the plan's own bar in the tail, many-diamond over on the
+  median too — because overlapping fish bodies sum two gradient hues the
+  same way his 2026-10-26 wake report did (option A fixed the wake only).
+  The root fix (narrowing the gradient span a procession draws from, one
+  colour per drawn shape) changes his authored colour behaviour and so is
+  his call, not a build row's; this is his explicit 2026-11-17 ruling to
+  ship it as measured. Any effect that concentrates its own light onto the
+  outline should expect the same trade.
 
 ### Sauron / `sauron` (row W1.5, 2026-11-15) — the shaped iris and pupil
 
