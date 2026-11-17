@@ -396,7 +396,9 @@ this is measured, not assumed:
 **So the remaining levers are his, not a build row's**: accept it (the
 comet trail doing to a standing shape what it already does wherever two of
 this effect's own fireworks share a cell), or change how this effect
-trails, which is its look. The check script prints the number under "ABOVE
+trails, which is its look. **His ruling, 2026-11-17: option A, ship as
+built, his to judge by eye** — no trail rework, this stays as measured in
+the W3 room deploy. The check script prints the number under "ABOVE
 THE PLAN'S LETTER — reported, not moved" and
 `test_the_live_show_white_is_recorded_above_the_plans_letter` pins it, so it
 cannot drift unnoticed in either direction.

@@ -3110,3 +3110,50 @@ against that commit.
     hosted beside today's over both of his real-audio arcs, kinematics and
     pixels. No vendored line changed. Evidence:
     `scripts/check_fish_word_shape.py`, `tests/test_fish_word_shape.py`.
+
+100. `effects/sauron.py` (NEW, SpotFX-authored, #67, on top of #75's
+     `program_rim`/`_lens_gain` and #89's pre-drop) + `effects/word_shapes.py`
+     / `word_shape_keys.py` (#95's, Word Shapes rows W0.1/W0.3): WORD SHAPES
+     ON SAURON (row W1.5,
+     2026-11-15; the Admiral: "Sauron: have it's pupil or something chagne
+     into that shape"; his Q8 **C** — both the pupil AND the iris become the
+     shape at once). Sauron already draws itself from two signed-distance
+     fields — the iris boundary (`d = dist - iris_r`) and the slit lens
+     (`sd`) — so a sung word's shape is one blend of EACH with the shape's
+     own field, under the envelope `m`: `d = (1-m)(dist - iris_r) +
+     m * shape_sdf(iris_r * word_shape_size)`, `sd = (1-m) * slit_sdf +
+     m * shape_sdf(that * word_shape_pupil)`, both in the eye's own gazed,
+     foreshortened coordinates. Everything downstream — the perimeter ring,
+     the flames' root, the heat map, `radial_coord`'s colour bands, the
+     inside test, the white-hot rim — reads those two fields, so one blend
+     bends the whole picture and no phase code changed (a charge still
+     grows `iris_r` and the shape with it, a surge still erupts the flames
+     from the shaped edge, the lids and the pre-drop still hold it down).
+     The shape inherits the EYE's own 1.7:1 aspect deliberately (both axes
+     divided by `s_min`), so `word_shape_size` is a MULTIPLIER of the iris
+     radius here, not the plan's fraction of the panel — his `iris_size`
+     0.62 makes the two coincide, which is why the bars are measured there.
+     `sdf_fast`'s far-field estimate is CLAMPED, not used raw
+     (`SHAPE_FAST_LIMIT`, `_shape_field`): past its grid box it steps down
+     by 0.055 eye units (a whole rendered pixel) right where the flames
+     read it, so the field is evaluated at the box edge with the radial
+     step added back — exact inside, continuous across, still one
+     `sdf_fast` call. The pupil is drawn `PUPIL_BITE_PX` (0.5 px) fatter so
+     a shape five real cells across reaches 100% fully dark rather than
+     50-73%, and its size is floored by the shape's own inradius so
+     `SLIT_MIN_DARK_PX`'s three-pixel core still holds. `_last_iris` /
+     `program_rim` keep the circle, so a drop arriving on a standing shape
+     reads as the eye snapping back round under the blast (P3 A means a
+     shape is never told while a drop is armed, so this is the only way
+     they meet) and a transition's ignition shows the pupil as the shape
+     from the first open of the lens. Two registered params,
+     `word_shape_size` (1.0, 0.6-1.3) and `word_shape_pupil` (0.40,
+     0.2-0.6); the six told keys ride only the Words band's write.
+     `fx.device_model.WORD_SHAPE_EFFECTS` gains `sauron`; no
+     `WORD_SHAPE_FORM_MIN_S` entry (the approved Energy-paced 0.5-0.9 s
+     form). Untold, the effect renders today's frames byte for byte —
+     proven against the pinned pre-row module over 320 frames of busy and
+     quiet audio. Evidence: `scripts/check_sauron_word_shape.py`,
+     `tests/test_sauron_word_shape.py`;
+     `.claude/skills/sauron-effect/SKILL.md`'s "WORD SHAPES" section is the
+     binding record of the four non-obvious things and the measured bars.

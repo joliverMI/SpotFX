@@ -1019,7 +1019,9 @@ NON-MONOTONIC** — dimming it can RAISE white, because a dimmer single-hue
 trace stops winning `lighten`'s max over the whiter body sum. The root fix
 is to narrow the gradient span a procession draws from (his own option-A
 vocabulary, one colour for one drawn shape), which is a change to his
-authored colour behaviour and so his call. The script pins the measured
+authored colour behaviour and so his call. **His ruling, 2026-11-17:
+option A, ship as built, his to judge by eye** — no further tuning, this
+stays as measured in the W3 room deploy. The script pins the measured
 worst and median and prints the bar's status per row.
 
 **Proofs**: `scripts/check_fish_word_shape.py` (eight sections, the whole
