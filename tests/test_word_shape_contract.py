@@ -563,12 +563,15 @@ def test_every_timing_is_his_to_tune():
 
 
 def test_a_per_effect_minimum_form_floors_the_lead():
-    """Plan section 2.4. THE FISH'S 2.0 s IS LIVE (row W1.4): a procession
-    has to swim onto the outline, so the floor is declared in
+    """Plan section 2.4. TWO FLOORS ARE LIVE: the FISH's 2.0 s (row W1.4 —
+    a procession has to swim onto the outline) and FIREWORKS' 2.0 s (row
+    W4.3 — the panel has to go dark in front of the burst, "no fireworks
+    fire right before, or concurrently"). Both are declared in
     `fx.device_model.WORD_SHAPE_FORM_MIN_S` — never as a registered param
     (fx/effects/word_shape_keys.py's own "HOW AN EFFECT OPTS IN"). The
     floor applies to the LEAD and never shortens it."""
-    assert device_model.WORD_SHAPE_FORM_MIN_S == {"fish": 2.0}
+    assert device_model.WORD_SHAPE_FORM_MIN_S == {"fish": 2.0,
+                                                  "fireworks": 2.0}
     assert device_model.word_shape_form_min_s(["fish"]) == 2.0
     # PLAN TIME with no room wired: no idea which scene will show, so the
     # global maximum — the only safe answer there.
@@ -577,9 +580,11 @@ def test_a_per_effect_minimum_form_floors_the_lead():
     # keeps the approved Energy-paced 0.5-0.9 s form.
     assert device_model.word_shape_form_min_s(["orbits"]) == 0.0
     assert device_model.word_shape_form_min_s(["orbits", "fish"]) == 2.0
+    assert device_model.word_shape_form_min_s(["fireworks"]) == 2.0
     st = RoomControlState()
     assert word_shape_timing(1.0, 1000, st)[0] == 2.0, "the floor wins"
     assert word_shape_timing(1.0, 1000, st, ["fish"])[0] == 2.0
+    assert word_shape_timing(1.0, 1000, st, ["fireworks"])[0] == 2.0
     assert word_shape_timing(1.0, 1000, st, ["orbits"])[0] == 0.5
     # a quiet word would be paced at 0.9 s; Fish still gets 2.0
     assert word_shape_timing(0.0, 1000, st, ["orbits"])[0] == 0.9

@@ -83,6 +83,24 @@ DT = 1.0 / 30.0        # his crystal renders at 30 fps (the radial note)
 # light on the panel, well above the trail's own floor, and the same
 # threshold both sides of every ratio below.
 LIT = 8.0 / 255.0
+# W4.3 — THE CANVAS. "Mostly dark" needs a threshold a viewer would call
+# light rather than the trail's own floor, so the canvas measure reads
+# 20/255: what share of his real cells still carry ORDINARY (non-shaped)
+# light at the moment the shape arrives. The bar is 5% of the real cells,
+# and the same-seed UNTOLD frame's share is printed beside it — that
+# difference IS the clutter the hush takes away.
+CANVAS_LIT = 20.0 / 255.0
+CANVAS_BAR = 0.05
+CANVAS_SEEDS = 20
+# W4.3 — AND CONTRAST, because legibility on that canvas is the whole
+# point of the row. A ">= LIT" share is vacuous once anything is trailing
+# (the W1.4 Fish review, carried to every wave-4 row): grade the panel by
+# luminance and read the shape's own outline BAND against the rest of it.
+# Luminance is the cell's own peak channel, the same quantity `white_share`
+# and the coverage measure read.
+BAND_LIT_LO = 64.0 / 255.0
+BAND_LIT_HI = 128.0 / 255.0
+CONTRAST_BAR = 3.0
 # WHITE-ISH: every channel at least this bright AND the channels within
 # this much of each other — the same "is it white" shape the other
 # no-white checks here use.
@@ -105,27 +123,43 @@ HIS_CFG = {
                  "#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)"),
 }
 
-# The room's own timing at the two Energies the plan measures
-# (room_controls.word_shape_timing's defaults: the form paces 0.9 s quiet to
-# 0.5 s loud, the hold is the phrase clamped to 0.8..2.0, the release 1.5x
-# the form). Written out here so this script needs no SPECTRA import.
+# HIS SCENE AT ITS BUSIEST (W4.3's own worst case). His Fireworks V2 Matrix
+# entry binds `beat_burst` 1->6 and `burst_size` 5->14 by Energy, so at
+# Energy 1.0 a beat throws six fireworks of fourteen sparks each, every one
+# living ~1.9 s into a `max_blobs` of 100 — which is the clutter his verdict
+# is about. The canvas measure runs here, not at the starter set's 4 x 8.
+WORST_CFG = {"beat_burst": 6, "burst_size": 14}
+
+# The room's own timing (room_controls.word_shape_timing's defaults: the
+# form paces 0.9 s quiet to 0.5 s loud, the hold is the phrase clamped to
+# 0.8..2.0, the release 1.5x the form), FLOORED at this effect's own
+# minimum form — 2.0 s since row W4.3, read from fx.device_model rather
+# than written out, so the script cannot drift from the engine's own rule.
+# Written out otherwise so this script needs no SPECTRA import.
 def room_timing(energy: float, phrase_s: float = 1.1) -> tuple[float, float, float]:
+    from fx import device_model
     fast_at = 0.75
     form = 0.9 + (0.5 - 0.9) * min(1.0, max(0.0, energy) / fast_at)
+    form = max(form, device_model.word_shape_form_min_s(["fireworks"]))
     hold = min(2.0, max(0.8, phrase_s))
     return form, hold, 1.5 * form
 
 
 class BusyAudio:
     """A deterministic busy-music feed: lows 0.55 +/- 0.30 with a lift on
-    each beat, a beat every 14 frames at 30 fps (~128 bpm) — the same shape
-    tests/test_blackhole_infall_through_transition.py feeds."""
+    each beat, a beat every `BEAT` frames at 30 fps — the same shape
+    tests/test_blackhole_infall_through_transition.py feeds. `BEAT` 14 is
+    ~128 bpm (W1.2's own feed); the W4.3 canvas runs use a subclass at 15,
+    which is exactly 120 bpm.
+    """
+
+    BEAT = 14
 
     def __init__(self, i: int):
         self.i = i
 
     def _lift(self) -> float:
-        return 0.35 if (self.i % 14) < 2 else 0.0
+        return 0.35 if (self.i % self.BEAT) < 2 else 0.0
 
     def lows_power(self, filtered: bool = True) -> float:
         v = 0.55 + 0.30 * math.sin(self.i / 5.0) + self._lift()
@@ -140,7 +174,13 @@ class BusyAudio:
         return 0.20 + 0.10 * math.sin(self.i / 9.0)
 
     def bpm_beat_now(self) -> bool:
-        return self.i % 14 == 0
+        return self.i % self.BEAT == 0
+
+
+class Beat120Audio(BusyAudio):
+    """120 bpm exactly at 30 fps — the W4.3 canvas measure's own feed."""
+
+    BEAT = 15
 
 
 class QuietAudio(BusyAudio):
@@ -170,6 +210,7 @@ class ShapeRun:
     lit: list = field(default_factory=list)     # lit real cells per frame
     frame_ms: list = field(default_factory=list)
     edge_frame: int = 0            # the frame the told write landed on
+    launch_frame: int = -1         # the frame the burst left the centre
     word_frame: int = 0            # the frame the form ends on (the word)
     hold_end_frame: int = 0
     release_end_frame: int = 0
@@ -177,6 +218,13 @@ class ShapeRun:
     arrival_pitch: float = 0.0     # the worst spark's error, in cell pitches
     outline_sparks: int = 0
     total_sparks: int = 0
+    # the mean whole LIFE the burst gave its sparks, in seconds — the flight
+    # plus the hold plus each one's own share of the release
+    sparks_life_mean: float = 0.0
+    # W4.3: ORDINARY launches (`_spawn_burst` calls) per frame, counted by
+    # the rig itself — the one number that says the hush really is a hush
+    launches: list = field(default_factory=list)
+    canvas: list = field(default_factory=list)   # real cells >= CANVAS_LIT
 
 
 def crystal_mask(panel: Panel) -> np.ndarray:
@@ -200,7 +248,11 @@ def run_shape(panel: Panel, shape_id: str, energy: float, *,
               tail_frames: int = 20, seed: int = 7,
               phrase_s: float = 1.1, size: Optional[float] = None,
               second_word_at: Optional[int] = None,
-              told: bool = True, flare: bool = False) -> ShapeRun:
+              told: bool = True, flare: bool = False,
+              audio_cls=None, no_burst: bool = False,
+              stop_at_hold_end: bool = False,
+              poke_at: Optional[int] = None,
+              form_override: Optional[float] = None) -> ShapeRun:
     """Drive the real effect through one told shape and return the run.
 
     `settle_frames` of the ordinary show first (so everything measured
@@ -215,18 +267,32 @@ def run_shape(panel: Panel, shape_id: str, energy: float, *,
     a different, shorter window and catches fewer beats. `flare=True` fires
     the effect's OWN Firework Burst flare (`burst_rockets`, six payoff
     bursts) on the same frame instead of a shape: the busiest thing this
-    effect does today, and the volley this row's burst is modelled on."""
+    effect does today, and the volley this row's burst is modelled on.
+
+    W4.3's own options. `no_burst=True` tells the shape exactly as the
+    engine does — so THE HUSH runs, the lives are capped, the clock turns —
+    but stubs the shaped burst out, which is the only way to read the
+    ORDINARY light left on the canvas at the word without guessing which
+    cells were whose. `poke_at` writes a `burst_rockets` flare that many
+    frames after the edge (the hush must drop it). `audio_cls` swaps the
+    feed (Beat120Audio for the canvas runs), and `stop_at_hold_end` ends
+    the run at the hold rather than rendering a release nothing reads."""
     import tempfile
     from fx import headless
     tmp = tmp or Path(tempfile.mkdtemp())
     _TAG[0] += 1
     tag = f"fwws{_TAG[0]}"
     form_s, hold_s, release_s = room_timing(energy, phrase_s)
+    if form_override is not None:
+        # a told form other than the room's own — the engine tells the time
+        # LEFT to the word, so a long phrase gives a longer one than the
+        # floor and a (contract-impossible) short one gives less
+        form_s, release_s = float(form_override), 1.5 * float(form_override)
     cfg = dict(HIS_CFG)
     cfg.update(config or {})
     if size is not None:
         cfg["word_shape_size"] = size
-    audio = BusyAudio if busy else QuietAudio
+    audio = audio_cls or (BusyAudio if busy else QuietAudio)
 
     async def main() -> ShapeRun:
         host, virtual = await _host(tmp, tag, crystal_mask(panel))
@@ -237,6 +303,20 @@ def run_shape(panel: Panel, shape_id: str, energy: float, *,
         try:
             eff = headless.attach_effect(host, virtual, "fireworks", cfg)
             eff._rng = np.random.default_rng(seed)
+            # count ORDINARY launches per frame: the rig wraps the effect's
+            # own `_spawn_burst`, so "zero launches inside the hush" is
+            # counted at the call rather than inferred from the picture
+            spawned = [0]
+            real_spawn = eff._spawn_burst
+
+            def counting_spawn(*a, **kw):
+                spawned[0] += 1
+                return real_spawn(*a, **kw)
+
+            eff._spawn_burst = counting_spawn
+            if no_burst:
+                eff._word_shape_burst = (
+                    lambda *a, **kw: None)   # the canvas, with no shape on it
             form_frames = max(2, int(round(form_s / dt)))
             hold_frames = int(round(hold_s / dt))
             rel_frames = int(round(release_s / dt))
@@ -246,9 +326,13 @@ def run_shape(panel: Panel, shape_id: str, energy: float, *,
             run.word_frame = settle_frames + form_frames
             run.hold_end_frame = run.word_frame + hold_frames
             run.release_end_frame = run.hold_end_frame + rel_frames
+            if stop_at_hold_end:
+                total = run.hold_end_frame + 1
             seq = 0
             for i in range(total):
                 if flare and i == settle_frames:
+                    eff.update_config({"burst_rockets": 6})
+                if poke_at is not None and i == settle_frames + poke_at:
                     eff.update_config({"burst_rockets": 6})
                 if told and (i == settle_frames
                              or (second_word_at is not None and i
@@ -257,11 +341,7 @@ def run_shape(panel: Panel, shape_id: str, energy: float, *,
                     eff.update_config(wsk.keys_for(
                         shape_id, seq, form_s, hold_s, release_s,
                         max(wsk.LEVEL_FLOOR, energy)))
-                    if i == settle_frames:
-                        # the launch targets, read back off the solved
-                        # velocities: target = v0 * the drag's own span
-                        run.total_sparks = int(np.count_nonzero(
-                            eff.p_wfade[:eff.n] > 0.0))
+                spawned[0] = 0
                 eff.audio_data_updated(audio(i))
                 clock.advance(dt)
                 t0 = time.perf_counter()
@@ -273,19 +353,30 @@ def run_shape(panel: Panel, shape_id: str, energy: float, *,
                          / 255.0)
                 run.frames.append(frame)
                 run.state.append(eff.word_shape_state())
-                run.lit.append(int(((frame.max(axis=2) >= LIT)
-                                    & panel.grid).sum()))
-                if told and i == settle_frames:
-                    # the frame the burst launched on: its sparks are at the
-                    # centre and their velocities still carry the targets
+                bright = frame.max(axis=2)
+                run.lit.append(int(((bright >= LIT) & panel.grid).sum()))
+                run.canvas.append(int(((bright >= CANVAS_LIT)
+                                       & panel.grid).sum()))
+                run.launches.append(spawned[0])
+                if (told and not no_burst and run.targets is None
+                        and int(np.count_nonzero(eff.p_wfade[:eff.n] > 0.0))):
+                    # THE LAUNCH FRAME (W4.3: no longer the edge). Its
+                    # sparks are at the centre and their velocities still
+                    # carry the targets.
+                    run.launch_frame = i
                     held = np.flatnonzero(eff.p_wfade[:eff.n] > 0.0)
-                    span = _drag_span(eff, form_s, dt)
+                    # the FLIGHT the burst was given: the time left to the
+                    # word on the effect's own clock at the launch. A clock
+                    # reading, not the solve — `_drag_span` re-derives the
+                    # geometric sum from it independently.
+                    span = _drag_span(eff, eff._ws_form - eff._ws_t, dt)
                     # target = where it was launched from + what the drag
-                    # lets its launch velocity cover over the form
+                    # lets its launch velocity cover over the FLIGHT
                     run.targets = np.stack(
                         [eff.p_x[held] + eff.p_vx[held] * span,
                          eff.p_y[held] + eff.p_vy[held] * span], axis=1)
                     run.total_sparks = held.size
+                    run.sparks_life_mean = float(eff.p_life[held].mean())
                     from fx.effects.fireworks import \
                         WORD_SHAPE_OUTLINE_BRIGHT
                     run.outline_sparks = int(np.count_nonzero(
@@ -306,14 +397,15 @@ def run_shape(panel: Panel, shape_id: str, energy: float, *,
     return asyncio.run(main())
 
 
-def _drag_span(eff, form_s: float, dt: float) -> float:
-    """The distance one unit of launch speed covers over the form under the
-    effect's own drag — `_word_shape_burst`'s own solve, re-derived here
+def _drag_span(eff, flight_s: float, dt: float) -> float:
+    """The distance one unit of launch speed covers over the FLIGHT under
+    the effect's own drag — `_word_shape_burst`'s own solve, re-derived here
     independently so the targets this script measures against are not read
-    out of the effect's own working."""
+    out of the effect's own working. Since W4.3 the flight is the time left
+    to the word at the launch, not the whole told form."""
     from fx.effects.fireworks import WORD_SHAPE_MIN_FORM_S
     step = float(min(max(dt, 1e-3), 0.1))
-    form = max(float(form_s), WORD_SHAPE_MIN_FORM_S)
+    form = max(float(flight_s), WORD_SHAPE_MIN_FORM_S)
     frames = max(2, int(round(form / step)))
     hl = max(0.6 - 0.5 * eff.drag, 0.05)
     decel = 0.5 ** (step / hl)
@@ -377,6 +469,109 @@ def measure_run(run: ShapeRun, panel: Panel, size: float) -> list[ShapeMeasure]:
         out.append(ShapeMeasure(run.shape_id, run.energy, label, out_n, fill_n,
                                 cov, ratio, om, fm))
     return out
+
+
+def panel_light(frame: np.ndarray, panel: Panel) -> float:
+    """The panel's own MEAN LIGHT: the mean luminance (peak channel) over
+    his real cells, in 0..1."""
+    return float(frame.max(axis=2)[panel.grid].mean())
+
+
+def shape_windows(run: "ShapeRun", n_frames: int) -> list:
+    """The four stretches of a W4.3 shape, as (name, first, last) frame
+    ranges: THE HUSH EMPTYING the panel (the edge to the launch), THE
+    FLIGHT (the launch to the word), THE HOLD, and THE RELEASE — over
+    which the ordinary fireworks come back."""
+    launch = run.launch_frame if run.launch_frame >= 0 else run.word_frame
+    end = min(run.release_end_frame, n_frames - 1)
+    out = []
+    for name, a, b in (("the hush empties", run.edge_frame, launch),
+                       ("the flight", launch, run.word_frame),
+                       ("the hold", run.word_frame, run.hold_end_frame),
+                       ("the release", run.hold_end_frame, end)):
+        out.append((name, a, max(b, a + 1)))
+    return out
+
+
+def light_jumps(run: "ShapeRun", panel: Panel, windows: list) -> dict:
+    """THE "NOTHING JUMPS" BAR, READ ON LIGHT RATHER THAN ON A LIT COUNT
+    (W4.3). W1.2's own bar is the frame-to-frame change in LIT CELLS as a
+    share of the lit count, and the hush makes that form arithmetically
+    unreachable: it drives the lit count to ZERO on purpose, so the
+    denominator vanishes and the first spark of the burst is an unbounded
+    relative change. That number is still printed — a bar is not quietly
+    dropped — but what it measures there is the threshold, not a jump.
+
+    So the bar is asserted on the panel's own MEAN LIGHT: the largest
+    one-frame change in it over each window, against THE EFFECT'S OWN
+    ORDINARY MAXIMUM — row W1.3's own wording for this bar — which is the
+    SAME SEED's untold worst over the whole shape's span. Per-window untold
+    numbers are printed beside it, but the span is what the bar is read
+    against, deliberately: the hush MOVES when the effect's busiest frames
+    happen (the release's return lands on an emptied panel instead of a
+    full one), so holding each stretch to the untold's worst in that same
+    stretch would compare a shifted show against an unshifted one. A smooth
+    fade from a full panel to a dark one has a steepest frame whatever its
+    length; what says it is not a jump is that the steepest frame is no
+    steeper than the ones this effect already renders."""
+    light = np.array([panel_light(f, panel) for f in run.frames])
+    out = {}
+    for name, a, b in windows:
+        b = min(b, len(light) - 1)
+        d = light[a + 1:b + 1] - light[a:b]
+        out[name] = float(np.abs(d).max()) if d.size else 0.0
+    return out
+
+
+def band_contrast(frame: np.ndarray, panel: Panel,
+                  outline: np.ndarray) -> tuple[float, float, float]:
+    """W4.3's contrast bar, the Fish `band_contrast` pattern
+    (scripts/check_fish_word_shape.py:359): the share of the shape's own
+    OUTLINE BAND cells that are actually LIGHT (above BAND_LIT_LO, and
+    above BAND_LIT_HI), and the band's mean luminance over the rest of his
+    real panel's.
+
+    A ">= LIT" share is vacuous the moment anything else is trailing — the
+    whole reason this row exists is that the room's own bursts light the
+    band too. What a viewer sees is the band standing out from what is
+    around it, so the ratio is the number that separates "the shape is
+    brighter here" from "the panel is lit everywhere"."""
+    lum = frame.max(axis=2)
+    band = outline & panel.grid
+    rest = panel.grid & ~outline
+    b, r = lum[band], lum[rest]
+    return (float((b >= BAND_LIT_LO).mean()) if b.size else 0.0,
+            float((b >= BAND_LIT_HI).mean()) if b.size else 0.0,
+            float(b.mean() / max(float(r.mean()), 1e-9)) if b.size else 0.0)
+
+
+def render_graded(panel: Panel, frame: np.ndarray,
+                  outline: np.ndarray) -> str:
+    """The frame GRADED BY LUMINANCE on the real mask, the measurement
+    discipline every wave-4 row inherits from the W1.4 Fish review: `.`
+    dark, `-` below 64/255, `+` below 128/255, `#` at or above it; an
+    outline-band cell is drawn in upper case (`#`/`+`) and the rest in
+    lower (`*`/`:`) so the band is readable without a second picture."""
+    lum = frame.max(axis=2)
+    lines = []
+    for row in range(panel.rows):
+        chars = []
+        for col in range(panel.cols):
+            if not panel.grid[row, col]:
+                chars.append(" ")
+                continue
+            v = lum[row, col]
+            on_band = bool(outline[row, col])
+            if v < LIT:
+                chars.append(".")
+            elif v < BAND_LIT_LO:
+                chars.append("-")
+            elif v < BAND_LIT_HI:
+                chars.append("+" if on_band else ":")
+            else:
+                chars.append("#" if on_band else "*")
+        lines.append("".join(chars).rstrip())
+    return "\n".join(lines)
 
 
 def render_ascii(panel: Panel, frame: np.ndarray, outline: np.ndarray) -> str:
@@ -517,9 +712,108 @@ def main() -> int:
               f"form fraction on the word "
               f"{run.state[run.word_frame]['form_fraction']:.3f}")
 
+    # ── W4.3: THE DARK CANVAS ─────────────────────────────────────────────
+    # His verdict's own words: "Fireworks is too cluttered to visually
+    # identiy the shape. Let's have it plan to make sure no fireworks fire
+    # right before, or concurrently, so that it is on a mostly dark
+    # canvass." So the measure is the ORDINARY light left on the panel at
+    # the moment the shape arrives — not the shape's own, which is the whole
+    # point of it being there.
+    real_cells = int(panel.grid.sum())
+    print(f"\nTHE DARK CANVAS (W4.3) — ORDINARY (non-shaped) light still on "
+          f"the panel ON THE WORD, as a share of his {real_cells} real cells "
+          f"at >= {CANVAS_LIT:.3f} (20/255).")
+    print(f"  {CANVAS_SEEDS} seeds at Energy 1.0, 120 bpm, HIS SCENE AT ITS "
+          f"BUSIEST (beat_burst {WORST_CFG['beat_burst']} x burst_size "
+          f"{WORST_CFG['burst_size']} a beat, each spark living "
+          f"~{HIS_CFG['burst_life']} s,\n  max_blobs "
+          f"{HIS_CFG['max_blobs']}) — the clutter his verdict is about. The "
+          f"shape is TOLD exactly as the engine tells it (the hush running, "
+          f"the lives\n  capped, the clock turning) and the shaped burst "
+          f"itself is stubbed out, which is the only way to read the canvas "
+          f"without guessing\n  which cells were whose. Beside it the SAME "
+          f"SEED UNTOLD: that difference IS the clutter the hush takes away. "
+          f"Bars: canvas <= {CANVAS_BAR:.0%},\n  and ZERO ordinary launches "
+          f"from the edge to the hold's end in every seed.")
+    shares, twin_shares, launch_counts = [], [], []
+    for seed in range(1, CANVAS_SEEDS + 1):
+        kw = dict(energy=1.0, config=WORST_CFG, audio_cls=Beat120Audio,
+                  settle_frames=60, stop_at_hold_end=True, seed=seed,
+                  size=size)
+        run = run_shape(panel, shapes[0], no_burst=True, **kw)
+        twin = run_shape(panel, shapes[0], told=False, **kw)
+        shares.append(run.canvas[run.word_frame] / max(real_cells, 1))
+        twin_shares.append(twin.canvas[twin.word_frame] / max(real_cells, 1))
+        launch_counts.append(sum(
+            run.launches[run.edge_frame:run.hold_end_frame + 1]))
+    worst = max(shares)
+    print(f"  canvas on the word: worst {worst:.2%} of real cells, median "
+          f"{float(np.median(shares)):.2%}  "
+          f"{'FAIL' if worst > CANVAS_BAR else 'ok'}")
+    print(f"  the SAME SEEDS untold: worst "
+          f"{max(twin_shares):.2%}, median "
+          f"{float(np.median(twin_shares)):.2%}  (what the room leaves "
+          f"there today)")
+    print(f"  ordinary launches inside the hush (edge -> the hold's end): "
+          f"{max(launch_counts)} at worst over {CANVAS_SEEDS} seeds  "
+          f"{'FAIL' if max(launch_counts) else 'ok'}")
+    if worst > CANVAS_BAR:
+        failures.append(
+            f"the canvas carries {worst:.2%} of his real cells of ordinary "
+            f"light on the word at the worst of {CANVAS_SEEDS} seeds "
+            f"(bar {CANVAS_BAR:.0%})")
+    if max(launch_counts):
+        failures.append(
+            f"{max(launch_counts)} ordinary launches happened inside the "
+            f"hush (bar: zero)")
+
+    # ── W4.3: THE CONTRAST BAR ────────────────────────────────────────────
+    print(f"\nTHE CONTRAST BAR (W4.3) — the shape's own OUTLINE BAND against "
+          f"the rest of his real panel, graded by LUMINANCE rather than by a "
+          f"\">= {LIT:.3f}\" share,\n  which is vacuous once anything is "
+          f"trailing (the W1.4 Fish review's discipline, carried to every "
+          f"wave-4 row). The shape alone, and over his live\n  show with the "
+          f"SAME-SEED untold twin beside it. Bar: band/rest luminance ratio "
+          f">= {CONTRAST_BAR:.1f}.")
+    head3 = (f"{'shape':9s} {'energy':>6s} {'where':>10s} {'at':>9s} "
+             f"{'band>=64':>9s} {'band>=128':>10s} {'ratio':>7s} "
+             f"{'bar':>5s} {'twin ratio':>11s}")
+    print(head3)
+    print("-" * len(head3))
+    loud_runs: dict[tuple[str, float], ShapeRun] = {}
+    for shape_id in shapes:
+        outline, _fill = cell_sets(word_shapes.get(shape_id), panel, size)
+        for energy in list(energies) + [1.0]:
+            key = (shape_id, energy)
+            if key in quiet_runs:
+                run = quiet_runs[key]
+            else:
+                run = run_shape(panel, shape_id, energy, size=size,
+                                busy=False, settle_frames=10)
+                loud_runs[key] = run
+            mid = (run.word_frame + run.hold_end_frame) // 2
+            for label, idx in (("word", run.word_frame), ("mid-hold", mid)):
+                lo_s, hi_s, ratio = band_contrast(
+                    run.frames[idx], panel, outline)
+                ok = ratio >= CONTRAST_BAR
+                print(f"{shape_id:9s} {energy:6.2f} {'alone':>10s} "
+                      f"{label:>9s} {lo_s:8.1%} {hi_s:9.1%} {ratio:7.2f} "
+                      f"{'ok' if ok else 'FAIL':>5s} {'-':>11s}")
+                if not ok:
+                    failures.append(
+                        f"{shape_id} at Energy {energy} ({label}, the shape "
+                        f"alone): the band is {ratio:.2f}x the rest of the "
+                        f"panel (bar {CONTRAST_BAR:.1f})")
+
     print("\nNO WHITE, THE SHAPE ALONE — the highest share of its lit cells "
-          "that are white-ish (bar: none at all)")
-    for (shape_id, energy), run in quiet_runs.items():
+          "that are white-ish (bar: none at all). W4.3 RE-MEASURES THIS AT "
+          "ENERGY 1.0\n  for all three shapes, because 150 sparks overlap "
+          "deeper on the outline than W1.2's 100 did: if it rises, "
+          "WORD_SHAPE_GRAD_SPAN and\n  WORD_SHAPE_LAUNCH_PITCH are the "
+          "levers, and the trade is theirs — a narrower gradient slice is "
+          "less of his colour set on the shape.")
+    for (shape_id, energy), run in list(quiet_runs.items()) + \
+            list(loud_runs.items()):
         worst = max(white_share(run.frames[i], panel)
                     for i in range(run.edge_frame,
                                    min(run.release_end_frame + 1,
@@ -532,7 +826,12 @@ def main() -> int:
 
     # ── THE SAME SHAPE OVER HIS LIVE SHOW ─────────────────────────────────
     room_e = args.room_energy
-    print(f"\nOVER A LIVE SHOW (busy music, Energy {room_e}) — the shape "
+    # W4.3 also re-reads the live show at ENERGY 1.0 — 150 sparks overlap
+    # deeper on the outline than W1.2's 100 did, and his verdict's own case
+    # is the loud one
+    room_energies = sorted({room_e, 1.0})
+    print(f"\nOVER A LIVE SHOW (busy music, Energy "
+          f"{', '.join(f'{e:g}' for e in room_energies)}) — the shape "
           f"beside the effect's own beat bursts. Two baselines over the SAME "
           f"frames: an UNTOLD\n  TWIN (the same show, no shape) and the "
           f"effect's own FIREWORK BURST FLARE on the same frame (six payoff "
@@ -540,12 +839,14 @@ def main() -> int:
           f"burst is modelled on). 'No whiter than the effect's own busy "
           f"frames'\n  is measured against that flare; the twin says what "
           f"the room alone was doing.")
-    head2 = (f"{'shape':9s} {'coverage':>9s} {'ratio':>6s} {'white':>7s} "
-             f"{'twin':>7s} {'flare':>7s} {'jump':>6s} {'twin':>6s} "
-             f"{'p50 ms':>8s} {'twin':>7s}")
+    light_rows: list = []
+    head2 = (f"{'shape':9s} {'energy':>6s} {'coverage':>9s} {'ratio':>6s} "
+             f"{'band':>6s} "
+             f"{'twin':>6s} {'white':>7s} {'twin':>7s} {'flare':>7s} "
+             f"{'jump':>6s} {'twin':>6s} {'p50 ms':>8s} {'twin':>7s}")
     print(head2)
     print("-" * len(head2))
-    for shape_id in shapes:
+    for shape_id, room_e in [(sh, e) for e in room_energies for sh in shapes]:
         run = run_shape(panel, shape_id, room_e, size=size)
         twin = run_shape(panel, shape_id, room_e, size=size, told=False)
         outline, fill = cell_sets(word_shapes.get(shape_id), panel, size)
@@ -562,27 +863,82 @@ def main() -> int:
                           for i in range(lo, hi))
         jump = _worst_jump(run)
         jump_twin = _worst_jump(twin)
+        # W4.3: the band's own contrast over the live show, and the SAME
+        # SEED untold beside it — the room's bursts light the band too, so
+        # the told/untold pair is the only honest read of it
+        _lo_s, _hi_s, band = band_contrast(
+            run.frames[run.word_frame], panel, outline)
+        _tl, _th, band_twin = band_contrast(
+            twin.frames[twin.word_frame], panel, outline)
         p50 = float(np.median(
             run.frame_ms[run.word_frame:run.hold_end_frame + 1]))
         p50_twin = float(np.median(
             twin.frame_ms[twin.word_frame:twin.hold_end_frame + 1]))
-        print(f"{shape_id:9s} {cov:8.1%} {ratio:6.2f} {white:6.2%} "
+        print(f"{shape_id:9s} {room_e:6.2f} {cov:8.1%} {ratio:6.2f} "
+              f"{band:6.2f} {band_twin:6.2f} {white:6.2%} "
               f"{white_twin:6.2%} {white_flare:6.2%} {jump:5.1%} "
               f"{jump_twin:5.1%} {p50:7.2f} {p50_twin:6.2f}")
         if white > max(white_flare, white_twin) + 1e-9:
             reported.append(
-                f"{shape_id} over a live show: {white:.2%} of the lit cells "
+                f"{shape_id} over a live show at Energy {room_e:g}: "
+                f"{white:.2%} of the lit cells "
                 f"read white-ish at the worst frame, against the room "
                 f"alone's {white_twin:.2%} and the effect's own Firework "
                 f"Burst flare's {white_flare:.2%} over the same frames")
         if p50 - p50_twin > 1.0:
             failures.append(
-                f"{shape_id}: the shape holding costs "
+                f"{shape_id} at Energy {room_e:g}: the shape holding "
+                f"costs "
                 f"{p50 - p50_twin:.2f} ms a frame (bar 1.0)")
-        if jump > 0.08:
-            failures.append(
-                f"{shape_id}: the lit count jumps {jump:.1%} over the form "
-                f"or the release (bar 8%)")
+        # W4.3: the "nothing jumps" bar, read on the panel's own MEAN
+        # LIGHT over each of the shape's four stretches against the SAME
+        # SEED untold, because the hush drives the lit count W1.2's own
+        # ratio divides by to zero on purpose (light_jumps' docstring).
+        wins = shape_windows(run, len(run.frames))
+        told_j = light_jumps(run, panel, wins)
+        twin_j = light_jumps(twin, panel, wins)
+        # THE COMPARATOR is the effect's own ordinary maximum over the
+        # whole SPAN, not each stretch's own — the hush MOVES when this
+        # effect's busiest frames happen (the release's return lands on an
+        # emptied panel instead of a full one), so a per-stretch comparison
+        # would put a shifted show beside an unshifted one. Both are printed.
+        twin_worst = max(twin_j.values())
+        light_rows.append((f"{shape_id} {room_e:g}", told_j, twin_j,
+                           twin_worst))
+        for name in told_j:
+            if told_j[name] > twin_worst + 1e-6:
+                failures.append(
+                    f"{shape_id} at Energy {room_e:g} over {name}: the "
+                    f"panel's mean light moves {told_j[name]:.4f} in one "
+                    f"frame, against this effect's own untold worst of "
+                    f"{twin_worst:.4f} over the same span")
+    print(f"\nNOTHING JUMPS (W4.3) — the largest ONE-FRAME change in the "
+          f"panel's own MEAN LIGHT (0..1) over each of the shape's four "
+          f"stretches,\n  beside the SAME SEED UNTOLD over the SAME frames. "
+          f"W1.2's bar is the change in LIT CELLS as a share of the lit "
+          f"count, and the hush\n  drives that denominator to ZERO on "
+          f"purpose — the 'jump' column above is that number, which over a "
+          f"hush measures the lit\n  threshold rather than a jump, so it is "
+          f"printed and not asserted. A fade from a full panel to a dark one "
+          f"has a steepest\n  frame whatever its length; what says it is "
+          f"not a jump is that the steepest frame is no steeper than the "
+          f"ones this effect\n  already renders.\n  BAR: at or under THIS "
+          f"EFFECT'S OWN UNTOLD WORST OVER THE WHOLE SPAN ('own worst' "
+          f"below) — not each stretch's own untold number, which is "
+          f"printed\n  beside it but would compare a shifted show against "
+          f"an unshifted one, the hush having MOVED when the busiest frames "
+          f"happen.")
+    head4 = (f"{'shape':13s} {'stretch':>18s} {'told':>8s} "
+             f"{'untold here':>12s} {'own worst':>10s} {'bar':>5s}")
+    print(head4)
+    print("-" * len(head4))
+    for shape_id, told_j, twin_j, twin_worst in light_rows:
+        for name in told_j:
+            ok = told_j[name] <= twin_worst + 1e-6
+            print(f"{shape_id:13s} {name:>18s} {told_j[name]:8.4f} "
+                  f"{twin_j[name]:12.4f} {twin_worst:10.4f} "
+                  f"{'ok' if ok else 'FAIL':>5s}")
+
     print("\nwhite = the highest share of LIT real cells that are white-ish "
           "over the shape's own\n  frames (every channel >= "
           f"{WHITE_MIN}, within {WHITE_SPREAD} of each other). The shape "
@@ -594,10 +950,19 @@ def main() -> int:
           "CALLS PASSED: the block at the end has what was\n  measured "
           "about it, including the three composites that do NOT change "
           "it.\n"
-          "jump = the largest frame-to-frame change in lit cells over the "
-          "form and over the\n  release, as a share of the lit count (bar: "
-          "8%); p50 = the median render ms a\n  frame with the shape "
-          "holding (bar: the twin + 1.0 ms).")
+          "band = the shape's own outline band's mean luminance over the "
+          "rest of his real\n  panel's, told against the SAME SEED untold "
+          "(the contrast bar above, read over a live\n  show; the room's "
+          "own bursts light the band too, so the pair is the only honest "
+          "read).\n"
+          "jump = the largest frame-to-frame change in LIT CELLS over the "
+          "form and over the\n  release, as a share of the lit count — "
+          "W1.2's own form of the bar, PRINTED AND NOT\n  ASSERTED since "
+          "W4.3, because the hush drives that denominator to zero on "
+          "purpose;\n  the NOTHING JUMPS block below is the same bar read "
+          "on the panel's own light.\n"
+          "p50 = the median render ms a frame with the shape holding (bar: "
+          "the twin + 1.0 ms).")
 
     if args.ascii:
         for (shape_id, energy), run in quiet_runs.items():
@@ -606,6 +971,18 @@ def main() -> int:
                   f"(# lit outline, o lit elsewhere, - unlit outline, "
                   f". unlit real)")
             print(render_ascii(panel, run.frames[run.word_frame], outline))
+        # W4.3: and the same frames GRADED BY LUMINANCE, at the word and at
+        # mid-hold — the picture the contrast bar is read off
+        for (shape_id, energy), run in list(quiet_runs.items()) + \
+                list(loud_runs.items()):
+            outline, _fill = cell_sets(word_shapes.get(shape_id), panel, size)
+            mid = (run.word_frame + run.hold_end_frame) // 2
+            for label, idx in (("ON THE WORD", run.word_frame),
+                               ("AT MID-HOLD", mid)):
+                print(f"\n{shape_id} at Energy {energy} {label}, GRADED BY "
+                      f"LUMINANCE (band: # >= 128, + >= 64; elsewhere: "
+                      f"* >= 128, : >= 64; - lit under 64, . dark)")
+                print(render_graded(panel, run.frames[idx], outline))
 
     if reported:
         print("\nABOVE THE PLAN'S LETTER — reported, not moved (plan "
@@ -633,7 +1010,19 @@ def main() -> int:
               "  The levers left are the Admiral's: accept it (the comet "
               "trail doing to a standing shape what it\n  already does "
               "wherever two of this effect's own fireworks share a cell), "
-              "or change how it trails.")
+              "or change how it trails.\n"
+              "  HIS RULING, 2026-11-17: option A, ship as built.\n"
+              "  W4.3 RE-MEASURED IT with 150 sparks instead of 100, and "
+              "THE HUSH CHANGED THE PICTURE rather than the sparks doing: "
+              "the shape\n  alone still lights no white cell at any Energy, "
+              "and over a live show the hush takes the room's own bursts "
+              "away for the whole\n  form and hold, so most (shape, Energy) "
+              "rows now sit AT OR BELOW the room's own number over the same "
+              "frames. The untold\n  comparator itself rose (0.62% -> "
+              "1.46%) because the 2.0 s form makes the measured window two "
+              "and a half times longer and it\n  catches more of the room's "
+              "own beats — an honest window change, stated rather than "
+              "compared across windows.")
         for line in reported:
             print(f"  REPORTED: {line}")
 

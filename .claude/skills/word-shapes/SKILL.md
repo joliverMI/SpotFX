@@ -255,9 +255,10 @@ effect_types)`:
 | `word_shape_release_ratio` | 1.5 | the release is this × the form |
 
 The form is floored at `fx.device_model.word_shape_form_min_s` — a
-per-effect minimum (`WORD_SHAPE_FORM_MIN_S`; the Fish's 2.0 s, since row
-W1.4, is the only one declared — STAR takes the approved Energy-paced
-form). **That accessor is the one thing easiest to get wrong here, and the
+per-effect minimum (`WORD_SHAPE_FORM_MIN_S`; **two are declared**, the
+Fish's 2.0 s since row W1.4 and FIREWORKS' 2.0 s since row W4.3 — STAR,
+Sauron, Orbits and the Black Hole take the approved Energy-paced form).
+**That accessor is the one thing easiest to get wrong here, and the
 W0.3 review caught exactly this:**
 
 - **THE LEAD IS THE FORM IN PRACTICE.** The effect is told the time LEFT to
@@ -276,6 +277,12 @@ W0.3 review caught exactly this:**
   answer when the room is unknown.
 - a late tick therefore shortens the form rather than landing the shape
   late — the same shape the word-colour ramp already has.
+
+**A FLOOR IS ALSO A LEAD ON EVERYTHING ELSE IN THAT BAND.** Because the
+form is the lead and `on_word_shape` fires the band ATOMICALLY, a colour
+kind pooled in a Words band on a floored scene lands that early too — 2.0 s
+early on a Fish or a Fireworks scene. Stated here rather than discovered:
+it is a property of the band, not of the effect that declared the floor.
 
 **THE LEAD.** The form IS the lead: `fire_at = word − form` (LEAD family,
 positive = earlier — `docs/SPECTRA_TIMING_CONVENTIONS.md` has both rows
@@ -521,11 +528,13 @@ SHAPES" section is the full record.
 `.claude/skills/fireworks-effect/SKILL.md`'s "WORD SHAPES" section;
 `fx/effects/fireworks.py`'s WORD SHAPES block comment; evidence
 `scripts/check_fireworks_word_shape.py` (`--ascii` draws it on the real
-mask), proofs `tests/test_fireworks_word_shape.py`. Four registered params
+mask, and since W4.3 also graded by luminance), proofs
+`tests/test_fireworks_word_shape.py`. Four registered params
 (`word_shape_size` 0.62, `word_shape_outline_share` 0.70,
-`word_shape_sparks_quiet` 60, `word_shape_sparks_loud` 100); no
-`WORD_SHAPE_FORM_MIN_S` entry. **`fireworks1d` is deliberately NOT a
-member** — there is nowhere to draw a shape on one line.
+`word_shape_sparks_quiet` **90**, `word_shape_sparks_loud` **150** — W1.2
+shipped 60/100; W4.3 raised them); **`WORD_SHAPE_FORM_MIN_S["fireworks"] =
+2.0` since W4.3**. **`fireworks1d` is deliberately NOT a member** — there
+is nowhere to draw a shape on one line.
 
 ONE big burst from the centre per told word, 60 sparks at Energy 0 to 100 at
 Energy 1, 70% of them aimed along the outline BY ARC LENGTH with half a cell
@@ -575,6 +584,47 @@ the same wall** — the lever is the effect's trailing, which is its look, and
 so the Admiral's call rather than a build row's. **His ruling, 2026-11-17:
 option A, ship as built, his to judge by eye** — no trail rework, this
 stays as measured in the W3 room deploy.
+
+#### W4.3 (2026-11-17) — the dark canvas, 50% more sparks, a 2.0 s form
+
+His room verdict, verbatim: *"Fireworks is too cluttered to visually
+identiy the shape. Let's have it plan to make sure no fireworks fire right
+before, or concurrently, so that it is on a mostly dark canvass. Also,
+increase the amount of blobs by 50% so it is more clearly visible, and have
+it hold 50% longer."* (The hold is the ROOM's — W4.2 tells a longer
+`word_shape_hold_s` — and this row only asserts the hang follows it.)
+`.claude/skills/fireworks-effect/SKILL.md`'s own W4.3 section is the full
+record; what belongs HERE, because it is about this contract rather than
+that effect:
+
+- **The second declared minimum form.**
+  `WORD_SHAPE_FORM_MIN_S["fireworks"] = 2.0`, applied at plan time with the
+  showing scene's effects and again at fire time — the Fish's own
+  mechanism, for a different reason: the floor is HOW EARLY THE WRITE
+  ARRIVES, and that is all a hush needs. **There is deliberately no seventh
+  told key**: a "quiet" key would reopen the W0.3 told-key contract for one
+  effect, and the form already means exactly "how long before the word the
+  effect is told".
+- **So a colour kind pooled in a Fireworks Words band lands 2.0 s early
+  too**, exactly as it already does on Fish. The band fires atomically;
+  that is a property of the band, not of the effect.
+- **The release follows the form**, so flooring the form at 2.0 s makes the
+  room's release 3.0 s (1.5 ×) — the shape stands much longer than W1.2
+  measured, and neither the row nor the effect chose that. The lever is the
+  room's `word_shape_release_ratio`.
+- **A clarity bar that is a bare ">= LIT" share is not a bar once the room
+  draws through the shape** — and this row is the proof of it: W1.2's
+  coverage read 99-100% over a live show while his own eye called the panel
+  too cluttered to read the shape on. W4.3 adds the Fish `band_contrast`
+  pattern (the band's own luminance against the rest of the panel,
+  6.0-11.5× measured against a bar of 3.0) and a luminance-graded ASCII at
+  the word and at mid-hold. **Any wave-1 bar still read as a bare lit share
+  should expect the same.**
+- **A "nothing jumps" bar expressed as a RATIO of the lit count cannot
+  survive an effect that deliberately empties its own panel.** W4.3 reads
+  it on the panel's own MEAN LIGHT instead, against the effect's own untold
+  worst over the same span, and prints W1.2's form of the number beside it
+  rather than dropping it.
 
 ### Orbits V2 / `orbits` (row W1.3, 2026-11-16) — few trace it, many become it
 
@@ -649,9 +699,10 @@ there, circle it for the phrase and peel away. `.claude/skills/fish-effect`
 (its WORD SHAPES section) is the binding statement; what matters HERE,
 because it is about this contract rather than that effect:
 
-- **Fish is still the only effect with a MINIMUM FORM** — STAR, Sauron,
-  Fireworks, Orbits and the Black Hole all take the approved Energy-paced
-  one — and its 2.0 s is
+- **Fish was the FIRST effect with a MINIMUM FORM, and since W4.3 it is
+  one of two** (Fireworks declares 2.0 s as well, for a different reason —
+  emptying its panel rather than swimming onto a line; STAR, Sauron, Orbits
+  and the Black Hole all take the approved Energy-paced one). Its 2.0 s is
   why W0.3's "both floors ask the SHOWING scene's own effects" rule exists
   at all: a procession has to SWIM onto the outline, and the lead IS the
   form in practice, so asking globally would stretch every other scene's
