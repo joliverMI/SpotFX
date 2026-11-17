@@ -345,6 +345,29 @@ def find_chrome() -> str | None:
     return None
 
 
+def harness_stale(built: Path, *sources: Path) -> Path | None:
+    """The newest `.ts`/`.tsx`/`.css` file under `sources` (files are taken
+    as-is; directories are walked) that is newer than `built`, or None if
+    `built` is at least as new as everything in them. A render script that
+    only checks `built.is_file()` reports a false failure once the harness
+    page or a page it mounts changes without a rebuild — this is the guard
+    for that (carried from the Word Shapes W2.2/W2.3 nits, 2026-11-17)."""
+    if not built.is_file():
+        return None
+    built_mtime = built.stat().st_mtime
+    newest: Path | None = None
+    newest_mtime = built_mtime
+    for src in sources:
+        paths = [src] if src.is_file() else (
+            list(src.rglob("*.ts")) + list(src.rglob("*.tsx")) + list(src.rglob("*.css"))
+        )
+        for p in paths:
+            m = p.stat().st_mtime
+            if m > newest_mtime:
+                newest, newest_mtime = p, m
+    return newest
+
+
 def free_port() -> int:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))

@@ -25,8 +25,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_ui_fidelity import (  # noqa: E402
-    HARNESS_DIST, REPO, cdp, evaluate, find_chrome, free_port, goto, serve, shoot,
-    wait_for_devtools, websockets,
+    HARNESS_DIST, REPO, cdp, evaluate, find_chrome, free_port, goto, harness_stale, serve,
+    shoot, wait_for_devtools, websockets,
 )
 
 OUT_DIR = REPO / "docs" / "evidence" / "sung-labels"
@@ -121,8 +121,19 @@ async def run() -> int:
     if websockets is None:
         print("SKIP: the `websockets` package is not installed in this interpreter")
         return 0
-    if not (HARNESS_DIST / "sunglabels.html").is_file():
+    sunglabels_html = HARNESS_DIST / "sunglabels.html"
+    if not sunglabels_html.is_file():
         print("SKIP: harness-dist/sunglabels.html is not built — run "
+              "`cd spectra/web && npx vite build --config vite.harness.config.ts`")
+        return 0
+    stale = harness_stale(
+        sunglabels_html,
+        REPO / "spectra/web/harness/sunglabels.tsx",
+        REPO / "spectra/web/src/sunglabels",
+    )
+    if stale is not None:
+        print(f"SKIP: stale harness bundle — rebuild (newer than harness-dist/sunglabels.html: "
+              f"{stale.relative_to(REPO)}) — run "
               "`cd spectra/web && npx vite build --config vite.harness.config.ts`")
         return 0
     chrome = find_chrome()

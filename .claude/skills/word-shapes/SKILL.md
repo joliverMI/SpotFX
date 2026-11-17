@@ -458,6 +458,7 @@ attached could not be told apart before it: `list_flare_kinds` carries
 `warnings`. The audit of the whole table above is
 `tests/test_scene_console.py::test_the_word_shapes_sonic_reach_is_complete`,
 which names where each claim's behaviour is proven.
+
 ## Wave 1, effect by effect
 
 Each row below is one effect WIRED to the told keys:
@@ -467,76 +468,53 @@ effect's own `SKILL.md` is the binding statement for how it draws the
 shape; this is the one-paragraph index, plus the clarity numbers it
 actually measured.
 
-### STAR / `radial` (row W1.6, 2026-11-15) — the third divisor, spin to rest
+### Black Hole / `blackhole` (row W1.1, 2026-11-16) — the shaped horizon
 
-`.claude/skills/radial-effect/SKILL.md`'s "WORD SHAPES" section;
-`fx/effects/radial.py`'s WORD SHAPES block comment; evidence
-`scripts/check_star_word_shape.py`, proofs `tests/test_star_word_shape.py`.
-One registered param, `word_shape_size` (0.62); no
-`WORD_SHAPE_FORM_MIN_S` entry (the approved Energy-paced 0.5-0.9 s form).
+`fx/effects/blackhole.py` (`blackhole`, the Matrix crystal effect only —
+`blackhole1d` is a STRIP and gets nothing). **One change in the effect: the
+event-horizon radius became a radius per angle**,
+`(1 - m) * horizon_scale + m * word_shape_size * shape.polar(theta)`, with
+the breathing and the charge/lull/drop math applied to that unchanged, so
+every existing phase composes with no code of its own. The captives ride
+the swelling ring out onto the outline and circle it at the ring's own
+LINEAR speed (`omega x ref / r(theta)`, with `ref` the blended mean radius
+— that is what keeps them from thinning over a heart's lobes), the black
+disc follows the outline 1.5 cell pitches in, and the whole thing beats
+with the bass.
 
-Star samples a strip at a SHAPED RADIUS, so the shape is a third angle
-DIVISOR in the harmonic blend an `edges` change already used — read at the
-SCREEN angle, so the polygon turns under it and the shape stands upright —
-plus a soft CUT at `u = 1` without which the strip simply repeats outward
-and the panel stays lit. The rotation governor scales the whole per-frame
-advance by `1 - m`, so the turn is exactly zero through the hold and
-resumes from the music on the release; the star wave is held by freezing
-its phase; an Edge Morph arriving mid-shape is deferred to the release.
+Two things this row learned that the next ones should read before
+repeating them:
 
-Measured: lit cells inside the shape **97.1-100%** (bar 95%), the outline
-within **0.000 cells** of `SIZE x polar(theta)` on 360 angles (bar half a
-cell), no white, **+0.22 ms** p50 (bar 1 ms). Two bars read honestly rather
-than moved, both printed by the check script:
+- **A SIZE MULTIPLIER IS NOT A BEAT ON A SHAPE.** This effect's breathing
+  is a multiplier on its radius, and a shaped radius is ~3x the ring's, so
+  the same multiplier is 3x the absolute swell: at his own `horizon_audio`
+  0.3 on loud lows the heart stood 12% WIDE of its told size and the
+  clarity bar — whose denominator is the outline band at SIZE 0.62 —
+  measured almost nothing, while the captives were tracing the shape
+  beautifully one band out. The fix is an ADDITIVE swell capped at HALF A
+  CELL, which makes the plan's own "the radius equals `SIZE x polar(theta)`
+  within half a cell at the hold" true under any audio rather than only in
+  silence. **Any effect whose shape rides a per-frame audio gain has this
+  problem**; measure the drawn outline against the pinned band before
+  trusting a coverage number.
+- **MEASURE THE DRAWN BAND BESIDE THE PINNED ONE.** Coverage against the
+  pinned 168/176/119 answers "is the shape where it was told to be";
+  coverage against the band the effect is actually drawing answers "is the
+  outline continuous". A low number on the first with a high number on the
+  second means the shape MOVED, not that it broke up — which is exactly the
+  diagnosis above, and it took a second denominator to see it.
+  `tests/test_blackhole_word_shape.py::drawn_band` is the helper.
 
-- **"90% of the area cells lit" is read against the cells the STRIP
-  lights** (97.3-100%). Star has no light of its own — Melt's own lit share
-  swings between about a third and three quarters, and a dark band of the
-  strip is a dark band of the heart. The absolute figure (32-45%) tracks
-  the strip's share and is reported.
-- **the 8%-per-frame jump bar is arithmetically out of reach here**: STAR's
-  rest state lights the whole panel and a shape is a fifth to a third of
-  it, so a 0.5 s form has to cut the lit count 4.3x in 15 rendered frames
-  at 30 fps. Measured with the strip frozen: 6.9-14.4% (60 fps) /
-  9.4-25.4% (30 fps), against the effect's own UNTOLD worst of 18.2% /
-  26.6%. The hold itself does not move at all.
-
-### Sauron / `sauron` (row W1.5, 2026-11-15) — the shaped iris and pupil
-
-His Q8 **C**: both at once. Sauron already draws itself from two signed
-distance fields, so the shape is a blend of each with the shape's own —
-the iris boundary with `shape_sdf(iris_r x word_shape_size)` and the slit
-lens with `shape_sdf(that x word_shape_pupil)` — in the eye's own gazed,
-foreshortened coordinates. The ring, the flames' root, the heat, the
-radial colour bands and the white-hot rim all read those two fields, so
-one blend bends the whole picture and every phase composes unchanged.
-
-Three facts a later row should not re-derive:
-
-- **`word_shape_size` is a MULTIPLIER of the iris radius here**, not the
-  plan's fraction of the panel: the shape is the eye's own edge bent, so
-  it lives in the eye's own frame (both axes divided by `s_min`, so it
-  inherits the eye's 1.7:1 aspect, deliberately). With his `iris_size`
-  0.62 the two coincide, which is why the bars are measured at SIZE 0.62.
-- **`sdf_fast`'s far field needs clamping at these sizes.** Past its grid
-  box the estimate steps down by 0.055 eye units — a whole rendered pixel,
-  measured — and at a pupil's size that boundary is inside the panel.
-  `sauron._shape_field` evaluates at the point where the ray leaves the
-  box and adds the radial step back: exact inside, continuous across, one
-  `sdf_fast` call, +0.2 to +0.7 ms for both fields together on a quiet
-  host (and see that skill on measuring it on a busy one).
-- **A small dark shape needs a bite.** A cell lands fully dark only once
-  it is 0.4 x the anti-alias inside the edge; a pupil about five real
-  cells across measured 50-73% fully dark because of it. Sauron draws the
-  pupil shape that much fatter (`PUPIL_BITE_PX`) and reaches 100%.
-
-Bars (plan §3.5): 85% of the shaped iris's area cells outside the pupil
-lit, 80% of its outline cells ringed, 70% of the pupil's cells black —
-**measured 100% / 100% / 100%** for all three shapes at Energy 0.2 and
-0.8, at the word and mid-hold, gaze centred and at its four extremes
-(`scripts/check_sauron_word_shape.py`). `.claude/skills/sauron-effect`
-holds the rest, including what a drop arriving on a standing shape looks
-like.
+Measured (`scripts/check_blackhole_word_shape.py`, his own Black Hole V2
+crystal entry, three seeds of busy music, at the word / mid-hold / the
+hold's end): heart 76.8-85.2%, star 58.5-79.0%, diamond 89.1-92.8% of the
+pinned outline cells, inside black 100% everywhere, cost +0.1 ms p50.
+**The one miss is the star at Energy 0.2 at the END of a 1.2 s hold
+(~58%), and it is the captive POPULATION, not the shape** — his
+quiet-Energy binding spawns 0.8 blobs/s for a 176-cell outline, and
+`spawn_rate` 2.0 or `beat_burst` 3 (his own params) read 72.7% / 75.6% in
+the same room. `.claude/skills/blackhole-effect/SKILL.md`'s own "WORD
+SHAPES" section is the full record.
 
 ### Fireworks / `fireworks` (row W1.2, 2026-11-16) — the shaped payoff burst
 
@@ -655,54 +633,6 @@ hyperbolic in the half-life, so ramping the half-life collapsed it from
 1.2% to 11% per frame over the last few release frames and dumped 23-28%
 of the lit cells in one frame).
 
-### Black Hole — the shaped horizon (W1.1, 2026-11-16)
-
-`fx/effects/blackhole.py` (`blackhole`, the Matrix crystal effect only —
-`blackhole1d` is a STRIP and gets nothing). **One change in the effect: the
-event-horizon radius became a radius per angle**,
-`(1 - m) * horizon_scale + m * word_shape_size * shape.polar(theta)`, with
-the breathing and the charge/lull/drop math applied to that unchanged, so
-every existing phase composes with no code of its own. The captives ride
-the swelling ring out onto the outline and circle it at the ring's own
-LINEAR speed (`omega x ref / r(theta)`, with `ref` the blended mean radius
-— that is what keeps them from thinning over a heart's lobes), the black
-disc follows the outline 1.5 cell pitches in, and the whole thing beats
-with the bass.
-
-Two things this row learned that the next ones should read before
-repeating them:
-
-- **A SIZE MULTIPLIER IS NOT A BEAT ON A SHAPE.** This effect's breathing
-  is a multiplier on its radius, and a shaped radius is ~3x the ring's, so
-  the same multiplier is 3x the absolute swell: at his own `horizon_audio`
-  0.3 on loud lows the heart stood 12% WIDE of its told size and the
-  clarity bar — whose denominator is the outline band at SIZE 0.62 —
-  measured almost nothing, while the captives were tracing the shape
-  beautifully one band out. The fix is an ADDITIVE swell capped at HALF A
-  CELL, which makes the plan's own "the radius equals `SIZE x polar(theta)`
-  within half a cell at the hold" true under any audio rather than only in
-  silence. **Any effect whose shape rides a per-frame audio gain has this
-  problem**; measure the drawn outline against the pinned band before
-  trusting a coverage number.
-- **MEASURE THE DRAWN BAND BESIDE THE PINNED ONE.** Coverage against the
-  pinned 168/176/119 answers "is the shape where it was told to be";
-  coverage against the band the effect is actually drawing answers "is the
-  outline continuous". A low number on the first with a high number on the
-  second means the shape MOVED, not that it broke up — which is exactly the
-  diagnosis above, and it took a second denominator to see it.
-  `tests/test_blackhole_word_shape.py::drawn_band` is the helper.
-
-Measured (`scripts/check_blackhole_word_shape.py`, his own Black Hole V2
-crystal entry, three seeds of busy music, at the word / mid-hold / the
-hold's end): heart 76.8-85.2%, star 58.5-79.0%, diamond 89.1-92.8% of the
-pinned outline cells, inside black 100% everywhere, cost +0.1 ms p50.
-**The one miss is the star at Energy 0.2 at the END of a 1.2 s hold
-(~58%), and it is the captive POPULATION, not the shape** — his
-quiet-Energy binding spawns 0.8 blobs/s for a 176-cell outline, and
-`spawn_rate` 2.0 or `beat_burst` 3 (his own params) read 72.7% / 75.6% in
-the same room. `.claude/skills/blackhole-effect/SKILL.md`'s own "WORD
-SHAPES" section is the full record.
-
 ### Fish / `fish` (row W1.4, 2026-11-15) — a procession along the outline
 
 His revision of the row, verbatim: *"Fish: similar to orbits ... they need
@@ -769,6 +699,77 @@ because it is about this contract rather than that effect:
   trail half-life measured 5 (few) to 13 (many) points MORE white for ZERO
   outline gain, so it ships at 0.6 s. Any effect that concentrates its own
   light onto the outline should expect the same trade.
+
+### Sauron / `sauron` (row W1.5, 2026-11-15) — the shaped iris and pupil
+
+His Q8 **C**: both at once. Sauron already draws itself from two signed
+distance fields, so the shape is a blend of each with the shape's own —
+the iris boundary with `shape_sdf(iris_r x word_shape_size)` and the slit
+lens with `shape_sdf(that x word_shape_pupil)` — in the eye's own gazed,
+foreshortened coordinates. The ring, the flames' root, the heat, the
+radial colour bands and the white-hot rim all read those two fields, so
+one blend bends the whole picture and every phase composes unchanged.
+
+Three facts a later row should not re-derive:
+
+- **`word_shape_size` is a MULTIPLIER of the iris radius here**, not the
+  plan's fraction of the panel: the shape is the eye's own edge bent, so
+  it lives in the eye's own frame (both axes divided by `s_min`, so it
+  inherits the eye's 1.7:1 aspect, deliberately). With his `iris_size`
+  0.62 the two coincide, which is why the bars are measured at SIZE 0.62.
+- **`sdf_fast`'s far field needs clamping at these sizes.** Past its grid
+  box the estimate steps down by 0.055 eye units — a whole rendered pixel,
+  measured — and at a pupil's size that boundary is inside the panel.
+  `sauron._shape_field` evaluates at the point where the ray leaves the
+  box and adds the radial step back: exact inside, continuous across, one
+  `sdf_fast` call, +0.2 to +0.7 ms for both fields together on a quiet
+  host (and see that skill on measuring it on a busy one).
+- **A small dark shape needs a bite.** A cell lands fully dark only once
+  it is 0.4 x the anti-alias inside the edge; a pupil about five real
+  cells across measured 50-73% fully dark because of it. Sauron draws the
+  pupil shape that much fatter (`PUPIL_BITE_PX`) and reaches 100%.
+
+Bars (plan §3.5): 85% of the shaped iris's area cells outside the pupil
+lit, 80% of its outline cells ringed, 70% of the pupil's cells black —
+**measured 100% / 100% / 100%** for all three shapes at Energy 0.2 and
+0.8, at the word and mid-hold, gaze centred and at its four extremes
+(`scripts/check_sauron_word_shape.py`). `.claude/skills/sauron-effect`
+holds the rest, including what a drop arriving on a standing shape looks
+like.
+
+### STAR / `radial` (row W1.6, 2026-11-15) — the third divisor, spin to rest
+
+`.claude/skills/radial-effect/SKILL.md`'s "WORD SHAPES" section;
+`fx/effects/radial.py`'s WORD SHAPES block comment; evidence
+`scripts/check_star_word_shape.py`, proofs `tests/test_star_word_shape.py`.
+One registered param, `word_shape_size` (0.62); no
+`WORD_SHAPE_FORM_MIN_S` entry (the approved Energy-paced 0.5-0.9 s form).
+
+Star samples a strip at a SHAPED RADIUS, so the shape is a third angle
+DIVISOR in the harmonic blend an `edges` change already used — read at the
+SCREEN angle, so the polygon turns under it and the shape stands upright —
+plus a soft CUT at `u = 1` without which the strip simply repeats outward
+and the panel stays lit. The rotation governor scales the whole per-frame
+advance by `1 - m`, so the turn is exactly zero through the hold and
+resumes from the music on the release; the star wave is held by freezing
+its phase; an Edge Morph arriving mid-shape is deferred to the release.
+
+Measured: lit cells inside the shape **97.1-100%** (bar 95%), the outline
+within **0.000 cells** of `SIZE x polar(theta)` on 360 angles (bar half a
+cell), no white, **+0.22 ms** p50 (bar 1 ms). Two bars read honestly rather
+than moved, both printed by the check script:
+
+- **"90% of the area cells lit" is read against the cells the STRIP
+  lights** (97.3-100%). Star has no light of its own — Melt's own lit share
+  swings between about a third and three quarters, and a dark band of the
+  strip is a dark band of the heart. The absolute figure (32-45%) tracks
+  the strip's share and is reported.
+- **the 8%-per-frame jump bar is arithmetically out of reach here**: STAR's
+  rest state lights the whole panel and a shape is a fifth to a third of
+  it, so a 0.5 s form has to cut the lit count 4.3x in 15 rendered frames
+  at 30 fps. Measured with the strip frozen: 6.9-14.4% (60 fps) /
+  9.4-25.4% (30 fps), against the effect's own UNTOLD worst of 18.2% /
+  26.6%. The hold itself does not move at all.
 
 ## Related
 

@@ -1222,6 +1222,71 @@ including how an effect opts in. Four things:
   `tests/test_drop_shock_switches.py`, `tests/test_drop_feedback_1012.py`;
   help `drop-shockwave-switches`, `pulse-flash-energy`.
 
+## WORD SHAPES — cross-cutting mechanics (rows W0.1/W0.3, 2026-11-15; wave 1, 2026-11-15/17)
+
+`fx/effects/word_shapes.py` (the shape library) and `word_shape_keys.py`
+(the told-key helper) are the one engine-to-effect contract six effects now
+share — `.claude/skills/word-shapes/SKILL.md` is the binding statement, and
+each effect's own skill has a "WORD SHAPES" section. Three mechanics every
+adopter repeats, worth having in one place rather than re-derived per
+effect:
+
+- **THE SEQ EDGE AND ITS CREATION BASELINE.** An effect watches
+  `word_shape_seq` (`word_shape_keys.SEQ_KEY`), never the shape id — two
+  words of the same shape back to back must both fire, which an id-equality
+  check would miss on the second. The pattern (every adopter's
+  `config_updated`, e.g. `fx/effects/fireworks.py` around its own
+  `_ws_seq`) is exactly the phase key's and `burst_rockets`' own: state is
+  created in `config_updated` rather than `__init__`, because
+  `config_updated` runs first during `super().__init__()`; on the FIRST
+  call (`not hasattr(self, "_ws_seq")`) the instance BASELINES at whatever
+  SEQ a persisted config happens to carry and does NOT fire, because a
+  fresh instance built from an old config must never replay a stale told
+  write as a new one; every later call compares against that baseline and
+  arms `_ws_pending` only on a real change. Skipping the baseline branch is
+  the single most repeated defect shape in this family (the fireworks
+  `burst_rockets` comment calls it out by name as the model to copy).
+- **THE `sdf_fast` BUDGET.** `Shape.sdf` is exact and costs ~8-11 ms over
+  the whole panel (heart 10, star 11, diamond 8) — paid once per shape at
+  most, NEVER per frame. `Shape.sdf_fast` is the per-frame field, built
+  lazily on first use (`prime()` moves that build off the render path): ~0.13
+  ms for the panel's 2,664 cells at any drawn size, within `FAST_TOLERANCE`
+  (0.01 units) of the exact value inside its grid box, and within
+  `FAR_FIELD_TOLERANCE` (35% relative) of it as a floored lower-bound
+  estimate past the box. Sauron is the sharpest case of the last rule: at
+  a small drawn size (the pupil) the grid box's edge lands INSIDE the
+  panel, so `sdf_fast` raw would step down by a whole rendered pixel right
+  at the boundary — `sauron._shape_field` evaluates at the point the ray
+  leaves the box and adds the radial step back, exact inside and
+  continuous across, still one `sdf_fast` call. Any effect drawing a shape
+  smaller than about a third of the panel owes the same clamp; the check
+  script for each effect prints the per-frame cost against a 1 ms budget
+  so a missed clamp shows up as a cost regression before it shows up as a
+  visual seam.
+- **THE PINNED-MODULE PROOF.** Every wave-1 row's "untold is byte-identical
+  to today's" claim follows `tests/test_flare_punch_crystal.py`'s own
+  pattern: `git show <ref>:fx/effects/<name>.py` pulled at a REF from
+  before that row's own change, written to a temp file and imported as a
+  SECOND registry entry beside the live module (the registry keys an
+  effect by its module's last name segment, so two copies can run side by
+  side), with an `assert "word_shape" not in src` (or the module's own
+  marker) guarding against a REF that turns out not to be "before" after
+  all — a silently-wrong ref would make the byte-identity proof compare
+  the new code against itself and pass for the wrong reason. Five of the
+  six wave-1 rows pin the SAME commit, `5db75fe6` (wave 0's own merge,
+  written as either the short or the full 40-char form — both resolve);
+  Fish pins `e00e1841` (Sauron's own merge, the commit immediately before
+  Fish's in merge order) because `fish.py` is untouched between the two —
+  either ref proves the same claim, and a later row should pin whatever
+  commit is actually before ITS OWN change to that module, not necessarily
+  wave 0's. Each test file keeps its own small local copy of the loader
+  (named `_pinned_type`, `pinned_type` or `_pinned_sauron` depending on the
+  row) rather than sharing one — `tests/pre_drop_look_harness.py`'s
+  `load_pinned` is the same pattern used for the phase-key family and is
+  not currently wired to the word-shape tests; a future consolidation could
+  point them at it, but doing so is not required by anything that checks
+  this contract today.
+
 ## Radial (STAR) rotation is audio-lows-driven — a healthy `spin` can read as parked
 
 `fx/effects/radial.py`'s ONLY motion source is the audio callback:

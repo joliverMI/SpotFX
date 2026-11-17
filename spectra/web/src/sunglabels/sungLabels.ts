@@ -51,9 +51,11 @@ export function filterShapes(shapes: SungShape[], query: string): SungShape[] {
 /** The form two words are compared in, mirroring
  * spectra/services/colour_words.py's `word_key`: lower case, no accents, no
  * apostrophes, other punctuation as a space. So "Corazón" and "corazon" are
- * one word here exactly as they are one label there. */
+ * one word here exactly as they are one label there. The `ß` → `ss` swap
+ * mirrors Python's `casefold()` (JS `toLowerCase()` leaves `ß` alone), so
+ * "Straße" matches "strasse" here the way it does in `word_key`. */
 export function wordKey(text: string): string {
-  return (text || '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase()
+  return (text || '').normalize('NFKD').replace(/\p{M}/gu, '').replace(/ß/g, 'ss').toLowerCase()
     .replace(/['’`]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
