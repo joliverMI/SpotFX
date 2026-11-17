@@ -72,17 +72,27 @@ quoted only where they are the ruling.
     unreachable bar should also pre-plan the cheap room lever it will most
     likely need (a dark canvas, a speed-vs-trail trade) — the follow-up is
     then a one-row ask, not a design round.
-16. **A clarity bar must be a CONTRAST bar, never a "lit" bar.** Counting a
+16. **A clarity bar must be a CONTRAST bar, never a "lit" bar — and the
+    light threshold is DERIVED, not a fixed "half of full".** Counting a
     cell lit at 8-20/255 (shape-flares-lead's W1.2/W1.3 bars) passes a
     trail at half brightness and a canvas full of other sparks just as
     easily as a clearly-formed shape; grade by luminance instead (dark /
-    <64 / <128 / ≥128 of 255), require the figure's band to stand at ≥ half
-    of full against the rest of the panel at EVERY frame of the hold, and
-    compare against the same-seed UNTOLD frame. And the CANVAS is part of
-    the design, not just the figure's own pixels — what else the effect
-    lights when the figure lands (beat bursts, a wake, a trail of other
-    blobs) decides legibility as much as the figure does, so a sparse-light
-    effect may need a quiet window planned around the figure from the
+    <64 / <128 / ≥128 of 255). But a flat "≥ half of full" requirement is
+    itself the wrong bar on a one-pitch band for a blob effect: W4.4 proved
+    it structurally unreachable (24 of 24 rows under it) because Orbits'
+    splat kernel caps the band's own outer cells at ~65/255 at his
+    `blob_size`, whatever the speed or the trail. **Do the band-width-
+    against-the-effect's-own-kernel sum FIRST** and set the light threshold
+    at what that kernel can actually deposit on the band — 64/255 was the
+    honest threshold for Orbits and Fish (blob kernels), 128/255 for
+    Fireworks' sparks, which really do reach half of full. Then require the
+    band to stand out against the REST of the panel (a band/rest contrast
+    ratio) and against the same-seed UNTOLD frame, at EVERY frame of the
+    hold. And the CANVAS is part of the design, not just the figure's own
+    pixels — what else the effect lights when the figure lands (beat
+    bursts, a wake, a trail of other blobs) decides legibility as much as
+    the figure does, so a sparse-light effect may need a quiet window
+    planned around the figure from the
     start, not added after his verdict names it.
 
 ## How he answers
