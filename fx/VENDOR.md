@@ -2873,3 +2873,76 @@ against that commit.
     module hosted beside today's on the same strip. No vendored line
     changed. Evidence: `scripts/check_star_word_shape.py`,
     `tests/test_star_word_shape.py`.
+
+96. `effects/fireworks.py` (SpotFX-authored on top of #15/#17/#64/#87):
+    WORD SHAPES ON FIREWORKS — THE SHAPED PAYOFF BURST (row W1.2,
+    2026-11-16; the Admiral: "Fireworks: have a flare style firework (so
+    the ones that are bigger) explode into the given shape and hang longer
+    than the others. It should form a slightly more solid outline than the
+    filling, but it also needs to still appear random", Q9 A "one big
+    centred shaped burst per word, ~70% of sparks on the outline, hanging
+    about twice as long, bigger at higher Energy"). ONE burst per told word
+    off the SEQ edge (`burst_rockets`' own edge-detect and
+    creation-baseline rules, #15), `word_shape_sparks_quiet`..`_loud` (60 to
+    100) sparks by the word's Energy, `word_shape_outline_share` (0.70) of
+    them aimed along `shape.at(s)` BY ARC LENGTH with +/- half a cell of
+    radial jitter and the rest inside at a depth drawn uniformly BY AREA —
+    nothing on a lattice, his own "it also needs to still appear random".
+    **Every spark's launch velocity is SOLVED from this effect's own drag**:
+    the draw integrates `x += v*dt` then `v *= 0.5**(dt/hl)`, so one unit of
+    launch speed covers `dt*(1-decel**m)/(1-decel)` over `m` frames and
+    dividing the target by it lands the spark on it the frame the form ends
+    — the word (measured arrival error 0.000 cell pitches, every spark,
+    both forms, all three shapes). A second damper (`WORD_SHAPE_HANG_HL_S`
+    0.05 s, flagged sparks only) then holds them where they arrived, each
+    twinkling off its OWN POSITION, and they fade spark by spark over the
+    release on their own `p_life` (`p_wfade`, a new SoA array carrying both
+    the flag and that spark's fade window, so a second word can never
+    retime the first's fade-out). Uncapped (`p_nocap`) and purely additive:
+    the scene's rockets, beat bursts and drop tail never pause and
+    `_capacity()` is unchanged across the edge. The render is UNCHANGED —
+    one pass over every particle, as always; see the note below on the one
+    section-6 bar this row does not reach and why the per-frame composite
+    is not the lever. Colours come off a 0.15 SLICE of the gradient read by
+    the spark's angle from a per-burst random offset rather than the whole
+    gradient, because sparks from opposite ends of a rainbow desaturate
+    each other where they overlap at his blob size (the shape ALONE then
+    lights no white cell at all, measured at Energy 1.0 for all three
+    shapes). Four registered params
+    (`word_shape_size` 0.62, `word_shape_outline_share` 0.70,
+    `word_shape_sparks_quiet` 60, `word_shape_sparks_loud` 100); the six
+    told keys ride only the Words band's write.
+    `fx.device_model.WORD_SHAPE_EFFECTS` gains `fireworks` —
+    `fireworks1d` deliberately gets NOTHING, there being nowhere to draw a
+    shape on one line. Untold (no keys, a cleared write, an older SpotFX, a
+    LedFX UI scrub) every branch returns before touching state and the
+    single-pass render takes no mask at all, so the effect renders byte for
+    byte what it rendered before — proven against the PINNED module hosted
+    beside today's over 320 busy and 320 quiet frames on his real mask. No
+    vendored line changed. Evidence:
+    `scripts/check_fireworks_word_shape.py`,
+    `tests/test_fireworks_word_shape.py`.
+
+    ONE SECTION-6 BAR THIS ROW DOES NOT REACH, and what was measured about
+    it. "No whiter than the effect's own busy frames today": the shape
+    ALONE lights no white-ish cell, but over a LIVE show 1.74-2.01% of the
+    lit cells read washed out at the worst frame against the room's own
+    0.62% — about ten cells of 976 while the shape hangs. THE PER-FRAME
+    COMPOSITE IS NOT THE CAUSE: summing, a per-channel `np.maximum` and a
+    per-cell winner-takes-all over two frames (the shaped sparks' own and
+    the room's) all give the heart the SAME 1.74% and differ by at most
+    0.23 points on the diamond, so the two-pass version was measured and
+    NOT kept (it cost +0.2-0.4 ms p50 for that). The cause is structural:
+    `self.trail` is a channel-wise MAX over time, so a cell holding the
+    shape's hue and a burst's hue from a neighbouring frame has all three
+    channels high whatever the per-frame arithmetic. Nor is the trail
+    length a lever in the other direction — shortening it (`trail_decay`
+    0.27 -> 0.0) RAISES the share to 2.95-3.63%, because the room's own lit
+    cells vanish from the denominator faster than the washed-out ones do.
+    The remaining levers are the Admiral's, not a build row's: accept it
+    (it is the comet trail doing to a standing shape what it already does
+    wherever two of this effect's fireworks share a cell), or change how
+    this effect trails, which is its look. Measured by
+    `scripts/check_fireworks_word_shape.py`, pinned by
+    `tests/test_fireworks_word_shape.py::
+    test_the_live_show_white_is_recorded_above_the_plans_letter`.

@@ -370,13 +370,34 @@ same show without a shape (1.7-2.0% of the lit cells, against the room
 alone's ~0.6% and the effect's own Firework Burst flare's ~0.5% over the
 same frames; 1.49% over 600 frames of his ordinary busy show). It is the
 same mechanism the effect already shows wherever two of its own fireworks
-overlap, and **no brightness setting changes it** (measured at 1.0, 0.8 and
-0.65: 1.63-2.01% at every one), so there is nothing to tune away. **The fix
-available if he wants it** is to composite the shaped sparks with a MAX
-rather than a sum — a second bincount pass guarded by `_ws_live` — which
-would change this effect's own additive convention and is a decision above
-a build row. Until then the check script prints it under "ABOVE THE PLAN'S
-LETTER — reported, not moved" and
+overlap, and **nothing an effect-level knob reaches changes it** — all of
+this is measured, not assumed:
+
+- **not brightness**: 1.63-2.01% at shaped-spark brightness 1.0, 0.8 and
+  0.65 alike;
+- **NOT THE PER-FRAME COMPOSITE, which is the one that looks like the
+  answer.** Rendering the shaped sparks into a frame of their own and
+  meeting the room's with a per-channel `np.maximum`, or with a per-cell
+  winner-takes-all, or summing as today, all give the heart the **same
+  1.74%** and differ by at most 0.23 points on the diamond. The two-pass
+  version was built, measured and **not kept** (it cost +0.2-0.4 ms p50 for
+  that). A per-channel max of two hues that between them cover all three
+  channels desaturates exactly as a sum does — and the two contributions
+  usually arrive on DIFFERENT frames anyway, which no per-frame arithmetic
+  can reach;
+- **the cause is `self.trail`**, a channel-wise MAX over time: a cell
+  holding the shape's hue and a passing burst's hue from a neighbouring
+  frame has all three channels high however this frame was composited.
+  Shortening the trail is not a lever in the other direction either —
+  `trail_decay` 0.27 -> 0.0 RAISES the share to 2.95-3.63%, because the
+  room's own lit cells leave the denominator faster than the washed-out
+  ones leave the numerator.
+
+**So the remaining levers are his, not a build row's**: accept it (the
+comet trail doing to a standing shape what it already does wherever two of
+this effect's own fireworks share a cell), or change how this effect
+trails, which is its look. The check script prints the number under "ABOVE
+THE PLAN'S LETTER — reported, not moved" and
 `test_the_live_show_white_is_recorded_above_the_plans_letter` pins it, so it
 cannot drift unnoticed in either direction.
 

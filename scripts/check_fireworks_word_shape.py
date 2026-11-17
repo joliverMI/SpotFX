@@ -21,12 +21,11 @@ them, renders real frames, and measures the picture on the mask:
     show, the highest share of lit cells that are white-ish beside the same
     measure over an untold twin AND over the effect's own Firework Burst
     flare (six payoff bursts — the busiest thing it does today). THAT
-    SECOND NUMBER IS REPORTED, NOT A BAR THIS SCRIPT CALLS PASSED: where
-    the room's own beat bursts cross the standing shape their colours ADD,
-    and the worst frame of a busy run carries about ten washed-out cells
-    more than the same show without a shape. No brightness setting changes
-    it (measured at 1.0, 0.8 and 0.65), so it is printed as a number above
-    the plan's letter rather than quietly redefined;
+    SECOND NUMBER IS REPORTED, NOT A BAR THIS SCRIPT CALLS PASSED: the
+    worst frame of a busy run carries about ten washed-out cells more than
+    the same show without a shape, and the cause is the TRAIL's channel-wise
+    max over TIME rather than anything a per-frame composite or a brightness
+    reaches — the block this script prints at the end has all of it;
   * COST: the p50 per-frame render cost with a shape holding, against the
     same show without one.
 
@@ -589,10 +588,12 @@ def main() -> int:
           f"{WHITE_MIN}, within {WHITE_SPREAD} of each other). The shape "
           "alone lights\n  none at all (above); what shows here is additive "
           "mixing where one of the room's\n  own beat bursts crosses the "
-          "standing shape, where the two colours ADD\n  — which is what "
-          "the effect already does to itself whenever two of its own "
-          "fireworks overlap.\n  IT IS REPORTED, NOT A BAR THIS SCRIPT "
-          "CALLS PASSED: see the block at the end when there is one.\n"
+          "standing shape — which is what the\n  effect already does to "
+          "itself whenever two of its own fireworks share a cell inside "
+          "the trail's\n  memory. IT IS REPORTED, NOT A BAR THIS SCRIPT "
+          "CALLS PASSED: the block at the end has what was\n  measured "
+          "about it, including the three composites that do NOT change "
+          "it.\n"
           "jump = the largest frame-to-frame change in lit cells over the "
           "form and over the\n  release, as a share of the lit count (bar: "
           "8%); p50 = the median render ms a\n  frame with the shape "
@@ -610,13 +611,29 @@ def main() -> int:
         print("\nABOVE THE PLAN'S LETTER — reported, not moved (plan "
               "section 6's fifth bar: 'the white fraction during a shape "
               "is no\n  higher than the effect's own busy frames today'). "
-              "The shape ALONE lights no white cell at all; this is the\n  "
-              "additive mixing where the room's own beat bursts cross it, "
-              "and no brightness setting changes it (measured\n  at 1.0, "
-              "0.8 and 0.65 — 1.63-2.01% at every one). The fix available "
-              "if he wants it is to composite the\n  shaped sparks with a "
-              "MAX rather than a sum, which would change this effect's own "
-              "additive convention\n  and is a decision above this row.")
+              "The shape ALONE lights no white cell at all; this is where "
+              "the\n  room's own beat bursts cross the standing shape. "
+              "What was measured about it, so nobody re-chases it:\n"
+              "    * not brightness — 1.63-2.01% at shaped-spark "
+              "brightness 1.0, 0.8 and 0.65 alike;\n"
+              "    * NOT the per-frame composite, which is the one that "
+              "looks like the answer: summing, a per-channel\n      max "
+              "and a per-cell winner-takes-all over two frames (the shaped "
+              "sparks' own and the room's) all\n      give the heart the "
+              "SAME 1.74%, and at most 0.23 points on the diamond. That "
+              "two-pass version was\n      built, measured and NOT kept — "
+              "it cost +0.2-0.4 ms p50 for that;\n"
+              "    * the cause is `self.trail`, a channel-wise MAX over "
+              "TIME: the shape's hue and a passing burst's\n      hue "
+              "from a NEIGHBOURING frame, which no per-frame arithmetic "
+              "reaches. Shortening the trail is no\n      lever either — "
+              "`trail_decay` 0.27 -> 0.0 RAISES the share to 2.95-3.63%, "
+              "the room's own lit cells\n      leaving the denominator "
+              "faster than the washed-out ones leave the numerator.\n"
+              "  The levers left are the Admiral's: accept it (the comet "
+              "trail doing to a standing shape what it\n  already does "
+              "wherever two of this effect's own fireworks share a cell), "
+              "or change how it trails.")
         for line in reported:
             print(f"  REPORTED: {line}")
 

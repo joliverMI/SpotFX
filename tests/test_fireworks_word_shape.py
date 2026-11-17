@@ -476,11 +476,22 @@ def test_the_live_show_white_is_recorded_above_the_plans_letter(capsys):
     same frames).
 
     It is the same mechanism the effect already shows wherever two of its
-    own fireworks overlap, and NO BRIGHTNESS SETTING CHANGES IT (measured at
-    1.0, 0.8 and 0.65: 1.63-2.01% at every one), so there is nothing to tune
-    away. The fix available if he wants it is to composite the shaped sparks
-    with a MAX rather than a sum, which changes this effect's own additive
-    convention and is a decision above this row.
+    own fireworks share a cell inside the trail's memory, and nothing an
+    effect-level knob reaches changes it — all measured (2026-11-17), so
+    nobody re-chases it: not brightness (1.63-2.01% at shaped-spark
+    brightness 1.0, 0.8 and 0.65 alike); NOT the per-frame composite, which
+    is the one that looks like the answer (summing, a per-channel
+    `np.maximum` and a per-cell winner-takes-all over two frames all give
+    the heart the SAME 1.74%, at most 0.23 points on the diamond — that
+    two-pass version was built, measured and not kept, it cost +0.2-0.4 ms
+    p50 for that); and not the trail length in the other direction
+    (`trail_decay` 0.27 -> 0.0 RAISES the share to 2.95-3.63%, the room's
+    own lit cells leaving the denominator faster than the washed-out ones
+    leave the numerator). The cause is `self.trail` being a channel-wise MAX
+    over TIME, so a cell holding the shape's hue and a passing burst's hue
+    from a NEIGHBOURING frame has every channel high whatever this frame
+    did. The levers left are the Admiral's: accept it, or change how this
+    effect trails, which is its look.
 
     So this test does not claim the bar: it RECORDS the measured number and
     fails only if it gets worse, which is what "report the number rather

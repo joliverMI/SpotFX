@@ -573,9 +573,24 @@ Clarity bar, the shape alone on the real mask at SIZE 0.62, on the word
 Two numbers the measurements forced, worth knowing before another row copies
 the approach: the colours come off a 0.15 SLICE of the gradient read by the
 spark's angle, not the whole gradient, because sparks from opposite ends of
-a rainbow sum to WHITE where they overlap at his blob size; and the burst's
-origins are scattered over a cell with their own fade-in from 0, because 100
-sparks stacked on one cell saturate it.
+a rainbow desaturate each other where they overlap at his blob size; and the
+burst's origins are scattered over a cell with their own fade-in from 0,
+because 100 sparks stacked on one cell saturate it.
+
+**The one section-6 bar this row does not reach, and the finding every other
+row's "no white" bar should have in hand:** alone the shape lights no
+white-ish cell at all, but over a LIVE show 1.74-2.01% of the lit cells read
+washed out at the worst frame against the room's own 0.62% — about ten cells
+of 976 while the shape hangs. The per-frame composite is NOT the lever
+(summing, a per-channel max and a per-cell winner-takes-all all give the
+heart the same 1.74%; the two-pass version was measured and not kept), and
+neither is the trail length (shortening it RAISES the share). The cause is
+`self.trail` being a channel-wise MAX over time, so a cell holding the
+shape's hue and a passing burst's hue from a neighbouring frame has every
+channel high whatever this frame did. **Any effect here that leaves
+something STANDING STILL over a show that keeps drawing through it will meet
+the same wall** — the lever is the effect's trailing, which is its look, and
+so the Admiral's call rather than a build row's.
 
 ## Related
 
