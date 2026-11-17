@@ -195,6 +195,18 @@ changes, fire_history's "deferred"/"preview" bucket — can never outlive
 this module's own light-hold deadline; the two must expire together, or
 "the preview released" is still a lie for however long preview_pause
 stays armed on its own.
+
+A WORD SHAPE IS NEVER TOLD ON THE WAY OUT (2026-11-17, row W4.1). The
+snapshot is the live effect config, so on a shape effect it carries
+fx/effects/word_shape_keys.py's six told keys as they stood before the
+preview — the last sung word's shape and SEQ on the showing scene. Writing
+them back is a told write, and the effect edges on the SEQ changing: the
+close would re-form that old word's shape on his room. `_revert_writes()`
+replaces those six (and only those six, and only where the snapshot already
+has them) with NOT_TOLD, which is the CLEARING write every shape effect
+already honours — a shape still standing from the preview releases from its
+own fraction, and nothing new forms. Everything else is restored byte for
+byte, and the same function builds `recover_stale_hold()`'s landing.
 """
 from __future__ import annotations
 
@@ -206,6 +218,7 @@ import tempfile
 import time
 from typing import Any
 
+from fx.effects import word_shape_keys
 from spectra import config
 from spectra.models.scene import FlareKind, SceneV2
 from spectra.services import flare_preview, fx_seam, room_controls
@@ -283,6 +296,42 @@ _release_step: str | None = None
 # retarget branch — from wherever any dangling tween currently sits, no
 # snap — and lands within one rendered frame either way.
 REVERT_TRANSITION_MS = 1
+
+
+def _revert_writes(snapshot: dict[str, dict]) -> list[dict]:
+    """The writes that hand his room back — the snapshot exactly as taken,
+    except that a WORD SHAPE is never told on the way out (row W4.1).
+
+    THE GHOST THIS CLOSES. The snapshot is the live effect config read
+    before the first fire (fx_seam.get_virtuals()), and on a shape effect
+    that config carries fx/effects/word_shape_keys.py's six told keys as
+    they stood then — on the showing scene, the LAST SUNG WORD's shape and
+    its SEQ. Writing them back is a told write like any other: the effect
+    edges on the SEQ changing against what it now holds (the preview's own),
+    so closing the overlay would re-form that old word's shape on his room,
+    with its old envelope, as a parting gift. Telling NOT_TOLD instead makes
+    the close a CLEARING write — the rule every shape effect already honours
+    — so a shape still standing from the preview RELEASES from its own
+    fraction (Fireworks' hanging sparks finish on their own clock) and
+    nothing new ever forms.
+
+    Only the keys the snapshot actually HAS are replaced: an effect that
+    knows no shapes has none in its config, and adding them would be a key
+    its CONFIG_SCHEMA rejects — which drops the WHOLE validated write
+    (word_shape_keys' own rule 1) and would leave that virtual holding the
+    preview instead of being handed back. Everything else is restored byte
+    for byte, exactly as before this existed."""
+    writes = []
+    for vid, snap in snapshot.items():
+        # `cfg`, not `config`: this module's own `config` is the storage
+        # module imported above, and shadowing it here would be a trap
+        cfg = dict(snap["config"])
+        for key in word_shape_keys.KEYS:
+            if key in cfg:
+                cfg[key] = word_shape_keys.NOT_TOLD[key]
+        writes.append({"virtual_id": vid, "effect_type": snap["type"],
+                       "config": cfg})
+    return writes
 
 
 class _SeamExecutor:
@@ -368,7 +417,10 @@ async def _revert_locked(reason: str = "explicit_close") -> None:
     ceiling firing) locks the session against a client that keeps
     heartbeating/re-firing afterward — an explicit close or a plain
     abandoned/lapsed heartbeat leaves it free to start fresh on its own
-    next open, exactly as before this ceiling existed."""
+    next open, exactly as before this ceiling existed.
+
+    The writes come from `_revert_writes()`, which hands the room back with
+    NO WORD SHAPE TOLD — see its own docstring for the ghost that closes."""
     global _snapshot, _deadline, _session_started_at, _locked_until_reopen
     global _release_step, _session_max_duration_s
     for task in _release_tasks:
@@ -385,8 +437,7 @@ async def _revert_locked(reason: str = "explicit_close") -> None:
     _clear_snapshot_file()
     if not snap:
         return
-    writes = [{"virtual_id": vid, "effect_type": s["type"], "config": s["config"]}
-             for vid, s in snap.items()]
+    writes = _revert_writes(snap)
     try:
         await fx_seam.apply_writes(writes, transition_ms=REVERT_TRANSITION_MS)
     except Exception:
@@ -861,8 +912,7 @@ async def recover_stale_hold() -> bool:
     logger.critical(
         "flare_preview_hold: stale hold found at startup (%d virtual(s)) — "
         "landing it back", len(snapshot))
-    writes = [{"virtual_id": vid, "effect_type": s["type"], "config": s["config"]}
-             for vid, s in snapshot.items()]
+    writes = _revert_writes(snapshot)
     try:
         await fx_seam.apply_writes(writes, transition_ms=REVERT_TRANSITION_MS)
     except Exception:

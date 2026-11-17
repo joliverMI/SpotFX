@@ -829,14 +829,18 @@ def test_the_told_write_lands_the_six_keys_on_every_shape_effect(shape_effects):
     params = write["params"]
     assert set(wsk.KEYS) <= set(params), "all six keys, every time"
     assert params[wsk.SHAPE_KEY] == "heart"
-    assert params[wsk.SEQ_KEY] == 1
+    # The SEQ comes from the ONE process-wide, clock-seeded source (row
+    # W4.1) — never a per-engine 1, which is what made every preview lap
+    # after the first draw nothing.
+    seq = params[wsk.SEQ_KEY]
+    assert seq > 1 and seq == responder._last_word_shape_seq
     assert params[wsk.FORM_KEY] == action.form_s
     assert params[wsk.HOLD_KEY] == action.hold_s
     assert params[wsk.RELEASE_KEY] == action.release_s
     assert params[wsk.LEVEL_KEY] == pytest.approx(0.8)
     # The surge record names what it reached.
     assert record["word_shape"] == {
-        "shape": "heart", "seq": 1, "form_s": action.form_s,
+        "shape": "heart", "seq": seq, "form_s": action.form_s,
         "hold_s": action.hold_s, "release_s": action.release_s,
         "level": pytest.approx(0.8), "virtuals": 1}
     # Nothing carried, nothing released — the firework_burst shape.
@@ -844,12 +848,49 @@ def test_the_told_write_lands_the_six_keys_on_every_shape_effect(shape_effects):
 
 
 def test_the_seq_edges_for_two_words_of_the_same_shape(shape_effects):
+    """...and for two words fired by two DIFFERENT ENGINES (row W4.1). The
+    preview seeds a fresh scratch ResponseEngine on every /fire, so a
+    per-engine counter wrote 1 on every lap and only lap 1 ever edged — his
+    own report, "the preview of the flare doesn't seem to work". The counter
+    belongs to the PROCESS (word_shape_keys.next_seq), so a second engine
+    never repeats what a first one wrote."""
     _cond, responder, executor, _clock = _scratch(_words_scene())
     action = _only(_plan([_hit(energy=0.5)]))
     _run(responder.on_word_shape(action))
     _run(responder.on_word_shape(action))
     seqs = [w["params"][wsk.SEQ_KEY] for w in _told(executor)]
-    assert seqs == [1, 2], "an effect watches the SEQ, never the id"
+    assert len(seqs) == 2 and seqs[1] > seqs[0], \
+        "an effect watches the SEQ, never the id"
+    # A SECOND ENGINE, the preview's own shape: its first write must still
+    # be an edge against what the first engine left standing.
+    _cond2, responder2, executor2, _clock2 = _scratch(_words_scene())
+    assert responder2._last_word_shape_seq == 0, "a fresh engine has written none"
+    _run(responder2.on_word_shape(action))
+    [again] = _told(executor2)
+    assert again["params"][wsk.SEQ_KEY] > seqs[-1], \
+        "a fresh engine never repeats a seq a running effect already holds"
+
+
+def test_the_seq_is_one_clock_seeded_source_for_the_whole_process():
+    """Row W4.1's own unit: monotonic per process, seeded from the wall
+    clock in ms, and re-seeded FORWARD when the clock passes the counter —
+    which is what keeps it clear of both a second engine's writes and a seq
+    a persisted effect config carries from an earlier process life."""
+    import time as _time
+    first = wsk.next_seq()
+    assert first > 1, "never 1 by construction"
+    assert first <= int(_time.time() * 1000) % wsk._SEQ_MODULUS + 1
+    assert first >= int(_time.time() * 1000) % wsk._SEQ_MODULUS - 60_000, \
+        "seeded from the clock, in milliseconds"
+    assert wsk.next_seq() > first and wsk.next_seq() > first + 1, "monotonic"
+    # A clock that has moved on re-seeds forward rather than crawling.
+    ahead = wsk._seq + 10_000
+    import unittest.mock as mock
+    with mock.patch.object(wsk.time, "time", lambda: (ahead + 1) / 1000.0):
+        assert wsk.next_seq() == ahead + 1
+    # ... and a clock that has NOT moved still never repeats itself.
+    with mock.patch.object(wsk.time, "time", lambda: (ahead + 1) / 1000.0):
+        assert wsk.next_seq() == ahead + 2
 
 
 def test_a_told_level_is_never_zero(shape_effects):
@@ -1178,7 +1219,12 @@ def test_the_preview_ruler_puts_the_trigger_where_the_shape_completes():
     assert timeline["lead_ms"] == round(form_s * 1000), "the form IS the lead"
     assert timeline["word_shape"] == {
         "shape": "heart", "form_s": form_s, "hold_s": hold_s,
-        "release_s": release_s}
+        "release_s": release_s,
+        # the room's LONGEST hold rides along (row W4.1) so the sentence
+        # under the ruler can say the hold it draws is the shortest
+        "hold_max_s": RoomControlState().word_shape_hold_max_s}
+    assert hold_s == RoomControlState().word_shape_hold_min_s, \
+        "a preview has no sung phrase, so its hold is always the clamp's floor"
     trigger = timeline["trigger_mark_s"]
     assert timeline["fire_at_s"] == pytest.approx(trigger - form_s), \
         "the write goes out a form before the mark"
@@ -1231,6 +1277,16 @@ def test_the_preview_writes_the_told_keys_when_an_effect_knows_shapes(
     [write] = [w for w in timeline["writes"] if wsk.SHAPE_KEY in w["params"]]
     assert write["params"][wsk.SHAPE_KEY] == "heart"
     assert write["at_s"] == 0.0
+    # NOT 1 BY CONSTRUCTION (row W4.1). Every /fire seeds a fresh scratch
+    # engine, so a per-engine counter made every lap write 1 — the effect
+    # edged on lap 1 and never again. A second timeline (the next lap) must
+    # therefore write a seq of its own.
+    first = write["params"][wsk.SEQ_KEY]
+    assert first > 1
+    lap2 = _run(flare_preview.build_timeline(scene, scene.flare_kinds[0], 0.5))
+    [second] = [w for w in lap2["writes"] if wsk.SHAPE_KEY in w["params"]]
+    assert second["params"][wsk.SEQ_KEY] > first, \
+        "the next lap of a preview is a fresh edge in the effect"
 
 
 def test_sonic_can_create_the_kind_and_set_each_timing(tmp_path, monkeypatch):

@@ -747,3 +747,270 @@ def test_capped_pause_s_reaches_zero_at_the_ceiling_and_locks(tmp_path, monkeypa
             await host.shutdown()
 
     _run(main())
+
+
+# ── 10. A WORD SHAPE ON EVERY LAP, AND THE ROOM HANDED BACK WITH NONE TOLD
+#      (Word Shapes row W4.1, 2026-11-17 — his own report: "the preview of
+#      the flare doesn't seem to work (I only tested orbits and black hole,
+#      but it didn't seem to show)").
+#
+#      WHAT WAS WRONG. open_program_hold seeds a FRESH scratch
+#      ResponseEngine per /fire, and the engine counted the told SEQ on
+#      ITSELF — so every lap wrote seq 1. Lap 1 edged against the effect's
+#      own baseline (0 on an instance apply_scene had just created); lap 2
+#      onward wrote 1 to an effect already holding 1, which is no edge at
+#      all, and nothing drew. The same per-engine counter also meant the
+#      live engine's first write after a restart was a 1 the fx host had
+#      already PERSISTED into the effect's config — one swallowed shape,
+#      exactly on a tuning day. fx/effects/word_shape_keys.next_seq() is now
+#      the one clock-seeded source for the whole process.
+#
+#      WHAT CLOSING WAS DOING. The snapshot is the live effect config, six
+#      told keys included, so on the showing scene it carried the LAST SUNG
+#      WORD's shape and seq; writing it back edged the effect and re-formed
+#      that old shape as a parting gift. The revert now tells NOT_TOLD.
+#
+#      Every assertion below reads the REAL effect instance on the headless
+#      host — its own `_ws_seq`/`_ws_m` state, not a recorded call. ────────
+
+SHAPE_EFFECT = "orbits"
+
+
+def _shape_scene_and_kind(effect_type: str = SHAPE_EFFECT):
+    """A scene whose crystal effect is a WORD_SHAPE_EFFECTS member, with one
+    `word_shape` kind in its Words section. fire_kind synthesises the
+    preview's own action for this type (scene_response.preview_word_shape),
+    exactly as POST /api/flare-preview/fire does."""
+    from spectra.models.scene import (FlareBand, FlareKind, ResponseSpec,
+                                      SceneDeviceConfig, SceneV2)
+    assert effect_type in device_model.WORD_SHAPE_EFFECTS, (
+        f"{effect_type!r} must be an effect that knows shapes — this test "
+        "proves a told write edges on a REAL instance")
+    scene = SceneV2(
+        name="Shape Hold Scene",
+        devices=[SceneDeviceConfig(
+            id="dev1", target_kind="virtual", target=VID,
+            effect_type=effect_type, params={"particle_count": 6})],
+        flare_kinds=[FlareKind(name="Heart", type="word_shape")],
+        responses={"word": ResponseSpec(bands=[FlareBand(
+            intensity_min=0.0, intensity_max=1.0, kinds={"Heart": 1.0})])})
+    return scene, scene.flare_kinds[0]
+
+
+async def _start_shape_host(tmp_path, *, attach: str = SHAPE_EFFECT,
+                            config: dict | None = None):
+    host = await headless.start_headless_host(str(tmp_path / "host"))
+    facade.set_host(host)
+    virtual = host.virtuals.get(VID)
+    headless.attach_effect(host, virtual, attach,
+                           dict(config or {"particle_count": 6}))
+    return host, virtual
+
+
+def _shape_state(virtual):
+    """The live effect's own word-shape state: (the seq it holds, the
+    envelope fraction this frame)."""
+    effect = virtual.active_effect
+    return getattr(effect, "_ws_seq", None), getattr(effect, "_ws_m", None)
+
+
+def test_three_preview_laps_draw_three_shapes(tmp_path, monkeypatch):
+    """(a) THE ROW'S OWN BAR: a shape on EVERY lap. Three /fire calls in one
+    session each edge the real effect — its own `_ws_seq` strictly
+    increasing and a shape actually standing (`_ws_m > 0`) after each."""
+    from spectra.services import flare_preview_hold as fph
+    _own(monkeypatch, tmp_path)
+    scene, kind = _shape_scene_and_kind()
+
+    async def main():
+        host, virtual = await _start_shape_host(tmp_path)
+        try:
+            seqs = []
+            for lap in range(3):
+                result = await fph.open_hold(scene, kind, 1.0,
+                                             heartbeat_timeout_s=30.0)
+                assert result["held"] is True
+                record = result["fire_record"]
+                assert record["result"] == "applied"
+                assert record["word_shape"]["virtuals"] == 1, \
+                    f"lap {lap + 1} wrote the told keys to no fixture"
+                await _pump_frames_for(virtual, LAND_S)
+                seq, m = _shape_state(virtual)
+                assert seq == record["word_shape"]["seq"], \
+                    f"lap {lap + 1}: the effect did not take the written seq"
+                assert m > 0.0, f"lap {lap + 1} drew no shape at all"
+                seqs.append(seq)
+            assert seqs[0] < seqs[1] < seqs[2], (
+                "every lap must be a fresh edge — a per-engine counter wrote "
+                f"1 on all three ({seqs})")
+        finally:
+            for t in fph._release_tasks:
+                t.cancel()
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+def test_lap_one_over_a_different_effect_type_still_edges(tmp_path, monkeypatch):
+    """(b) THE TYPE SWITCH — what he actually did (he previewed Orbits V2
+    and Black Hole V2 while STAR was showing). apply_scene lands the scene
+    first, which CREATES a fresh instance of the other type (its baseline is
+    whatever that write carried: no told keys at all), and the told jump
+    then edges it."""
+    from spectra.services import flare_preview_hold as fph
+    _own(monkeypatch, tmp_path)
+    scene, kind = _shape_scene_and_kind()
+
+    async def main():
+        host, virtual = await _start_shape_host(
+            tmp_path, attach="radial",
+            config={"background_color": "#111111", "spin": 0.1})
+        try:
+            assert virtual.active_effect.type == "radial"
+            result = await fph.open_hold(scene, kind, 1.0,
+                                         heartbeat_timeout_s=30.0)
+            assert result["fire_record"]["word_shape"]["virtuals"] == 1
+            await _pump_frames_for(virtual, LAND_S)
+            assert virtual.active_effect.type == SHAPE_EFFECT, \
+                "the scene's own fire switched the fixture's effect"
+            seq, m = _shape_state(virtual)
+            assert seq == result["fire_record"]["word_shape"]["seq"]
+            assert m > 0.0, "lap 1 of a type switch draws its shape"
+        finally:
+            for t in fph._release_tasks:
+                t.cancel()
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+def test_close_leaves_no_shape_told_and_never_re_forms_the_last_word(
+        tmp_path, monkeypatch):
+    """(c) THE GHOST ON CLOSE. A same-type session (previewing the scene that
+    is already showing) snapshots an effect config carrying the LAST SUNG
+    WORD's six told keys. Writing them back on close is a told write and
+    would re-form that old shape; the revert tells NOT_TOLD instead, so the
+    preview's own standing shape RELEASES from its fraction and nothing
+    forms. Everything else is still restored exactly."""
+    from fx.effects import word_shape_keys as wsk
+    from spectra.services import flare_preview_hold as fph
+    _own(monkeypatch, tmp_path)
+    scene, kind = _shape_scene_and_kind()
+    # what a sung word left standing before he opened the preview
+    sung = {"particle_count": 6, **wsk.keys_for("star", 7, 0.6, 1.2, 0.9, 0.7)}
+
+    async def main():
+        host, virtual = await _start_shape_host(tmp_path, config=sung)
+        try:
+            assert wsk.told(virtual.active_effect.config) is not None, \
+                "the snapshot has to carry a sung word's keys for this proof"
+            await fph.open_hold(scene, kind, 1.0, heartbeat_timeout_s=30.0)
+            await _pump_frames_for(virtual, LAND_S)
+            _seq, standing = _shape_state(virtual)
+            assert standing > 0.0, "the preview's own shape is up"
+
+            assert (await fph.close_hold())["reverted"] is True
+            await _land_revert(virtual)
+            config = virtual.active_effect.config
+            assert wsk.told(config) is None, (
+                "the room is handed back with NO shape told — the last sung "
+                "word must never re-form on close")
+            assert config[wsk.SHAPE_KEY] == "" and config[wsk.SEQ_KEY] == 0
+            assert config["particle_count"] == 6, \
+                "everything else is restored exactly as before"
+            effect = virtual.active_effect
+            assert effect._ws_releasing is True and effect._ws_m > 0.0, (
+                "a standing preview shape lets go from its own fraction — "
+                "the clearing-write rule, not a snap")
+            assert effect._ws_told.form_s == 0.0, \
+                "and it is releasing, never forming again"
+            await _pump_frames_for(virtual, 1.0)
+            assert virtual.active_effect._ws_m == 0.0, "then it is gone"
+        finally:
+            for t in fph._release_tasks:
+                t.cancel()
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+def test_a_persisted_seq_from_the_old_first_write_still_edges(
+        tmp_path, monkeypatch):
+    """(d) THE RESTART CASE. The in-process fx host persists each effect's
+    config, the six told keys included, so after a preview session the stored
+    seq was 1 — exactly what a restarted SpotFX's per-engine counter wrote
+    first, which a fresh instance's creation baseline then swallowed (one
+    lost shape). A clock-seeded seq can never be that number."""
+    from fx.effects import word_shape_keys as wsk
+    from spectra.services import flare_preview_hold as fph
+    _own(monkeypatch, tmp_path)
+    scene, kind = _shape_scene_and_kind()
+    # a persisted config carrying the seq the OLD first write produced
+    stale = {"particle_count": 6, **wsk.keys_for("heart", 1, 0.5, 0.8, 0.75, 0.5)}
+
+    async def main():
+        host, virtual = await _start_shape_host(tmp_path, config=stale)
+        try:
+            assert virtual.active_effect.config[wsk.SEQ_KEY] == 1
+            assert virtual.active_effect._ws_seq == 1, \
+                "the creation baseline is the stale seq — it must not fire"
+            assert virtual.active_effect._ws_told is None
+            result = await fph.open_hold(scene, kind, 1.0,
+                                         heartbeat_timeout_s=30.0)
+            written = result["fire_record"]["word_shape"]["seq"]
+            assert written != 1, "the one thing the old counter always wrote"
+            await _pump_frames_for(virtual, LAND_S)
+            seq, m = _shape_state(virtual)
+            assert seq == written and m > 0.0, \
+                "a persisted seq never swallows the first shape again"
+        finally:
+            for t in fph._release_tasks:
+                t.cancel()
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())
+
+
+def test_a_recovered_stale_hold_also_tells_no_shape(tmp_path, monkeypatch):
+    """(c, the restart half) `recover_stale_hold()` lands the SAME writes a
+    close does — so a snapshot left on disk by a killed process hands the
+    room back with no shape told either, rather than re-forming a word sung
+    before the preview that outlived it."""
+    from fx.effects import word_shape_keys as wsk
+    from spectra import config as scfg
+    from spectra.services import flare_preview_hold as fph
+    _own(monkeypatch, tmp_path)
+    scene, kind = _shape_scene_and_kind()
+    sung = {"particle_count": 6, **wsk.keys_for("diamond", 11, 0.6, 1.2, 0.9, 0.7)}
+
+    async def main():
+        host, virtual = await _start_shape_host(tmp_path, config=sung)
+        try:
+            await fph.open_hold(scene, kind, 1.0, heartbeat_timeout_s=30.0)
+            await _pump_frames_for(virtual, LAND_S)
+            assert scfg.FLARE_PREVIEW_HOLD_FILE.exists()
+            # a fresh process: the in-memory session is gone, the snapshot
+            # (six told keys included) survives on disk
+            for t in fph._release_tasks:
+                t.cancel()
+            fph._release_tasks = []
+            fph._snapshot = None
+            fph._deadline = None
+
+            assert await fph.recover_stale_hold() is True
+            await _land_revert(virtual)
+            config = virtual.active_effect.config
+            assert wsk.told(config) is None, \
+                "a recovered snapshot tells no shape either"
+            assert config["particle_count"] == 6
+        finally:
+            for t in fph._release_tasks:
+                t.cancel()
+            facade.set_host(None)
+            await host.shutdown()
+
+    _run(main())

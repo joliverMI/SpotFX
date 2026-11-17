@@ -551,7 +551,13 @@ def test_two_words_of_the_same_shape_back_to_back_both_edge(tmp_path):
             return seq1, star._shape_seq, star._shape is not None
 
     seq1, seq2, standing = run(main())
-    assert seq2 == seq1 + 1 and standing
+    # STRICTLY GREATER, not seq1 + 1 (Word Shapes row W4.1): the counter is
+    # one clock-seeded source for the whole PROCESS now
+    # (fx/effects/word_shape_keys.next_seq) rather than a per-engine 1, 2,
+    # 3 — which is what made every preview lap after the first write the
+    # same 1 and draw nothing. What this test is about is unchanged: the
+    # effect edges on the SEQ CHANGING, never on the shape id.
+    assert seq2 > seq1 and standing
 
 
 def test_a_second_word_inside_the_release_reforms_from_where_it_is(tmp_path):

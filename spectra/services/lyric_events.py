@@ -687,7 +687,7 @@ def default_shape_timing(energy: float, phrase_ms: float) -> tuple[float, float,
     frac = 1.0 if FAST_AT_ENERGY <= 0 else min(1.0, e / FAST_AT_ENERGY)
     form_s = wsk.DEFAULT_FORM_S + (0.5 - wsk.DEFAULT_FORM_S) * frac
     hold_s = min(max(max(0.0, float(phrase_ms or 0.0)) / 1000.0,
-                     wsk.DEFAULT_HOLD_S), 2.0)
+                     wsk.DEFAULT_HOLD_S), wsk.DEFAULT_HOLD_MAX_S)
     return (round(form_s, 4), round(hold_s, 4),
             round(wsk.release_s_for(form_s), 4))
 

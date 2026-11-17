@@ -145,7 +145,8 @@ const timeline = (over = {}) => ({
   animation_start_s: null, animation_end_s: null, duration_s: 6,
   animation_anchor_s: 2, trigger_mark_s: 2, lead_ms: 540, anchor_rule: 'switch_end',
   attached_classes: ['word'], fire_at_s: 1.46, effect_animation_ms: 3390,
-  word_shape: { shape: 'heart', form_s: 0.54, hold_s: 1.2, release_s: 0.81 },
+  word_shape: { shape: 'heart', form_s: 0.54, hold_s: 1.2, release_s: 0.81,
+                hold_max_s: 2 },
   writes: [], ...over,
 });
 const marks = preview.wordShapeMarks(timeline());
@@ -170,6 +171,22 @@ const zero = preview.wordShapeMarks(timeline({
 ok(zero.spans.length === 0, 'a zero envelope draws no spans rather than slivers');
 ok(preview.wordShapeSentence(marks, 'Heart').startsWith('The Heart forms over 540 ms'),
   'the sentence reads the envelope out loud');
+// ROW W4.1: a preview has no sung phrase, so the hold it shows is always the
+// room's shortest — said out loud, with both numbers off the server.
+ok(marks.hold_max_s === 2, "the room's longest hold is read off the timeline");
+ok(preview.wordShapeSentence(marks, 'Heart').includes(
+  "holds 1200 ms — the room's shortest hold; a sung phrase holds up to 2000 ms"),
+  'and names the hold as the shortest there is');
+const noMax = preview.wordShapeMarks(timeline({
+  word_shape: { shape: 'heart', form_s: 0.54, hold_s: 1.2, release_s: 0.81 } }));
+ok(noMax.hold_max_s === null
+   && !preview.wordShapeSentence(noMax, 'Heart').includes('shortest'),
+  'an older server that sent no maximum simply drops the clause');
+const sameMax = preview.wordShapeMarks(timeline({
+  word_shape: { shape: 'heart', form_s: 0.54, hold_s: 2, release_s: 0.81,
+                hold_max_s: 2 } }));
+ok(!preview.wordShapeSentence(sameMax, 'Heart').includes('shortest'),
+  'and so does a room whose shortest hold IS its longest');
 
 console.log('\nthe save\'s advisory notes');
 const warnings = [

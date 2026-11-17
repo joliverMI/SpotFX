@@ -67,6 +67,10 @@ export interface WordShapeMarks {
   hold_end_s: number;
   /** The shape is gone here. */
   end_s: number;
+  /** The room's LONGEST hold (`word_shape_hold_max_s`), straight off the
+   * server — null when it sent none. A preview's own `hold_s` is always the
+   * clamp's floor, because a preview has no sung phrase (row W4.1). */
+  hold_max_s: number | null;
   spans: WordShapeSpan[];
   /** The shortest ruler that shows the whole envelope with a little room
    * after it — the caller takes the larger of this and the server's own
@@ -102,21 +106,33 @@ export function wordShapeMarks(timeline: FlarePreviewTimeline | null): WordShape
   if (word_s > start_s) spans.push({ from_s: start_s, to_s: word_s, label: 'forms' });
   if (hold_s > 0) spans.push({ from_s: word_s, to_s: hold_end_s, label: 'holds' });
   if (release_s > 0) spans.push({ from_s: hold_end_s, to_s: end_s, label: 'releases' });
+  const hold_max_s = (typeof ws.hold_max_s === 'number' && ws.hold_max_s > 0)
+    ? ws.hold_max_s : null;
   return {
     shape: ws.shape,
     form_s, hold_s, release_s,
     start_s, word_s, hold_end_s, end_s,
+    hold_max_s,
     spans,
     needed_duration_s: end_s + TAIL_PAD_S,
   };
 }
 
 /** The sentence under the ruler. Reads the envelope out loud so the three
- * spans are explainable without hovering anything. */
+ * spans are explainable without hovering anything — and names the hold for
+ * what it is (row W4.1): a preview has no sung phrase behind it, so its hold
+ * is always the room's SHORTEST, where a real word holds up to the room's
+ * `word_shape_hold_max_s`. Both numbers come off the server's own timeline;
+ * nothing here is computed (PreviewRuler.tsx's rule). The clause is dropped
+ * when the server sent no maximum, or when the two are the same number —
+ * then the hold he is watching is every hold there is. */
 export function wordShapeSentence(marks: WordShapeMarks, shapeName?: string): string {
   const ms = (s: number) => `${Math.round(s * 1000)} ms`;
+  const shortest = marks.hold_max_s != null && marks.hold_max_s > marks.hold_s
+    ? ` — the room's shortest hold; a sung phrase holds up to ${ms(marks.hold_max_s)}`
+    : '';
   return `The ${shapeName || marks.shape} forms over ${ms(marks.form_s)} and stands `
-    + `complete ON the word, holds ${ms(marks.hold_s)}, then releases over `
+    + `complete ON the word, holds ${ms(marks.hold_s)}${shortest}, then releases over `
     + `${ms(marks.release_s)}.`;
 }
 

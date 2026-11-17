@@ -380,6 +380,15 @@ statement. Seven things not visible cold:
   reset and on `deactivate`), so the release morphs back into the NEW edge
   count. Applying it at the hold would be a step nobody sees followed by a
   second morph on the way out.
+- **THE SEQ IS STRICTLY INCREASING, NOT `+1`** (Word Shapes row W4.1,
+  2026-11-17). `_shape_seq` edge-detects the told SEQ as it always has, but
+  the counter is now one clock-seeded source for the whole SpotFX process
+  (`fx/effects/word_shape_keys.next_seq`) rather than a per-engine 1, 2, 3 —
+  which is what made every preview lap after the first write the same 1 and
+  draw nothing. So two words back to back give seqs that are strictly
+  greater, never consecutive: assert `seq2 > seq1`, never `seq1 + 1`, and
+  never assume a first write is 1 (a persisted 1 on a fresh instance is
+  exactly the creation baseline that must NOT fire).
 - **WHAT WRONG LOOKS LIKE.** A shape that spins is the governor not being
   reached (a phase armed, or `_shape_m` stuck at 0 because the SEQ never
   edged). A heart with bands sliding across it rather than out through it

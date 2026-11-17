@@ -77,6 +77,20 @@
  * hard-coded ids) and re-opens the timeline on a change, carrying the
  * choice into the live fire too so the room draws what the ruler draws.
  *
+ * A SHAPE ON EVERY LAP (row W4.1, 2026-11-17 — his own report: "the preview
+ * of the flare doesn't seem to work"). The loop below re-fires every lap and
+ * the room now draws the shape every lap: the SEQ a told write carries comes
+ * from one clock-seeded source for the whole process
+ * (fx/effects/word_shape_keys.next_seq), where it used to come from the
+ * server's per-/fire scratch engine and was therefore 1 on every lap — only
+ * the first lap of a session ever edged. Nothing changed here, and two facts
+ * about what he sees are worth keeping straight: on a scene that is NOT the
+ * one showing, lap 1's shape forms while the scene itself is still fading in
+ * over its own stored crossfade (the room is never moved on /open — the
+ * overlay opens dark by design), and every lap after it is clean; and the
+ * HOLD is always the room's shortest, because a preview has no sung phrase
+ * behind it (the sentence under the ruler says both numbers).
+ *
  * MAXIMUM HOLD CEILING (2026-08-21): the server also enforces an ABSOLUTE
  * cap on one continuous hold (spectra/services/flare_preview_hold.py,
  * MAX_HOLD_DURATION_S = 180s) that heartbeats/re-fires can never push
@@ -563,10 +577,12 @@ export default function FlarePreviewOverlay({ sceneId, kind, onClose, onTriggerO
                 {wordShapeSentence(marks, shapeName)} The forming time <strong>IS</strong> the
                 lead: the band fires {Math.round(marks.form_s * 1000)} ms early so the shape
                 stands complete on the word, and the live fire waits for the white playhead to
-                reach the left edge of “forms”, every loop. The red line is the word itself and
-                does not drag — a Words band fires on the word, so a per-kind trigger offset is
-                not applied there (save the scene and it says so). Only a sung word fires this
-                in your show; nothing here is a trigger.
+                reach the left edge of “forms”, every loop — and the room draws the shape on
+                every one of them. On a scene that isn’t the one showing, the first lap forms
+                while that scene is still fading in; every lap after it is clean. The red line
+                is the word itself and does not drag — a Words band fires on the word, so a
+                per-kind trigger offset is not applied there (save the scene and it says so).
+                Only a sung word fires this in your show; nothing here is a trigger.
               </div>
             )}
 
