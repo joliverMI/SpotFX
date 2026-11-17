@@ -919,9 +919,22 @@ def test_fish_is_wired_exactly_where_orbits_is():
     )
     assert "fish" in registry["effects"]
     assert "fish" in registry["morph"]["supported_effects"]
-    # every shared Orbits param survives with the same type and range
-    orb = registry["effects"]["orbits"]["params"]
-    fish = registry["effects"]["fish"]["params"]
+    # every shared Orbits param survives with the same type and range —
+    # EXCEPT each effect's OWN word-shape settings. The Fish was a wholesale
+    # copy of Orbits' registry, so this test mirrors one on the other; the
+    # Word Shapes plan (section 6) deliberately breaks that for the
+    # `word_shape_*` params, because every wave-1 effect registers the
+    # settings ITS OWN shape needs and nothing else: Orbits has a MANY-mode
+    # orbit shrink (`word_shape_wobble`) that means nothing on a fish, and
+    # the two disagree on `word_shape_few`'s maximum (Orbits 8, Fish 16 —
+    # its own `particle_count` ceiling) and `word_shape_size`'s minimum.
+    # What the effects DO share is the six told keys, and those are
+    # deliberately not registry params at all (fx/effects/
+    # word_shape_keys.py's rule 1), so nothing here can check them.
+    orb = {k: v for k, v in registry["effects"]["orbits"]["params"].items()
+           if not k.startswith("word_shape_")}
+    fish = {k: v for k, v in registry["effects"]["fish"]["params"].items()
+            if not k.startswith("word_shape_")}
     shared = set(orb) & set(fish)
     assert len(shared) == len(orb), (
         f"fish must carry every Orbits param: missing {set(orb) - set(fish)}"

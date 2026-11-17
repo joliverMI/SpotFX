@@ -729,7 +729,10 @@ Every REGISTERED fish param (`config/effect_params.json`) — the wall's
 `wall_lookahead`/`wall_turn_strength` (the glance's speed widening and its
 arc divisor) and the solo burst's three included —
 — and the lull search's `search_speed`/`search_pause_s`/`search_reach`
-and the scaled drop's `drop_scale_min` — and the big fish's
+and the scaled drop's `drop_scale_min` — and the word shape's
+`word_shape_size`/`word_shape_few` (but NOT its minimum form, which lives
+in `fx.device_model.WORD_SHAPE_FORM_MIN_S` and is deliberately not
+Sonic-tellable) — and the big fish's
 `big_fish_brightness`/`big_fish_size`/`big_fish_cross_slow_s`/
 `big_fish_cross_fast_s`/`big_fish_ripple`/`big_fish_ripple_size` and the
 avoidance's `big_fish_avoid`/`big_fish_avoid_margin` — and the wake's
@@ -802,6 +805,227 @@ the probe measures the lit-pixel blue against each mode's own curve.
   snapshot, `TAKE_REGISTRY = False`); Squiggles -> Fish is UNRAVEL; Sauron/Eye
   -> Fish is FLAME LICK onto `_formation_points()`.
 `fx/effects/transition_cloud.py`'s docstring is the binding statement for phase 4's programs; `tests/test_transition_programs_phase4.py` measures them on the real pipeline.
+
+## WORD SHAPES (2026-11-15, plan row W1.4) — a PROCESSION along the
+   outline; untold, nothing here exists
+
+His words for the row: *"Fish: similar to orbits ... they need to smoothly
+accelerate and not have sudden velocity shifts"*, and on the first design:
+*"the fish didn't seem to be sufficiently making the outline. We may need to
+boost the trail brightness and lower decay briefly to get it to show
+better. They also may need to more tightly flow."* P2 A, approved: with FEW
+fish the water keeps a trace of the loop while the fish swim it.
+
+A sung word that reaches a shape fires the showing scene's Words response;
+the `word_shape` kind writes `fx/effects/word_shape_keys.py`'s six told keys
+in ONE jump; the fish turn onto the outline nose to tail, circle it for the
+phrase and peel away. **Load `.claude/skills/word-shapes` first** — it is
+the binding statement for the library, the keys, the envelope and the engine
+contract. The module's own WORD SHAPES block is the binding statement for
+everything below; what is not visible cold:
+
+- **IT IS A BLEND ON THE REST GEOMETRY, NOT A MODE.** A shaped fish is an
+  ordinary swimmer (mode < 2) with the loop's steer summed into the same
+  desired-heading vector every other term lands in, bounded by the same
+  turn clamp — so the two fish laws still hold structurally. Every shape
+  block in `draw()` is gated on `_word_shape_step` returning non-None, so
+  **untold is byte-identical to the pinned pre-change module** over both
+  real-audio arcs (`scripts/check_fish_word_shape.py` §1).
+- **THE ENVELOPE IS THE SPEED, NEVER THE AIM.** `m`
+  (`word_shape_keys.envelope`) paces how hard the loop pulls and how fast a
+  fish runs; a fish heads for its entry from the FIRST frame of the form.
+  `word_shape_grip` is the loop's own authority — 1 from that frame, let go
+  over the first HALF of the release (`WS_RELEASE_GRIP`), so the fish return
+  to wandering with heading and speed intact while the trail is still
+  fading. A second word mid-shape restarts the form FROM the fraction
+  standing (`word_shape_restart_t`, the closed-form inverse smoothstep) and
+  a clearing write releases from it (`word_shape_release_t`) — never a snap.
+- **THE ENTRY RULE** (`word_shape_entries`): each fish's entry is the
+  outline point on its OWN bearing from the centre of view, so no two cross
+  on the way in; no two entries are within `WS_ENTRY_MIN_GAP / n` of the
+  loop; and over `WS_SPACE_EASE_S` they ease to EVEN spacing, each fish
+  keeping its order. The minimum gap is opened EXACTLY (pool-adjacent
+  violators, then a compression if the wrap is short) — **not by
+  relaxation**: a relaxation pass halves the deficit, so a clump of eight
+  fish on one bearing was still 0.3% short of the gap after twelve passes
+  and the proof went red. The bearing is read in the fish's own NORMALIZED
+  space, which is the shape's own space up to one scale per axis (`sx` and
+  `sy` both carry `radius_scale`), so the two angles are literally the same
+  angle and no panel geometry is involved.
+- **HOLDING STATION IS SPLIT IN TWO, and that split is the clarity bar.**
+  The lag between a fish and its own place on the loop has a COMMON-MODE
+  part (the line marched while the fish swam in; a fish's path round a
+  corner is longer than the arc) and a DIFFERENTIAL part (out of step with
+  its neighbours). The line's own PHASE follows the fish
+  (`WS_PHASE_GAIN` — the procession is where the fish are, which is also
+  what the water trace should be drawing) and each fish's SPEED fixes only
+  its spacing (`WS_SPACING_GAIN`). Correcting both with speed meant every
+  fish sprinting after an absolute phase it could never reach, since a fish
+  and its place move at the same pace — exactly the velocity shift his note
+  rules out.
+- **THE TARGET IS ANCHORED TO THE FISH, NOT TO ITS STATION** (`WS_REACH`).
+  The one thing that keeps a fish on a corner: anchored to the time-marched
+  station, a fish a tenth of the loop behind aimed at a point right across
+  the heart's cleft and swam the CHORD — measured 11 px (5.6 cell pitches)
+  inside the outline. Anchored a short arc ahead of its own place, the
+  chord is always a few px long and it follows the line round.
+- **THE TURN ARC TIGHTENS** (`WS_TURN_X`, scaled by `m`) — his "more tightly
+  flow", and **the only way the bar is reachable at all**: measured, the
+  outline turns 249 degrees (the heart's cleft), 154 (a star's notch) and
+  114 (the diamond's tip) inside ONE of his own turn radii
+  (`orbit_radius` 0.14 = 4.5 px), so a fish on its ordinary circle rounds
+  those 5 cell pitches wide of the line. The mechanism is the pre-drop's own
+  (`PRE_DROP_TURN`, `kst["turn"]` dividing `omega_max`): the clamp still
+  bounds every steering term, it is simply a tighter circle while a shape
+  runs, and at `m = 0` it is his circle to the bit. **A fish-motion bar
+  measured against "the ordinary turn clamp" has to read the clamp IN
+  FORCE** — `check_fish_word_shape.py` §3 prints both.
+- **A FEED-FORWARD OF THE LOOP'S OWN CURVATURE WAS BUILT AND IS NOT
+  SHIPPED.** Turning each fish at the outline's curvature times its speed
+  is the textbook fix for a proportional steer's lag, and it measured
+  WORSE (medians 1.3/1.8/1.0 → 4.3/3.2/1.1 cell pitches): the projection a
+  fish off the line reads is poor exactly where the curvature is largest,
+  and a cusp's curvature saturates the clamp into a spin. Do not re-add it
+  without re-running §4.
+- **HIS NOTE'S TWO NUMBERS.** The trail's half-life eases from
+  `trail_decay`'s own value up to its end of `WS_TRAIL_HALF_LIFE_S` — the
+  **(few 0.6 s, many 1.0 s) PAIR**, chosen by the latched mode — and its
+  deposit brightness up to `WS_TRAIL_GAIN` (1.6), both by `m`, both through
+  `_trail_half_life()` / `_trail_gain()`. **The pair, and why it is a pair
+  rather than one number, is the half-life table further down this
+  section**: the trade only exists with MANY fish, because with FEW the
+  water trace already carries the line. The boost goes in through
+  `_clip_body_layer`'s WHOLE-pixel ceiling — the scatter's own
+  hue-preserving one — so a brighter smear is never a whiter one. **It asks
+  for that by a FLAG, `_ws_gain_clip`, not an argument**: two check scripts
+  substitute or wrap that method by its one-positional-argument signature
+  (`check_fish_big_fish_avoid.py`'s `_Bodies` spy,
+  `check_fish_disperse.py`'s per-channel control) and a new keyword broke
+  both — `tests/test_fish_tail_drive.py` is what caught it. **`trail_decay`
+  and `ripple_life` are NEVER written**: the scaling is the quantity they
+  drive, so the release's end restores his values exactly and no new param
+  exists. Re-measure sections 4 AND 5 together before moving either end of
+  the pair — they pull against each other, and the first answer here was
+  wrong because it was read off a metric that saturates (see the table).
+- **THE WATER TRACE (P2 A) IS FEW-FISH ONLY.** With `n <= word_shape_few`
+  the wake takes one deposit per fish per frame at the loop point its own
+  place has reached (the loop, not the fish, so the line glows while a fish
+  is still swimming onto it) and `ripple_life` eases up to
+  `WS_RIPPLE_LIFE_S`. Scoped to few deliberately: with many, the bodies and
+  trails already light the outline and a longer-lived busy wake is where
+  white comes from (the WAKE COLOUR block). The mode is LATCHED at the edge,
+  so a population change mid-shape cannot switch it.
+- **THE PAUSES.** The wall's authority, the big fish, a swim burst and the
+  pond rest are held while a shape runs and resume after; one already in
+  flight finishes. The wall is faded by `m` exactly the way a big fish's
+  threat already relaxes it — **except where it is late turning a fish back
+  from a wall it is heading into**: "the pond gives way, the wall does not"
+  (the BIG_AVOID block) is what keeps a fish on the panel and a shape is not
+  allowed to spend it. The lunge, the solo burst and every speed moment need
+  no gate of their own: they multiply the ORDINARY target, which the blend
+  fades out. The tail drive hands over per fish through an ARRAY weight —
+  the only thing that makes `_tail_drive_step`/`_tail_drive_flap` take a
+  non-scalar `weight`, and an untold frame never reaches it.
+- **WHAT WRONG LOOKS LIKE.** P3 A means a shape is never TOLD while a
+  charge, lull or drop is armed, but one can ARRIVE mid-shape. Then the
+  phase wins: a formed school, a rush, ejecta, keepers and dispersing fish
+  are not on the loop at all, so the procession empties while the told clock
+  keeps running, and the trail and wake still restore at the release's end.
+  On the panel that reads as the shape dissolving into the charge's school,
+  which is the right answer — his authored moment is the bigger one.
+- **CREATION BASELINE** (`_ws_seen`): a fresh instance built from a
+  persisted config carrying a stale SEQ must NOT fire — the fireworks
+  `burst_rockets` rule. `prime()` is deliberately NOT called: this effect
+  reads only `at()`, and `prime()` would build the ~200 ms `sdf_fast` grid
+  it never looks at.
+- **THE SETTINGS**: `word_shape_size` (0.62) and `word_shape_few` (3) are
+  registered (help topic `word-shapes`), so Sonic reaches them per scene
+  entry for free. The MINIMUM FORM is **not** a param:
+  `fx.device_model.WORD_SHAPE_FORM_MIN_S["fish"] = 2.0`, because SpotFX's
+  planner needs it before it has asked any effect anything (it decides the
+  lead) — `docs/SPECTRA_TIMING_CONVENTIONS.md` carries the row.
+
+**THE CLARITY BARS, measured** (`scripts/check_fish_word_shape.py`, his
+real mask at SIZE 0.62, 20 seeds per row for the distances and 8 for the
+white, his live music Fish with the tail drive and the pond rest on).
+
+**"IS THE OUTLINE LIT" HAS TO MEAN CONTRAST HERE, and this row shipped a
+vacuous metric once.** The first check counted a band cell lit at ANY value
+above zero — and the fish's own wake already lights 74-98% of that band on
+the SAME FRAME UNTOLD, so "100% lit" said nothing at all. The squadron
+leader caught it (PR 532 review). It is now the share of the band ABOVE A
+LIGHT THRESHOLD (64 and 128 of 255) plus the band-to-rest luminance ratio,
+each read beside the same seed's frame UNTOLD — `band_contrast`. Anything
+measured on an "above zero" share of this effect is worthless; the wake
+washes everything.
+
+| mode | shape | word | mid-hold | band>64 told/untold | band>128 | band/rest |
+|---|---|---|---|---|---|---|
+| few | heart | 0.7 | 0.9 | 100 / 14% | 87 / 7% | 4.3 / 1.7x |
+| few | star | 1.1 | 1.0 | 99 / 11% | 85 / 6% | 4.2 / 1.4x |
+| few | diamond | 0.4 | 0.2 | 100 / 8% | 97 / 4% | 6.4 / 1.2x |
+| many | heart | 1.1 | 1.4 | 93 / 25% | 79 / 12% | 4.6 / 1.8x |
+| many | star | 1.4 | 1.8 | 91 / 18% | 67 / 7% | 3.4 / 1.2x |
+| many | diamond | 0.5 | 0.3 | 98 / 19% | 86 / 7% | 6.6 / 1.4x |
+
+Distances in CELL PITCHES, medians of 20 seeds; the share of fish-instants
+beyond the 2-pitch bar is 0-10.3%. The bars are 60% (few) / 70% (many) of
+the band above 64, a ratio of at least 2.5x, and at least 1.4x the untold
+ratio on the same seed.
+
+**THERE IS NO ENERGY AXIS**, and claiming one double-counted: this effect
+never reads `word_shape_level`, so every figure came out identical at
+Energy 0.2 and 0.8. On HIS scene (copied from Orbits V2) Energy drives
+`particle_count`, so FEW and MANY *are* the Energy axis.
+
+**THE HALF-LIFE IS A (FEW, MANY) PAIR** because the trade only exists with
+many fish — re-measured on the contrast metric, since the first answer here
+was read off the saturated one:
+
+| mode shape | half-life 0.6 / 1.0 / 1.35 s | band>128 | white (today's worst) |
+|---|---|---|---|
+| many heart | | 61.3 / 71.4 / 78.0% | 18.7 / 21.3 / 22.7% (28.3%) |
+| many star | | 51.4 / 68.2 / 72.7% | 23.6 / 26.8 / 28.28% (28.3%) |
+| few heart | | 82.4 / 82.4 / 83.6% | flat |
+| few star | | 75.0 / 77.6 / 78.4% | flat |
+
+So MANY takes 1.0 s — 10 to 17 points of real light for 2.6 to 3.2 of
+white, with 1.5 points of headroom; 1.35 s leaves 0.02 points and drops the
+ratio to 2.7x. FEW is FLAT at all three (the water trace already carries
+it) and stays at 0.6 s.
+
+**TWO STATISTICS, AND WHICH BAR IS HELD ON WHICH.** The word bar (4 cells)
+is held on the WORST fish of 20 seeds; the mid-hold bar (2 cells) on the
+MEDIAN, because that is what the plan's own one-number-per-row figures are.
+The worst instant and the share of fish-instants beyond 2 pitches are
+printed beside it, and the worst is pinned (`HOLD_DIST_MAX_SEEN`).
+**MANY-STAR IS MARGINAL**: its median is 1.8-2.4 depending on the seed
+count, and a star's notch bound on the shaped circle is 2.0-3.4 pitches, so
+many fish at a notch cannot meet 2 cells by geometry. Both distance bars
+are read off the fish the TURN-CIRCLE LAW allows on the line (the plan's
+own parenthetical), with the threshold and the window derived from the law.
+
+**THE WHITE TAIL IS AN OPEN EXCEEDANCE, not a pass.** Across 8 seeds the
+shaped worst is 23.9-33.8% against this effect's own worst busy frame today
+(few 26.0%, many 24.5%), so five of six rows exceed the plan's bar in the
+TAIL; the medians are 12-26%. A shape packs the shoal onto one small loop
+and each fish carries its own place in the gradient, so overlapping bodies
+sum two hues — the same arithmetic as his 2026-10-26 report, which option A
+fixed for the WAKE only. Attributed: his x1.6 trail boost costs 0.5-2
+points and buys 14 points of band light, so it stays; the FEW water trace
+owns the rest of the FEW tail and is also the whole reason FEW reads (-8
+points of white, -45 of band if removed), and **its amplitude is
+NON-MONOTONIC** — dimming it can RAISE white, because a dimmer single-hue
+trace stops winning `lighten`'s max over the whiter body sum. The root fix
+is to narrow the gradient span a procession draws from (his own option-A
+vocabulary, one colour for one drawn shape), which is a change to his
+authored colour behaviour and so his call. The script pins the measured
+worst and median and prints the bar's status per row.
+
+**Proofs**: `scripts/check_fish_word_shape.py` (eight sections, the whole
+acceptance list) and `tests/test_fish_word_shape.py` (the contract, the
+floor through the real engine, the envelope's inverses, the entry rule, and
+one real effect for the baseline / restore / pauses).
 
 ## THE HOST FRAME: `om` published, born matched (2026-10-17)
 

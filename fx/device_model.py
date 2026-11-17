@@ -505,8 +505,11 @@ SAURON_SURGE_EFFECTS = frozenset({"sauron"})
 # shaped horizon, STAR's shaped radius, Orbits' tethers, Fish's procession,
 # Sauron's shaped iris and pupil, Fireworks' shaped burst) one row at a
 # time, each behind the Admiral's own tuning gate (docs/ADDING_EFFECTS.md),
-# and each adding its own name here and nowhere else. To join, follow
-# fx/effects/word_shape_keys.py's own "HOW AN EFFECT OPTS IN".
+# and each adding its own name here and nowhere else. A scene with a Words
+# band and a Word Shape kind writes to no fixture but these. To join,
+# follow fx/effects/word_shape_keys.py's own "HOW AN EFFECT OPTS IN";
+# tests/test_word_shape_contract.py's `WIRED` tuple is the proof that has
+# to be edited in the same change.
 WORD_SHAPE_EFFECTS: frozenset = frozenset({
     # W1.6 — STAR: the shape joins the radial's own angle divisor and the
     # rotation governor eases the spin to a stop, so the shape stands
@@ -533,6 +536,11 @@ WORD_SHAPE_EFFECTS: frozenset = frozenset({
     # `blackhole1d` is deliberately NOT here and never will be: it is a
     # STRIP, and a shape has no meaning on one line of pixels.
     "blackhole",
+    # W1.4 — FISH: the fish swim onto the outline nose to tail, circle it
+    # for the phrase and peel away, with the water keeping a trace of the
+    # loop behind them when there are few (fx/effects/fish.py's WORD SHAPES
+    # block). The first effect to declare a minimum form, below.
+    "fish",
 })
 
 # THE PER-EFFECT MINIMUM FORM (plan section 2.4): an effect whose shape
@@ -541,8 +549,21 @@ WORD_SHAPE_EFFECTS: frozenset = frozenset({
 # floor here, in seconds, keyed by registry name. The planner's timing takes
 # the LARGER of the Energy-paced form and this (room_controls.
 # word_shape_timing), so the band fires early enough for whatever is
-# showing. EMPTY now; Fish's own wave-1 row fills it.
-WORD_SHAPE_FORM_MIN_S: dict[str, float] = {}
+# showing.
+#
+# THE MINIMUM LIVES HERE, NOT AS A REGISTERED PARAM, on purpose: it is a
+# fact SpotFX's planner needs BEFORE it has asked any effect anything (it
+# decides the lead), and a Sonic-tellable number would let the room be
+# retuned into a shape that cannot assemble. fx/effects/word_shape_keys.py's
+# "HOW AN EFFECT OPTS IN" says the same.
+WORD_SHAPE_FORM_MIN_S: dict[str, float] = {
+    # FISH (plan row W1.4): a procession has to SWIM onto the outline — the
+    # fish are steered, never placed, under their own turn clamp and speed
+    # ease, so a 0.5-0.9 s Energy-paced form would land the word with the
+    # shoal still crossing the pond. 2.0 s is what the measured approach
+    # needs (scripts/check_fish_word_shape.py section 4).
+    "fish": 2.0,
+}
 
 
 def word_shape_form_min_s(effect_types=None) -> float:
@@ -570,8 +591,7 @@ def word_shape_form_min_s(effect_types=None) -> float:
       * NO EFFECT TYPES AT ALL — a bare TriggerEngine with no room wired (a
         spec, or the Test Bed on a host with no conductor) — falls back to
         the global maximum, the only safe answer when the room is unknown.
-    0.0 with nothing declared (this row) — the Energy-paced form stands
-    alone, and the whole mechanism is inert."""
+    0.0 with nothing declared — the Energy-paced form stands alone."""
     if not WORD_SHAPE_FORM_MIN_S:
         return 0.0
     if effect_types is None:

@@ -33,7 +33,7 @@ sung word and that write:
      marks, Sonic's reach, and a `responses["word"]` round-trip.
 
 THE ROW'S OWN GATE, proven here and in tests/test_lyric_events.py's
-switch-off proof: `WORD_SHAPE_EFFECTS` held exactly the effects WAVE 1 has
+switch-off proof: `WORD_SHAPE_EFFECTS` holds exactly the effects WAVE 1 has
 wired and nothing else — EMPTY on W0.3, and from W1.6 onward the `WIRED`
 tuple below, which each wave-1 row appends its own registry name to as it
 lands. A scene with a Words band therefore writes to no fixture but those,
@@ -41,6 +41,13 @@ and the one proof that has to be edited to change that is this one. Every
 test below that watches a real write monkeypatches the set to its own test
 effect, which is also how anyone reading this can see at a glance which
 effects a Words band can move.
+
+THE PER-EFFECT MINIMUM FORM IS LIVE TOO, since W1.4: the Fish declares
+2.0 s (`fx.device_model.WORD_SHAPE_FORM_MIN_S`), so a call to
+`word_shape_timing` that names NO effects now answers with that floor — the
+no-room fallback, deliberately — and every test here about the Energy-paced
+form names the showing scene's own effects, exactly as every production
+caller does.
 """
 from __future__ import annotations
 
@@ -101,9 +108,13 @@ def _plan(hits, events=(), **tuning):
                          shape_timing=_room_timing())
 
 
-def _room_timing(state: RoomControlState | None = None):
+def _room_timing(state: RoomControlState | None = None, effects=(EFFECT,)):
+    """The showing scene's own timing, the way `engine.lyric_shape_timing`
+    binds it to `conductor.virtuals` — named effects, never the global
+    maximum."""
     st = state or RoomControlState()
-    return lambda energy, phrase_ms: word_shape_timing(energy, phrase_ms, st)
+    return lambda energy, phrase_ms: word_shape_timing(
+        energy, phrase_ms, st, list(effects))
 
 
 def _only(actions):
@@ -165,12 +176,15 @@ def _words_scene(name="Shape Scene", *, kinds=None, lanes=None,
 #   W1.2 — Fireworks, fx/effects/fireworks.py (the shaped payoff burst)
 #   W1.3 — ORBITS, fx/effects/orbits.py (few trace it, many become it)
 #   W1.1 — Black Hole, fx/effects/blackhole.py (the shaped event horizon)
+#   W1.4 — FISH, fx/effects/fish.py (the procession along the outline; also
+#          the first effect to declare a minimum form, 2.0 s)
 WIRED = (
     "radial",
     "sauron",
     "fireworks",
     "orbits",
     "blackhole",
+    "fish",
 )
 
 
@@ -514,12 +528,17 @@ def test_the_test_bed_sentence_and_payload_carry_the_shape():
 
 
 def test_the_form_paces_with_energy_between_his_two_numbers():
+    """Every call here names the SHOWING scene's effects, which is what
+    every production caller does — a bare call asks for the global maximum
+    of every declared minimum (the Fish's 2.0 s since W1.4), which is the
+    no-room fallback and not the Energy pacing this test is about."""
     st = RoomControlState()
+    showing = [EFFECT]
     assert st.word_shape_form_slow_s == 0.9 and st.word_shape_form_fast_s == 0.5
-    assert word_shape_timing(0.0, 1000, st)[0] == 0.9
-    assert word_shape_timing(le.FAST_AT_ENERGY, 1000, st)[0] == 0.5
-    assert word_shape_timing(1.0, 1000, st)[0] == 0.5, "0.75 and ABOVE"
-    half = word_shape_timing(le.FAST_AT_ENERGY / 2, 1000, st)[0]
+    assert word_shape_timing(0.0, 1000, st, showing)[0] == 0.9
+    assert word_shape_timing(le.FAST_AT_ENERGY, 1000, st, showing)[0] == 0.5
+    assert word_shape_timing(1.0, 1000, st, showing)[0] == 0.5, "0.75 and ABOVE"
+    half = word_shape_timing(le.FAST_AT_ENERGY / 2, 1000, st, showing)[0]
     assert half == pytest.approx(0.7, abs=1e-3), "linear between"
 
 
@@ -538,25 +557,33 @@ def test_every_timing_is_his_to_tune():
     st = RoomControlState(word_shape_form_slow_s=2.0, word_shape_form_fast_s=1.0,
                           word_shape_hold_min_s=0.1, word_shape_hold_max_s=0.2,
                           word_shape_release_ratio=0.5)
-    assert word_shape_timing(0.0, 1000, st) == (2.0, 0.2, 1.0)
-    assert word_shape_timing(1.0, 50, st) == (1.0, 0.1, 0.5)
+    showing = [EFFECT]
+    assert word_shape_timing(0.0, 1000, st, showing) == (2.0, 0.2, 1.0)
+    assert word_shape_timing(1.0, 50, st, showing) == (1.0, 0.1, 0.5)
 
 
-def test_a_per_effect_minimum_form_floors_the_lead(monkeypatch):
-    """Plan section 2.4 (Fish 2.0 s). Empty in this row; the accessor is
-    what a wave-1 row fills, and the floor applies to the LEAD, never
-    shortens it."""
-    assert device_model.WORD_SHAPE_FORM_MIN_S == {}
-    assert device_model.word_shape_form_min_s() == 0.0
-    monkeypatch.setattr(device_model, "WORD_SHAPE_FORM_MIN_S", {"fish": 2.0})
-    # PLAN TIME: no idea which scene will show, so the global maximum.
+def test_a_per_effect_minimum_form_floors_the_lead():
+    """Plan section 2.4. THE FISH'S 2.0 s IS LIVE (row W1.4): a procession
+    has to swim onto the outline, so the floor is declared in
+    `fx.device_model.WORD_SHAPE_FORM_MIN_S` — never as a registered param
+    (fx/effects/word_shape_keys.py's own "HOW AN EFFECT OPTS IN"). The
+    floor applies to the LEAD and never shortens it."""
+    assert device_model.WORD_SHAPE_FORM_MIN_S == {"fish": 2.0}
+    assert device_model.word_shape_form_min_s(["fish"]) == 2.0
+    # PLAN TIME with no room wired: no idea which scene will show, so the
+    # global maximum — the only safe answer there.
     assert device_model.word_shape_form_min_s() == 2.0
-    # FIRE TIME: exactly the showing effects.
+    # FIRE TIME: exactly the showing effects, so a scene with no Fish in it
+    # keeps the approved Energy-paced 0.5-0.9 s form.
     assert device_model.word_shape_form_min_s(["orbits"]) == 0.0
     assert device_model.word_shape_form_min_s(["orbits", "fish"]) == 2.0
     st = RoomControlState()
     assert word_shape_timing(1.0, 1000, st)[0] == 2.0, "the floor wins"
+    assert word_shape_timing(1.0, 1000, st, ["fish"])[0] == 2.0
     assert word_shape_timing(1.0, 1000, st, ["orbits"])[0] == 0.5
+    # a quiet word would be paced at 0.9 s; Fish still gets 2.0
+    assert word_shape_timing(0.0, 1000, st, ["orbits"])[0] == 0.9
+    assert word_shape_timing(0.0, 1000, st, ["fish"])[0] == 2.0
 
 
 def test_the_planned_lead_asks_the_SHOWING_scenes_effects(monkeypatch):
@@ -636,6 +663,13 @@ class _Plan:
 
 
 def _clock_engine(rec, hits, *, triggers=(), mode="full"):
+    """A real TriggerEngine over a position feed. `lyric_shape_timing` is
+    wired to THIS TEST'S showing effect, exactly as the live engine wires
+    `engine.lyric_shape_timing` to the showing scene's own effects: left
+    unwired, the engine's own `_room_shape_timing` fallback asks for the
+    global maximum of every declared per-effect minimum (the Fish's 2.0 s
+    since W1.4), which is the no-room answer and not what a clock test of
+    the Energy-paced form is about."""
     from spectra.services.trigger_engine import TriggerEngine
     words = le.SongWords(URI, "ok", hits=tuple(hits))
     return TriggerEngine(
@@ -648,7 +682,8 @@ def _clock_engine(rec, hits, *, triggers=(), mode="full"):
         transition_intensity=lambda: 0.5,
         lyric_enabled=lambda uri: True, lyric_settings=lambda: TUNING,
         lyric_words=lambda uri: words, lyric_colour=rec.lyric_colour,
-        lyric_shape=rec.lyric_shape)
+        lyric_shape=rec.lyric_shape,
+        lyric_shape_timing=_room_timing())
 
 
 def _sweep(engine, rec, stop=20_000, step=200):
@@ -669,7 +704,7 @@ def test_a_shape_fires_its_form_early_and_lands_on_the_word(energy):
     word by construction."""
     rec = Rec()
     hit = _hit(10_000, energy=energy, end_ms=10_900)
-    form_s = word_shape_timing(energy, 900, RoomControlState())[0]
+    form_s = word_shape_timing(energy, 900, RoomControlState(), [EFFECT])[0]
     _sweep(_clock_engine(rec, [hit]), rec)
     assert len(rec.shapes) == 1 and rec.words == []
     _phrase, shape, ramp_ms, pos, planned_form, hold_s, release_s, told_e = rec.shapes[0]
@@ -678,8 +713,8 @@ def test_a_shape_fires_its_form_early_and_lands_on_the_word(energy):
     assert fire_at <= pos < fire_at + 200, "fired its form early"
     assert pos + ramp_ms == 10_000, "the ramp is what is left of the form"
     assert planned_form == form_s
-    assert (hold_s, release_s) == word_shape_timing(energy, 900,
-                                                    RoomControlState())[1:]
+    assert (hold_s, release_s) == word_shape_timing(
+        energy, 900, RoomControlState(), [EFFECT])[1:]
     assert told_e == energy
 
 
@@ -1138,7 +1173,8 @@ def test_the_preview_ruler_puts_the_trigger_where_the_shape_completes():
     kind = scene.flare_kinds[0]
     timeline = _run(flare_preview.build_timeline(scene, kind, 0.8))
     assert timeline["kind_type"] == "word_shape"
-    form_s, hold_s, release_s = word_shape_timing(0.8, 0.0, RoomControlState())
+    form_s, hold_s, release_s = word_shape_timing(
+        0.8, 0.0, RoomControlState(), [EFFECT])
     assert timeline["lead_ms"] == round(form_s * 1000), "the form IS the lead"
     assert timeline["word_shape"] == {
         "shape": "heart", "form_s": form_s, "hold_s": hold_s,

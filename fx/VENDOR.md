@@ -3034,3 +3034,79 @@ against that commit.
     `scripts/check_blackhole_word_shape.py`;
     `.claude/skills/blackhole-effect/SKILL.md`'s "WORD SHAPES" section is
     the binding record of the measurements and the precedence table.
+
+99. `effects/fish.py` (SpotFX-authored, #21, on top of #39/#40/#55/#65/#83/
+    #84/#85) + `effects/word_shapes.py` / `word_shape_keys.py` (#95's, Word
+    Shapes rows W0.1/W0.3): WORD SHAPES ON THE FISH (row W1.4, 2026-11-15;
+    the Admiral: "Fish: similar to orbits", "they need to smoothly
+    accelerate and not have sudden velocity shifts", and on the first
+    design "the fish didn't seem to be sufficiently making the outline. We
+    may need to boost the trail brightness and lower decay briefly to get
+    it to show better. They also may need to more tightly flow"; P2 A
+    approved: with FEW fish the water keeps a trace of the loop while the
+    fish swim it). A sung word's shape becomes a PROCESSION along the
+    outline: the fish turn onto it nose to tail, circle it for the phrase
+    and peel away.
+    It is a BLEND ON THE REST GEOMETRY, never a new mode — a shaped fish is
+    an ordinary swimmer (mode < 2) with the loop's own steer (`WS_SEEK_W`)
+    summed into the same desired-heading vector every other term lands in
+    and bounded by the same turn clamp, so the two fish laws (#21's: no
+    fish reverses on the spot, every about-face is an arc) still hold
+    structurally. `_word_shape_step` is the whole per-frame state and every
+    shape block in `draw()` is gated on it returning non-None.
+    `word_shape_keys.envelope` paces the SPEED (`m`); `word_shape_grip` is
+    the loop's own authority, full from the FIRST frame of the form and let
+    go over the first half of the release (`WS_RELEASE_GRIP`), so the fish
+    return to wandering with heading and speed intact. `word_shape_restart_t`
+    / `word_shape_release_t` are closed-form inverses of that smoothstep,
+    so a second word mid-shape restarts the form FROM the fraction standing
+    and a clearing write releases from it.
+    `word_shape_entries` hands each fish the outline point on its OWN
+    bearing from the centre of view (so no two cross on the way in), opens
+    a minimum gap of `WS_ENTRY_MIN_GAP / n` EXACTLY (pool-adjacent
+    violators then a compression — relaxation passes halve the deficit and
+    left a clump of eight 0.3% short), and eases the entries to even
+    spacing over `WS_SPACE_EASE_S`. Holding station is SPLIT: the line's
+    own phase follows the fish (`WS_PHASE_GAIN`) and each fish's speed
+    fixes only its spacing (`WS_SPACING_GAIN`), because a fish and its
+    place move at the same pace and correcting both with speed meant every
+    fish sprinting after an absolute phase it could never reach. The target
+    is anchored a short arc ahead of the fish's OWN place (`WS_REACH`):
+    anchored to the marched station instead, a fish a tenth of the loop
+    behind aimed right across the heart's cleft and swam the CHORD, 11 px
+    inside the outline. On the approach it may run `dist / time_left` to
+    `WS_DASH_X` (2.5) x cruise, eased to the procession's pace over the
+    form's last stretch.
+    `WS_TURN_X` tightens the turn ARC by `m` the way the pre-drop (#86, the
+    PRE_DROP block) tightens the lull keepers' circle — the clamp still
+    bounds every steering term, it is just a tighter circle while a shape
+    runs — because every shape in the library turns 114-249 degrees inside
+    ONE of his own turn radii. His two trail numbers are
+    `_trail_half_life()` (up to `WS_TRAIL_HALF_LIFE_S`, the (FEW 0.6 s,
+    MANY 1.0 s) pair — the trade only exists with many fish, since with few
+    the water trace already carries the line, and it was measured on the
+    band's share above 128/255 because an "above zero" share saturates on
+    this effect) and `_trail_gain()`
+    (up to `WS_TRAIL_GAIN`, through `_clip_body_layer`'s hue-preserving
+    whole-pixel ceiling — asked for by a FLAG, `_ws_gain_clip`, because two
+    check scripts wrap that method by its one-argument signature — so a
+    brighter smear is never a whiter one);
+    `trail_decay` and `ripple_life` themselves are NEVER written. With
+    `n <= word_shape_few` the wake takes one deposit per fish per frame at
+    the loop point its own place has reached and `_wake_half_life()` eases
+    `ripple_life` up to `WS_RIPPLE_LIFE_S` (P2 A's water trace). The wall's
+    authority, the big fish, a swim burst and the pond rest are HELD while
+    a shape runs and resume after, one in flight finishing; the wall keeps
+    any fish it is late turning back from a wall it is heading into (#55's
+    "the pond gives way, the wall does not"). `_tail_drive_step` /
+    `_tail_drive_flap` learn to take an ARRAY `weight` so the tail hands
+    over per fish; `_glance_radius` reads an optional `(look-ahead, arc)`
+    pair. `fx.device_model.WORD_SHAPE_EFFECTS` gains `fish`, and
+    `WORD_SHAPE_FORM_MIN_S` gains its first entry, `fish: 2.0` — a
+    procession has to SWIM there.
+    Untold (no keys, a cleared write, an older SpotFX, a LedFX UI scrub)
+    every line returns before touching state and the effect renders byte
+    for byte what it rendered before — proven against the PINNED module
+    hosted beside today's over both of his real-audio arcs, kinematics and
+    pixels. No vendored line changed. Evidence:
+    `scripts/check_fish_word_shape.py`, `tests/test_fish_word_shape.py`.

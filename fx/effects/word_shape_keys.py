@@ -62,11 +62,16 @@ the known ids: a rejected key drops the WHOLE write (`pre_drop.py`'s own
 reason for not adding a `phase` value), so an id from a newer SpotFX must
 fall through to "not told" rather than take the rest of the write with it.
 
-HOW AN EFFECT OPTS IN (wave 1, not this row — nothing is wired yet):
+HOW AN EFFECT OPTS IN (`fish` is the first, plan row W1.4):
   1. the schema fields and ADVANCED_KEYS (rule 1);
   2. its registry name in `fx.device_model.WORD_SHAPE_EFFECTS`;
-  3. its own `word_shape_size` (and `word_shape_few`, `word_shape_form_min_s`
-     where the plan gives it one) as registered params;
+  3. its own `word_shape_size` (and `word_shape_few` where the plan gives it
+     one) as REGISTERED params in config/effect_params.json — but NOT its
+     minimum form: that lives in `fx.device_model.WORD_SHAPE_FORM_MIN_S`,
+     keyed by registry name, because SpotFX's planner needs it before it
+     has asked any effect anything (it is what decides the lead) and
+     because a Sonic-tellable number would let the room be retuned into a
+     shape that cannot assemble in time;
   4. read `told(self._config)` each frame, `envelope(...)` for where the
      shape is, and `fx.effects.word_shapes.get(told.shape)` for the
      geometry.

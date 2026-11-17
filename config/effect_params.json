@@ -3392,6 +3392,28 @@
           "note": "How much of the Shockwave a quiet drop gets (intensity 0), as a fraction of the full one at the automatic ceiling.",
           "help_topic": "drop-shockwave",
           "default": 0.55
+        },
+        "word_shape_size": {
+          "label": "Word Shape Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "Word shapes: how big the loop the fish swim is, as a fraction of the panel's half-height. The shape comes out about 14% wider than tall, which is the panel's own aspect.",
+          "help_topic": "word-shapes",
+          "default": 0.62
+        },
+        "word_shape_few": {
+          "label": "Word Shape Few Fish",
+          "type": "integer",
+          "smooth": false,
+          "min": 1,
+          "max": 16,
+          "aspect": "shape",
+          "note": "Word shapes: this many fish or fewer counts as FEW, and then the water keeps a trace of the loop behind them in the set's colour, so the whole outline shows with only two or three.",
+          "help_topic": "word-shapes",
+          "default": 3
         }
       },
       "defaults": {
@@ -3477,7 +3499,9 @@
         "drop_debris_speed": 0.85,
         "drop_afterglow_beats": 1.5,
         "drop_reveal": 0.75,
-        "drop_shock_scale_min": 0.55
+        "drop_shock_scale_min": 0.55,
+        "word_shape_size": 0.62,
+        "word_shape_few": 3
       }
     },
     "gifplayer": {

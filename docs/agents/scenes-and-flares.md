@@ -337,11 +337,27 @@ shape NEVER imprints on an event, and nothing imprints on a shape.
 **WHICH FIXTURES IT REACHES** is `fx.device_model.WORD_SHAPE_EFFECTS` —
 wave 1 adds one effect per row, each behind the Admiral's own tuning gate
 (`docs/ADDING_EFFECTS.md`), and the told write lands on those virtuals and
-no others — STAR since row W1.6 (`.claude/skills/radial-effect`) and
-Sauron since row W1.5 (its iris's edge and its slit pupil both bend into
-the shape; `.claude/skills/sauron-effect`).
+no others — STAR since row W1.6 (`.claude/skills/radial-effect`), Sauron
+since row W1.5 (its iris's edge and its slit pupil both bend into the
+shape; `.claude/skills/sauron-effect`), Fireworks since row W1.2 (the
+shaped payoff burst; `.claude/skills/fireworks-effect`), Orbits since row
+W1.3 (few trace it, many become it; `.claude/skills/orbits-effect`), the
+Black Hole since row W1.1 (its event horizon takes the shape;
+`.claude/skills/blackhole-effect`) and the FISH since row W1.4 (the fish swim onto the outline nose to tail and circle it, the
+water keeping a trace of the loop behind them when there are few;
+`.claude/skills/fish-effect`). `tests/test_word_shape_contract.py`'s own
+`WIRED` tuple is the one place that list is pinned.
+
+**THE FISH IS THE ONLY EFFECT WITH A MINIMUM FORM**
+(`fx.device_model.WORD_SHAPE_FORM_MIN_S["fish"] = 2.0`, since a procession
+has to SWIM onto the outline), which is exactly why both floors ask the
+SHOWING scene's own effects rather than the whole library's maximum: a
+Black Hole or STAR scene keeps the approved Energy-paced 0.5-0.9 s form
+even while a Fish scene asks for 2.0 s.
 Proofs: `tests/test_word_shape_contract.py`
-(the whole contract) and `tests/test_lyric_events.py` (the boundary: a shape
+(the whole contract), `tests/test_fish_word_shape.py` +
+`scripts/check_fish_word_shape.py` (the Fish's own clarity bars) and
+`tests/test_lyric_events.py` (the boundary: a shape
 word adds exactly one output to the engine and changes nothing else).
 
 ## A scene's stored data is not proof he authored it
