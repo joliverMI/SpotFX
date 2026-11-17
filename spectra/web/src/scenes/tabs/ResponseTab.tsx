@@ -394,6 +394,11 @@ export default function ResponseTab({ scene, setScene, classes, helpTopic, warni
           What each effect actually looks like on charge/lull/drop <HelpLink topic="response-families" />
         </div>
       )}
+      {classes.includes('word') && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+          What each scene actually looks like drawing a shape <HelpLink topic="word-shapes-looks" />
+        </div>
+      )}
 
       {classes.map((cls) => {
         const spec = scene.responses[cls];
