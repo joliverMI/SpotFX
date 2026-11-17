@@ -50,6 +50,50 @@ quoted only where they are the ruling.
     A narrow row of hand-picked options can't surprise him the way the
     full range can — his "0.5 is flat" assumption on STAR's `edges` only
     broke once he saw the whole -0.7..+0.7 range rendered.
+14. **An approved mechanism and a legible render are two separate things
+    to verify.** "He approved it" and "it reads clearly on the rendered
+    tile" are not the same claim — shape-flares-lead's Fish correction
+    arrived INSIDE a blanket approval message naming one tile by name, and
+    his 2026-11-17 room verdict showed it is worse than that: three of six
+    word-shape mechanisms (Fireworks, Orbits, Fish) were approved on the
+    explainer, built to their stated clarity bars, reviewed green, and
+    still read "not clear enough" live. Re-read an "I approve" message for
+    a per-tile correction before treating it as unconditional sign-off, and
+    never let a green bar at build time stand in for his eye in the room.
+15. **An honestly unreachable clarity bar still gets reported, with its
+    likely room lever pre-planned.** When a build-time measurement shows a
+    bar is structurally unreachable on an effect — a property of how it
+    renders, not a defect — report the honest number and let his eye
+    decide rather than reworking the mechanism further; shape-flares-lead's
+    "W3 — the list for the Admiral's eye" named three such cases and his
+    ruling on two was explicit option-A ("accept/ship as built, I'll judge
+    by eye"). The refinement his W4 verdict added: his eye verdict arrived
+    within HOURS of the deploy, as a tuning list, so a row reporting an
+    unreachable bar should also pre-plan the cheap room lever it will most
+    likely need (a dark canvas, a speed-vs-trail trade) — the follow-up is
+    then a one-row ask, not a design round.
+16. **A clarity bar must be a CONTRAST bar, never a "lit" bar — and the
+    light threshold is DERIVED, not a fixed "half of full".** Counting a
+    cell lit at 8-20/255 (shape-flares-lead's W1.2/W1.3 bars) passes a
+    trail at half brightness and a canvas full of other sparks just as
+    easily as a clearly-formed shape; grade by luminance instead (dark /
+    <64 / <128 / ≥128 of 255). But a flat "≥ half of full" requirement is
+    itself the wrong bar on a one-pitch band for a blob effect: W4.4 proved
+    it structurally unreachable (24 of 24 rows under it) because Orbits'
+    splat kernel caps the band's own outer cells at ~65/255 at his
+    `blob_size`, whatever the speed or the trail. **Do the band-width-
+    against-the-effect's-own-kernel sum FIRST** and set the light threshold
+    at what that kernel can actually deposit on the band — 64/255 was the
+    honest threshold for Orbits and Fish (blob kernels), 128/255 for
+    Fireworks' sparks, which really do reach half of full. Then require the
+    band to stand out against the REST of the panel (a band/rest contrast
+    ratio) and against the same-seed UNTOLD frame, at EVERY frame of the
+    hold. And the CANVAS is part of the design, not just the figure's own
+    pixels — what else the effect lights when the figure lands (beat
+    bursts, a wake, a trail of other blobs) decides legibility as much as
+    the figure does, so a sparse-light effect may need a quiet window
+    planned around the figure from the
+    start, not added after his verdict names it.
 
 ## How he answers
 
@@ -212,6 +256,101 @@ first test of the workflow: that session's entry goes here next.
   would have fit his §13 preference better.
 - Confirmation: "yes to both questions"; "do 18 degrees per frame for now".
 - Room verdict: pending (after deploy).
+
+### 2026-11-15/17 — shape-flares-lead (new, a shared shape library + a new
+response class + six effects, Black Hole V2 / STAR / Orbits V2 / Fish /
+Sauron / Fireworks V2)
+
+This plan was unusual among the sessions logged here: it was the first one
+built in PARALLEL waves by five crews rather than by one agent end-to-end,
+and the squadron leader's own review ledger
+(`/home/javi/fleet-spotfx/data/shape-flares-lead/report.md`) carries a
+second layer of "what we learned" that belongs to THAT process (rebase
+sequencing, measurement discipline, honest-bar reporting) rather than to
+design-session technique; only the design-session half is recorded here.
+
+- Rounds: 2 (one ten-question grilling round; one approval message that
+  carried a real plan revision). Questions asked: 10; answered explicitly:
+  1 (Q8); "take your rec" for the rest: 9 (his reply, verbatim, was the
+  single line "8C, rest defaults" — the most compressed answer logged in
+  this file to date, confirming "How he answers"'s existing note that a
+  short bundled reply is a GOOD round, not an under-specified one).
+- Changed the plan: Q8, Sauron's pupil-or-iris → he picked C, both at once
+  ("have it's pupil or something chagne into that shape"; the recommended
+  option was iris-only, with pupil-only and both offered beside it). He
+  did not ask for a new option — he picked the combining one already on
+  the page over the narrower rec (reinforces "How he answers"'s "he adds
+  to the recommendation toward MORE of his own idea" above, with a
+  stronger example: "the rec plus the other listed option, taken whole",
+  not "the rec plus a hint").
+- A revision arrived INSIDE an approval, not as a separate round. His
+  message approving the whole plan (P1 A / P2 A / P3 A) also named one
+  effect by name as not working yet: "I approve the defaults, but the fish
+  didn't seem to be sufficiently making the outline. We may need to boost
+  the trail brightness and lower decay briefly to get it to show better.
+  They also may need to more tightly flow." This reopened only Fish's own
+  tile (trail brightened ~1.5x and its half-life raised under the shape,
+  the water trace kept brighter through the hold, the steering tightened)
+  while every other scene's design stood as approved (reinforces "How he
+  answers"'s "he comments on tiles more than he answers numbered lists"
+  above: a message that reads as a blanket APPROVAL can still carry a
+  per-tile correction in the same breath).
+- Waved through / unanswered: Q1 (the name, "Word Shapes"), Q2 (a fifth
+  Words section), Q3 (a Shapes row on Sung labels), Q4 (the five timing
+  numbers), Q5 (the word-colour play rules), Q6 (on for every song once a
+  scene's Words band carries the kind), Q7 (STAR included, spin eases to a
+  stop), Q9 (one big centred Fireworks burst), Q10 (3-or-fewer threshold).
+- New preference: §14 and §15 above (approved-mechanism-vs-legible-render,
+  honest-bar-reporting) were both drafted from this session and CONFIRMED,
+  harder than first drafted, by the room verdict below.
+- Visuals: the per-scene animated crystal tiles (the real 976-cell mask,
+  his three shapes, a scrubber with the sung word marked) is what let him
+  give the Fish correction with no argument — he named the exact effect
+  and the exact two levers (trail brightness, decay) from watching the
+  tile, not from reading the mechanism's prose. What the FIRST pass of the
+  Fish tile got wrong, worth stating for the next session that renders a
+  sparse-light effect (few particles, a trail, a wake): the simulation's
+  law was correct but its rendered line was too faint/short to read as
+  "the shape" at a glance — a continuous param like a trail's own
+  brightness or half-life needs its own look-right-at-a-glance pass on the
+  actual render, the same way §13's full-range-grid preference exists for
+  a shape PARAMETER's range, not just for whether a motion law is right.
+  One more miss, found only after the room verdict: the explainer's
+  crystal tiles rendered the shape's own pixels on a dark tile, while the
+  room showed them on top of the effect's ordinary light at his tuned
+  densities — the next explainer for a figure on a live effect should
+  render the figure INTO a busy frame of that effect (a loud-Energy frame
+  at his stored params), not onto black.
+- Room verdict (2026-11-17, in his room, hours after the deploy),
+  verbatim: "a few pieces of feedback on the word shapes. First, it's hard
+  to test for a couple reasons: the preview of the flare doesn't seem to
+  work (I only tested orbits and black hole, but it didn't seem to show).
+  Second, star and black hole look pretty good, but could last a little
+  longer. Fireworks is too cluttered to visually identiy the shape. Let's
+  have it plan to make sure no fireworks fire right before, or
+  concurrently, so that it is on a mostly dark canvass. Also, increase the
+  amount of blobs by 50% so it is more clearly visible, and have it hold
+  50% longer. Finally, I can tell the fish and orbits are trying to do
+  something, but it's not clear enough. They need to increase speed so
+  they can pass the outline fast enough that their trail stays and it
+  clearly forms the shape. Start with orbits and when we get that dialed
+  in, we will do fish. I think fish are going to have to override some of
+  the motion rules to move sharply enough to form corners, like on the
+  star." The two build-time "ship as built, I judge by eye" items from the
+  plan's own honest-miss list resolved differently than either reads on
+  paper: Fireworks' near-white was NOT what he saw — the clutter of his
+  own beat bursts under the shape was (a canvas problem, not a colour
+  one); Fish's white tail was not mentioned at all — the faint, slow
+  outline was, the same complaint as Orbits (fixed there first, per his
+  own sequencing — "start with orbits ... then we will do fish"). What the
+  plan got wrong: three of six mechanisms (Fireworks, Orbits, Fish) were
+  approved on the explainer, built to their stated clarity bars, measured
+  green, and still read "not clear enough" live — the tile problem was the
+  room problem, confirming §14 harder than it was first drafted; and the
+  "lit at 8-20%" bars used for Fireworks and Orbits (W1.2, W1.3) were
+  exactly the vacuous kind §16 now rules out — the Fish review's
+  band-against-rest contrast metric caught the same defect and was never
+  re-run on the other five rows before the room session.
 
 ### Template for the next entry
 ```
