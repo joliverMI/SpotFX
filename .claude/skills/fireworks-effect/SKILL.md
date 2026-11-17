@@ -415,6 +415,158 @@ over the first, which keeps fading: there is nothing to blend, which is this
 effect's answer to the plan's "no snap". A clearing write
 (`told() is None`) mid-shape takes nothing away for the same reason.
 
+## W4.3 — A DARK CANVAS, HALF AGAIN AS MANY SPARKS, AND A 2.0 s FORM
+   (2026-11-17, his room verdict)
+
+His words, verbatim: *"Fireworks is too cluttered to visually identiy the
+shape. Let's have it plan to make sure no fireworks fire right before, or
+concurrently, so that it is on a mostly dark canvass. Also, increase the
+amount of blobs by 50% so it is more clearly visible, and have it hold 50%
+longer."* The longer hold is the ROOM's (row W4.2 tells a longer
+`word_shape_hold_s`); nothing in this effect stretches it, and this row
+asserts the hang follows what it is told.
+
+**`fireworks` NOW DECLARES A MINIMUM FORM** —
+`fx.device_model.WORD_SHAPE_FORM_MIN_S["fireworks"] = 2.0`, the Fish's own
+precedent and the second entry in that dict. Read the word-shapes skill's
+own note on that accessor first: the form IS the lead in practice, so the
+floor does not merely fire the band early, it makes the whole envelope
+2.0 s long. **A consequence worth stating rather than discovering: the band
+fires 2.0 s EARLY, so a COLOUR kind pooled in a Fireworks scene's Words
+band lands 2.0 s early too** — exactly as it already does on Fish. There is
+deliberately **no seventh told key** for a "quiet": that would reopen the
+W0.3 told-key contract for one effect, and "how early the write arrives" is
+all a hush needs.
+
+**THE HUSH** (`_word_shape_arm`, `_word_shape_clock`, the spawn block's
+first branch). From the SEQ edge to the **END OF THE HOLD** this effect
+makes no ordinary launch of any kind:
+
+- `spawn_rate` bursts, `_beat_pending` beat bursts and the **drop tail's
+  shower** are all withheld, and the accumulators (`spawn_acc`,
+  `_beat_pending`, `_tail_acc`) are CLEARED every hushed frame — nothing is
+  deferred, so the release does not open onto a pile of withheld launches;
+- a **`burst_rockets` flare poke is DROPPED, not deferred** (`_burst_pending
+  = 0`, the pre-drop breath's own swallow). The key is still self-reset, so
+  an identical later write edges again;
+- what is **already in the air is not killed**: each ordinary particle's
+  remaining life is capped at its own share of `WORD_SHAPE_HUSH_FADE_S`
+  (0.7 s) over `WORD_SHAPE_HUSH_FADE_FRAC` (0.5..1.0). **The stagger is not
+  decoration** — one constant for all of them made every particle of a
+  similar age reach zero on the SAME frame, measured as 9.1% of his real
+  cells winking out in one frame against the effect's own untold worst of
+  3.7%. Lull rockets (`p_rocket`) are left alone: they are a phase's
+  choreography, not the ordinary show;
+- launching **resumes with the release**, which is W1.2's own vision ("the
+  ordinary fireworks carry on around them").
+
+**THE FLIGHT NO LONGER LEAVES AT THE EDGE.** `_word_shape_arm` starts the
+clock and opens the hush; `draw`'s launch block fires the burst when the
+clock reaches `form − WORD_SHAPE_FLIGHT_S` (0.8 s), and the flight handed to
+`_word_shape_burst` is the time LEFT to the word on the effect's own clock,
+so a frame of quantization at the launch cannot drift the arrival off the
+word (measured arrival error still **0.000 cell pitches**). Three things
+that follow:
+
+- **`_ws_form` is the whole TOLD form, from the edge** — so `_ws_frac` still
+  reads 1.0 and `_ws_hang` still flips ON the word. `WORD_SHAPE_CLOCK_EPS`
+  is why it flips on that frame rather than the one after it: the clock
+  accumulates `dt` and reaches a told time to within a float's dust;
+- **a told form shorter than the flight** (impossible from the engine, which
+  floors it) makes flight = form, so the burst launches at the edge rather
+  than before it;
+- **a shaped spark's `p_life` is flight + hold + its own fade**, not form +
+  hold + fade — it is not born until the flight starts — and it still ends
+  exactly where W1.2's did.
+
+**A CLEARING WRITE ALSO ENDS THE HUSH** (`config_updated`, the
+`told() is None` branch). It says no shape is standing, and holding the
+panel dark for a shape that will never arrive is worse than doing nothing,
+so launching resumes at once and a burst still in the barrel is dropped.
+The CLOCK is left alone, so a spark already in the air keeps fading on its
+own exactly as W1.2 has it — there is nothing to blend.
+
+**A PHASE ARRIVING ENDS THE HUSH.** P3 A means a shape is never told while a
+charge, lull or drop is armed, but one landing on a standing shape owns the
+panel: the drop payoff and its tail fire as today and the shaped sparks,
+additive, keep flying or hanging over them. The check is one line in
+`_word_shape_clock` (`self._phase != "none"`), so an already-armed phase
+ends it on the next frame too.
+
+**`word_shape_sparks_quiet` 90, `_loud` 150** — W1.2's 60/100 plus half
+again, in the module's `CONFIG_SCHEMA` **and** in
+`config/effect_params.json`, with one test pinning that they agree. They
+are uncapped (`p_nocap`), so `CAP` (1024) is the only bound: a show
+saturating his `max_blobs` of 100 plus a loud burst's 150 is 250, and even
+the registry's own 400 ceiling fits — asserted, so the clamp in
+`_word_shape_burst` is provably unreachable in his room.
+
+### What W4.3 measured, and the one bar it had to re-read
+
+`scripts/check_fireworks_word_shape.py` prints all of it (`--ascii` now also
+draws the frame GRADED BY LUMINANCE at the word and at mid-hold).
+
+- **THE DARK CANVAS**, his headline: over 20 seeds at Energy 1.0 with a
+  120 bpm beat and his scene at its busiest (`beat_burst` 6 × `burst_size`
+  14 a beat, each spark living 1.9 s into a `max_blobs` of 100), the
+  ordinary light left on the panel ON THE WORD is **0.00% of his 976 real
+  cells** at 20/255, against **43.6% median / 60.6% worst** on the same
+  seeds untold. Zero `_spawn_burst` calls between the edge and the hold's
+  end in every seed. Measured by telling the shape exactly as the engine
+  does and stubbing the burst itself out — the only way to read the canvas
+  without guessing which cells were whose.
+- **CLARITY**, the shape alone on his real mask: coverage **96.4-100%** of
+  the pinned outline cells on the word (bar 70%), fill ratio **0.41-0.57**
+  (bar 0.70); up from W1.2's 87.5-100% with 100 sparks.
+- **CONTRAST**, the row's new bar, because legibility on that canvas is the
+  whole point: the outline band's mean luminance is **6.0-11.5× the rest of
+  the panel's** at the word and at mid-hold (bar 3.0), with 86.9-99.2% of
+  the band above 64/255 and 65.5-96.6% above 128/255.
+- **WHITE**: the shape alone still lights **no white cell at all** at any
+  Energy, 150 sparks included. Over a LIVE show the told worst is now
+  **0.97-2.17%** of the lit cells against the room alone's **1.46%** over
+  the same frames — so most (shape, Energy) rows sit at or BELOW the room's
+  own number, where W1.2 read 1.74-2.01% against 0.62%. **What moved was
+  the window and the hush, not the sparks**: the 2.0 s form makes the
+  measured span two and a half times longer (catching more of the room's own
+  beats, which is why the untold comparator rose) and the hush takes those
+  beats away for the whole form and hold. His 2026-11-17 ruling stands —
+  option A, ship as built. If it ever does rise with the spark count,
+  `WORD_SHAPE_GRAD_SPAN` and `WORD_SHAPE_LAUNCH_PITCH` are the levers and
+  the trade is his: a narrower slice is less of his colour set on the shape.
+- **THE "NOTHING JUMPS" BAR HAD TO BE RE-READ, and that is arithmetic
+  rather than convenience.** W1.2's form is the frame-to-frame change in LIT
+  CELLS as a share of the lit count. The hush drives that denominator to
+  ZERO on purpose, so the first spark of the burst is an unbounded relative
+  change and the measured number (2300-3300%) is about the lit threshold,
+  not about anything a viewer would call a jump. It is still printed. The
+  bar is asserted on the panel's own **MEAN LIGHT** over each of the
+  shape's four stretches (the hush emptying, the flight, the hold, the
+  release), against **the effect's own ordinary maximum** — the same seed's
+  untold worst over the same SPAN. Measured: **0.0022-0.0737 told against
+  an own-worst of 0.0611-0.0737**, every stretch under it. The comparator is
+  the span's worst and not each stretch's own, deliberately: the hush MOVES
+  when this effect's busiest frames happen (the release's return lands on an
+  emptied panel instead of a full one), so a per-stretch comparison would
+  put a shifted show beside an unshifted one. Both numbers are printed.
+- **W1.2's additive proof is RETIRED and rewritten.** "The ordinary
+  particles are untouched across the edge" is exactly what his verdict
+  overturns. The rule now:
+  `test_the_shaped_burst_is_additive_except_the_hush` — ordinary sparks are
+  SHORTENED (never killed, never re-timed longer, keeping their age, colour
+  and motion) and ordinary LAUNCHES are withheld from the edge to the
+  hold's end; everything else is as additive as it was, and `_capacity()`
+  is still unchanged across the edge.
+- **COST**: +0.07 to +0.11 ms p50 a frame with the shape holding (bar 1.0).
+
+**One side effect of the floor worth knowing before tuning it.** The room's
+release is 1.5 × the FORM, so flooring the form at 2.0 s makes the release
+3.0 s: a shaped spark now lives the flight (0.8 s) + the hold + its own
+share of 3.0 s, which is **2.0-3.0× an ordinary burst's** life against
+W1.2's 1.22×. Neither this effect nor this row chose that — it is the
+room's `word_shape_release_ratio` times the planner's floor, and the lever
+is the room's, not the effect's.
+
 **Proofs:** `tests/test_fireworks_word_shape.py` (the pinned-module
 byte-identity over 320 busy and 320 quiet frames, the real `ResponseEngine`
 through to the real effect, arrival, the split, the counts, the hang, the

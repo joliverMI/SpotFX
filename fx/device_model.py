@@ -563,6 +563,22 @@ WORD_SHAPE_FORM_MIN_S: dict[str, float] = {
     # shoal still crossing the pond. 2.0 s is what the measured approach
     # needs (scripts/check_fish_word_shape.py section 4).
     "fish": 2.0,
+    # FIREWORKS (plan row W4.3, his room verdict 2026-11-17: "Fireworks is
+    # too cluttered to visually identiy the shape. Let's have it plan to
+    # make sure no fireworks fire right before, or concurrently, so that it
+    # is on a mostly dark canvass"). The floor is HOW EARLY THE WRITE
+    # ARRIVES, which is all a hush needs: the effect stops launching at the
+    # SEQ edge and the panel has 1.2 s to empty before the shaped burst
+    # leaves the centre (`fx/effects/fireworks.py`'s WORD SHAPES block —
+    # the flight itself is still 0.8 s, so the burst looks as W1.2 measured
+    # it). There is deliberately no seventh told key for a "quiet": that
+    # would reopen the W0.3 told-key contract for one effect, and the form
+    # already means exactly this.
+    #
+    # It has the same consequence Fish's floor has, and it is worth stating
+    # rather than discovering: the band fires 2.0 s EARLY, so a COLOUR kind
+    # pooled in a Fireworks scene's Words band lands 2.0 s early too.
+    "fireworks": 2.0,
 }
 
 
