@@ -442,6 +442,18 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: 'fireworks-word-shape',
+        title: 'Fireworks — a sung word\'s shape',
+        keywords: 'fireworks word shape shapes heart star diamond sung word burst sparks outline fill filling hang hold random energy size share quiet loud crystal matrix',
+        body: [
+          'When a sung word points at a shape, the Fireworks crystal answers with ONE big firework from the middle. Its sparks fly out and gather into that shape — most of them on its edge, a scatter inside — arriving exactly ON the word. They hang there glittering while the word is sung, far longer than an ordinary burst, then go out one spark at a time while the ordinary fireworks carry on around them.',
+          'Every spark is aimed: its launch speed is worked out from this effect\'s own Drag so that it comes to rest on its own point in the shape the instant the forming time ends. Nothing is on a grid — each spark picks its own place along the edge (with about half a cell of wobble) or its own depth inside — so the shape still looks like a firework and not a drawing.',
+          'Word Shape Size is the shape\'s half-height as a share of the panel\'s (0.62 by default). Word Shape Outline Share is how many of the sparks go to the edge rather than inside (0.7 — seven in ten, which is what makes it read as a heart rather than a blob). Word Shape Sparks (quiet) and (loud) are how big the burst is at the quietest and loudest words (60 and 100): a loud word bursts bigger. All four are the effect\'s own settings — change them on the scene\'s Initial Set tab or ask Sonic ("make the word shape size 0.7 on Fireworks\' Matrix entry").',
+          'The burst is purely on top: the scene\'s own rockets, beat bursts and the shower after a drop never pause for it, and it never counts against the density cap. Its colours come out of the scene\'s own colour set — a slice of the gradient, a different slice each word, with the inside sparks drawn dimmer than the edge so the filling reads as filling. A second shape word while the first is still fading simply bursts over it; the first keeps fading on its own.',
+          'A shape is never drawn during a charge, lull or drop, and a drop landing near the word wins over the shape — see "Word shapes: a sung word draws a shape" for the whole of when one fires. The Fireworks STRIP has no shape: there is nowhere to draw one on a single line.',
+        ],
+      },
+      {
         id: 'flare-min-intensity',
         title: 'A flare kind\'s minimum Energy',
         keywords: 'flare kind minimum intensity min threshold only above 0.4 gate lane pool skip quiet',
@@ -829,6 +841,7 @@ export const HELP_SECTIONS: HelpSection[] = [
           'Which effects can draw a shape grows one effect at a time, each after you have tuned it in the room. An effect that has not been taught shapes ignores a shape word and keeps doing what it does.',
           'STAR draws it in its own outline: the star\'s edges bend into the heart, star or diamond while its turning slows, and on the word it stands upright and still — a solid shape made of the colour bands still flowing out through it. It holds, then bends back into the star and spins up again from the music. Word shape size (0.62) is how big it is, as a share of the panel\'s half-height. A change of Edges arriving while the shape stands waits for the release; a charge, lull or drop arriving then takes the turning back, on purpose — the bigger moment wins.',
           'Sauron draws it with the eye itself: on the word the eye\'s own edge bends into the shape and its slit pupil becomes a smaller shape inside it, the white-hot rim hugging that and the flames still licking out of the shaped edge, the eye going on looking about the room. It holds, then rounds back into the eye and the slit. Two settings of its own: Word Shape Size (how big the shape is against the iris the eye already has) and Word Shape Pupil (how big the pupil shape is inside it).',
+          'Fireworks draws it by exploding into it: one big firework leaves the middle and its sparks fly out and gather into the shape, most of them along its edge with a scatter inside, arriving exactly on the word. They hang there glittering while the word is sung, far longer than an ordinary burst, then go out one spark at a time while the ordinary fireworks carry on around them. Four settings of its own: Word Shape Size, Word Shape Outline Share (how many sparks go to the edge rather than inside), and Word Shape Sparks quiet and loud (how big the burst is at the quietest and loudest words). The Fireworks strip has no shape — there is nowhere to draw one on a single line.',
         ],
       },
       {

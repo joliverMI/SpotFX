@@ -534,6 +534,64 @@ lit, 80% of its outline cells ringed, 70% of the pupil's cells black —
 holds the rest, including what a drop arriving on a standing shape looks
 like.
 
+### Fireworks / `fireworks` (row W1.2, 2026-11-16) — the shaped payoff burst
+
+`.claude/skills/fireworks-effect/SKILL.md`'s "WORD SHAPES" section;
+`fx/effects/fireworks.py`'s WORD SHAPES block comment; evidence
+`scripts/check_fireworks_word_shape.py` (`--ascii` draws it on the real
+mask), proofs `tests/test_fireworks_word_shape.py`. Four registered params
+(`word_shape_size` 0.62, `word_shape_outline_share` 0.70,
+`word_shape_sparks_quiet` 60, `word_shape_sparks_loud` 100); no
+`WORD_SHAPE_FORM_MIN_S` entry. **`fireworks1d` is deliberately NOT a
+member** — there is nowhere to draw a shape on one line.
+
+ONE big burst from the centre per told word, 60 sparks at Energy 0 to 100 at
+Energy 1, 70% of them aimed along the outline BY ARC LENGTH with half a cell
+of jitter and the rest inside at a random depth, nothing on a lattice.
+**Every spark's launch velocity is solved from the effect's own drag** (the
+draw's own geometric sum, computed per burst for the frame rate it
+integrates at) so it is standing on its target the frame the form ends —
+measured arrival error 0.000 cell pitches. A separate damper then holds them
+where they arrived (the hang), each twinkling off its own position, and they
+fade spark by spark over the release on their own `p_life`: about 1.93x an
+ordinary burst's life at the effect's DEFAULT `burst_life`, which is where
+the plan's "about twice" comes from, and 1.22x against his own entry's tuned
+1.9 s — the shape's duration is the told envelope's, a room setting, not the
+effect's to stretch. Uncapped and additive, so the scene's rockets, beat
+bursts and drop tail carry on underneath; a second word bursts over the
+first, which keeps fading, so there is nothing to blend on release.
+
+Clarity bar, the shape alone on the real mask at SIZE 0.62, on the word
+(>= 70% of the outline cells lit, fill ratio <= 0.70):
+
+| shape | Energy 0.2 | Energy 0.8 | the plan's sim |
+|---|---|---|---|
+| heart | 87.5% / 0.39 | 95.2% / 0.60 | 72% / 0.46, 87% / 0.47 |
+| star | 92.0% / 0.50 | 98.3% / 0.64 | 76% / 0.65, 86% / 0.65 |
+| diamond | 95.8% / 0.43 | 100.0% / 0.63 | 81% / 0.50, 90% / 0.53 |
+
+Two numbers the measurements forced, worth knowing before another row copies
+the approach: the colours come off a 0.15 SLICE of the gradient read by the
+spark's angle, not the whole gradient, because sparks from opposite ends of
+a rainbow desaturate each other where they overlap at his blob size; and the
+burst's origins are scattered over a cell with their own fade-in from 0,
+because 100 sparks stacked on one cell saturate it.
+
+**The one section-6 bar this row does not reach, and the finding every other
+row's "no white" bar should have in hand:** alone the shape lights no
+white-ish cell at all, but over a LIVE show 1.74-2.01% of the lit cells read
+washed out at the worst frame against the room's own 0.62% — about ten cells
+of 976 while the shape hangs. The per-frame composite is NOT the lever
+(summing, a per-channel max and a per-cell winner-takes-all all give the
+heart the same 1.74%; the two-pass version was measured and not kept), and
+neither is the trail length (shortening it RAISES the share). The cause is
+`self.trail` being a channel-wise MAX over time, so a cell holding the
+shape's hue and a passing burst's hue from a neighbouring frame has every
+channel high whatever this frame did. **Any effect here that leaves
+something STANDING STILL over a show that keeps drawing through it will meet
+the same wall** — the lever is the effect's trailing, which is its look, and
+so the Admiral's call rather than a build row's.
+
 ## Related
 
 - `.claude/skills/crystal-hex-grid/SKILL.md` — the panel this is all

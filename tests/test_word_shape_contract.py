@@ -159,9 +159,11 @@ def _words_scene(name="Shape Scene", *, kinds=None, lanes=None,
 #   W1.6 — STAR, fx/effects/radial.py (the shape divisor, spin to rest)
 #   W1.5 — Sauron, fx/effects/sauron.py (the shaped iris and its shaped
 #          pupil, his Q8 C)
+#   W1.2 — Fireworks, fx/effects/fireworks.py (the shaped payoff burst)
 WIRED = (
     "radial",
     "sauron",
+    "fireworks",
 )
 
 

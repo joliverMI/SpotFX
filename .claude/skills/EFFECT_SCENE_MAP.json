@@ -58,9 +58,11 @@
         "fx/effects/fireworks1d.py",
         "scripts/check_firework_burst.py",
         "scripts/check_fireworks_drop_tail.py",
+        "scripts/check_fireworks_word_shape.py",
         "tests/test_fireworks_drop_tail.py",
         "tests/test_fireworks_rocket_angles.py",
-        "tests/test_firework_burst.py"
+        "tests/test_firework_burst.py",
+        "tests/test_fireworks_word_shape.py"
       ]
     },
     "squiggles-effect": {

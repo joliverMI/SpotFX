@@ -4525,6 +4525,50 @@
           "aspect": "reactivity",
           "note": "How much volume grows each firework's particle count; 0 pins it at Burst Size",
           "default": 1.0
+        },
+        "word_shape_size": {
+          "label": "Word Shape Size",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.2,
+          "max": 1.0,
+          "aspect": "shape",
+          "note": "Word shapes: the shaped burst's half-height as a fraction of the panel's own (0.62 = about two thirds of the way from the centre to the top). The crystal is wider than it is tall, so the shape comes out about 14% wider than tall, exactly as every circle here does.",
+          "help_topic": "fireworks-word-shape",
+          "default": 0.62
+        },
+        "word_shape_outline_share": {
+          "label": "Word Shape Outline Share",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0.5,
+          "max": 0.9,
+          "aspect": "shape",
+          "note": "Word shapes: the share of the burst's sparks aimed at the shape's OUTLINE; the rest land inside it at random depths. 0.7 = seven in ten on the outline, which is what makes it read as a heart rather than a blob.",
+          "help_topic": "fireworks-word-shape",
+          "default": 0.7
+        },
+        "word_shape_sparks_quiet": {
+          "label": "Word Shape Sparks (quiet)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 10,
+          "max": 400,
+          "aspect": "shape",
+          "note": "Word shapes: how many sparks the burst throws at Energy 0. The count rises evenly to the loud one with the word's own Energy, so a loud word bursts bigger.",
+          "help_topic": "fireworks-word-shape",
+          "default": 60
+        },
+        "word_shape_sparks_loud": {
+          "label": "Word Shape Sparks (loud)",
+          "type": "numeric",
+          "smooth": true,
+          "min": 10,
+          "max": 400,
+          "aspect": "shape",
+          "note": "Word shapes: how many sparks the burst throws at Energy 1.",
+          "help_topic": "fireworks-word-shape",
+          "default": 100
         }
       },
       "defaults": {
