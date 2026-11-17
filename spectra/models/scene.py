@@ -465,9 +465,10 @@ class FlareKind(BaseModel):
                   panel, just only fire by sung word"): a sung word that
                   reaches a shape writes `fx/effects/word_shape_keys.py`'s
                   six told keys to every virtual whose live effect is in
-                  fx.device_model.WORD_SHAPE_EFFECTS (EMPTY until wave 1,
-                  so a Words band writes to no fixture yet), and the effect
-                  forms / holds / releases the shape on its OWN clock. The
+                  fx.device_model.WORD_SHAPE_EFFECTS (the effects wave 1
+                  has wired so far — a Words band writes to no fixture
+                  unless one of them is showing), and the effect forms /
+                  holds / releases the shape on its OWN clock. The
                   firework_burst shape exactly: one instant jump, no
                   jump/params/gain/hold_ms of its own, nothing carried,
                   nothing released. Its ONE lead is the form time (LEAD

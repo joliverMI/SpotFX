@@ -320,12 +320,12 @@ def word_shape_effect_ms(kind: FlareKind, intensity: float,
     surge, whose write is on the mark, a shape's write is the form EARLIER
     than its mark — which is the whole point of the kind.
 
-    Returned even when NO virtual will take the write (WORD_SHAPE_EFFECTS
-    is empty until wave 1): the shape's timing is the room's, not the
-    fixture's, so the ruler must still show him what he has tuned. That is
-    the one deliberate difference from pulse_effect_ms/big_fish_effect_ms,
-    which return None with no matching virtual because there is then no
-    animation at all."""
+    Returned even when NO virtual will take the write (nothing showing is
+    one of the WORD_SHAPE_EFFECTS wave 1 has wired): the shape's timing is
+    the room's, not the fixture's, so the ruler must still show him what he
+    has tuned. That is the one deliberate difference from
+    pulse_effect_ms/big_fish_effect_ms, which return None with no matching
+    virtual because there is then no animation at all."""
     if kind.type != "word_shape":
         return None
     action = preview_word_shape(intensity, shape, conductor.virtuals)

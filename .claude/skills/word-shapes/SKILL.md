@@ -592,6 +592,65 @@ something STANDING STILL over a show that keeps drawing through it will meet
 the same wall** — the lever is the effect's trailing, which is its look, and
 so the Admiral's call rather than a build row's.
 
+### Orbits V2 / `orbits` (row W1.3, 2026-11-16) — few trace it, many become it
+
+`.claude/skills/orbits-effect/SKILL.md`'s "WORD SHAPES" section;
+`fx/effects/orbits.py`'s WORD SHAPES block comment; evidence
+`scripts/check_orbits_word_shape.py`, proofs
+`tests/test_orbits_word_shape.py`. Three registered params —
+`word_shape_size` (0.62), `word_shape_few` (3) and `word_shape_wobble`
+(0.15); no `WORD_SHAPE_FORM_MIN_S` entry. The 2-D Matrix effect only:
+**`orbits1d` knows no shapes**, and a strip has no outline to draw one on.
+
+TWO MODES, LATCHED AT THE EDGE from the live blob count (`<=
+word_shape_few` is FEW) and held for the whole shape — his scene drives
+`particle_count` 1-8 by Energy, so without the latch a rising Energy would
+flip three blobs tracing one heart into eight beads on it mid-word. His
+P1 A: with FEW the TETHER RING scales by `(1 - m)` so the tethers gather to
+the centre and the blobs trace ONE shape, each walking the outline BY ARC
+LENGTH at its own orbit rate from its own EVEN SLOT; with MANY each slot's
+tether blends to the outline at `ring_phase + k/n`, so the beads circulate
+at the ring's own speed, orbits shrunk to `word_shape_wobble`. Both are
+POSITION blends on the envelope's smoothstep — Orbits is position-driven,
+so continuity is a property of the blend (the velocity graft's own reason).
+
+Measured at the hold on the real mask at SIZE 0.62: outline lit **74-93%**
+with FEW (bar 60%) and **77-88%** with MANY (bar 75%), 100% by the hold's
+END; every blob's centre (FEW) or tether (MANY) within **0.02 cell
+pitches** of the outline; **+0.00 to +0.33 ms** p50 (bar 1 ms); white 0 of
+976 cells except 1 on many-diamond at Energy 0.8. Three things read
+honestly rather than moved, all printed by the check script:
+
+- **the bar is asserted AT THE HOLD, not at the word** — at the word the
+  shape has only just completed, so the trail behind each blob is still the
+  forming sweep: measured 29-79%. No blob-based effect can light 60% of an
+  outline the instant it arrives on it.
+- **the 8%-per-frame jump bar is not a property this effect has even
+  untold**: at his `trail_decay` 0.15 the comet smear loses 11% of its
+  brightness every frame, so cells near the lit threshold wink out in
+  blocks — 13-20% frame to frame on the untold control. The bar asserted is
+  acceptance 3's own wording for this effect, "the effect's own ordinary
+  maximum".
+- **the heading change at the hold's EDGES is not the blend's**, so it is
+  not what is barred there: the envelope's largest one-frame move over the
+  whole shape is asserted against the steepest its own smoothstep can be
+  (1.5 / its duration), and the most the blend could be moving a blob at an
+  edge against the ordinary maximum. A hard turn in those frames is the
+  OUTLINE (a heart's cleft turns 3.11 rad) or Orbits' own jog kick, which
+  reverses a blob at loud Energy told or not — the untold control reaches
+  3.10 of the 3.14 rad a heading change can be.
+
+THREE DEFECTS THIS ROW FOUND BY MEASURING, each one a trap for the next
+effect: **SIZE must be divided by the effect's own space** (Orbits' `sx`/
+`sy` carry `radius_scale`, so a heart at 0.62 came out at 1.12 of the panel
+and spilled off three sides — coverage read 15%); **a walk along the
+outline has to be anchored** or random spawn phases put every blob in one
+third of it (58% against 85-99% on the unluckiest seed); and **a lingering
+trail must blend its per-frame DECAY, not its half-life** (the decay is
+hyperbolic in the half-life, so ramping the half-life collapsed it from
+1.2% to 11% per frame over the last few release frames and dumped 23-28%
+of the lit cells in one frame).
+
 ## Related
 
 - `.claude/skills/crystal-hex-grid/SKILL.md` — the panel this is all

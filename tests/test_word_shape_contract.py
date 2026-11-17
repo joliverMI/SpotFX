@@ -62,6 +62,9 @@ from spectra.services.room_controls import RoomControlState, word_shape_timing
 URI = "spotify:track:wordshapes"
 VID = "v1"
 EFFECT = "orbits"
+# An effect no Word Shapes row wires — the "not in the set" side of the
+# membership gate. Squiggles draws no shape in any wave of the plan.
+UNWIRED = "squiggles"
 TUNING = LyricEventSettings()
 
 
@@ -160,10 +163,12 @@ def _words_scene(name="Shape Scene", *, kinds=None, lanes=None,
 #   W1.5 — Sauron, fx/effects/sauron.py (the shaped iris and its shaped
 #          pupil, his Q8 C)
 #   W1.2 — Fireworks, fx/effects/fireworks.py (the shaped payoff burst)
+#   W1.3 — ORBITS, fx/effects/orbits.py (few trace it, many become it)
 WIRED = (
     "radial",
     "sauron",
     "fireworks",
+    "orbits",
 )
 
 
@@ -827,9 +832,17 @@ def test_a_flares_off_virtual_gets_nothing(shape_effects):
 
 
 def test_an_effect_that_does_not_know_shapes_gets_nothing():
-    """WORD_SHAPE_EFFECTS is empty on master, so this is the state of his
-    room today: the Words section runs, and no fixture is written."""
-    _cond, responder, executor, _clock = _scratch(_words_scene())
+    """The membership gate, from the other side — and the state of most of
+    his room: the Words section runs in full, and an effect that is not in
+    WORD_SHAPE_EFFECTS is written nothing at all. This test uses the REAL
+    set (no `shape_effects` fixture) on an effect no row has wired, so it
+    stays true however many wave-1 rows land."""
+    assert UNWIRED not in device_model.WORD_SHAPE_EFFECTS, (
+        f"{UNWIRED!r} was wired for word shapes: this test needs an effect "
+        "that is NOT, so point it at another one")
+    scene = _words_scene()
+    scene.devices[0].effect_type = UNWIRED
+    _cond, responder, executor, _clock = _scratch(scene)
     record = _run(responder.on_word_shape(_only(_plan([_hit()]))))
     assert record["result"] == "applied"
     assert _told(executor) == []

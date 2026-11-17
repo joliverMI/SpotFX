@@ -30,8 +30,10 @@
         "fx/effects/orbits.py",
         "fx/effects/orbits1d.py",
         "scripts/check_orbits_drop_burst_and_persistence.py",
+        "scripts/check_orbits_word_shape.py",
         "scripts/smoke_orbits_params.py",
-        "tests/test_orbits_drop_persistence.py"
+        "tests/test_orbits_drop_persistence.py",
+        "tests/test_orbits_word_shape.py"
       ]
     },
     "radial-effect": {

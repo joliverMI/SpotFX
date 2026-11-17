@@ -522,6 +522,11 @@ WORD_SHAPE_EFFECTS: frozenset = frozenset({
     # block). The STRIP (fireworks1d) gets nothing — a shape has nowhere
     # to be drawn on one line.
     "fireworks",
+    # W1.3 — ORBITS: few trace the shape together, many become its outline
+    # (fx/effects/orbits.py's WORD SHAPES block). The 2-D Matrix effect
+    # only: `orbits1d` knows no shapes, and a strip has no outline to draw
+    # one on.
+    "orbits",
 })
 
 # THE PER-EFFECT MINIMUM FORM (plan section 2.4): an effect whose shape
