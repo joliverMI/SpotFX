@@ -499,20 +499,23 @@ SAURON_SURGE_EFFECTS = frozenset({"sauron"})
 # sets above, and like them the keys are deliberately absent from the
 # effect-parameter registry: they ride ONLY that one write.
 #
-# EMPTY ON PURPOSE IN THIS ROW. W0.3 builds the whole engine contract — the
+# ONE NAME PER WAVE-1 ROW. W0.3 built the whole engine contract — the
 # class, the kind, the planner's shape branch, the fire path, the told
-# write — and wires NO effect to it: wave 1 adds each effect (Black Hole's
+# write — and wired NO effect to it; wave 1 adds each effect (Black Hole's
 # shaped horizon, STAR's shaped radius, Orbits' tethers, Fish's procession,
-# Sauron's shaped iris, Fireworks' shaped burst) one row at a time, each
-# behind the Admiral's own tuning gate (docs/ADDING_EFFECTS.md). So even a
-# scene with a Words band and a Word Shape kind writes to no fixture until
-# the first wave-1 row lands. To join, follow fx/effects/word_shape_keys.py's
-# own "HOW AN EFFECT OPTS IN".
+# Sauron's shaped iris and pupil, Fireworks' shaped burst) one row at a
+# time, each behind the Admiral's own tuning gate (docs/ADDING_EFFECTS.md),
+# and each adding its own name here and nowhere else. To join, follow
+# fx/effects/word_shape_keys.py's own "HOW AN EFFECT OPTS IN".
 WORD_SHAPE_EFFECTS: frozenset = frozenset({
     # W1.6 — STAR: the shape joins the radial's own angle divisor and the
     # rotation governor eases the spin to a stop, so the shape stands
     # upright through the hold (fx/effects/radial.py's WORD SHAPES block).
     "radial",
+    # W1.5 — SAURON: the iris boundary and the slit lens each blend into
+    # the shape's own distance field, so the eye's edge and its pupil
+    # become the shape at once (his Q8 C; fx/effects/sauron.py).
+    "sauron",
 })
 
 # THE PER-EFFECT MINIMUM FORM (plan section 2.4): an effect whose shape

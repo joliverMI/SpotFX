@@ -156,7 +156,9 @@
         "scripts/check_sauron.py",
         "scripts/render_sauron.py",
         "scripts/render_sauron_tuneup.py",
-        "tests/test_sauron.py"
+        "scripts/check_sauron_word_shape.py",
+        "tests/test_sauron.py",
+        "tests/test_sauron_word_shape.py"
       ]
     },
     "pulse-effect": {

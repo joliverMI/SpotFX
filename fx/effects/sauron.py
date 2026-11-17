@@ -125,7 +125,8 @@ from pyfastnoiselite import pyfastnoiselite as fnl
 import fx.effects.particle_handoff as particle_handoff
 import fx.effects.pre_drop as pre_drop
 from fx.color import parse_gradient, validate_gradient
-from fx.effects import lull_handoff, phase_grammar
+from fx.effects import (lull_handoff, phase_grammar, word_shape_keys,
+                       word_shapes)
 from fx.effects.audio import AudioReactiveEffect
 from fx.effects.blackhole import _HEX_FACE_D, _HEX_FACE_NX, _HEX_FACE_NY
 from fx.effects.gradient import GradientEffect
@@ -189,6 +190,61 @@ RADIAL_HEAT_MIX = 0.12     # the flames' heat tints the coordinate this much
 RAINBOW_SPAN_DEG = 180.0   # "auto" sorts a set spanning more hue cold->warm
 PALETTE_BAND = 0.35        # a sorted colour holds this share of its band
 SURGE_POKE_FLOOR = 0.001   # a fire at intensity 0 still edges the poke
+# THE WORD SHAPE (Word Shapes plan row W1.5, the Admiral's Q8 C: "BOTH the
+# pupil and the iris become the shape at once"). Two signed-distance fields
+# already draw this eye — the iris boundary (`dist - iris_r`) and the slit
+# lens (`sd`) — so a shape is a BLEND of each with the shape's own field,
+# in the eye's own gazed, foreshortened coordinates. The shape therefore
+# inherits the eye's own frame: both axes are divided by `s_min`, so the
+# iris "circle" is already about 1.7x taller than wide on his crystal and
+# the shape is exactly as elongated. That is deliberate — the shape IS the
+# eye's edge bent, so it has to live where the edge lives; drawn
+# physically square instead it reaches 0.68 of the panel's half-width
+# (measured) and the flames have nowhere left to lick.
+#
+# `sdf_fast` is the per-frame field (the case word_shapes built it for),
+# but past its own grid box it is a far-field ESTIMATE that steps down
+# where the box ends, and at these sizes that boundary lands inside the
+# panel — in the flames the shaped edge feeds. SHAPE_FAST_LIMIT clamps the
+# lookup onto the box's inscribed disc and adds the radial step back,
+# which is exact inside the disc, continuous across it and still one
+# `sdf_fast` call. scripts/check_sauron_word_shape.py measures the step
+# this removes and the cost of removing it.
+SHAPE_FAST_LIMIT = 0.999 * word_shapes.FAST_EXTENT
+# THE PUPIL'S BITE. The slit's edge is anti-aliased over SLIT_AA_PX, so a
+# cell lands fully dark only once it is 0.4 x that inside — fine for a
+# lens 18 px tall, and a real loss on a shaped pupil about five real cells
+# across, whose own cells then read as part of the rim instead of part of
+# the shape (measured: 50-73% of them fully dark, worst at the gaze's
+# extremes where the foreshortening squeezes it). The shaped pupil is
+# therefore drawn exactly that much fatter, so the black reaches its own
+# outline and the white-hot rim sits just outside it — the shape at the
+# size it is meant to be, not half a pixel short of it on every side.
+PUPIL_BITE_PX = 0.4 * SLIT_AA_PX
+# The shapes' inradius about their own centre (-sdf(0, 0)), worked out once
+# per shape: what the pupil's size is floored by so its dark core survives
+# the hex lattice (SLIT_MIN_DARK_PX, tune-up 1).
+_SHAPE_INRADIUS: dict = {}
+
+
+def shape_inradius(shape) -> float:
+    """The shape's largest circle about its own centre, in unit
+    coordinates — cached, since it is one exact `sdf` point per shape."""
+    r = _SHAPE_INRADIUS.get(shape.id)
+    if r is None:
+        r = max(float(-np.asarray(shape.sdf(0.0, 0.0))), 1e-3)
+        _SHAPE_INRADIUS[shape.id] = r
+    return r
+
+
+def _inv_smoothstep(y: float) -> float:
+    """Where on word_shape_keys' own smoothstep a fraction `y` sits — how
+    a second word arriving mid-shape picks the form up from where the
+    shape already is instead of snapping it to zero."""
+    y = min(1.0, max(0.0, float(y)))
+    return float(0.5 - np.sin(np.arcsin(1.0 - 2.0 * y) / 3.0))
+
+
 # THE PRE-DROP (fx/effects/pre_drop.py is the binding statement; predrop
 # plan step 8, the plan's 3.5: "the lids part to a narrow glare on the slit
 # pupil in the new colours, flames held down, brightening slowly until the
@@ -355,6 +411,7 @@ class Sauron2d(Twod, GradientEffect):
         phase_grammar.SHOCK_ON_KEY,
         lull_handoff.DROP_KEY,
         *pre_drop.KEYS,
+        *word_shape_keys.KEYS,
     ]
 
     CONFIG_SCHEMA = vol.Schema(
@@ -506,9 +563,25 @@ class Sauron2d(Twod, GradientEffect):
             **phase_grammar.shock_on_schema_fields(),
             **phase_grammar.breath_schema_fields(),
             **lull_handoff.drop_schema_fields(),
+            # THE WORD SHAPE (row W1.5): two tuned params — the shape's
+            # size is a MULTIPLIER of the iris radius here, not a fraction
+            # of the panel, because the shape IS the eye's own edge bent
+            vol.Optional(
+                "word_shape_size",
+                description="Word shape: its size as a MULTIPLIER of the iris radius (1 = the eye's own edge bends into the shape)",
+                default=1.0,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.6, max=1.3)),
+            vol.Optional(
+                "word_shape_pupil",
+                description="Word shape: the pupil shape's size as a fraction of the iris shape's",
+                default=0.40,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.2, max=0.6)),
             # THE PRE-DROP's told keys (ride only the lull arm; zeros on a
             # lull that plays none) — fx/effects/pre_drop.py
             **pre_drop.schema_fields(),
+            # THE WORD SHAPE's told keys (ride only the Words band's one
+            # write) — fx/effects/word_shape_keys.py
+            **word_shape_keys.schema_fields(),
         }
     )
 
@@ -580,6 +653,13 @@ class Sauron2d(Twod, GradientEffect):
         self.last_ring = None
         self.last_slit_core = None
         self.last_eye_px = (0.0, 0.0)
+        # the word shape's instruments: how far it is formed, the two
+        # sizes it was drawn at and the gazed frames it was drawn in
+        self.last_shape_frac = 0.0
+        self.last_shape_size = 0.0
+        self.last_shape_pupil = 0.0
+        self.last_shape_frame = None
+        self.last_pupil_frame = None
 
     def config_updated(self, config):
         super().config_updated(config)
@@ -588,7 +668,8 @@ class Sauron2d(Twod, GradientEffect):
                   "core_white", "streaks", "flames", "flame_audio",
                   "flame_speed", "tongues", "sky", "drift_speed",
                   "gaze_radius", "gaze_depth", "snap_threshold", "snap_hold",
-                  "speed_audio", "x_offset", "y_offset"):
+                  "speed_audio", "x_offset", "y_offset", "word_shape_size",
+                  "word_shape_pupil"):
             setattr(self, k, float(c[k]))
         self.palette_sort = c.get("palette_sort", "auto")
         self.lull_lids_upside_down = bool(c.get("lull_lids_upside_down", True))
@@ -610,6 +691,28 @@ class Sauron2d(Twod, GradientEffect):
             self._surge_seen = new_surge
             if new_surge > 0.0:
                 self._surge_pending = max(self._surge_pending, new_surge)
+
+        # THE WORD SHAPE's own edge (fx/effects/word_shape_keys.py): an
+        # effect watches the SEQ, never the id, so two words of the same
+        # shape both edge. Creation baseline, exactly as the surge above:
+        # a fresh instance built from a persisted config carrying a stale
+        # SEQ must not suddenly draw last night's heart.
+        told = word_shape_keys.told(c)
+        seq = told.seq if told is not None else 0
+        if not hasattr(self, "_shape_seq"):
+            self._shape_seq = seq
+            self._shape = None
+            self._shape_t = 0.0
+            self._shape_env = (0.0, 0.0, 0.0)
+            self._shape_m = 0.0
+            self._shape_inr = 1.0
+        elif seq != self._shape_seq:
+            self._shape_seq = seq
+            self._word_shape_edge(told)
+        elif told is None and self._shape is not None:
+            # a CLEARING write mid-shape (the same SEQ, the id emptied):
+            # let go from where the shape is rather than snapping it off
+            self._word_shape_edge(None)
 
         # charge/lull/drop: edge-detect the phase key (eye.py's shape)
         new_phase = c.get("phase", "none")
@@ -1146,6 +1249,79 @@ class Sauron2d(Twod, GradientEffect):
         return np.clip((1.0 - RADIAL_HEAT_MIX) * rc
                        + RADIAL_HEAT_MIX * heat, 0.0, 1.0)
 
+    # ── the word shape (row W1.5) ───────────────────────────────────────
+
+    def _word_shape_edge(self, told):
+        """A new shape was told (or the standing one cleared). Starts this
+        effect's OWN clock — SpotFX writes once and says nothing more.
+
+        A word arriving while a shape is still up does NOT snap the form
+        back to zero: the clock starts where the envelope already is
+        (_inv_smoothstep), so the shape carries on forming from the
+        fraction it had reached. A clearing write becomes a release from
+        that same fraction.
+        """
+        m = float(self._shape_m)
+        if told is None:
+            if self._shape is None:
+                return
+            release = max(self._shape_env[2], 1e-3)
+            self._shape_env = (0.0, 0.0, release)
+            self._shape_t = release * _inv_smoothstep(1.0 - m)
+            return
+        try:
+            shape = word_shapes.get(told.shape)
+            # the lazy views (the lookup grid) are built HERE, on the
+            # write's own thread, never on the first frame that draws it
+            shape.prime()
+            self._shape_inr = shape_inradius(shape)
+        except Exception:                                 # noqa: BLE001
+            _LOGGER.warning("sauron: word shape %r unavailable", told.shape)
+            self._shape = None
+            return
+        self._shape = shape
+        self._shape_env = (told.form_s, told.hold_s, told.release_s)
+        self._shape_t = (told.form_s * _inv_smoothstep(m)) if m > 0.0 else 0.0
+
+    def _word_shape_step(self, dt) -> float:
+        """How far the told shape is formed this frame — 0 when none is
+        told, and 0 again once the whole form, hold and release have run
+        (the effect resets ITSELF; it never writes a key back)."""
+        if self._shape is None:
+            self._shape_m = 0.0
+            return 0.0
+        form, hold, release = self._shape_env
+        self._shape_t += dt
+        if self._shape_t > form + hold + release:
+            self._shape = None
+            self._shape_t = 0.0
+            self._shape_m = 0.0
+            return 0.0
+        self._shape_m = float(word_shape_keys.envelope(
+            self._shape_t, form, hold, release))
+        return self._shape_m
+
+    def _shape_field(self, shape, x, y, size):
+        """The shape's signed distance over the panel in EYE UNITS, drawn
+        at `size` (its half-height): `sdf_fast` inside its own grid box,
+        and outside it the field at the point where the ray leaves the
+        box, plus the step out to the point.
+
+        That second half is what keeps the field continuous: `sdf_fast`'s
+        own far field past the box is a lower-bound estimate that steps
+        down at the boundary, and at these sizes the boundary lands inside
+        the panel (the pupil's box reaches 2 x its own half-height, about
+        a quarter of the way to the crystal's edge). Inside the clamp the
+        value is `sdf_fast`'s own, so the shape's own cells — the ones the
+        inside test and the clarity bars read — are never the estimate.
+        """
+        inv = 1.0 / max(float(size), 1e-4)
+        ux = x * inv
+        uy = y * inv
+        r = np.maximum(np.sqrt(ux * ux + uy * uy), 1e-6)
+        k = np.minimum(1.0, SHAPE_FAST_LIMIT / r)
+        return (shape.sdf_fast(ux * k, uy * k) + r * (1.0 - k)) * size
+
     def draw(self):
         if self.test:
             self.draw_test(self.m_draw)
@@ -1302,8 +1478,35 @@ class Sauron2d(Twod, GradientEffect):
         self.program_rim = (eye_px, eye_py, iris_r * self.s_min)
         d = dist - iris_r
 
+        # ── the WORD SHAPE: the eye's own edge bends into it ────────────
+        # The iris boundary is already a signed-distance field, so the
+        # shape is a blend of it with the shape's own, at the iris's own
+        # radius (`word_shape_size` multiplies THAT, not the panel). Every
+        # reader below — the perimeter ring, the flames' root, the heat,
+        # the radial colour coordinate, the inside test — measures from
+        # `d` and `dist`, so bending them here bends all of it at once and
+        # the phases (a charge's grown iris, a surge, the lids) compose
+        # unchanged. `_last_iris`/`program_rim` keep the CIRCLE on purpose:
+        # the drop's Shockwave and a transition's ignition rim are built
+        # round a radius, and a drop never lands on a shape it told
+        # (P3 A) — it can only arrive on one already standing.
+        m = self._word_shape_step(dt)
+        self.last_shape_frac = m
+        iris_at = iris_r
+        s_iris = 0.0
+        if m > 0.0 and self._shape is not None:
+            s_iris = max(iris_r * self.word_shape_size, 1e-3)
+            self.last_shape_size = s_iris
+            d = ((1.0 - m) * d
+                 + m * self._shape_field(self._shape, tx, ty, s_iris))
+            # the shaped edge's own radius along each pixel's ray: what the
+            # flames measure their gap to the hex edge FROM, so a lick
+            # still starts where the edge now is
+            iris_at = np.maximum(dist - d, 0.02)
+            dist = d + iris_r
+
         # ── flames + sky ────────────────────────────────────────────────
-        gap = self._edge_gap(eye_px, eye_py, iris_r)
+        gap = self._edge_gap(eye_px, eye_py, iris_at)
         flame = self._flames(d, ang, gap, imp, surge, charge,
                              held=PRE_DROP_FLAMES if glare else None)
         self.last_flame = np.where(d >= 0.0, flame, 0.0).astype(np.float32)
@@ -1363,6 +1566,20 @@ class Sauron2d(Twod, GradientEffect):
             hc = max(h - SLIT_MIN_TIP * wm, 0.0)
             sd = np.minimum(sd, np.sqrt(
                 qx * qx + np.maximum(np.abs(qy) - hc, 0.0) ** 2) - wm)
+        # THE SHAPED PUPIL (his Q8 C — both at once): the slit's own field
+        # bends into the same shape, in the slit's own leading,
+        # foreshortened frame, at `word_shape_pupil` of the iris shape's
+        # size. Its size is FLOORED so the shape's own inradius still
+        # holds SLIT_MIN_DARK_PX of fully dark core (tune-up 1): a blend
+        # of two fields that each contain that disc contains it too, so
+        # the pupil never thins below three rendered pixels at any gaze.
+        if m > 0.0 and self._shape is not None:
+            s_pup = max(s_iris * self.word_shape_pupil,
+                        self.slit_min_half(cos_eff) / self._shape_inr)
+            self.last_shape_pupil = s_pup
+            sd = ((1.0 - m) * sd
+                  + m * (self._shape_field(self._shape, qx, qy, s_pup)
+                         - PUPIL_BITE_PX / self.s_min))
         # instrument: the floor column's centre and half-length, rendered px
         # (the slit's height direction squeezed by the eyeball turn)
         self.last_slit_core = (
@@ -1377,6 +1594,10 @@ class Sauron2d(Twod, GradientEffect):
         self.last_heat = heat.astype(np.float32)
         self.last_d = d.astype(np.float32)
         self.last_slit = black.astype(np.float32)
+        # the two gazed frames the shape is drawn in, so a check script can
+        # re-measure the shape's own cells with the EXACT sdf
+        self.last_shape_frame = (tx, ty)
+        self.last_pupil_frame = (qx, qy)
 
         # ── colour: the (sorted) set along the heat ─────────────────────
         hclip = np.clip(heat, 0.0, 1.0)
