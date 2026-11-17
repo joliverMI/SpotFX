@@ -134,7 +134,31 @@ WORD_SHAPE_MANY = "many"
 # zero slope at both ends, so the trail comes back to today's with no step
 # anywhere. At `m` 1 and `m` 0 the two formulations are identical, so the
 # hold is the same picture either way.
-WORD_SHAPE_TRAIL_S = 0.9
+#
+# ROW W4.4 RAISED IT FROM 0.9 TO 1.8, and only that far. It is the row's
+# SECOND lever, used only to finish the bar after the speed below, and the
+# sweep (`scripts/check_orbits_word_shape.py --speed-x ... --trail-s ...`,
+# 16 configurations x 24 (mode, count, shape, Energy) rows) says exactly
+# what each lever does:
+#   * the WORST row's share of the outline band over 64/255 at mid-hold is
+#     governed by the SPEED and almost not at all by the trail — 43% at
+#     speed 3 and 60-61% at speed 4 at EVERY trail from 0.9 to 5.0;
+#   * the trail moves the MEDIAN and the hold's END — at speed 4, the
+#     median went 87% (0.9) -> 91% (1.8) -> 93% (3.0) -> 93% (5.0), so it
+#     saturates by 3.0;
+#   * 0.9 left the worst row at 53%, under the bar; 1.8 clears it. 3.0 and
+#     5.0 were measured and buy the worst row nothing, so the trail is left
+#     at the smallest rise that finishes the bar.
+WORD_SHAPE_TRAIL_S = 1.8
+# ROW W4.4's FIRST lever, and his own named one — `_word_shape_speed_x`'s
+# docstring is the binding statement for what it multiplies and why it is
+# ramped by the envelope. 4.0, from the same sweep: his estimate was 3.0,
+# which leaves the one-blob and four-bead rows (his quiet-Energy binding
+# and the bottom of MANY) at 43% of the band, under the bar, at any trail;
+# 4.0 clears every row; 6.0 buys the worst row 8 more points of band and
+# costs band/rest contrast (the median ratio 4.69 -> 4.28 at trail 1.8),
+# because a faster blob smears light further off the line.
+WORD_SHAPE_SPEED_X = 4.0
 
 # Every per-particle SoA array, in one place so compaction and the particle
 # handoff native snapshot can never drift out of sync with each other.
@@ -340,6 +364,12 @@ class Orbits2d(Twod, GradientEffect):
                 default=0.15,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
             vol.Optional(
+                "word_shape_speed_x",
+                description="Word shape: how much faster the blobs run the "
+                            "outline under a shape",
+                default=WORD_SHAPE_SPEED_X,
+            ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=6.0)),
+            vol.Optional(
                 "frequency_range",
                 description="Audio band driving the reactivity",
                 default="Lows (beat+bass)",
@@ -520,6 +550,7 @@ class Orbits2d(Twod, GradientEffect):
         self.word_shape_size = float(self._config["word_shape_size"])
         self.word_shape_few = int(self._config["word_shape_few"])
         self.word_shape_wobble = float(self._config["word_shape_wobble"])
+        self.word_shape_speed_x = float(self._config["word_shape_speed_x"])
 
         self.power_func = self.POWER_FUNCS_MAPPING[
             self._config["frequency_range"]
@@ -1244,6 +1275,53 @@ class Orbits2d(Twod, GradientEffect):
         """
         return self.word_shape_size / max(float(self.radius_scale), 1e-6)
 
+    def _word_shape_speed_x(self):
+        """(the FEW walk multiplier, the MANY ring multiplier) for THIS
+        frame — row W4.4's one lever, `1 + (x - 1) * m`.
+
+        His verdict on the W1.3 build, 2026-11-17: *"I can tell the fish and
+        orbits are trying to do something, but it's not clear enough. They
+        need to increase speed so they can pass the outline fast enough that
+        their trail stays and it clearly forms the shape."* The arithmetic
+        behind that: FEW walks the outline at the blob's OWN omega
+        (`base_speed` 0.3 on his scene -> a lap in 3.3 s), so three blobs
+        each cover a third of a 168-cell outline in 1.1 s against a trail
+        half-life of ~1 s, and ONE blob (his Energy-0 binding) never gets
+        round at all; MANY circulates at the RING's rate (`spin` x
+        `base_speed` = 0.11 laps/s, a lap in 9 s). Multiplying the rate under
+        the shape is what makes the gap between two visits short against the
+        trail's own half-life, which is what makes the line read as a line.
+
+        RAMPED BY THE ENVELOPE, which is the whole of his standing rule
+        (*"they need to smoothly accelerate and not have sudden velocity
+        shifts"*): `m` is a smoothstep with ZERO SLOPE at both ends of both
+        ramps, so the speed leaves today's rate with no step, is back to
+        today's rate by the release's end, and never changes by more in one
+        frame than the smoothstep's own steepest slope allows.
+
+        ONE RATE EACH, BY THE LATCHED MODE, not both:
+          * FEW walks the outline by arc length at its own orbit rate, so
+            `omega` IS the walk rate (the position blend's own note), and the
+            vanishing tether ring is irrelevant there;
+          * MANY samples `shape.at(ring_phase + k/n)`, so `ring_phase`'s rate
+            IS the circulation rate, and a bead's own `omega` only drives the
+            `word_shape_wobble` it still has.
+        Speeding the other channel of each pair would add motion that the
+        blend is multiplying towards zero anyway.
+
+        Untold (`_ws_m` 0) both are exactly 1.0 and the callers skip the
+        multiply entirely, so an untold frame is byte for byte today's
+        (word_shape_keys' rule 3).
+        """
+        ws_m = self._ws_m
+        if ws_m <= 0.0 or self._ws_shape is None:
+            return 1.0, 1.0
+        x = min(6.0, max(1.0, float(self.word_shape_speed_x)))
+        mult = 1.0 + (x - 1.0) * ws_m
+        if self._ws_mode == WORD_SHAPE_FEW:
+            return mult, 1.0
+        return 1.0, mult
+
     def _word_shape_step(self, dt):
         """Run the told shape's own clock and set `_ws_m` (the envelope) and
         `_ws_shape` for this frame. Nothing told: both stay at 0 / None and
@@ -1693,12 +1771,21 @@ class Orbits2d(Twod, GradientEffect):
 
         # ── global motion ───────────────────────────────────────────────
         jump_eff = self.speed_jump * rscale
+        # WORD SHAPES, ROW W4.4: the rate the shape is run at. `ws_walk_x`
+        # multiplies FEW's walk along the outline (`omega`, below) and
+        # `ws_ring_x` MANY's circulation round it (this ring rate). BOTH ARE
+        # EXACTLY 1.0 untold — and 1.0 for the mode that is not latched — so
+        # the ring's own multiply here is an exact IEEE no-op and the array
+        # multiply on `omega` is skipped outright. An untold frame is byte
+        # for byte today's (word_shape_keys' rule 3).
+        ws_walk_x, ws_ring_x = self._word_shape_speed_x()
         self.ring_phase = (
             self.ring_phase
             + self.spin
             * self.base_speed
             * direction
             * (1.0 + 0.5 * jump_eff * impulse)
+            * ws_ring_x
             * dt
         ) % 1.0
         self.roll_total = (self.roll_total + self.gradient_spin * dt) % 1.0
@@ -1735,6 +1822,10 @@ class Orbits2d(Twod, GradientEffect):
         )
         # lull slows the fall-to-center swirl; drop boosts the explosion
         omega = omega * self._omega_scale
+        if ws_walk_x != 1.0:
+            # WORD SHAPES, ROW W4.4: FEW's walk along the outline is the
+            # blob's own orbit cycle by arc length, so this IS the walk rate
+            omega = omega * ws_walk_x
         self.p_phase[:n] += omega * dt
         self.p_phase[:n] %= 2 * np.pi
 

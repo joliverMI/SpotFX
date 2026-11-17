@@ -236,7 +236,7 @@ arrays set every frame from the drawn displacement, render byte-identical)
 and `gesture: "orbit"`. An incoming Orbits starts FRESH under a program
 (the program owns the outgoing particles). `fx/effects/transition_program.py`'s docstring is the binding statement; `tests/test_transition_programs.py` measures it on the real pipeline.
 
-## WORD SHAPES — few trace it, many become it (2026-11-16, row W1.3)
+## WORD SHAPES — few trace it, many become it (2026-11-16, row W1.3; row W4.4's speed section, 2026-11-17, is at the end of it)
 
 Load `.claude/skills/word-shapes` first: it owns the shape library, the six
 told keys, the form/hold/release envelope and the outline-cell denominators
@@ -357,6 +357,154 @@ been walked by the hold's MIDDLE; across five seeds FEW at Energy 0.8 runs
 1 ms). White: 0 cells of 976, except 1 on many-diamond at Energy 0.8, where
 eight beads of different colours crowd one small outline.
 
+### ROW W4.4 (2026-11-17) — FAST ENOUGH FOR THE TRAIL TO CLOSE THE OUTLINE
+
+His verdict on the W1.3 build, after the W3 room deploy: *"I can tell the
+fish and orbits are trying to do something, but it's not clear enough. They
+need to increase speed so they can pass the outline fast enough that their
+trail stays and it clearly forms the shape. Start with orbits and when we
+get that dialed in, we will do fish."* Plus his standing rule for the row:
+*"they need to smoothly accelerate and not have sudden velocity shifts."*
+
+**THE W1.3 BAR WAS VACUOUS, AND THAT IS THE ROW'S FIRST FINDING.** It
+counted a cell LIT at 20/255 — eight percent of full. Re-measured with the
+same rig, the W1.3 numbers (74-93% of the outline at the hold) sat beside a
+share of the SAME band over half of full (128/255) of **1-25%**. A faint,
+broken line passes a bar like that. The Fish review's lesson (a vacuous lit
+bar becomes a CONTRAST bar — `scripts/check_fish_word_shape.py`'s
+`band_contrast`) was never carried back here; this row carries it, and the
+W1.3 number keeps printing beside the new one for the record.
+
+**ONE NEW REGISTERED PARAM, `word_shape_speed_x`** (1.0-6.0, default
+**4.0**; `WORD_SHAPE_SPEED_X`), applied as `1 + (x - 1) * m` by
+`_word_shape_speed_x()` — which is the binding statement — to **ONE rate
+per latched mode**: FEW's `omega` (its walk along the outline IS its orbit
+rate, by arc length) and MANY's `ring_phase` rate (its circulation IS the
+ring's). Never both: the blend is multiplying the other one towards zero
+anyway. Ramped by the envelope, so the acceleration is CONTINUOUS and the
+speed is back to today's by the release's end — his standing rule, and
+`(1.0, 1.0)` on every untold frame, so untold is still byte-identical.
+
+**`WORD_SHAPE_TRAIL_S` ROSE 0.9 -> 1.8, and only that far.** It is the
+row's SECOND lever, and the sweep (16 configurations of `--speed-x` x
+`--trail-s` over 24 (mode, count, shape, Energy) rows) separates the two
+cleanly — this is the number to know before touching either:
+
+| | speed 2 | speed 3 | speed 4 | speed 6 |
+|---|---|---|---|---|
+| trail 0.9 | 27 / 64 | 43 / 78 | 53 / 87 | 59 / 88 |
+| trail 1.8 | 28 / 74 | 43 / 83 | **60 / 91** | 67 / 93 |
+| trail 3.0 | 28 / 77 | 43 / 84 | 61 / 93 | 69 / 95 |
+| trail 5.0 | 28 / 78 | 43 / 85 | 61 / 93 | 73 / 96 |
+
+(worst / median share of the outline band over 64/255 at mid-hold.)
+
+- **the WORST row is the SPEED's and almost not the trail's at all** — 43%
+  at speed 3 and 60-61% at speed 4 at EVERY trail from 0.9 to 5.0. He was
+  right that speed is the lever;
+- **the trail moves the MEDIAN and the hold's END**, and saturates by 3.0;
+- 0.9 left the worst row at 53%, under the bar; **1.8 clears it**, so the
+  trail stopped there. 3.0 and 5.0 were measured and buy the worst row
+  nothing.
+- **his estimate of 3.0 was not enough**: it leaves the ONE-blob rows (his
+  quiet-Energy `particle_count` binding) and the FOUR-bead rows at 43-48%
+  of the band, under the bar, at any trail. 6.0 buys the worst row 8 more
+  points and costs band/rest contrast (median ratio 4.69 -> 4.28), because
+  a faster blob smears light further off the line. **4.0.**
+- **the ADAPTIVE rule the row's spec offered as an alternative was measured
+  and REFUSED**, with a number: "the rate is whatever makes
+  `(outline / n) / v <= k x half_life`". At the spec's own implied `k` ~ 1
+  it gives 3.4x for one blob, 1.1x for three, 2.3x for four beads, 1.1x for
+  eight — and the measurement says 1.1x is barely better than today's. At
+  the `k` ~ 0.15 that a brightness bar actually needs, EVERY count clamps
+  to the 6.0 ceiling and the rule degenerates to "max speed". Its premise
+  is that the binding constraint is the revisit GAP; it is not, it is the
+  DEPOSIT (below). A fixed multiplier is what shipped.
+
+**THE ROW'S BAR, AND ITS ONE OPEN EXCEEDANCE.** The row's spec asked for
+**90% of the outline band over 128/255** at every hold frame. That is above
+what this effect can DEPOSIT, and the arithmetic is exact rather than
+arguable: the band is every real cell within ONE CELL PITCH of the outline,
+a pitch is two addressable columns, and `_splat` weights a cell
+`1 - dist / (blob_size + 0.5)` — so at his `blob_size` fallback 2.5 a cell a
+full pitch off the swept path takes `1 - 2/3 = 0.33` of the blob's
+brightness, and his `brightness_audio` 0.5 already holds that brightness at
+0.775 of full: **65 OF 255**. The trail composes by `np.maximum`, so nothing
+can exceed what was deposited; measured with an UNDECAYING trail at speed 6
+the band's over-128 share **ceilings at 43-99%** by row, and 23 of the 24
+rows reach no speed in 1..6 that meets the spec. **No speed and no trail
+reaches it** — the one row that does is few-3 diamond at Energy 0.8, at
+speed 5 (90% -> 91%). So the bar ASSERTED is the share over **64/255** — the same
+threshold the Fish row's bar uses, for the same reason — at mid-hold AND at
+the hold's end, plus the band/rest luminance ratio, plus that share against
+the SAME SEED's frame untold. The over-128 share is printed on every row
+with its ceiling (`--needed`). The levers that could close it are
+`blob_size` and `brightness_audio` — HIS authored params, his eye, not a
+build row's to move. **Reported, not hidden** (the honest-bar rule from
+wave 1, and the same shape as the Fish row's white tail).
+
+Measured at the shipped defaults (seed 7, his live Matrix entry, phrase
+1.2 s), share of the band over 64/255 at mid-hold / at the hold's end, with
+the over-128 share at mid-hold in brackets; bars 55% and ratio 1.4:
+
+| | heart | star | diamond |
+|---|---|---|---|
+| FEW 1, Energy 0.2 | 95 / 92% (23) | 91 / 89% (26) | 97 / 97% (43) |
+| FEW 1, Energy 0.8 | 62 / 97% (41) | 61 / 90% (35) | 64 / 99% (49) |
+| FEW 3, Energy 0.2 | 99 / 100% (42) | 98 / 97% (43) | 100 / 100% (62) |
+| FEW 3, Energy 0.8 | 100 / 100% (80) | 99 / 97% (73) | 100 / 100% (90) |
+| MANY 4, Energy 0.2 | 75 / 73% (21) | 74 / 82% (26) | 68 / 76% (23) |
+| MANY 4, Energy 0.8 | 68 / 88% (21) | 72 / 91% (31) | 60 / 84% (19) |
+| MANY 8, Energy 0.2 | 90 / 93% (39) | 90 / 97% (47) | 92 / 96% (52) |
+| MANY 8, Energy 0.8 | 99 / 99% (77) | 95 / 98% (76) | 97 / 100% (84) |
+
+Untold, on the same seeds and the same frames, the band reads **0-10%**.
+Ratios 1.53-11.97 told against 0.00-2.22 untold. The W1.3 lit-cell number
+is now **100%** almost everywhere (it was 74-93%). Across 5 seeds the two
+lowest rows hold: many-4 diamond at Energy 0.8 reads 60-93% and many-4
+heart 68-88% at mid-hold, ratio down to 1.53 — about 5 points and 0.13 of
+headroom on the pinned seed, which is the unlucky one. White 0 of 976 cells
+(1 on many-diamond at Energy 0.8, as W1.3); cost **+0.03 to +0.18 ms** p50;
+the lit-cell jump 6.5-27.2% against this effect's own 16.7-33.3% untold.
+
+**`fill` — THE STATISTIC THAT ANSWERS HIM DIRECTLY.** Seconds from the word
+until the whole line stands and stays. 0.00-0.05 s with three blobs or
+eight beads, 0.30-0.58 s with ONE blob (it has to get all the way round).
+The hold's FIRST frames can never be whole at any speed, and the reason is
+structural rather than a tuning miss: during the form the position is a
+BLEND, so trail laid early in the form was laid on the blob's CIRCLE, not
+on the outline — only the last part of the form lands on the line. Speed is
+exactly what shortens this, and it does (`fill` 0.68-0.70 s at speed 3,
+0.55-0.58 s at speed 4 on the one-blob rows).
+
+**THE CONTINUITY BAR MOVED AT THE HOLD'S EDGES, and this is the trap for
+W4.6 (Fish).** Before this row a blob walked the outline at its own
+`base_speed` — SLOWER than its ordinary orbit — so its hold-edge per-frame
+speed change sat under the untold control's. At 4x it does not, at quiet
+Energy: measured 129-200 px/s against an untold quiet-Energy ordinary of 98.
+**It is not the blend.** The panel is ANISOTROPIC (a column is half a cell
+pitch, a row sqrt(3)/2), so the same arc-length walk's px speed swings by
+nearly 2x round the outline and changes abruptly at every corner — a
+STANDING shape, envelope flat at 1.0, produces one-frame changes up to
+100 px/s ANYWHERE in the hold, which W1.3 already refused to bar
+(`mid-hold`). Comparing a 4x-speed outline walk against a 1x-speed circle
+is not a like-for-like test of "sudden shifts". So at the hold's edges what
+is asserted is the DECOMPOSITION, with no magic number: the envelope's
+largest one-frame move over the whole shape against the steepest its own
+smoothstep can be; **`row_speed_bound` = the blend's own bound PLUS the
+multiplier's** (`|dx| / x_max` of the fastest speed the hold reaches) —
+37-106 px/s, under the ordinary at every row; and the raw change within
+what a standing shape already does mid-hold plus that bound. At the form's
+START and the release's END, where the row's ramp really is what is moving,
+the plain speed-and-heading bar against the ordinary maximum STANDS and is
+met with room to spare (2.8-11.7 px/s of 98-488). **Any effect that speeds
+a walk along one of these outlines owes the same decomposition.**
+
+Proofs: `scripts/check_orbits_word_shape.py` (`--only contrast`,
+`--speed-x`/`--trail-s` for the sweep, `--needed` for the ceiling,
+`--ascii` for the luminance-graded renders) and
+`tests/test_orbits_word_shape.py`'s ROW W4.4 sections.
+
 ## Sonic reach
 
 Same rule as every effect here: no direct param edit. Sonic reaches these
@@ -364,8 +512,9 @@ params only through an existing `FlareKind` on whichever scene binds this
 effect — except that a registered param's current value on one scene
 entry is reachable through `set_scene_entry_param`, which includes the
 strip's strip-phase tunables (`charge_fill` … `flare_punch_glow`,
-registered on `orbits1d`) and the crystal's three Word Shape settings
-(`word_shape_size`, `word_shape_few`, `word_shape_wobble`). The six
+registered on `orbits1d`) and the crystal's four Word Shape settings
+(`word_shape_size`, `word_shape_few`, `word_shape_wobble`,
+`word_shape_speed_x`). The six
 `word_shape_*` TOLD keys are deliberately NOT registered — they ride only
 the Words band's own write, so no kind, drift mechanism or Sonic op can
 reach them.

@@ -2280,6 +2280,17 @@
           "help_topic": "word-shapes",
           "default": 0.15
         },
+        "word_shape_speed_x": {
+          "label": "Word Shape Speed",
+          "type": "numeric",
+          "smooth": true,
+          "min": 1.0,
+          "max": 6.0,
+          "aspect": "shape",
+          "note": "Word shapes: how much faster the blobs run the outline while a shape stands, so each one's trail is still bright when the next arrives. Ramped in and out on the shape's own smoothstep, so the blobs accelerate smoothly and are back to their ordinary speed by the release's end.",
+          "help_topic": "word-shapes",
+          "default": 4.0
+        },
         "impulse_decay": {
           "label": "Impulse Decay",
           "type": "numeric",
@@ -2481,6 +2492,7 @@
         "word_shape_size": 0.62,
         "word_shape_few": 3,
         "word_shape_wobble": 0.15,
+        "word_shape_speed_x": 4.0,
         "impulse_decay": 0.06,
         "frequency_range": "Lows (beat+bass)",
         "gradient": "linear-gradient(90deg, #ff0000 0.00%,#ff7800 14.00%,#ffc800 28.00%,#00ff00 42.00%,#00c78c 56.00%,#0000ff 70.00%,#800080 84.00%,#ff00b2 98.00%)",
