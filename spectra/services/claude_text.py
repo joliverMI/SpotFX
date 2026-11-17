@@ -2,13 +2,20 @@
 (spectra/services/lyric_reading.py, color_meanings.py). Text in, text out: no
 audio ever goes through here, and no tools are offered.
 
-THE SAME ACCOUNT AS SONIC, chosen by the same switch: `config.
-settings_agent_backend()` picks the Anthropic API (`ANTHROPIC_API_KEY`) or the
-`claude` CLI on his subscription (`CLAUDE_CODE_OAUTH_TOKEN`). The CLI half
-reuses settings_agent_cli's clean working directory, isolated config directory
-and credential handling rather than a second copy of those rules. Neither
-credential is ever read from a file here, and an absent one is a stated
-ClaudeUnavailable, never a silent nothing.
+THE SAME KEY AND THE SAME SWITCH AS SONIC. `config.settings_agent_backend()`
+picks the transport -- the Anthropic SDK or the `claude` CLI -- and BOTH bill
+his own API credits since the Admiral's order of 2026-11-17 (the subscription
+login these features used to run on is gone; spectra/services/
+settings_agent_cli.py's docstring has that history). The key itself comes from
+spectra/services/anthropic_key.py on every call, which reads it fresh from the
+environment or ~/.config/anthropic/api-key -- one helper, so a missing key says
+the same sentence here that it says in Sonic's error path and on the lyric
+pages. The CLI half reuses settings_agent_cli's clean working directory,
+isolated config directory and env-building rather than a second copy of those
+rules, so it inherits the same no-other-credential-in-the-child property and
+the same apiKeySource check. A missing key is a stated ClaudeUnavailable before
+anything is asked; a rejected one is the API's or the CLI's own error, redacted,
+never retried against something else.
 
 The model comes from `config.lyric_agent_model()`, which is Sonic's model unless
 SPECTRA_LYRIC_AGENT_MODEL says otherwise.
@@ -31,7 +38,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from spectra import config
-from spectra.services import sonic_usage
+from spectra.services import anthropic_key, sonic_usage
 
 logger = logging.getLogger(__name__)
 
@@ -55,18 +62,19 @@ class ClaudeReply:
 
 
 def availability() -> dict[str, Any]:
-    """Whether a press of a read button can work, without asking Claude."""
+    """Whether a press of a read button can work, without asking Claude.
+
+    ONE CAUSE FOR BOTH TRANSPORTS now that both bill his API key: a key or
+    no key, with anthropic_key.missing_reason()'s own sentence as the
+    reason the page shows (it names ANTHROPIC_API_KEY and the key file, so
+    the fix is in the message). `reason` is what the UI renders; it never
+    carries the key, only the file's path."""
     backend = config.settings_agent_backend()
     model = config.lyric_agent_model()
-    if backend == "cli":
-        if config.settings_agent_cli_oauth_token():
-            return {"available": True, "reason": None, "backend": backend, "model": model}
-        reason = "No Claude subscription token is set up on this machine."
-    else:
-        if config.settings_agent_api_key():
-            return {"available": True, "reason": None, "backend": "api", "model": model}
-        reason = "No Claude API key is set up on this machine."
-    return {"available": False, "reason": reason, "backend": backend, "model": model}
+    if anthropic_key.read():
+        return {"available": True, "reason": None, "backend": backend, "model": model}
+    return {"available": False, "reason": anthropic_key.missing_reason(),
+            "backend": backend, "model": model}
 
 
 def parse_json_text(text: str) -> dict[str, Any]:
@@ -103,9 +111,9 @@ def _record_usage(*, backend: str, model: str, usage: Any, purpose: str,
 
 
 async def _ask_api(*, system: str, user: str, schema: dict, purpose: str) -> ClaudeReply:
-    api_key = config.settings_agent_api_key()
+    api_key = anthropic_key.read()
     if not api_key:
-        raise ClaudeUnavailable("No Claude API key is set up on this machine.")
+        raise ClaudeUnavailable(anthropic_key.missing_reason())
     try:
         import anthropic
     except ImportError as exc:
@@ -123,7 +131,11 @@ async def _ask_api(*, system: str, user: str, schema: dict, purpose: str) -> Cla
             output_config={"format": {"type": "json_schema", "schema": schema}},
         )
     except anthropic.APIError as exc:
-        raise ClaudeUnavailable(f"Claude did not answer ({type(exc).__name__}: {exc}).") from exc
+        # A rejected key lands here (AuthenticationError/PermissionDenied):
+        # the API's own words, redacted, never a retry against anything
+        # else. redact() because an SDK error can quote the request it made.
+        raise ClaudeUnavailable(anthropic_key.redact(
+            f"Claude did not answer ({type(exc).__name__}: {exc}).")) from exc
     _record_usage(backend="api", model=model, usage=getattr(response, "usage", None),
                   purpose=purpose, rounds=1)
     if response.stop_reason == "refusal":
@@ -137,7 +149,7 @@ async def _ask_api(*, system: str, user: str, schema: dict, purpose: str) -> Cla
 async def _ask_cli(*, system: str, user: str, schema: dict, purpose: str) -> ClaudeReply:
     from spectra.services import settings_agent_cli as cli
     try:
-        token = cli._client_available()
+        api_key = cli._api_key_available()
         workdir = cli._workdir()
     except cli.SettingsAgentUnavailable as exc:
         raise ClaudeUnavailable(str(exc)) from exc
@@ -155,7 +167,7 @@ async def _ask_cli(*, system: str, user: str, schema: dict, purpose: str) -> Cla
         "--verbose",
     ]
     process = await asyncio.create_subprocess_exec(
-        *argv, cwd=str(workdir), env=cli._subprocess_env(token, workdir),
+        *argv, cwd=str(workdir), env=cli._subprocess_env(api_key, workdir),
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
@@ -168,7 +180,7 @@ async def _ask_cli(*, system: str, user: str, schema: dict, purpose: str) -> Cla
     if process.returncode not in (0, 1):
         raise ClaudeUnavailable(
             f"Claude's CLI exited {process.returncode}: "
-            f"{stderr.decode('utf-8', 'replace')[:300]}")
+            f"{anthropic_key.redact(stderr.decode('utf-8', 'replace'))[:300]}")
     try:
         events = json.loads(stdout.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -179,12 +191,19 @@ async def _ask_cli(*, system: str, user: str, schema: dict, purpose: str) -> Cla
                   if isinstance(e, dict) and e.get("type") == "result"), None)
     if final is None:
         raise ClaudeUnavailable("Claude's CLI gave no result.")
+    # Same who-paid check Sonic's own CLI turns get -- raises if the CLI
+    # reports it authenticated as anything other than his API key.
+    try:
+        cli._verify_api_key_source(events)
+    except cli.SettingsAgentUnavailable as exc:
+        raise ClaudeUnavailable(str(exc)) from exc
     model_usage = final.get("modelUsage") or {}
     _record_usage(backend="cli", model=next(iter(model_usage), None) or model,
                   usage=final.get("usage"), purpose=purpose,
                   cost_usd=final.get("total_cost_usd"), rounds=final.get("num_turns"))
     if final.get("is_error"):
-        raise ClaudeUnavailable(str(final.get("result") or "Claude's CLI reported an error."))
+        raise ClaudeUnavailable(anthropic_key.redact(
+            str(final.get("result") or "Claude's CLI reported an error.")))
     return ClaudeReply(parse_json_text(str(final.get("result") or "")), model, "cli")
 
 

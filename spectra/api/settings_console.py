@@ -27,17 +27,19 @@
                                         write op), never from `reply`'s
                                         prose.
                                         Routes to services/settings_agent.py
-                                        (default, ANTHROPIC_API_KEY) or
+                                        (default: the Anthropic SDK) or
                                         services/settings_agent_cli.py
                                         (config.settings_agent_backend()
-                                        == "cli", a subscription-
-                                        authenticated `claude -p`
-                                        subprocess -- see that module's
-                                        docstring; default OFF, the
-                                        captain's ruling) -- either way,
-                                        503 when that backend has no
-                                        model to talk to, never a silent
-                                        no-op.
+                                        == "cli", a `claude -p` subprocess
+                                        with the settings MCP server --
+                                        what his live instance runs).
+                                        BOTH bill his own API key since
+                                        2026-11-17 -- transport is the
+                                        only difference -- and either way
+                                        a missing or rejected key is a
+                                        503 carrying the real reason,
+                                        never a silent no-op and never a
+                                        fallback to a subscription login.
   POST /api/settings-console/transcribe multipart audio upload (field
                                         "audio") -> {text, vocabulary_honored}.
                                         503 (via TranscriptionUnavailable)
@@ -131,11 +133,11 @@ async def post_dispatch(body: DispatchIn,
 
 @router.post("/message")
 async def post_message(body: MessageIn):
-    # config.settings_agent_backend() defaults to "api" -- see that
-    # function's docstring and settings_agent_cli.py's module docstring
-    # for the captain's ruling this switch exists to honour: a
-    # subscription-authenticated CLI backend may be built ready to
-    # enable, but never enables itself.
+    # config.settings_agent_backend() defaults to "api"; his live instance
+    # sets "cli". Both pay with his own API key (the Admiral's 2026-11-17
+    # order) -- see that function's docstring for why the default's shape
+    # is no longer a safety latch, and settings_agent_cli.py's module
+    # docstring for the credential handling itself.
     agent = settings_agent_cli if config.settings_agent_backend() == "cli" else settings_agent
     try:
         return await agent.run_turn(body.session_id, body.text)

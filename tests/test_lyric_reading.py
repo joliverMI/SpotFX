@@ -667,21 +667,79 @@ def test_a_refused_or_cut_off_reply_is_not_used(monkeypatch, stop_reason, text):
 
 
 def test_no_key_is_stated_and_asks_nothing(monkeypatch):
+    """No key: a stated refusal, nothing asked, and the reason names BOTH
+    ways to configure it (the env var a service unit would set and the key
+    file) so the fix is in the message rather than in someone's memory.
+    conftest.py's autouse _no_real_anthropic_key fixture is what keeps his
+    real ~/.config/anthropic/api-key out of this."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(scfg, "settings_agent_backend", lambda: "api")
-    assert claude_text.availability()["available"] is False
+    avail = claude_text.availability()
+    assert avail["available"] is False
+    assert "ANTHROPIC_API_KEY" in avail["reason"]
+    assert str(scfg.anthropic_api_key_file()) in avail["reason"]
     with pytest.raises(claude_text.ClaudeUnavailable):
         asyncio.run(claude_text.ask_json(system="s", user="u", schema={}, purpose="t"))
 
 
-def _fake_cli(tmp_path, result_text, is_error=False):
+@pytest.mark.parametrize("backend", ["api", "cli"])
+def test_a_missing_key_never_falls_back_to_the_subscription(monkeypatch, backend, tmp_path):
+    """Both transports, same rule (the Admiral's 2026-11-17 order): a
+    subscription token exported in this process is not a credential any
+    more, so an unconfigured key refuses on BOTH rather than quietly
+    running `claude -p` on his subscription. Nothing is spawned."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-should-never-be-used")
+    monkeypatch.setattr(scfg, "settings_agent_backend", lambda: backend)
+    monkeypatch.setattr(scfg, "settings_agent_cli_workdir", lambda: tmp_path / "work")
+    monkeypatch.setattr(
+        asyncio, "create_subprocess_exec",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not spawn `claude`")))
+
+    assert claude_text.availability()["available"] is False
+    with pytest.raises(claude_text.ClaudeUnavailable, match="ANTHROPIC_API_KEY"):
+        asyncio.run(claude_text.ask_json(system="s", user="u", schema={}, purpose="t"))
+
+
+def test_the_cli_refuses_a_turn_it_did_not_bill_to_the_api_key(tmp_path, monkeypatch):
+    """The detector, on the lyric transport too: a `claude -p` run whose own
+    init event says it authenticated as something else is refused, not used.
+    "none" is what the real captured transcripts from the subscription era
+    report (tests/fixtures/cli_transcript_applied.json), so this is the
+    actual shape of the thing being guarded against."""
+    script, _ = _fake_cli(tmp_path, '{"matches": []}', key_source="none")
+    monkeypatch.setattr(scfg, "settings_agent_backend", lambda: "cli")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-his-own-key")
+    monkeypatch.setattr(scfg, "settings_agent_cli_binary", lambda: str(script))
+    monkeypatch.setattr(scfg, "settings_agent_cli_workdir", lambda: tmp_path / "work")
+    with pytest.raises(claude_text.ClaudeUnavailable, match="ANTHROPIC_API_KEY"):
+        asyncio.run(claude_text.ask_json(system="s", user="u", schema={}, purpose="t"))
+
+
+def test_a_rejected_key_is_surfaced_redacted_on_the_lyric_transport(tmp_path, monkeypatch):
+    script, _ = _fake_cli(
+        tmp_path, "Invalid API key (sk-ant-api03-his-own-key)", is_error=True)
+    monkeypatch.setattr(scfg, "settings_agent_backend", lambda: "cli")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-his-own-key")
+    monkeypatch.setattr(scfg, "settings_agent_cli_binary", lambda: str(script))
+    monkeypatch.setattr(scfg, "settings_agent_cli_workdir", lambda: tmp_path / "work")
+    with pytest.raises(claude_text.ClaudeUnavailable) as exc:
+        asyncio.run(claude_text.ask_json(system="s", user="u", schema={}, purpose="t"))
+    assert "Invalid API key" in str(exc.value)
+    assert "sk-ant-api03-his-own-key" not in str(exc.value)
+
+
+def _fake_cli(tmp_path, result_text, is_error=False, key_source="ANTHROPIC_API_KEY"):
     out = tmp_path / "argv.json"
     script = tmp_path / "claude"
     script.write_text("#!" + sys.executable + "\n" + textwrap.dedent(f"""
         import json, os, sys
         json.dump({{"argv": sys.argv[1:], "has_key": "ANTHROPIC_API_KEY" in os.environ,
+                   "key": os.environ.get("ANTHROPIC_API_KEY"),
+                   "has_oauth": "CLAUDE_CODE_OAUTH_TOKEN" in os.environ,
                    "cwd": os.getcwd()}}, open({str(out)!r}, "w"))
-        print(json.dumps([{{"type": "system", "subtype": "init", "tools": []}},
+        print(json.dumps([{{"type": "system", "subtype": "init", "tools": [],
+                           "apiKeySource": {key_source!r}}},
                           {{"type": "result", "result": {result_text!r}, "is_error": {is_error!r},
                            "usage": {{"input_tokens": 5, "output_tokens": 1}}, "num_turns": 1}}]))
     """), encoding="utf-8")
@@ -689,18 +747,24 @@ def _fake_cli(tmp_path, result_text, is_error=False):
     return script, out
 
 
-def test_the_cli_backend_offers_no_tools_and_uses_his_token(tmp_path, monkeypatch):
+def test_the_cli_backend_offers_no_tools_and_bills_his_api_key(tmp_path, monkeypatch):
+    """The 2026-11-17 inversion, on the lyric features' own CLI transport:
+    the child gets ANTHROPIC_API_KEY (it used to be deliberately stripped,
+    so a CLAUDE_CODE_OAUTH_TOKEN could bill the subscription instead) and
+    no subscription credential survives into it."""
     script, out = _fake_cli(tmp_path, 'here you go: {"matches": []}')
     monkeypatch.setattr(scfg, "settings_agent_backend", lambda: "cli")
-    monkeypatch.setattr(scfg, "settings_agent_cli_oauth_token", lambda: "tok")
     monkeypatch.setattr(scfg, "settings_agent_cli_binary", lambda: str(script))
     monkeypatch.setattr(scfg, "settings_agent_cli_workdir", lambda: tmp_path / "work")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "must-not-reach-the-child")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-his-own-key")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-must-not-reach-the-child")
     reply = asyncio.run(claude_text.ask_json(system="LABELS", user="WORDS", schema={"type": "object"},
                                              purpose="t"))
     assert reply.data == {"matches": []} and reply.backend == "cli"
     argv = json.loads(out.read_text())
-    assert argv["has_key"] is False
+    assert argv["has_key"] is True
+    assert argv["key"] == "sk-ant-api03-his-own-key"
+    assert argv["has_oauth"] is False
     assert argv["argv"][argv["argv"].index("--tools") + 1] == ""
     assert "--strict-mcp-config" in argv["argv"]
     assert "--allowedTools" not in argv["argv"]
@@ -712,7 +776,7 @@ def test_the_cli_backend_offers_no_tools_and_uses_his_token(tmp_path, monkeypatc
 def test_the_cli_reporting_an_error_is_unavailable(tmp_path, monkeypatch):
     script, _ = _fake_cli(tmp_path, "quota exhausted", is_error=True)
     monkeypatch.setattr(scfg, "settings_agent_backend", lambda: "cli")
-    monkeypatch.setattr(scfg, "settings_agent_cli_oauth_token", lambda: "tok")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-his-own-key")
     monkeypatch.setattr(scfg, "settings_agent_cli_binary", lambda: str(script))
     monkeypatch.setattr(scfg, "settings_agent_cli_workdir", lambda: tmp_path / "work")
     with pytest.raises(claude_text.ClaudeUnavailable, match="quota"):

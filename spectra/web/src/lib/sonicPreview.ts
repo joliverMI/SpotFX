@@ -67,9 +67,13 @@ export function formatRejectedStatus(change: SonicRejectedChange): string {
  * whichever backend actually refused. Found live 2026-11-02 (data/
  * sonic-jukebox-unresponsive/report.md): the chat's hard-coded "is
  * ANTHROPIC_API_KEY configured?" toast is flatly wrong for the "cli"
- * (subscription) backend, which refused for an entirely different,
- * self-explanatory reason (a stale-restart tool-manifest mismatch) and
- * had nothing to do with an API key. Every SettingsAgentUnavailable
+ * backend, which refused for an entirely different, self-explanatory
+ * reason (a stale-restart tool-manifest mismatch) and had nothing to do
+ * with an API key. Still true after 2026-11-17, when both backends moved
+ * onto his API key: a missing key is now ONE of several real reasons
+ * either backend can refuse (a rejected key, a timeout, a manifest
+ * mismatch, a turn billed to the wrong credential), and the server's own
+ * sentence is the only thing that knows which. Every SettingsAgentUnavailable
  * message in this codebase is already a single short, plain-language
  * sentence (no raw stack trace, no dumped manifest — settings_agent_
  * cli.py's own hardening caps even the manifest-mismatch case to a short

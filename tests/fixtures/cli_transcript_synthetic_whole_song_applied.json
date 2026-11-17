@@ -159,7 +159,7 @@
     ],
     "model": "claude-sonnet-5",
     "permissionMode": "default",
-    "apiKeySource": "none",
+    "apiKeySource": "ANTHROPIC_API_KEY",
     "claude_code_version": "synthetic"
   },
   {

@@ -72,7 +72,8 @@ import uuid
 from typing import Any, Optional
 
 from spectra import config
-from spectra.services import (absorb_console, analysis_console, device_console, drop_console,
+from spectra.services import (absorb_console, analysis_console, anthropic_key, device_console,
+                              drop_console,
                               house_console, jukebox_console, lock_console, lyric_console,
                               room_effect_console, scene_console, settings_console, show_console,
                               sonic_usage)
@@ -130,10 +131,17 @@ class SettingsAgentUnavailable(Exception):
 
 
 def _client():
-    api_key = config.settings_agent_api_key()
+    """His own API key or nothing — read through the one helper
+    (spectra/services/anthropic_key.py: ANTHROPIC_API_KEY in the
+    environment, else ~/.config/anthropic/api-key), so this backend and
+    the CLI one cannot disagree about what counts as configured or about
+    what to say when it is not. A missing key raises before any state
+    changes and before any model call; there is no other credential left
+    in this codebase to fall back to."""
+    api_key = anthropic_key.read()
     if not api_key:
         raise SettingsAgentUnavailable(
-            "no ANTHROPIC_API_KEY configured — Sonic has no model to talk to yet")
+            f"Sonic has no model to talk to yet: {anthropic_key.missing_reason()}")
     import anthropic
     return anthropic.AsyncAnthropic(api_key=api_key)
 
