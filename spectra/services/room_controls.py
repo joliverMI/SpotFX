@@ -1846,8 +1846,20 @@ def word_shape_timing(energy: float, phrase_ms: float,
                each number comes from). This IS the lead: the band fires
                `form_s` early so the shape completes ON the word.
       hold     the sung phrase's own length, clamped to
-               [`word_shape_hold_min_s`, `word_shape_hold_max_s`].
-      release  `word_shape_release_ratio` x the form.
+               [`word_shape_hold_min_s`, `word_shape_hold_max_s`], then
+               MULTIPLIED by the per-effect hold stretch
+               (fx.device_model.word_shape_hold_x — STAR, the Black Hole
+               and Fireworks hold x1.5 since his room verdict of
+               2026-11-17, so their hold runs 1.2-3.0 s where every other
+               effect's runs 0.8-2.0 s). The stretch is applied AFTER the
+               clamp on purpose: the maximum is meant to stretch with it,
+               or his "half again as long" would be silently cut back to
+               2.0 s on exactly the long phrases he was watching. With no
+               effect types given the stretch is 1.0, NOT the global
+               maximum — see that accessor's docstring for why the hold's
+               no-room fallback is the opposite of the form floor's.
+      release  `word_shape_release_ratio` x the form (the FORM, so the
+               stretch does not reach it).
 
     Pure: every number comes from `settings` or the arguments, nothing is
     read off disk. An inverted pair (fast slower than slow, min above max)
@@ -1865,5 +1877,6 @@ def word_shape_timing(energy: float, phrase_ms: float,
     lo, hi = float(settings.word_shape_hold_min_s), float(settings.word_shape_hold_max_s)
     hold_s = max(0.0, float(phrase_ms or 0.0)) / 1000.0
     hold_s = min(max(hold_s, lo), hi) if hi >= lo else hi
+    hold_s *= device_model.word_shape_hold_x(effect_types)
     release_s = max(0.0, form_s * float(settings.word_shape_release_ratio))
     return (round(form_s, 4), round(hold_s, 4), round(release_s, 4))

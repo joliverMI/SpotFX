@@ -590,6 +590,102 @@ def test_a_per_effect_minimum_form_floors_the_lead():
     assert word_shape_timing(0.0, 1000, st, ["orbits"])[0] == 0.9
     assert word_shape_timing(0.0, 1000, st, ["fish"])[0] == 2.0
 
+def test_a_per_effect_hold_stretch_lengthens_the_hold():
+    """Row W4.2, his room verdict 2026-11-17: "star and black hole look
+    pretty good, but could last a little longer" / Fireworks "have it hold
+    50% longer". ONE factor, 1.5, on the three effects he named — a code
+    constant beside the form floor, never a registered param."""
+    assert device_model.WORD_SHAPE_HOLD_X == {
+        "radial": 1.5, "blackhole": 1.5, "fireworks": 1.5}
+    assert device_model.word_shape_hold_x(["radial"]) == 1.5
+    assert device_model.word_shape_hold_x(["sauron"]) == 1.0
+    # the LARGEST among the showing types, like the form floor
+    assert device_model.word_shape_hold_x(["sauron", "blackhole"]) == 1.5
+    # NO TYPES AT ALL IS 1.0, *not* the global maximum — the OPPOSITE of
+    # word_shape_form_min_s' fallback, and deliberately so: "longest is
+    # safest" protects a shape's LANDING, and a hold has none to protect.
+    assert device_model.word_shape_hold_x() == 1.0
+
+    st = RoomControlState()
+    assert (st.word_shape_hold_min_s, st.word_shape_hold_max_s) == (0.8, 2.0)
+    # the stretch applies AFTER the clamp, so the MAXIMUM stretches too
+    assert word_shape_timing(0.5, 0, st, ["radial"])[1] == 1.2
+    assert word_shape_timing(0.5, 5000, st, ["radial"])[1] == 3.0
+    assert word_shape_timing(0.5, 5000, st, ["blackhole"])[1] == 3.0
+    assert word_shape_timing(0.5, 5000, st, ["fireworks"])[1] == 3.0
+    # Sauron, Orbits and Fish are untouched — he did not ask for them
+    for untouched in ("sauron", EFFECT, "fish"):
+        assert word_shape_timing(0.5, 0, st, [untouched])[1] == 0.8, untouched
+        assert word_shape_timing(0.5, 5000, st, [untouched])[1] == 2.0, untouched
+    # and a room nobody named keeps the unstretched hold
+    assert word_shape_timing(0.5, 0, st)[1] == 0.8
+    assert word_shape_timing(0.5, 5000, st)[1] == 2.0
+
+    # THE FORM AND THE RELEASE ARE UNTOUCHED: the stretch reaches the hold
+    # and nothing else (the release is a multiple of the FORM).
+    stretched = word_shape_timing(0.5, 1000, st, ["radial"])
+    plain = word_shape_timing(0.5, 1000, st, [EFFECT])
+    assert stretched[0] == plain[0] and stretched[2] == plain[2]
+    assert stretched[1] == pytest.approx(plain[1] * 1.5)
+
+
+def test_every_hold_setting_he_tunes_is_still_what_the_stretch_multiplies():
+    """His two hold settings stay the number the stretch is measured
+    against — the Sonic text and the Help topic both say "half again as
+    long as this", so a retune has to carry straight through."""
+    st = RoomControlState(word_shape_hold_min_s=1.0, word_shape_hold_max_s=1.4)
+    assert word_shape_timing(0.5, 0, st, ["blackhole"])[1] == 1.5
+    assert word_shape_timing(0.5, 9000, st, ["blackhole"])[1] == pytest.approx(2.1)
+    assert word_shape_timing(0.5, 0, st, [EFFECT])[1] == 1.0
+
+
+def test_the_stretched_hold_rides_the_preview_and_the_fire_path(monkeypatch):
+    """The preview and the fire path read the ONE rule, so both show the
+    stretch unasked — which is how he tests it in the room without waiting
+    for a song to sing the right word."""
+    from spectra.services import engine as engine_mod
+    from spectra.services import flare_preview
+
+    # THE PREVIEW, on a Black Hole scene: phrase_ms is 0 there, so the hold
+    # is the minimum — 1.2 s, not 0.8 s.
+    scene = _words_scene()
+    scene.devices[0].effect_type = "blackhole"
+    timeline = _run(flare_preview.build_timeline(scene, scene.flare_kinds[0], 0.8))
+    assert timeline["word_shape"]["hold_s"] == 1.2
+    # the envelope the ruler draws is longer by exactly the stretch
+    assert timeline["effect_animation_ms"] == pytest.approx(1000 * (
+        timeline["word_shape"]["form_s"] + 1.2
+        + timeline["word_shape"]["release_s"]))
+
+    # THE FIRE PATH, on a STAR scene: the told hold is the PLANNER'S hold,
+    # stretched at plan time (fire_lyric_shape_event re-makes only the form
+    # exact), so a scene change between the plan and the word carries the
+    # planned scene's stretch — at most one scene's difference.
+    star = _words_scene()
+    star.devices[0].effect_type = "radial"
+    [action] = le.plan_words([_hit(energy=0.8, end_ms=10_000)], [], TUNING,
+                             shape_timing=_room_timing(effects=("radial",)))
+    assert action.hold_s == 1.2
+    _cond, responder, executor, _clock = _scratch(star)
+    monkeypatch.setattr(engine_mod, "responses", responder)
+    monkeypatch.setattr(engine_mod, "conductor", responder.conductor)
+    _run(engine_mod.fire_lyric_shape_event(action, 310))
+    assert _told(executor)[-1]["params"][wsk.HOLD_KEY] == 1.2
+
+
+def test_the_hold_stretch_never_moves_the_planned_lead():
+    """The lead is the FORM (LEAD family, positive = earlier). The stretch
+    is a duration on the effect's own clock after the shape is complete, so
+    it must not reach the lead — nothing fires earlier because it holds
+    longer."""
+    [plain] = le.plan_words([_hit(energy=0.8, end_ms=15_000)], [], TUNING,
+                            shape_timing=_room_timing(effects=(EFFECT,)))
+    [stretched] = le.plan_words([_hit(energy=0.8, end_ms=15_000)], [], TUNING,
+                                shape_timing=_room_timing(effects=("radial",)))
+    assert stretched.transition_ms == plain.transition_ms
+    assert stretched.form_s == plain.form_s
+    assert stretched.release_s == plain.release_s
+    assert stretched.hold_s == 3.0 and plain.hold_s == 2.0
 
 def test_the_planned_lead_asks_the_SHOWING_scenes_effects(monkeypatch):
     """THE REVIEW'S FIX (1), 2026-11-16. The lead IS the form in practice

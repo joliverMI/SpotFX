@@ -244,6 +244,12 @@ the six told keys, the envelope and the engine contract above all of this.
 NOT and must not be** (there is nowhere to draw a shape on one line), and
 the strip's schema does not carry the keys.
 
+**ITS HOLD IS STRETCHED ×1.5 (row W4.2, his room verdict 2026-11-17).**
+`fireworks` is in `fx.device_model.WORD_SHAPE_HOLD_X`, so the
+`word_shape_hold_s` this effect is TOLD is already 1.2–3.0 s rather than
+0.8–2.0 s — "have it hold 50% longer". Nothing in this module changed: it runs whatever
+hold it is told (`.claude/skills/word-shapes`, THE HOLD STRETCH).
+
 **ONE BURST PER TOLD WORD, from the centre.** The SEQ edge (never the id —
 two hearts back to back both fire) arms `_ws_pending` in `config_updated`,
 with the same **creation-baseline rule as `burst_rockets`**: a fresh

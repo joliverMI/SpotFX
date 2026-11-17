@@ -321,6 +321,12 @@ approved Energy-paced 0.5-0.9 s form). The WORD SHAPES block comment above
 `DEFAULT_WORD_SHAPE_SIZE` in `fx/effects/radial.py` is the binding
 statement. Seven things not visible cold:
 
+**ITS HOLD IS STRETCHED ×1.5 (row W4.2, his room verdict 2026-11-17).**
+`radial` is in `fx.device_model.WORD_SHAPE_HOLD_X`, so the
+`word_shape_hold_s` this effect is TOLD is already 1.2–3.0 s rather than
+0.8–2.0 s — "star and black hole look pretty good, but could last a little longer". Nothing in this module changed: it runs whatever
+hold it is told (`.claude/skills/word-shapes`, THE HOLD STRETCH).
+
 - **IT IS A DIVISOR, IN THE BLEND THE EFFECT ALREADY HAD.** Star's picture
   is the source strip sampled at a shaped radius `u = r / (max_radius x
   div(angle))`, the `u = 1` contour IS the visible outline, and the effect
