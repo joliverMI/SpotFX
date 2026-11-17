@@ -527,6 +527,12 @@ WORD_SHAPE_EFFECTS: frozenset = frozenset({
     # only: `orbits1d` knows no shapes, and a strip has no outline to draw
     # one on.
     "orbits",
+    # W1.1 — Black Hole: the event horizon's radius becomes a radius per
+    # angle, the captives ride the swelling ring onto the outline and the
+    # black disc follows it (fx/effects/blackhole.py's WORD SHAPES block).
+    # `blackhole1d` is deliberately NOT here and never will be: it is a
+    # STRIP, and a shape has no meaning on one line of pixels.
+    "blackhole",
 })
 
 # THE PER-EFFECT MINIMUM FORM (plan section 2.4): an effect whose shape

@@ -37,9 +37,11 @@ W0.1 is the library plus the told-key helper plus the check, W0.3 is the
 whole engine contract above it, and WAVE 1 wires the effects one at a time
 — `fx.device_model.WORD_SHAPE_EFFECTS` names exactly those, so a scene
 with a Words band and a Word Shape kind writes to those fixtures and no
-others. "The effects that draw one", below, is the live list; the Admiral's
-tuning gate (`docs/ADDING_EFFECTS.md`) stands in front of each of them, and
-nothing is in his room until the row is deployed.
+others. "Wave 1, effect by effect", below, is the live list, and
+`tests/test_word_shape_contract.py`'s `WIRED` tuple is the ledger the
+contract asserts against; the Admiral's tuning gate
+(`docs/ADDING_EFFECTS.md`) stands in front of each of them, and nothing is
+in his room until the row is deployed.
 
 ## What the library is
 
@@ -453,7 +455,6 @@ attached could not be told apart before it: `list_flare_kinds` carries
 `warnings`. The audit of the whole table above is
 `tests/test_scene_console.py::test_the_word_shapes_sonic_reach_is_complete`,
 which names where each claim's behaviour is proven.
-
 ## Wave 1, effect by effect
 
 Each row below is one effect WIRED to the told keys:
@@ -650,6 +651,54 @@ trail must blend its per-frame DECAY, not its half-life** (the decay is
 hyperbolic in the half-life, so ramping the half-life collapsed it from
 1.2% to 11% per frame over the last few release frames and dumped 23-28%
 of the lit cells in one frame).
+
+### Black Hole — the shaped horizon (W1.1, 2026-11-16)
+
+`fx/effects/blackhole.py` (`blackhole`, the Matrix crystal effect only —
+`blackhole1d` is a STRIP and gets nothing). **One change in the effect: the
+event-horizon radius became a radius per angle**,
+`(1 - m) * horizon_scale + m * word_shape_size * shape.polar(theta)`, with
+the breathing and the charge/lull/drop math applied to that unchanged, so
+every existing phase composes with no code of its own. The captives ride
+the swelling ring out onto the outline and circle it at the ring's own
+LINEAR speed (`omega x ref / r(theta)`, with `ref` the blended mean radius
+— that is what keeps them from thinning over a heart's lobes), the black
+disc follows the outline 1.5 cell pitches in, and the whole thing beats
+with the bass.
+
+Two things this row learned that the next ones should read before
+repeating them:
+
+- **A SIZE MULTIPLIER IS NOT A BEAT ON A SHAPE.** This effect's breathing
+  is a multiplier on its radius, and a shaped radius is ~3x the ring's, so
+  the same multiplier is 3x the absolute swell: at his own `horizon_audio`
+  0.3 on loud lows the heart stood 12% WIDE of its told size and the
+  clarity bar — whose denominator is the outline band at SIZE 0.62 —
+  measured almost nothing, while the captives were tracing the shape
+  beautifully one band out. The fix is an ADDITIVE swell capped at HALF A
+  CELL, which makes the plan's own "the radius equals `SIZE x polar(theta)`
+  within half a cell at the hold" true under any audio rather than only in
+  silence. **Any effect whose shape rides a per-frame audio gain has this
+  problem**; measure the drawn outline against the pinned band before
+  trusting a coverage number.
+- **MEASURE THE DRAWN BAND BESIDE THE PINNED ONE.** Coverage against the
+  pinned 168/176/119 answers "is the shape where it was told to be";
+  coverage against the band the effect is actually drawing answers "is the
+  outline continuous". A low number on the first with a high number on the
+  second means the shape MOVED, not that it broke up — which is exactly the
+  diagnosis above, and it took a second denominator to see it.
+  `tests/test_blackhole_word_shape.py::drawn_band` is the helper.
+
+Measured (`scripts/check_blackhole_word_shape.py`, his own Black Hole V2
+crystal entry, three seeds of busy music, at the word / mid-hold / the
+hold's end): heart 76.8-85.2%, star 58.5-79.0%, diamond 89.1-92.8% of the
+pinned outline cells, inside black 100% everywhere, cost +0.1 ms p50.
+**The one miss is the star at Energy 0.2 at the END of a 1.2 s hold
+(~58%), and it is the captive POPULATION, not the shape** — his
+quiet-Energy binding spawns 0.8 blobs/s for a 176-cell outline, and
+`spawn_rate` 2.0 or `beat_burst` 3 (his own params) read 72.7% / 75.6% in
+the same room. `.claude/skills/blackhole-effect/SKILL.md`'s own "WORD
+SHAPES" section is the full record.
 
 ## Related
 
