@@ -22,15 +22,22 @@ one; this effect is deliberately exempt.
 
 `spin_total += lows_impulse * spin_cfg² / 10 * ROTATION_SPEED_SCALE` per
 60 Hz audio callback — i.e. **rev/s = 6 × ROTATION_SPEED_SCALE ×
-lows_impulse × spin²**. `ROTATION_SPEED_SCALE` (0.8, Admiral order
-2026-10-06, "reduce the maximum speed of rotation of Star by 20 percent")
-is a single multiplier applied to every rotation-speed source in this
-module — spin's reactive ceiling was 6 rev/s (spin_cfg at its own max 1.0,
-full audio impulse), now 4.8 rev/s. `spin` is a GAIN on the live captured
+lows_impulse × spin²**. `ROTATION_SPEED_SCALE` (**0.4** since 2026-11-18;
+0.8 before, from the 2026-10-06 order "reduce the maximum speed of rotation
+of Star by 20 percent", and halved again by "slow the star rotation by 50%
+at all speeds, including the burst speeds, not just the static speed",
+data/star-curve-study/report.md) is a single multiplier applied to every
+rotation-speed source in this module — spin's reactive ceiling was 6 rev/s
+(spin_cfg at its own max 1.0, full audio impulse), then 4.8, now **2.4
+rev/s**. THAT IS WHY A BURST NEEDS NO SEPARATE KNOB: a bass hit is this
+same law at a high impulse, so one scale slows the static speed and the
+bursts together. The per-frame cap is halved in step (below), because the
+cap — not the scale — is what the loudest fires sit on. `spin` is a GAIN on the live captured
 lows power (snapcast.monitor melbank), NOT the bridge's "intensity"
 (stored librosa analysis — the two diverge freely). During bass-light
 passages the lows impulse idles ~0.01, so a healthy `spin=0.55`
-turns ~5.2°/s (post-scale) and reads as parked while rendering fine.
+turns ~2.6°/s (post-scale; it was 5.2 before 2026-11-18) and reads as
+parked while rendering fine.
 Before diagnosing "effect X ignores its speed param" on ANY effect, check
 whether the param is tagged `"aspect": "reactivity"` in
 `config/effect_params.json` and measure the LIVE impulse before blaming
@@ -40,24 +47,27 @@ radial is where it was found (`docs/spectra-star-motion-audio-idle.md`,
 
 ## `base_rotation` is a SEPARATE, differently-scaled control — don't conflate
 
-`base_rotation` (0..1.6, default 0.0 — ceiling reduced from 2.0 the same
-2026-10-06 order) is a quiet FLOOR in plain revolutions/second — LINEAR,
+`base_rotation` (0..**0.8**, default 0.0 — the ceiling is
+`2.0 * ROTATION_SPEED_SCALE`: 2.0 originally, 1.6 after the 2026-10-06
+order, 0.8 since 2026-11-18) is a quiet FLOOR in plain revolutions/second — LINEAR,
 absolute, never squared, never audio-multiplied. It combines with the
 audio-driven `spin` term as `effective rev/s = max(base_rotation, reactive
 rev/s)` — a FLOOR, not a sum, so it never adds anything at a peak. It
 advances on the RENDER clock (`draw()`), not `audio_data_updated` — a base
 term there would stall in exactly the quiet case it exists for. Default
 0.0 keeps every pre-existing scene byte-identical until he sets one.
-`fx/VENDOR.md` deviation #22. A stored scene authored above the new 1.6
+`fx/VENDOR.md` deviation #22. A stored scene authored above the current
 ceiling is clamped on load (`spectra/models/scene.py`'s
-`_clamp_radial_base_rotation`), not silently dropped by the effect's own
-schema validation.
+`RADIAL_BASE_ROTATION_MAX` / `_clamp_radial_base_rotation`, which mirrors
+the literal — as does `config/effect_params.json`'s declared `max`; all
+three move together), not silently dropped by the effect's own schema
+validation.
 
 ## The charge phase adds its own spin-up — a third rotation source
 
 During a charge, `_phase_step` adds `CHARGE_SPIN_REV_S * p² * dt`
-(0.72 rev/s at full charge — `0.9 * ROTATION_SPEED_SCALE`, `p` = charge
-progress) to `spin_total` — an ease-in that maxes at the charge ramp's
+(**0.36** rev/s at full charge — `0.9 * ROTATION_SPEED_SCALE`, so it
+followed the 2026-11-18 halving on its own; `p` = charge progress) to `spin_total` — an ease-in that maxes at the charge ramp's
 END. Its direction is `spin`'s sign if it has one, else `twist`'s, else
 clockwise. So a star that visibly spins up before a drop, even in a quiet
 passage, is this choreography, not `spin` or `base_rotation` misbehaving.
@@ -210,16 +220,20 @@ want it to go through 0". Five things not visible cold:
   past half a revolution), scales it by the ease-in and clamps it. The
   clamp shipped as `ROTATION_CAP_REV_S` = 0.7 x 6.0 x ROTATION_SPEED_SCALE
   = 3.36 rev/s; the spin smooth plan (next section) re-expressed it per
-  rendered frame — `ROTATION_CAP_DEG_FRAME` = **18 deg per frame**.
+  rendered frame — `ROTATION_CAP_DEG_FRAME`, 18 deg per frame then and
+  **9 deg per frame** (0.75 rev/s at 30 fps) since 2026-11-18.
   Identity below the cap. `spin_ease_in_s` defaults to **0** on the effect
   (every other Radial scene byte-identical); STAR's Matrix entry carries
   1.0 (`STAR_SPIN_EASE_IN_S`, written by `scripts/star_improve_scene_data.
   py`). No quiet floor on STAR by his word ("it can slow to a stop during
   quiet music"): `base_rotation` stays 0 and his.
 - **`_star_wave_step` (draw)**: with `star_wave` on, `self.star` is
-  overridden per frame by a cosine between `star_wave_lo` and `_hi`
+  overridden per frame from `_star_wave_u` between `star_wave_lo` and `_hi`
   (STAR: **-0.2 .. +0.4**, through flat = 0 every cycle), period
-  `star_wave_period_slow_s` (7) at `energy` 0 -> `_fast_s` (3) at 1; the
+  `star_wave_period_slow_s` (effect default 7, **STAR 28 since 2026-11-18**)
+  at `energy` 0 -> `_fast_s` (3, **kept** — his "slow the star setting drift
+  by 75%, but keep the burst speeds": the energy-paced period IS the drift's
+  burst speed) at 1; the
   phase integrates (a pace change never jumps the value) and, on the
   scene's FIRST activation, starts AT the fired `star` value (clamped into
   the bounds), heading up — a later re-fire while STAR is already showing
@@ -227,6 +241,35 @@ want it to go through 0". Five things not visible cold:
   The stored `star` is never rewritten. **Flat is star = 0**, not 0.5 (he assumed
   0.5 until the -0.7..+0.7 x 3-6 edges grid): `radius x (1 + star
   cos(edges phi))`; 0.5 is a 3.0x star. Crossing 0 is continuous.
+- **`star_wave_curve` (2026-11-18, data/star-curve-study/report.md)** picks
+  the phase -> value map: `cosine` (the DEFAULT, and bit-for-bit the closed
+  form that shipped before — so every other Radial scene is untouched),
+  `linear`, `smooth`, `plateau` (**STAR's own entry**) and `steps`. It never
+  was the "linear bounce" he described: the cosine already eases at both
+  LIMITS (37% of a cycle within 0.05 of one) and runs FASTEST through flat
+  (11%) — the missing dwell was the one at flat. `plateau` holds four times
+  a cycle — at lo, at flat, at hi, at flat again — measuring **45% flat /
+  31% ends**, with `star_wave_dwell_flat` (0.161) and `_dwell_end` (0.089)
+  as the hold shares of one cycle, his "50% held, split 1.8 : 1 toward
+  flat". **A glide's time is proportional to the value span it covers**, so
+  every glide shares one peak rate (`pi / glide_share`) and the short leg
+  never lurches; holding half the cycle still leaves the glide at HALF the
+  old peak rate because the cycle is 4x longer.
+  **THE HOLD IS AT THE VALUE 0, NOT THE MIDPOINT OF THE BOUNDS** — with
+  -0.2..+0.4 flat is at ONE THIRD (`x0` in `_star_wave_u`), and a curve
+  built on the midpoint would hold at +0.1, a half-pointed shape. Bounds
+  that never cross 0 lose their flat holds to the limits
+  (`_star_wave_segments`), so the param is safe on any bounds.
+  **The seeding**: `_star_wave_phase_for` keeps the `arccos` closed form for
+  `cosine` (exact, not approximate) and inverts every other curve from a
+  256-point table of its RISING span, `searchsorted(side="left")` so a
+  landed value sitting on a hold starts at that hold's BEGINNING — the
+  binding's own `star = 0.0` therefore enters flat and waits out the whole
+  dwell. Round trip measured at < 5e-4 star units
+  (`tests/test_star_curve.py`, `data/star-curve-study/seed_inverse_check.py`).
+  `_star_wave_rise_end` COMPUTES that span rather than assuming half a cycle;
+  it comes to exactly 0.5 for any paired dwell, but computing it is what
+  keeps an unequal pair correct.
 - **`energy`** (0..1, default 0.5) is PUSHED by the pulse feed
   (`spectra/services/pulse_feed.py`; `fx.device_model.ENERGY_FED_EFFECTS`
   = the one-colour effects + radial, `ENERGY_ONLY_EFFECTS` = radial takes
@@ -269,12 +312,15 @@ cold (`data/star-spin-smooth/report.md` has the evidence):
   "hard to tell it moved" was aliasing, not speed. Any per-frame reasoning
   about STAR must use dt = 1/30; the rig (`tests/star_harness.py`) steps
   at 1/60, so a per-frame cap is 2x the rev/s there.
-- **`ROTATION_CAP_DEG_FRAME` = 18 (per RENDERED frame, whatever dt — a
+- **`ROTATION_CAP_DEG_FRAME` (per RENDERED frame, whatever dt — a
   stalled frame is clamped to the same angle)** replaces `ROTATION_CAP_
-  REV_S`. 18 deg per frame = 1.5 rev/s at 30 fps, under the aliasing limit
-  of every edge count STAR rolls (3..6 -> 60..30 deg). One constant, by
-  his "for now": retune it there. A loud fire's STEADY speed (spin 0.94 on
-  Gold: 1.63 rev/s) now rides this clamp — the trade he chose over 22 deg.
+  REV_S`. 18 deg per frame = 1.5 rev/s at 30 fps when the spin smooth plan
+  shipped; **9 deg = 0.75 rev/s since 2026-11-18**, both under the aliasing
+  limit of every edge count STAR rolls (3..6 -> 60..30 deg). One constant:
+  retune it there. A loud fire's STEADY speed rides this clamp — the trade
+  he chose over 22 deg, and the reason the 2026-11-18 halving had to touch
+  the cap as well as the scale (the scale alone would have left exactly
+  those clamped frames at the old angle).
 - **The jerk was the impulse SHAPE, not the cap.** `lows_power(filtered)`
   decays 0.2 per 60 Hz frame (ExpFilter, `fx/effects/audio.py`) and the
   drive is spin² x impulse, so a hit was a ~6-frame burst (rise ~100 ms,
@@ -302,7 +348,7 @@ cold (`data/star-spin-smooth/report.md` has the evidence):
   surges +70% with a 300 ms half-life. The final energy-paced numbers are
   in `data/star-spin-smooth/plan.md` ("Final law, measured").
 
-Proofs: `tests/test_star_spin_smooth.py` (the 18 deg clamp at any dt,
+Proofs: `tests/test_star_curve.py` (the halving, the curve's dwell shares, `cosine` bit-identity, the seeding) and `tests/test_star_spin_smooth.py` (the per-frame clamp at any dt,
 release 0 = ease+clamp alone, the law to 1e-12, burst spread with the turn
 kept, energy linear / snappier-lazier / never a step, the data script, the
 registry). Help topic `star-spin-smooth`.

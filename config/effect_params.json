@@ -1163,10 +1163,10 @@
           "type": "numeric",
           "smooth": true,
           "min": 0,
-          "max": 1.6,
+          "max": 0.8,
           "aspect": "shape",
           "help_topic": "radial-base-rotation",
-          "note": "A QUIET BASE ROTATION FLOOR, added 2026-08-25 (owner ask: \"I want there to be some minimum absolute value for the base speed the pattern rotates at\"). SCALES COMPLETELY DIFFERENTLY FROM `spin`/Speed and is not interchangeable with it: this value is LINEAR and ABSOLUTE in REVOLUTIONS PER SECOND (0.05 = one turn every 20s, 1.0 = one turn a second), whereas `spin` is a GAIN that fx/effects/radial.py squares before use (nonlinear_log(x,2)/10) and then multiplies by the LIVE captured lows power \u2014 so `spin` produces exactly zero rotation in silence at any value, which is the whole reason this param exists (docs/spectra-star-motion-audio-idle.md). SEMANTICS ARE A FLOOR, NOT A SUM: effective rev/s = max(base_rotation, reactive rev/s), so the existing reactivity is byte-unchanged whenever the music's own drive is faster. Advanced on the RENDER clock in radial.py's draw() (via _base_rotation_step), NOT in audio_data_updated \u2014 a base term in the audio callback would stall exactly when the audio does. Direction follows sign(spin) (i.e. the spin_sign/Flip machinery), else sign(twist), else clockwise; it never fights the current direction. Default 0.0 = the vendored behaviour, unchanged. fx/VENDOR.md deviation #22. MAX REDUCED 2026-10-06 (Admiral order, \"reduce the maximum speed of rotation of Star by 20 percent\") from 2.0 to 1.6 rev/s \u2014 fx/effects/radial.py's own CONFIG_SCHEMA Range is the source of truth (ROTATION_SPEED_SCALE); keep this literal in sync with it. A stored scene authored above the new max is clamped on load (spectra/models/scene.py's radial base_rotation clamp), not silently dropped.",
+          "note": "A QUIET BASE ROTATION FLOOR, added 2026-08-25 (owner ask: \"I want there to be some minimum absolute value for the base speed the pattern rotates at\"). SCALES COMPLETELY DIFFERENTLY FROM `spin`/Speed and is not interchangeable with it: this value is LINEAR and ABSOLUTE in REVOLUTIONS PER SECOND (0.05 = one turn every 20s, 1.0 = one turn a second), whereas `spin` is a GAIN that fx/effects/radial.py squares before use (nonlinear_log(x,2)/10) and then multiplies by the LIVE captured lows power \u2014 so `spin` produces exactly zero rotation in silence at any value, which is the whole reason this param exists (docs/spectra-star-motion-audio-idle.md). SEMANTICS ARE A FLOOR, NOT A SUM: effective rev/s = max(base_rotation, reactive rev/s), so the existing reactivity is byte-unchanged whenever the music's own drive is faster. Advanced on the RENDER clock in radial.py's draw() (via _base_rotation_step), NOT in audio_data_updated \u2014 a base term in the audio callback would stall exactly when the audio does. Direction follows sign(spin) (i.e. the spin_sign/Flip machinery), else sign(twist), else clockwise; it never fights the current direction. Default 0.0 = the vendored behaviour, unchanged. fx/VENDOR.md deviation #22. MAX REDUCED 2026-10-06 (Admiral order, \"reduce the maximum speed of rotation of Star by 20 percent\") from 2.0 to 1.6 rev/s, then HALVED AGAIN 2026-11-18 (Admiral order, \"slow the star rotation by 50% at all speeds, including the burst speeds\", data/star-curve-study/report.md) to 0.8 rev/s \u2014 fx/effects/radial.py's own CONFIG_SCHEMA Range is the source of truth (ROTATION_SPEED_SCALE); keep this literal in sync with it, and so must spectra/models/scene.py's RADIAL_BASE_ROTATION_MAX. A stored scene authored above the new max is clamped on load (spectra/models/scene.py's radial base_rotation clamp), not silently dropped.",
           "default": 0.0
         },
         "twist": {
@@ -1275,6 +1275,38 @@
           "max": 30,
           "default": 3.0,
           "help_topic": "star-wave"
+        },
+        "star_wave_curve": {
+          "label": "Star Wave Curve",
+          "type": "enum",
+          "smooth": false,
+          "options": ["cosine", "linear", "smooth", "plateau", "steps"],
+          "aspect": "shape",
+          "default": "cosine",
+          "help_topic": "star-wave",
+          "note": "The SHAPE of the sway between Star Wave Low and High. cosine (default, and what shipped before 2026-11-18): eased at the two limits only \u2014 37% of a cycle near a limit but just 11% near FLAT, and fastest straight through it. plateau (STAR's own entry; the Admiral, 2026-11-18, \"have it follow a curve so that it spends more time flat, and at the ends\"): four holds per cycle \u2014 at the low end, at flat, at the high end, at flat again \u2014 measuring 45% at flat and 31% at the ends, each glide's time proportional to the value span it covers so none of them lurches; its two holds are Star Wave Dwell Flat / Dwell End. smooth: cosine's ease taken further, longer at the limits and still no pause at flat. steps: a ladder of held shapes with a visible snap between them. linear: a constant-rate bounce, no dwell anywhere. FLAT IS NOT THE MIDDLE OF THE RANGE \u2014 it is the value 0, the plain polygon, which in STAR's -0.2..+0.4 sits at ONE THIRD; every hold is placed in value space, so a sway whose bounds never cross 0 simply loses its flat holds to the limits. data/star-curve-study/report.md."
+        },
+        "star_wave_dwell_flat": {
+          "label": "Star Wave Dwell Flat",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 0.45,
+          "aspect": "shape",
+          "default": 0.161,
+          "help_topic": "star-wave",
+          "note": "Plateau curve only: the share of ONE CYCLE held FLAT (star = 0, the plain polygon) at each of the two passes through it \u2014 so twice this much flat per cycle. With Star Wave Dwell End it is his \"50% held, split 1.8 : 1 toward flat\" (2 x 0.161 + 2 x 0.089, 2026-11-18). Raising it steepens the glides, which stay gentler than the old cosine as long as the periods stay long."
+        },
+        "star_wave_dwell_end": {
+          "label": "Star Wave Dwell End",
+          "type": "numeric",
+          "smooth": true,
+          "min": 0,
+          "max": 0.45,
+          "aspect": "shape",
+          "default": 0.089,
+          "help_topic": "star-wave",
+          "note": "Plateau curve only: the share of ONE CYCLE held at each of the two limits (Star Wave Low and High) \u2014 so twice this much per cycle. See Star Wave Dwell Flat. The two together are capped at 98% of the cycle so the glides always have time."
         },
         "edges": {
           "label": "Edges",

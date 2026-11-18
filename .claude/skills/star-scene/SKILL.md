@@ -134,13 +134,52 @@ per frame for now". ONE change, same raw-dict discipline (backup,
 --revert, structural diff, dry run by default), DJ applies at deploy:
 Matrix entry `spin_release_low_s 0.45`, `spin_release_high_s 0.2` — the
 seconds a bass hit's spin burst is spread over at section energy 0 and 1
-(a straight line between; the effect default 0/0 is today). The 18 deg per
-rendered frame clamp is engine code (`ROTATION_CAP_DEG_FRAME`), not scene
-data. Expect a loud fire (spin 0.94 by the `spin` binding at trigger
-intensity 1) to sit AT the clamp through a steady loud passage — that is
-the trade he chose over 22 deg, revisit the constant, not the binding, if
-he wants it faster. `tests/test_star_spin_smooth.py` proves the script on
-his STAR shape. The radial-effect skill carries the mechanics.
+(a straight line between; the effect default 0/0 is today). The per-frame
+clamp is engine code (`ROTATION_CAP_DEG_FRAME` — 18 deg then, 9 since
+2026-11-18), not scene data. Expect a loud fire (spin 0.94 by the `spin`
+binding at trigger intensity 1) to sit AT the clamp through a steady loud
+passage — that is the trade he chose over 22 deg, revisit the constant, not
+the binding, if he wants it faster. `tests/test_star_spin_smooth.py` proves
+the script on his STAR shape. The radial-effect skill carries the mechanics.
+
+## The star curve study (2026-11-18) — what `scripts/star_curve_scene_data.py` changes on THIS scene
+
+His words: "cut the max angle/frame the star can rotate, but let's scale it
+all down by 50%. So slow the star rotation by 50% at all speeds, including
+the burst speeds, not just the static speed. Additionally, slow the 'star
+setting' drift by 75%, but keep the burst speeds. However, it seems like it
+currently linearly bounces between the limits. Instead, have it follow a
+curve so that it spends more time flat, and at the ends"; after the
+five-curve artifact, **"D2 and all recs"**. Same raw-dict discipline
+(backup, --revert, structural diff, dry run by default), DJ applies at
+deploy. FIVE params on the Matrix entry and nothing else:
+`star_wave_curve "plateau"`, `star_wave_dwell_flat 0.161`,
+`star_wave_dwell_end 0.089`, `star_wave_period_slow_s 28.0`,
+`star_wave_period_fast_s 3.0`.
+
+- The DRIFT slowed only at its CALM end (7 -> 28 s); the loud end stays 3 s
+  — that energy-paced period is what "keep the burst speeds" names, and it
+  is written explicitly so the kept value is pinned in his data rather than
+  riding the effect default. (He chose this reading, D2, over both-x4.)
+- The CURVE holds four times a cycle — at -0.2, at FLAT, at +0.4, at flat
+  again. **Flat is the value 0, a third of the way up this scene's -0.2 ..
+  +0.4 — not the midpoint**, which would be a half-pointed +0.1 shape.
+- The ROTATION halving is engine code, not scene data:
+  `ROTATION_SPEED_SCALE` 0.8 -> 0.4 and `ROTATION_CAP_DEG_FRAME` 18 -> 9.
+  Both were needed; the scale alone leaves the clamped loud frames at the
+  old angle. The `spin` values this scene's flare kinds patch (0.25 / 0.55)
+  and its `spin` binding (0.4..1.0) are INPUTS to the squared law, so they
+  halved on their own — **do not "fix" them to compensate**.
+- `base_rotation` is still absent from this entry (0, his "it can slow to a
+  stop during quiet music"); its ceiling moved 1.6 -> 0.8 with the scale, so
+  never author one above that here.
+- The pre-drop outline's own spin-up (`PRE_DROP_SPIN_FROM/_TO`, 0.35 -> 1.8
+  rev/s) was left ALONE by his choice, and is now the fastest turn in the
+  scene — expected, not a bug.
+
+`tests/test_star_curve.py` proves the script on his STAR shape and owns the
+constants' values; the radial-effect skill carries the curve's mechanics
+(`_star_wave_u`, `_star_wave_segments`, the seeding inverse).
 
 ## Sonic reach
 

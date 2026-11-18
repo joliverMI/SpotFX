@@ -35,7 +35,25 @@ IMPLODE_MIN_W = 0.10
 # max (1.0) reaches the new, lower ceiling automatically — the scale is
 # applied to the OUTPUT, never to spin's own [-1, 1] input range, so
 # nothing about how a binding reaches "max" needs to change.
-ROTATION_SPEED_SCALE = 0.8
+#
+# HALVED AGAIN 2026-11-18 (Admiral order, data/star-curve-study/report.md:
+# "cut the max angle/frame the star can rotate, but let's scale it all down
+# by 50%. So slow the star rotation by 50% at all speeds, including the
+# burst speeds, not just the static speed", then "D2 and all recs"):
+# 0.8 -> 0.4, so the reactive ceiling is 2.4 rev/s and his usual fire
+# (spin 0.70) means 0.44 rev/s instead of 0.88. THIS IS WHAT HALVES THE
+# BURSTS TOO: a bass hit is not a separate quantity, it is this same law at
+# a high impulse (data/star-spin-smooth/report.md F3), so one scale covers
+# "all speeds" — the static speed, the bursts, and the charge spin-up
+# (CHARGE_SPIN_REV_S below) together. The per-frame CAP is halved with it,
+# below, because the cap is what clips the loudest fires and would
+# otherwise hold them at the old angle. Three mirrors of the derived
+# base_rotation ceiling (2.0 × this scale) must move in step:
+# config/effect_params.json's declared `max` and spectra/models/scene.py's
+# RADIAL_BASE_ROTATION_MAX. Nothing else needed an edit — the spin values a
+# flare patches (0.25 / 0.55) and the fire binding (0.4–1.0) are INPUTS to
+# the squared law, so they produce half of what they used to on their own.
+ROTATION_SPEED_SCALE = 0.4
 
 # charge/lull/drop choreography (SpotFX drives `phase` + ramps
 # `phase_progress`; see _phase_step)
@@ -74,7 +92,18 @@ CHARGE_SPIN_REV_S = 0.9 * ROTATION_SPEED_SCALE
 # per-frame angle: 18 deg per rendered frame = 1.5 rev/s at 30 fps, under
 # the aliasing limit of every edge count STAR rolls (3..6 edges -> 60..30
 # deg). "For now": one constant, retune here.
-ROTATION_CAP_DEG_FRAME = 18.0
+#
+# HALVED 2026-11-18 with ROTATION_SPEED_SCALE above (the same order: "cut
+# the max angle/frame the star can rotate, but let's scale it all down by
+# 50%"): 18 -> 9 deg per rendered frame = 0.75 rev/s at 30 fps. Both halves
+# of that order are needed and neither is redundant — the scale halves every
+# frame BELOW the cap, and this halves the ceiling the loudest fires sit on.
+# At a 0.9-intensity fire (spin 0.94) the old steady speed was already on the
+# 18 deg clamp for half its frames (data/star-spin-smooth/plan.md, "Final
+# law, measured"), so leaving the cap at 18 would have left exactly those
+# frames unslowed. Still far under the aliasing limit (9 < 30 deg for a
+# 6-point star).
+ROTATION_CAP_DEG_FRAME = 9.0
 ROTATION_CAP_REV_FRAME = ROTATION_CAP_DEG_FRAME / 360.0
 # THE RELEASE: a one-pole low-pass on the per-frame ADVANCE (not on the
 # speed), so a bass hit's burst, which the lows filter (ExpFilter decay
@@ -116,6 +145,52 @@ DEFAULT_STAR_WAVE_LO = -0.2
 DEFAULT_STAR_WAVE_HI = 0.4
 DEFAULT_STAR_WAVE_PERIOD_SLOW_S = 7.0
 DEFAULT_STAR_WAVE_PERIOD_FAST_S = 3.0
+# ── THE STAR CURVE (2026-11-18, data/star-curve-study/report.md; the Admiral:
+# "Additionally, slow the 'star setting' drift by 75%, but keep the burst
+# speeds. However, it seems like it currently linearly bounces between the
+# limits. Instead, have it follow a curve so that it spends more time flat,
+# and at the ends", and after the five-curve page: "D2 and all recs").
+#
+# IT NEVER WAS A LINEAR BOUNCE. The shipped sway is a raised cosine, which
+# already eases to a stop at both LIMITS and runs fastest straight through
+# flat: 11% of a cycle within 0.05 of star = 0 against 37% near a limit. The
+# dwell he is missing is the one at FLAT, where the shape change is most
+# visible. So `star_wave_curve` picks the phase -> value map, and `plateau`
+# is the one he chose: four holds per cycle — at lo, at flat, at hi, at flat
+# again — with cosine glides between them. Measured: 45% at flat and 31% at
+# the ends, against today's 11% / 37%.
+#
+# FLAT IS NOT THE MIDDLE OF THE RANGE. The shaping is
+# radius x (1 + star cos(edges phi)), so star = 0 is the plain polygon, and
+# with his -0.2 .. +0.4 bounds that sits at ONE THIRD of the sway, not one
+# half. Every hold is therefore placed in VALUE space (`x0` in
+# `_star_wave_u`), never at the midpoint of the bounds — a curve built on the
+# midpoint would hold at +0.1, a half-pointed shape, which is not the ask.
+#
+# EVERY GLIDE SHARES ONE PEAK RATE: a glide's time is proportional to the
+# value span it covers, so the sway never lurches on the short leg. Holding
+# half the cycle still leaves the glide at HALF today's peak rate, because
+# the cycle is four times longer (0.135 against 0.269 star/s).
+#
+# THE DRIFT RATE, x0.25 with the bursts kept ("but keep the burst speeds"):
+# the only pace the drift takes from the music is its energy-paced period, so
+# that IS its burst speed and it stays — the calm end alone slows, 7 -> 28 s,
+# while the loud end holds at 3 s. Both are on STAR's own entry; the effect
+# defaults below stay at today's values, so no other Radial scene moves.
+STAR_WAVE_CURVES = ("cosine", "linear", "smooth", "plateau", "steps")
+DEFAULT_STAR_WAVE_CURVE = "cosine"       # today, for every other Radial scene
+STAR_WAVE_CURVE = "plateau"              # STAR's own entry
+# the plateau's holds, as shares of ONE CYCLE — two flat holds and two limit
+# holds, so his "50% held, split 1.8 : 1 toward flat" is 2 x 0.161 + 2 x 0.089
+DEFAULT_STAR_WAVE_DWELL_FLAT = 0.161
+DEFAULT_STAR_WAVE_DWELL_END = 0.089
+# `steps`: the share of each rung spent held before it snaps to the next
+STAR_WAVE_STEP_HOLD = 0.70
+# the seeding inverse's table size (see `_star_wave_phase_for`)
+STAR_WAVE_SEED_SAMPLES = 256
+# STAR's own periods, x4 on the calm end, the loud end kept
+STAR_WAVE_PERIOD_SLOW_S = 28.0
+STAR_WAVE_PERIOD_FAST_S = 3.0
 
 # ── WORD SHAPES (the Word Shapes plan row W1.6, 2026-11-15; the Admiral:
 # "STAR: change the radial shape so it matches the shape if possible. This
@@ -277,6 +352,136 @@ def _inv_smooth(y):
     return 0.5 - math.sin(math.asin(1.0 - 2.0 * y) / 3.0)
 
 
+def _smoother(t):
+    """The quintic smootherstep — zero slope AND zero curvature at both ends,
+    which is what makes `smooth` hover at the limits longer than a cosine."""
+    t = np.clip(t, 0.0, 1.0)
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+
+
+def _star_wave_segments(dwell_flat, dwell_end, x0):
+    """THE PLATEAU's eight segments, `(duration, u_from, u_to)` in phase
+    order: hold at the low end, glide to flat, hold at flat, glide to the high
+    end, hold there, glide back to flat, hold at flat, glide back to the low
+    end. Durations are shares of ONE CYCLE and always sum to 1.
+
+    A glide's time is proportional to the value span it covers, so every glide
+    shares one peak rate and the sway never lurches on the short leg. `x0` is
+    where FLAT sits in the sway, in value space (see the STAR CURVE comment):
+    when it is outside the bounds — `lo >= 0` or `hi <= 0`, so the sway never
+    passes through the plain polygon at all — the two flat holds collapse and
+    their time goes to the limits, which keeps the param safe on any bounds
+    instead of silently holding at a shape that is not flat."""
+    hf = min(max(float(dwell_flat), 0.0), 0.45)
+    he = min(max(float(dwell_end), 0.0), 0.45)
+    x0 = min(max(float(x0), 0.0), 1.0)
+    if x0 <= 0.0 or x0 >= 1.0:
+        he = min(he + hf, 0.49)
+        hf = 0.0
+    held = 2.0 * (he + hf)
+    if held > 0.98:                      # always leave the glides some time
+        shrink = 0.98 / held
+        he *= shrink
+        hf *= shrink
+    glide = 1.0 - 2.0 * he - 2.0 * hf
+    g_up = glide * x0 / 2.0
+    g_dn = glide * (1.0 - x0) / 2.0
+    return (
+        (he, 0.0, 0.0), (g_up, 0.0, x0), (hf, x0, x0), (g_dn, x0, 1.0),
+        (he, 1.0, 1.0), (g_dn, 1.0, x0), (hf, x0, x0), (g_up, x0, 0.0),
+    )
+
+
+def _star_wave_u(p, curve, x0, dwell_flat, dwell_end):
+    """The sway's normalised position (0 = `star_wave_lo`, 1 = `_hi`) at phase
+    `p`, for each `star_wave_curve`. Continuous and bounded to [0, 1] for
+    every curve; `steps` is deliberately the one with a visible snap."""
+    p = float(p) % 1.0
+    if curve == "cosine":                # the original: eased at the limits
+        return 0.5 - 0.5 * np.cos(2.0 * np.pi * p)
+    if curve == "linear":                # a constant-rate bounce
+        return 2.0 * p if p < 0.5 else 2.0 - 2.0 * p
+    if curve == "smooth":                # longer hover at the limits only
+        return float(_smoother(2.0 * p if p < 0.5 else 2.0 - 2.0 * p))
+    if curve == "steps":                 # a ladder of held shapes
+        rungs = (0.0, x0 / 2.0, x0, (1.0 + x0) / 2.0, 1.0,
+                 (1.0 + x0) / 2.0, x0, x0 / 2.0)
+        n = len(rungs)
+        k = int(p * n) % n
+        f = p * n - k
+        if f <= STAR_WAVE_STEP_HOLD:
+            return rungs[k]
+        s = (f - STAR_WAVE_STEP_HOLD) / (1.0 - STAR_WAVE_STEP_HOLD)
+        a, b = rungs[k], rungs[(k + 1) % n]
+        return a + (b - a) * float(_smoother(s))
+    segments = _star_wave_segments(dwell_flat, dwell_end, x0)
+    t = p
+    last = len(segments) - 1
+    for i, (d, a, b) in enumerate(segments):
+        if t <= d or i == last:
+            if d <= 0.0:
+                return b
+            s = min(max(t / d, 0.0), 1.0)
+            return a + (b - a) * (0.5 - 0.5 * np.cos(np.pi * s))
+        t -= d
+    return 0.0
+
+
+def _star_wave_rise_end(curve, x0, dwell_flat, dwell_end):
+    """The phase at which the sway FIRST reaches its high end — the span the
+    seeding inverse is built over.
+
+    For the plateau it is computed from the segments rather than assumed:
+    `hold_end + glide_up + hold_flat + glide_dn`. That happens to come to
+    exactly half a cycle for ANY paired dwell — the two glides share
+    `glide/2` however `x0` splits them, and the two holds either side are the
+    same pair as on the way down — but computing it keeps the inverse correct
+    if the holds are ever made unequal, which the proof depends on."""
+    if curve == "plateau":
+        segments = _star_wave_segments(dwell_flat, dwell_end, x0)
+        return sum(d for d, _a, _b in segments[:4])
+    return 0.5
+
+
+def _star_wave_phase_for(value, lo, hi, curve, x0, dwell_flat, dwell_end):
+    """The phase at which the sway shows `value`, taken on its RISING span so
+    the scene's first frame is the shape the fire landed and the sway heads up
+    from there.
+
+    `cosine` keeps the closed form it has always used, so the DEFAULT curve is
+    exactly — not approximately — what shipped before. Every other curve is
+    inverted from a table of its rise: non-decreasing by construction, so
+    `searchsorted(side="left")` lands on the START of a hold when the landed
+    value sits on one, and the star then waits out that whole dwell before it
+    moves (with his plateau a fire landing the binding's `star = 0.0` enters
+    flat and holds). Measured round trip, landed value -> phase -> value:
+    1.5e-5 star units across all five curves, and the table agrees with the
+    closed form to 6.4e-6 of a cycle — 0.2 ms of the 28 s period
+    (data/star-curve-study/seed_inverse_check.py)."""
+    x = (value - lo) / (hi - lo) if hi > lo else 0.0
+    x = min(max(float(x), 0.0), 1.0)
+    if curve == "cosine":
+        return float(np.arccos(1.0 - 2.0 * x)) / (2.0 * np.pi)
+    p_up = float(_star_wave_rise_end(curve, x0, dwell_flat, dwell_end))
+    if p_up <= 0.0:
+        return 0.0
+    n = STAR_WAVE_SEED_SAMPLES
+    tp = np.linspace(0.0, p_up, n)
+    tu = np.maximum.accumulate(np.array(
+        [_star_wave_u(float(q), curve, x0, dwell_flat, dwell_end) for q in tp],
+        dtype=np.float64))
+    i = int(np.searchsorted(tu, x, side="left"))
+    if i <= 0:
+        return 0.0
+    if i >= n:
+        return float(tp[-1])
+    u0, u1 = float(tu[i - 1]), float(tu[i])
+    if u1 - u0 <= 1e-12:                 # inside a hold: take its start
+        return float(tp[i - 1])
+    f = (x - u0) / (u1 - u0)
+    return float(tp[i - 1] + f * (tp[i] - tp[i - 1]))
+
+
 def splat_brighter(layer, x, y, rgb, size=1.1):
     """Soft dots composed BRIGHTER-WINS into `layer` (H, W, 3) float: where
     a dot is brighter (perceived luminance) than the cell, the cell takes the
@@ -395,9 +600,11 @@ class Radial2d(Twod):
                     "than this; whenever the audio's own drive is faster, "
                     "the reactive spin takes over unchanged. 0 disables it "
                     "(the vendored behaviour). Max reduced 2026-10-06 (see "
-                    "ROTATION_SPEED_SCALE above) from 2.0 to 1.6 rev/s — "
-                    "config/effect_params.json's own declared max must "
-                    "stay in sync with this literal."
+                    "ROTATION_SPEED_SCALE above) from 2.0 to 1.6 rev/s, and "
+                    "halved again 2026-11-18 to 0.8 rev/s with that same "
+                    "scale — config/effect_params.json's own declared max "
+                    "and spectra/models/scene.py's RADIAL_BASE_ROTATION_MAX "
+                    "must stay in sync with this literal."
                 ),
                 default=0.0,
             ): vol.All(
@@ -471,6 +678,34 @@ class Radial2d(Twod):
                 description="Star wave: seconds per full sway when the music is intense",
                 default=DEFAULT_STAR_WAVE_PERIOD_FAST_S,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=30.0)),
+            vol.Optional(
+                "star_wave_curve",
+                description=(
+                    "Star wave: the shape of the sway. Cosine eases at the "
+                    "two limits only (the original); Plateau holds at the "
+                    "low end, at flat, at the high end and at flat again; "
+                    "Soft Ends hovers longer at the limits; Steps holds a "
+                    "ladder of shapes and snaps between them; Linear is a "
+                    "constant-rate bounce"
+                ),
+                default=DEFAULT_STAR_WAVE_CURVE,
+            ): vol.In(list(STAR_WAVE_CURVES)),
+            vol.Optional(
+                "star_wave_dwell_flat",
+                description=(
+                    "Star wave, Plateau only: the share of one cycle held "
+                    "FLAT at each of the two passes through star = 0"
+                ),
+                default=DEFAULT_STAR_WAVE_DWELL_FLAT,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.45)),
+            vol.Optional(
+                "star_wave_dwell_end",
+                description=(
+                    "Star wave, Plateau only: the share of one cycle held at "
+                    "each of the two limits"
+                ),
+                default=DEFAULT_STAR_WAVE_DWELL_END,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.45)),
             vol.Optional(
                 "phase",
                 description="Charge/lull/drop choreography phase (driven by SpotFX)",
@@ -1665,8 +1900,9 @@ class Radial2d(Twod):
         _spin_release_s() seconds with its total turn preserved (unity DC
         gain — the filter is on the advance, so a steady passage turns
         exactly as far as without it), and no frame ever turns more than
-        ROTATION_CAP_DEG_FRAME (18 deg per rendered frame — under the
-        180/edges deg at which an N-point star's turn reads backwards).
+        ROTATION_CAP_DEG_FRAME (9 deg per rendered frame since 2026-11-18,
+        18 before it — under the 180/edges deg at which an N-point star's
+        turn reads backwards).
         Below the cap a frame is untouched; with spin_ease_in_s 0 the ease
         is gone; with both release params 0 the filter is bypassed and the
         motion is today's to the frame. The first rendered frame (nothing
@@ -1718,9 +1954,9 @@ class Radial2d(Twod):
         self._spin_frame_prev = self.spin_total
 
     def _star_wave_step(self, dt):
-        """THE STAR WAVE (`star_wave`): `star` sways on a continuous cosine
-        between `star_wave_lo` and `star_wave_hi`; a full sway takes
-        `star_wave_period_slow_s` at energy 0 and `_fast_s` at energy 1
+        """THE STAR WAVE (`star_wave`): `star` sways between `star_wave_lo`
+        and `star_wave_hi` on the curve `star_wave_curve` names; a full sway
+        takes `star_wave_period_slow_s` at energy 0 and `_fast_s` at energy 1
         (the told section energy, linear between). The phase integrates,
         so a change of energy changes the pace and never the value. On the
         scene's FIRST activation the wave starts AT the value the fire
@@ -1731,7 +1967,12 @@ class Radial2d(Twod):
         instead — jumping to the newly landed value would be a visible
         step. Crossing 0 is smooth: the shaping is radius x
         (1 + star cos(edges phi)), continuous through star = 0 — the points
-        tuck in through the flat polygon and come out at the other angle."""
+        tuck in through the flat polygon and come out at the other angle.
+
+        THE CURVE (2026-11-18, see the STAR CURVE comment at the top): the
+        phase -> value map is `_star_wave_u`, and FLAT is held at the value 0,
+        not at the midpoint of the bounds. `cosine` is the default and is the
+        shape that shipped before, so no other Radial scene moves."""
         cfg = self._config
         if not cfg.get("star_wave", False):
             self._wave_phase = None
@@ -1740,13 +1981,22 @@ class Radial2d(Twod):
         hi = float(cfg.get("star_wave_hi", DEFAULT_STAR_WAVE_HI))
         if hi < lo:
             lo, hi = hi, lo
+        curve = cfg.get("star_wave_curve", DEFAULT_STAR_WAVE_CURVE)
+        if curve not in STAR_WAVE_CURVES:
+            curve = DEFAULT_STAR_WAVE_CURVE
+        dwell_flat = float(cfg.get("star_wave_dwell_flat",
+                                   DEFAULT_STAR_WAVE_DWELL_FLAT))
+        dwell_end = float(cfg.get("star_wave_dwell_end",
+                                  DEFAULT_STAR_WAVE_DWELL_END))
+        # where FLAT sits in the sway, in value space — one third of his
+        # -0.2 .. +0.4, never one half
+        x0 = (0.0 - lo) / (hi - lo) if hi > lo else 0.0
+        x0 = min(max(x0, 0.0), 1.0)
         if self._wave_phase is None:
             base = float(cfg.get("star") or 0.0)
             base = min(max(base, lo), hi)
-            x = (base - lo) / (hi - lo) if hi > lo else 0.0
-            # cos phase for which lo + (hi-lo)(0.5 - 0.5 cos(2 pi p)) == base,
-            # on the rising half (p in [0, 0.5])
-            self._wave_phase = float(np.arccos(1.0 - 2.0 * x)) / (2.0 * np.pi)
+            self._wave_phase = _star_wave_phase_for(
+                base, lo, hi, curve, x0, dwell_flat, dwell_end)
         slow = float(cfg.get("star_wave_period_slow_s",
                              DEFAULT_STAR_WAVE_PERIOD_SLOW_S) or 0.5)
         fast = float(cfg.get("star_wave_period_fast_s",
@@ -1760,7 +2010,8 @@ class Radial2d(Twod):
         # picture either. It carries on from the same point on the release.
         if not self._shape_active():
             self._wave_phase = (self._wave_phase + dt / period) % 1.0
-        self.star = lo + (hi - lo) * (0.5 - 0.5 * np.cos(2.0 * np.pi * self._wave_phase))
+        self.star = lo + (hi - lo) * _star_wave_u(
+            self._wave_phase, curve, x0, dwell_flat, dwell_end)
 
     def _track_rotation(self, dt):
         """The live rotation rate (rad/s, smoothed) — what the bands release

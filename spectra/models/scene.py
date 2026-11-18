@@ -934,7 +934,10 @@ def _as_dict(value) -> dict:
 
 # Admiral order, 2026-10-06 ("reduce the maximum speed of rotation of Star
 # by 20 percent"): Radial's `base_rotation` ceiling dropped from 2.0 to
-# 1.6 rev/s (fx/effects/radial.py's own CONFIG_SCHEMA Range is the source
+# 1.6 rev/s, and halved again on 2026-11-18 ("slow the star rotation by 50%
+# at all speeds", data/star-curve-study/report.md) to 0.8 rev/s — the
+# ceiling is 2.0 x ROTATION_SPEED_SCALE and that scale went 0.8 -> 0.4
+# (fx/effects/radial.py's own CONFIG_SCHEMA Range is the source
 # of truth; config/effect_params.json's registry entry mirrors it for
 # Sonic/UI). A stored value authored above the new ceiling would otherwise
 # reach fx's `_apply_config(validate=True)`, which DROPS THE WHOLE WRITE on
@@ -947,7 +950,7 @@ def _as_dict(value) -> dict:
 # RADIAL_BASE_ROTATION_MAX. `offset`-mode ParamTargets are left alone —
 # they are a signed delta off a runtime-carried baseline, not a value this
 # clamp can evaluate at load time.
-RADIAL_BASE_ROTATION_MAX = 1.6
+RADIAL_BASE_ROTATION_MAX = 0.8
 _RADIAL_SPEED_PARAM = "base_rotation"
 
 

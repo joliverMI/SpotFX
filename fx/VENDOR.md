@@ -1638,8 +1638,13 @@ against that commit.
     `CHARGE_SPIN_REV_S` charge-phase spin-up (0.9 → 0.72 rev/s at full
     charge), and the CONFIG_SCHEMA `Range` on #22's own `base_rotation`
     param (max 2.0 → 1.6 rev/s — this schema `Range` is the source of
-    truth; `config/effect_params.json`'s `base_rotation.max` mirrors it by
+    truth; `config/effect_params.json`'s `base_rotation.max` and
+    `spectra/models/scene.py`'s `RADIAL_BASE_ROTATION_MAX` mirror it by
     hand, there being no shared source across that JSON/Python boundary).
+    **HALVED AGAIN 2026-11-18 to `ROTATION_SPEED_SCALE = 0.4` (#106):
+    reactive ceiling 2.4 rev/s, charge spin-up 0.36, `base_rotation` max
+    0.8 — every number in this entry follows that one constant, so read
+    both entries together.**
     The scale is applied to each source's OUTPUT, never to `spin`'s own
     `[-1, 1]` input range, so a binding already set to spin's own "max"
     reaches the new, lower ceiling automatically with no change to how it
@@ -2788,10 +2793,13 @@ against that commit.
     however large) once per governed frame — scales it by
     smoothstep(active_s / `spin_ease_in_s`) (new param, effect default 0 =
     byte-identical; STAR's entry 1.0) and clamps it at `ROTATION_CAP_REV_S`
-    = 0.7 x 6.0 x ROTATION_SPEED_SCALE = 3.36 rev/s (identity below).
+    = 0.7 x 6.0 x ROTATION_SPEED_SCALE = 3.36 rev/s (identity below;
+    re-expressed per rendered frame by the spin smooth plan and halved
+    again by #106).
     `_star_wave_step` (draw) overrides `self.star` per frame with a cosine
     between `star_wave_lo`/`_hi` (new params; STAR -0.2..+0.4, through
-    flat = 0) whose period runs `star_wave_period_slow_s` -> `_fast_s` by
+    flat = 0; the SHAPE of that sway became a param in #106) whose period
+    runs `star_wave_period_slow_s` -> `_fast_s` by
     the new pushed `energy` key (the pulse feed, `fx.device_model.
     ENERGY_FED_EFFECTS` / `ENERGY_ONLY_EFFECTS`); phase integrated, starting
     at the fired `star`; the stored `star` is never rewritten; `star_wave`
@@ -3714,3 +3722,60 @@ against that commit.
      `.claude/skills/fish-effect/SKILL.md`'s ROW W5.5 section and
      `.claude/skills/word-shapes/SKILL.md`'s ROW W5.5 bullets are the
      binding record.
+
+106. `effects/radial.py` (SpotFX-authored tuning on top of #22/#54/#95):
+     THE ROTATION HALVED AND THE SWAY GOT A CURVE (2026-11-18, Admiral
+     order verbatim: "I think we need to cut the max angle/frame the star
+     can rotate, but let's scale it all down by 50%. So slow the star
+     rotation by 50% at all speeds, including the burst speeds, not just
+     the static speed. Additionally, slow the 'star setting' drift by 75%,
+     but keep the burst speeds. However, it seems like it currently
+     linearly bounces between the limits. Instead, have it follow a curve
+     so that it spends more time flat, and at the ends"; after the
+     five-curve artifact, "D2 and all recs").
+
+     TWO CONSTANTS CARRY THE ROTATION HALF. `ROTATION_SPEED_SCALE` 0.8 ->
+     0.4 (#54's one scale, so the reactive ceiling 4.8 -> 2.4 rev/s, the
+     charge spin-up 0.72 -> 0.36, and `base_rotation`'s schema max
+     1.6 -> 0.8 all follow) and `ROTATION_CAP_DEG_FRAME` 18 -> 9 deg per
+     rendered frame (0.75 rev/s at the crystal's 30 fps). BOTH are load
+     bearing and neither is redundant: a bass-hit "burst" is not a separate
+     quantity but the same squared-audio law at a high impulse, so the
+     scale slows the static speed and the bursts together — while a loud
+     fire's steady speed already SAT on the 18 deg clamp (data/star-spin-
+     smooth/plan.md), so leaving the cap would have left exactly those
+     frames at the old angle. The `spin` values a flare patches (0.25 /
+     0.55) and the fire binding (0.4..1.0) are INPUTS to the squared law
+     and needed no edit. `PRE_DROP_SPIN_FROM/_TO` (the pre-drop outline's
+     own spin, never governed by the cap) was left alone by his choice and
+     is now the fastest turn in the scene.
+
+     THE SWAY'S SHAPE IS NOW A PARAM. `star_wave_curve`
+     (`cosine|linear|smooth|plateau|steps`, effect default `cosine`) picks
+     `_star_wave_u`, the phase -> value map, with `star_wave_dwell_flat`
+     (0.161) and `star_wave_dwell_end` (0.089) as the plateau's hold shares
+     of one cycle. It never was the linear bounce he described: the shipped
+     cosine already eases at both LIMITS (37% of a cycle within 0.05 of
+     one) and runs fastest through FLAT (11%) — the missing dwell was the
+     one at flat. `plateau` (STAR's entry) holds four times a cycle — lo,
+     flat, hi, flat — measuring 45% flat / 31% ends, each glide's time
+     proportional to the value span it covers so every glide shares one
+     peak rate and the short leg never lurches. THE HOLD IS AT THE VALUE 0,
+     NOT THE MIDPOINT OF THE BOUNDS (with -0.2..+0.4 that is one third;
+     the midpoint would hold a half-pointed +0.1), and bounds that never
+     cross 0 give their flat time to the limits, so the param is safe on
+     any bounds. `_star_wave_phase_for` keeps the `arccos` closed form for
+     `cosine` — so the DEFAULT is bit-for-bit what shipped before, and
+     every other Radial scene (House Star, the only one) is byte-identical
+     — and inverts the rest from a 256-point table of the rising span,
+     `searchsorted(side="left")` so a landed value on a hold starts at that
+     hold's BEGINNING; measured round trip < 5e-4 star units.
+
+     No vendored line changed. STAR's own five scene params
+     (`scripts/star_curve_scene_data.py`: the curve, the two dwells, and
+     the periods 28 s calm / 3 s loud kept) are HIS data, written with a
+     backup and `--revert`. Evidence: `tests/test_star_curve.py`,
+     `data/star-curve-study/report.md` and `seed_inverse_check.py`.
+     `.claude/skills/radial-effect/SKILL.md` is the binding record.
+     Unverified against his live room (standing order 35, no live test
+     without his word).

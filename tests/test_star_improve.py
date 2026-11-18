@@ -14,8 +14,11 @@ between. I want it to go through 0".
      ~52%); a genuinely signed param (`star`, -1..1) still flips.
   2. THE EASE-IN: the first second's rotation climbs monotonically to the
      song's own speed; spin_ease_in_s 0 is today frame for frame.
-  3. THE CAP: no frame advances faster than 3.36 rev/s however hard the
-     audio and the charge push; a frame below the cap is untouched.
+  3. THE CAP: no frame advances faster than ROTATION_CAP_DEG_FRAME however
+     hard the audio and the charge push; a frame below the cap is untouched.
+     (First shipped as 3.36 rev/s, then 18 deg/frame, and 9 deg/frame since
+     the star curve study of 2026-11-18 — tests/test_star_curve.py owns the
+     constant's own value, this file owns the behaviour.)
   4. THE STAR WAVE: bounded by lo..hi, continuous, never parked, crosses 0
      without a step in the picture larger than the plain turning star's;
      starts at the value the fire landed; off = today.
@@ -100,7 +103,7 @@ def test_random_sign_still_flips_a_signed_param():
 
 # ── the rig: the live rotation law driven per frame ────────────────────────
 
-CEIL = 6.0 * radial.ROTATION_SPEED_SCALE          # 4.8 rev/s
+CEIL = 6.0 * radial.ROTATION_SPEED_SCALE          # 2.4 rev/s since 2026-11-18
 
 
 def _turn(room, rev_s_fn, frames, on_frame=None):
@@ -148,22 +151,23 @@ def test_ease_in_zero_is_today():
 
 def test_cap_holds_the_total_advance_and_is_identity_below():
     # the spin smooth plan (2026-11-12) re-expressed the cap per RENDERED
-    # FRAME (his "do 18 degrees per frame for now"); it was 3.36 rev/s
+    # FRAME (his "do 18 degrees per frame for now"); it was 3.36 rev/s, and
+    # the star curve study halved the angle again on 2026-11-18
     cap = radial.ROTATION_CAP_REV_FRAME
-    assert abs(radial.ROTATION_CAP_DEG_FRAME - 18.0) < 1e-9
-    assert abs(cap - 18.0 / 360.0) < 1e-12
+    assert abs(radial.ROTATION_CAP_DEG_FRAME - 9.0) < 1e-9
+    assert abs(cap - 9.0 / 360.0) < 1e-12
 
     async def go():
         with tempfile.TemporaryDirectory() as tmp:
             async with star_room(tmp, radial={"spin_ease_in_s": 0.0}) as room:
-                slow = _turn(room, lambda t: 2.0, 30)
+                slow = _turn(room, lambda t: 1.0, 30)         # 6 deg/frame: under the cap
                 fast = _turn(room, lambda t: CEIL, 30)           # today's ceiling, all the way
                 # the charge spin-up on top of the loud drive
                 room.star.update_config({"phase": "charge", "phase_progress": 1.0})
                 charged = _turn(room, lambda t: CEIL, 30)
         return slow, fast, charged
     slow, fast, charged = run(go())
-    assert np.allclose(slow[1:] / DT, 2.0, atol=1e-6)            # untouched below the cap
+    assert np.allclose(slow[1:] / DT, 1.0, atol=1e-6)            # untouched below the cap
     assert np.all(fast[1:] <= cap + 1e-9)                         # revolutions PER FRAME
     assert abs(fast[5:].mean() - cap) < 1e-9
     assert np.all(charged <= cap + 1e-9)

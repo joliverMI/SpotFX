@@ -118,7 +118,11 @@ def test_base_turns_at_the_declared_rate_with_zero_audio():
 
 
 def test_floor_never_adds_when_the_audio_drive_is_faster():
-    loud = 0.30  # reactive ≈ 0.545 rev/s, well over BASE
+    # reactive rev/s = 60 * impulse * spin^2 / 10 * ROTATION_SPEED_SCALE, and
+    # that scale halved on 2026-11-18 (data/star-curve-study/report.md), so the
+    # drive is doubled to keep this test's premise — an audio drive FASTER than
+    # the floor — true of the same floor
+    loud = 0.60  # reactive ≈ 0.545 rev/s, well over BASE
     def body(host, virtual):
         no_base, rev_no_base, _ = _drive(
             host, virtual, loud, base_rotation=0.0)
@@ -158,7 +162,7 @@ def test_registry_declares_the_param_and_says_it_scales_unlike_speed():
     assert meta["default"] == 0.0
     assert meta["type"] == "numeric"
     assert meta["help_topic"] == "radial-base-rotation"
-    assert meta["max"] == 1.6
+    assert meta["max"] == 0.8               # 1.6 before 2026-11-18
     note = meta["note"]
     assert "REVOLUTIONS PER SECOND" in note
     assert "LINEAR" in note
@@ -169,18 +173,26 @@ def test_registry_declares_the_param_and_says_it_scales_unlike_speed():
 #    speed of rotation of Star by 20 percent") ──────────────────────────
 
 
-def test_base_rotation_ceiling_is_1_6_rev_s_and_the_old_2_0_ceiling_is_rejected():
+def test_base_rotation_ceiling_is_0_8_rev_s_and_every_old_ceiling_is_rejected():
     from fx.effects.radial import Radial2d
     import voluptuous as vol
 
-    assert Radial2d.CONFIG_SCHEMA({"base_rotation": 1.6})["base_rotation"] == 1.6
-    try:
-        Radial2d.CONFIG_SCHEMA({"base_rotation": 2.0})
-    except vol.Invalid:
-        pass
-    else:
-        raise AssertionError("base_rotation=2.0 (the old ceiling) must now "
-                              "be rejected by the schema")
+    # 2.0 originally, 1.6 after the 2026-10-06 20% cut, 0.8 since the star
+    # curve study halved ROTATION_SPEED_SCALE on 2026-11-18
+    assert Radial2d.CONFIG_SCHEMA({"base_rotation": 0.8})["base_rotation"] == 0.8
+    for old in (1.6, 2.0):
+        try:
+            Radial2d.CONFIG_SCHEMA({"base_rotation": old})
+        except vol.Invalid:
+            pass
+        else:
+            raise AssertionError(f"base_rotation={old} (an old ceiling) must "
+                                 "now be rejected by the schema")
+
+
+def r_scale() -> float:
+    from fx.effects import radial as r
+    return r.ROTATION_SPEED_SCALE
 
 
 def test_reactive_spin_ceiling_dropped_20_percent():
@@ -203,21 +215,23 @@ def test_reactive_spin_ceiling_dropped_20_percent():
 
     advance = asyncio.run(_with_host(body))
     # pre-change this would be 6.0 rev in 60 callbacks (1 "second" of
-    # audio); post-change it must be 6.0 * ROTATION_SPEED_SCALE == 4.8
-    assert abs(advance - 4.8) < 1e-6
+    # audio); post-change it must be 6.0 * ROTATION_SPEED_SCALE — 4.8 after
+    # the 2026-10-06 cut, 2.4 since 2026-11-18 halved the scale again
+    assert abs(advance - 6.0 * r_scale()) < 1e-6
+    assert abs(advance - 2.4) < 1e-6
 
 
 def test_charge_spin_up_ceiling_dropped_20_percent():
     from fx.effects import radial as r
 
     assert abs(r.CHARGE_SPIN_REV_S - 0.9 * r.ROTATION_SPEED_SCALE) < 1e-12
-    assert abs(r.CHARGE_SPIN_REV_S - 0.72) < 1e-6
+    assert abs(r.CHARGE_SPIN_REV_S - 0.36) < 1e-6    # 0.72 before 2026-11-18
 
 
 def test_a_scene_authored_above_the_old_2_0_ceiling_is_clamped_on_load():
     from spectra.models.scene import SceneV2, RADIAL_BASE_ROTATION_MAX
 
-    assert RADIAL_BASE_ROTATION_MAX == 1.6
+    assert RADIAL_BASE_ROTATION_MAX == 0.8  # 1.6 before 2026-11-18
     scene = SceneV2(
         name="Old STAR backup",
         devices=[{
@@ -228,7 +242,7 @@ def test_a_scene_authored_above_the_old_2_0_ceiling_is_clamped_on_load():
         }],
     )
     dev = scene.devices[0]
-    assert dev.params["base_rotation"] == 1.6
+    assert dev.params["base_rotation"] == 0.8
     # an in-range value must survive untouched
     assert dev.params["spin"] == 0.55
 
@@ -255,8 +269,8 @@ def test_a_scene_binding_authored_above_the_old_ceiling_is_clamped_on_load():
         }],
     )
     binding = scene.devices[0].params["base_rotation"]
-    assert binding.out_max == 1.6
-    assert binding.fallback == 1.6
+    assert binding.out_max == 0.8
+    assert binding.fallback == 0.8
     assert binding.out_min == 0.0
 
 
@@ -278,7 +292,7 @@ def test_an_effect_step_variant_above_the_old_ceiling_is_clamped_on_load():
         }],
     )
     step = scene.devices[0].effect_steps[0]
-    assert step.params["base_rotation"] == 1.6
+    assert step.params["base_rotation"] == 0.8
 
 
 def test_a_flare_kind_absolute_target_above_the_old_ceiling_is_clamped_on_load():
@@ -293,7 +307,7 @@ def test_a_flare_kind_absolute_target_above_the_old_ceiling_is_clamped_on_load()
         }],
     )
     target = scene.flare_kinds[0].params["base_rotation"]
-    assert target.value == 1.6
+    assert target.value == 0.8
 
 
 def test_a_flare_kind_bare_number_target_above_the_old_ceiling_is_clamped_on_load():
@@ -309,7 +323,7 @@ def test_a_flare_kind_bare_number_target_above_the_old_ceiling_is_clamped_on_loa
     )
     target = scene.flare_kinds[0].params["base_rotation"]
     assert target.mode == "absolute"
-    assert target.value == 1.6
+    assert target.value == 0.8
 
 
 def test_a_legacy_param_patch_targeting_base_rotation_is_clamped_on_load():
@@ -331,4 +345,4 @@ def test_a_legacy_param_patch_targeting_base_rotation_is_clamped_on_load():
                 if "base_rotation" in k.params)
     target = kind.params["base_rotation"]
     assert target.mode == "absolute"
-    assert target.value == 1.6
+    assert target.value == 0.8
