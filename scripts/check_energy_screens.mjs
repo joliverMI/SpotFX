@@ -14,14 +14,38 @@
  *
  * Run: node scripts/check_energy_screens.mjs
  */
-import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = path.join(REPO, 'spectra/web/src');
+const require = createRequire(path.join(REPO, 'spectra/web/package.json'));
+const esbuild = require('esbuild');
+
+/** THE songStrip CASE FIX — required of every script that bundles anything
+ * reaching `components/songStrip` as a TRANSITIVE, extension-less import.
+ * `components/songStrip.ts` and `components/SongStrip.tsx` differ only by
+ * the case of their first letter (on purpose — songStrip.ts's own
+ * docstring), and esbuild's bundler then case-insensitively matches the
+ * request against `SongStrip.tsx` and dies trying to read a nonexistent
+ * `songStrip.tsx`. The esbuild CLI takes no plugins, so a script that
+ * needs this cannot use it; see docs/agents/ui-timeline-and-tv.md.
+ *
+ * THREE below bundles `timeline/canvas/layers.ts`, which since Word Shapes
+ * W5.2 pulls in `canvas/wordsLayer.ts` and through it the ticker's own
+ * marker primitives — so this script needs the fix even though none of its
+ * own three entries names songStrip transitively on its face. */
+const songStripFix = {
+  name: 'songstrip-case-fix',
+  setup(b) {
+    b.onResolve({ filter: /(^|\/)songStrip$/ }, () => (
+      { path: path.join(SRC, 'components/songStrip.ts') }
+    ));
+  },
+};
 
 let failures = 0;
 const ok = (cond, msg) => {
@@ -37,9 +61,15 @@ writeFileSync(entry, [
   `export { intensityBackground } from ${JSON.stringify(path.join(SRC, 'timeline/canvas/layers.ts'))};`,
 ].join('\n'));
 const js = path.join(out, 'bundle.mjs');
-execFileSync('npx', ['esbuild', entry, '--bundle', '--format=esm', '--platform=node',
-  '--log-level=error', `--outfile=${js}`],
-  { cwd: path.join(REPO, 'spectra/web'), stdio: ['ignore', 'ignore', 'inherit'] });
+const build = await esbuild.build({
+  entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile: js,
+  nodePaths: [path.join(REPO, 'spectra/web/node_modules')], logLevel: 'error',
+  plugins: [songStripFix],
+});
+if (build.errors.length) {
+  console.log(`  ✗ bundle failed: ${build.errors.map((e) => e.text).join('; ')}`);
+  process.exit(1);
+}
 const M = await import(pathToFileURL(js).href);
 
 const SECS = [

@@ -392,6 +392,32 @@ clean."
   real one — while react-query's structural sharing means the 3 s poll
   never re-runs the effect. Mount the seeder AFTER the status query is in
   cache. (The app never notices: its 1 Hz WS `clock` pushes arrive.)
+- **`canvas/layers.ts` NOW REACHES `components/songStrip` TRANSITIVELY, so
+  every script that BUNDLES it needs the `songstrip-case-fix` plugin — and
+  therefore the esbuild API, not its CLI, which takes no plugins.** This is
+  the long-standing case-collision quirk described further down (a
+  transitive, extension-less `songStrip` request resolves
+  case-insensitively onto `SongStrip.tsx` and esbuild then dies reading a
+  nonexistent `songStrip.tsx`); what W5.2 changed is its REACH. Before this
+  row nothing under `timeline/canvas/` imported `songStrip` at all —
+  `frame.ts`'s own import is a type import and erases — so a plain
+  `npx esbuild .../canvas/layers.ts --bundle` worked. `wordsLayer.ts` needs
+  the ticker's primitives as VALUES, so it no longer does.
+  `scripts/check_timeline_playhead_one_clock.mjs` and
+  `scripts/check_energy_screens.mjs` were converted from the CLI to the API
+  with the plugin in this row for exactly that reason (found by the
+  squadron leader's review of PR 545, not by the suite: neither script has
+  a pytest wrapper, though `tests/test_energy_screens.py` wraps the second
+  one). **Before adding or editing any check that bundles anything under
+  `timeline/canvas/`, grep `scripts/ -l 'canvas/layers'` and give each hit
+  the plugin.** `check_timeline_follow_playhead.mjs` needs nothing — it
+  transpiles without `--bundle`, so no resolution happens. Section FIVE of
+  `scripts/check_home_words.mjs` now ASSERTS this rule over every
+  `scripts/*.mjs`, so it cannot regress silently again: each script that
+  both reaches the layer stack and bundles must have an `onResolve` on a
+  bare `songStrip` and must not use the plugin-less CLI. It tests the
+  MECHANISM, not the plugin's name — `check_home_drops_panel.mjs` folds the
+  same rule into its own `stub-spectra-ws` plugin, which is correct.
 - **Help**: the audio shape's Legend `InfoTip` now deep-links `home-page`
   (Home's own topic, which `help/routeTopics.ts` already opens for "/" and
   which had no `topic=` caller at all — one orphan fewer). It used to link

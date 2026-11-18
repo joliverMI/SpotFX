@@ -32,10 +32,21 @@
 //           other one does not.
 //   FOUR  — the help topic `home-page` is linked from the audio shape's
 //           InfoTip (one orphan fewer) and says what the markers are.
+//   FIVE  — THE BUNDLING RULE this row introduced: `canvas/layers.ts` now
+//           reaches `components/songStrip` as a transitive, extension-less
+//           VALUE import (through `wordsLayer.ts`), which trips esbuild's
+//           case-insensitive match onto `SongStrip.tsx`. Every script that
+//           BUNDLES anything under `timeline/canvas/` must therefore carry
+//           the `songstrip-case-fix` onResolve plugin — and so must use the
+//           esbuild API, since its CLI takes no plugins. Asserted here
+//           rather than left to a reviewer's eye: two scripts
+//           (check_timeline_playhead_one_clock.mjs, check_energy_screens.mjs)
+//           were already broken by this before anyone noticed, and only one
+//           of them has a pytest wrapper.
 //
 // Run: node scripts/check_home_words.mjs
 //   (THREE needs the dev-only jsdom: cd spectra/web && npm install --no-save jsdom)
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -651,6 +662,37 @@ console.log('FOUR — the help topic');
     'and that a tap opens the details, and how it goes away');
   ok(/Test Bed/.test(intro),
     'and sends him to the Test Bed for a word\'s odds, which this card does not claim');
+}
+
+console.log('FIVE — every script that bundles the canvas layers carries the songStrip case fix');
+{
+  const scriptsDir = join(repo, 'scripts');
+  const names = readdirSync(scriptsDir).filter((n) => n.endsWith('.mjs')).sort();
+  const bundlers = [];
+  for (const name of names) {
+    const text = readFileSync(join(scriptsDir, name), 'utf8');
+    // Does it reach the canvas layer stack at all, AND actually bundle?
+    // A transpile-only script (no --bundle / bundle: true) resolves
+    // nothing and needs nothing — check_timeline_follow_playhead.mjs is
+    // the standing example.
+    const reaches = /timeline\/canvas\/(layers|wordsLayer)/.test(text)
+      || /BUILDER_LAYERS/.test(text) || /home\/HomeTimeline/.test(text);
+    const bundles = /--bundle/.test(text) || /bundle:\s*true/.test(text);
+    if (reaches && bundles) bundlers.push({ name, text });
+  }
+  ok(bundlers.length >= 3,
+    `found ${bundlers.length} script(s) that bundle the canvas layer stack `
+    + `(${bundlers.map((b) => b.name).join(', ')})`);
+  for (const { name, text } of bundlers) {
+    // The PROPERTY, not the plugin's name: an `onResolve` whose filter is
+    // a bare, extension-less `songStrip`. check_home_drops_panel.mjs
+    // carries exactly that rule folded into its own `stub-spectra-ws`
+    // plugin, which is fine — a name grep would have called it broken.
+    ok(/onResolve\(\{[^}]*songStrip\$\//.test(text),
+      `${name} resolves a bare \`songStrip\` import itself (the case fix)`);
+    ok(!/execFileSync\(\s*'npx',\s*\['esbuild'/.test(text),
+      `${name} bundles through the esbuild API, not its plugin-less CLI`);
+  }
 }
 
 console.log(failures === 0
