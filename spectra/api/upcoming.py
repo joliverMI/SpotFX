@@ -78,9 +78,18 @@ request: `shape` (the library id, straight off the mark), plus `shape_name`
 and `words` (that word's own describe sentence, `lyric_events.describe`)
 joined on here from the same plan by the mark's own id. The strip and
 Home then draw the shape's glyph in place of the colour diamond, and the
-next-event box prints the word and the shape. A colour word's row is
-untouched, so a song whose words reach no shape sends exactly the bytes it
-sends today.
+next-event box prints the shape. A colour word's row is untouched, so a
+song whose words reach no shape sends exactly the bytes it sends today.
+
+WHAT THE WORD WAS READ AS (W5.3, the Admiral 2026-11-18: "In the countdown
+box, don't show the triggering phrase or word, just say 'red' or 'sky blue'
+or whatever it is getting interpreted as"). A `kind: "word"` row and an
+imprinted event gain one more field, `label` — `WordHit.label`, the colour
+word the match was read as, straight off `lyric_events.word_marks` — and
+the countdown box prints THAT, never the phrase. It is absent on a row
+whose word reaches no colour set (a shape-only word), which is how the box
+knows to say "heart" alone; `word` (the phrase) stays on the wire for the
+Test Bed's own readouts, where he reads matches.
 """
 from __future__ import annotations
 

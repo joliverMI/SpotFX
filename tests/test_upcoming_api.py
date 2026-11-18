@@ -375,3 +375,69 @@ def test_a_shaped_word_doing_its_colour_draws_as_a_colour_word(monkeypatch):
     row = next(e for e in _client().get("/api/upcoming", params={"uri": URI}).json()["events"]
                if e["kind"] == "word")
     assert row["shape"] is None and "shape_name" not in row
+
+# ── what the word was READ AS (row W5.3) ───────────────────────────────────
+
+
+def test_a_word_row_says_what_the_match_was_read_as(monkeypatch):
+    """W5.3 (the Admiral, 2026-11-18: "In the countdown box, don't show the
+    triggering phrase or word, just say 'red' or 'sky blue' or whatever it is
+    getting interpreted as"). Every word mark — the row a word firing alone
+    is, and the event a word imprints on — carries `label`, the colour word
+    the match was READ AS, beside the phrase it keeps for the Test Bed."""
+    _mode("triggers_only")
+    from spectra.api import upcoming
+    from spectra.services import lyric_events as le
+    t_scene, _t_flare = _his_scene_and_flare()
+    events = [le.EventMoment(str(t_scene.id), le.KIND_SCENE, 1000, "your scene change")]
+    # the phrase and the reading DIFFER, which is the whole point of the field
+    hits = [_read_hit(900, "9-9", "roses are red", "red", "#ff0000"),
+            _read_hit(12_000, "120-120", "the sky above", "sky blue", "#38bdf8")]
+    plan = le.plan_words(hits, events, le.LyricEventSettings())
+    monkeypatch.setattr(upcoming, "word_plan",
+                        lambda uri: le.Preview(True, le.SongWords(uri, "ok", hits=tuple(hits)),
+                                               actions=plan))
+
+    rows = {(e["ms"], e["kind"]): e
+            for e in _client().get("/api/upcoming", params={"uri": URI}).json()["events"]}
+    scene = rows[(1000, "scene")]
+    assert scene["label"] == "red" and scene["word"] == "roses are red", \
+        "an imprinted event carries both: the box prints the reading, the Test Bed the phrase"
+    word = rows[(12_000, "word")]
+    assert word["label"] == "sky blue" and word["word"] == "the sky above"
+
+
+def test_a_shape_only_word_names_no_colour_it_will_not_show(monkeypatch):
+    """A word that reaches a SHAPE and no colour set recolours nothing, so it
+    carries no `label` — the countdown box then says "heart" alone rather
+    than a colour word the room is never going to show. A shape word that
+    DOES pool a colour kind carries both, and the box says "heart · red"."""
+    _mode("triggers_only")
+    from spectra.api import upcoming
+    from spectra.services import lyric_events as le
+
+    def rows_for(hits):
+        plan = le.plan_words(hits, [], le.LyricEventSettings())
+        assert [a.verdict for a in plan] == [le.VERDICT_SHAPE]
+        monkeypatch.setattr(upcoming, "word_plan",
+                            lambda uri: le.Preview(True, le.SongWords(uri, "ok",
+                                                                      hits=tuple(hits)),
+                                                   actions=plan))
+        return next(e for e in _client().get("/api/upcoming", params={"uri": URI}).json()["events"]
+                    if e["kind"] == "word")
+
+    bare = rows_for([_shape_hit(12_000, "120-120", "love", "heart", sets=False)])
+    assert bare["shape"] == "heart" and "label" not in bare
+    pooled = rows_for([_shape_hit(12_000, "120-120", "love", "heart", swatch="#ff0000")])
+    assert pooled["shape"] == "heart" and pooled["label"] == "love", \
+        "the shape word's own reading, pooled with its colour kind"
+
+
+def _read_hit(ms, key, phrase, label, swatch):
+    """A hit whose PHRASE and READING differ — "roses are red" read as
+    "red" — which `_hit` above (label=phrase) cannot show."""
+    from spectra.services import lyric_events as le
+    return le.WordHit(key=key, first_word=int(ms // 100), last_word=int(ms // 100), phrase=phrase,
+                      label=label, line=int(ms // 10_000), ms=float(ms), end_ms=float(ms + 300),
+                      emphasis=0.5, strength=0.9, his=False, set_ids=(f"set-{label}",),
+                      set_names=(label.title(),), swatches=(swatch,), energy=0.3)

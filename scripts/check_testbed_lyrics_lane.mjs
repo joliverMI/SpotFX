@@ -268,14 +268,24 @@ console.log('§6 word shapes (row W2.3)');
   ok(strip.kindGlyphSvg('word', null, '#ff0000', 'heart').includes('♥')
     && !strip.kindGlyphSvg('word', null, '#ff0000', null).includes('♥'),
     'the next-event box glyph is the shape\'s character, else the diamond');
+  // W5.3 rewrote what the box says: the READING, never the phrase — the
+  // shape here, and the colour word too where one is pooled with it.
+  // scripts/check_song_strip.mjs section EIGHT is that rule's own spec.
   ok(strip.eventLabel({ kind: 'word', rank: null, rank_of: null, word: 'love',
-                        shape: 'heart', shape_name: 'Heart' }) === 'Word “love” → heart',
-    'and the box\'s hover label names the shape');
+                        shape: 'heart', shape_name: 'Heart' }) === 'Word · heart',
+    'and the box\'s hover label names the shape, not the phrase');
 
   // THE LIVE PULSE (spec 3).
   const push = (over = {}) => ({ verdict: 'shape', phrase: 'love', shape: 'heart',
                                  result: 'applied', landed: true, set_name: null, ...over });
   ok(pulse.pulseWords(push()) === 'love → ♥ heart · drew', 'the pulse says it drew');
+  // ...and the COUNTDOWN BOX asks for the same sentence with the reading in
+  // place of the phrase (W5.3), so its hover never contradicts its count.
+  ok(pulse.pulseWords(push(), { readAs: true }) === '♥ heart · drew',
+    'the box\'s own pulse names the shape, never the phrase');
+  ok(pulse.pulseWords(push({ verdict: 'fire', shape: null, label: 'Red',
+                             set_name: 'Sunset' }), { readAs: true }) === 'red · Sunset',
+    'and a colour word\'s pulse names what it was read as and what landed');
   ok(pulse.pulseWords(push({ result: 'held' })) === 'love → ♥ heart · held',
     'that it was held');
   ok(pulse.pulseWords(push({ result: 'fell_back_to_colour' })) === 'love → ♥ heart · colour instead',

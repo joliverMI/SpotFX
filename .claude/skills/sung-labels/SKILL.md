@@ -212,13 +212,33 @@ ONE plan.
 - **One drawing rule, three places** (`songStrip.ts`: `HALO_GAP`, `HALO_
   STROKE`, `diamondPath`, `wordColour`, `kindGlyphSvg(kind, num, halo)`):
   the strip and Home's shape (`trackPainter.ts`, `drawShapeMarkers`), the
-  next-event box (ring on the kind's own glyph, the word printed under it —
-  NO second swatch, NO "→ scene"), and the Test Bed's **Word events row**
+  next-event box (ring on the kind's own glyph, WHAT THE WORD WAS READ AS
+  printed under it — NO second swatch, NO "→ scene"), and the Test Bed's
+  **Word events row**
   (`TestbedLaneBar.tsx` `WordEventsRow`, `lyricEvents.ts` `wordEvents`),
   which REPLACED the "His scene changes"/"His flares" rows and now also
   feeds the Sung words lane's guide lines (`LyricsLane` takes `guides`).
   Words that do nothing draw nowhere outside the Test Bed.
-- **Proofs:** `scripts/check_song_strip.mjs` §SIX, `scripts/check_testbed_
+- **THE COUNTDOWN BOX SAYS WHAT THE WORD WAS READ AS, NEVER THE PHRASE**
+  (row W5.3, the Admiral 2026-11-18: "In the countdown box, don't show the
+  triggering phrase or word, just say 'red' or 'sky blue' or whatever it is
+  getting interpreted as"). A word mark carries `label` beside `word`
+  (`lyric_events.word_marks`'s `_read_as`): `WordHit.label`, the colour word
+  the match was read as, and present ONLY where the word's reading has a
+  colour to it (`hit.set_ids`) — so a shape-only word names no colour the
+  room will not show. `songStrip.ts`'s `wordReading` is the ONE function
+  both the box's printed line (`SongNextBox.tsx`) and its hover
+  (`eventLabel`) read: a colour word is "red", a shape word "heart", a shape
+  word with a colour kind pooled "heart · red", and a row with neither (an
+  older server) is the bare kind word. The box's live pulse asks
+  `pulseWords(push, { readAs: true })` for the same reason; the strip's own
+  marker flash keeps the phrase, and so do every Test Bed readout and
+  `shapeWords`, because the Test Bed is where he reads matches. The box is a
+  fixed 96px, so a long reading ellipsises on the line and is whole on the
+  hover.
+- **Proofs:** `scripts/check_song_strip.mjs` §SIX and §EIGHT (W5.3's own
+  spec: the three box texts, the fallback, and that neither the line nor the
+  hover ever prints the phrase), `scripts/check_testbed_
   lyrics_lane.mjs`, `scripts/render_testbed_lyrics_lane.py` (the harness
   `spectra/web/harness/testbedlyrics.tsx` now mocks `/testbed/lyric-events`),
   `tests/test_lyric_events.py`'s "the highlight" section.

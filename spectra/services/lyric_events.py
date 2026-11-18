@@ -1289,7 +1289,17 @@ def word_marks(actions: Sequence[WordAction]) -> tuple[dict[str, dict[str, Any]]
     The swatch is the word's FIRST candidate set's, as the Word matches row
     draws it (his default, 2026-11-12): which set really lands, and whether
     the event can carry it, is decided at fire time and told through
-    `fired_payload`."""
+    `fired_payload`.
+
+    `label` IS WHAT THE MATCH WAS READ AS (W5.3, the Admiral 2026-11-18:
+    "In the countdown box, don't show the triggering phrase or word, just
+    say 'red' or 'sky blue' or whatever it is getting interpreted as") —
+    `WordHit.label`, the colour word the sung label is keyed on, the same
+    field `fired_payload` already tells. It is carried ONLY where the word's
+    reading has a colour to it (`hit.set_ids`), so a row that reaches a
+    shape and no colour set says "heart" alone rather than naming a colour
+    nothing is going to show. The phrase stays in `word` for the Test Bed,
+    which is where he reads matches."""
     imprints: dict[str, dict[str, Any]] = {}
     fires: list[dict[str, Any]] = []
     for action in actions:
@@ -1297,7 +1307,7 @@ def word_marks(actions: Sequence[WordAction]) -> tuple[dict[str, dict[str, Any]]
         if action.verdict == VERDICT_IMPRINT and action.event is not None:
             imprints[action.event.id] = {
                 "word": hit.phrase, "word_ms": int(round(hit.ms)), "swatch": hit.swatch,
-                "word_key": hit.key}
+                "word_key": hit.key, **_read_as(hit)}
         elif action.verdict in (VERDICT_FIRE, VERDICT_SHAPE):
             # A SHAPE word is a marker of the same kind, carrying its shape
             # (W0.3): one row, one idea — "a word did something here" —
@@ -1307,8 +1317,16 @@ def word_marks(actions: Sequence[WordAction]) -> tuple[dict[str, dict[str, Any]]
                 "rank": None, "rank_of": None, "source": "word", "id": fire_id(hit),
                 "word": hit.phrase, "word_ms": int(round(hit.ms)), "swatch": hit.swatch,
                 "word_key": hit.key, "momentary": action.momentary,
-                "shape": action.shape_id})
+                "shape": action.shape_id, **_read_as(hit)})
     return imprints, fires
+
+
+def _read_as(hit: WordHit) -> dict[str, Any]:
+    """The `label` half of a mark — what the match was READ AS, where the
+    reading has a colour to it (see `word_marks`). Empty otherwise, so the
+    field's presence is itself the "this word recolours something" fact the
+    countdown box needs, with no second flag."""
+    return {"label": hit.label} if hit.set_ids and hit.label else {}
 
 
 def fire_id(hit: WordHit) -> str:
