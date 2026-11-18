@@ -3403,7 +3403,7 @@ against that commit.
     star's W4 number must be re-measured rather than assumed. Nothing
     anchors to a shape BY INDEX (Orbits FEW anchors to each blob's own
     phase, Fish enters on each fish's bearing, Fireworks samples `at(s)`
-    at random, STAR/Black Hole/Sauron read `polar` by angle). Every
+    at random, STAR/Black Hole/Sauron read `polar` by angle).
     IN THE FRAME (y DOWN, row 0 the top tip) a star's and a diamond's own
     point now sits at MAXIMUM y and a heart's point at MINIMUM y with its
     cleft at the bottom; his panel shows that frame inverted, which is why

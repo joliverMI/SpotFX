@@ -94,6 +94,27 @@ quoted only where they are the ruling.
     the figure does, so a sparse-light effect may need a quiet window
     planned around the figure from the
     start, not added after his verdict names it.
+17. **A verdict's numbers can overshoot — build every number as a
+    retunable constant, and expect a second pass.** His W4 room verdict's
+    own quantified asks on Fireworks — "increase the amount of blobs by
+    50%", "have it hold 50% longer" — came back ONE DAY LATER, in his W5
+    verdict, as "I think we overtuned the fireworks last time": the
+    direction was right, the magnitude was not. A number he states in a
+    verdict is a first guess at the fix, not a target to hit exactly;
+    land it as a named constant he can retune by voice or by a later row
+    (never hand-derived into the math), and plan for a second pass to walk
+    it back rather than treating a shipped, measured-green build as the
+    close of the question.
+18. **The device's orientation belongs in the explainer tiles.** Every
+    shape-flares-lead explainer, through W4, rendered a shape in the
+    library's own unrotated frame — correct for the math, upside-down on
+    the one fixture that draws it. It took him living with it in the room
+    to say so: "the shapes should be 'flipped' because they are visually
+    upside-down on this device." A tile whose whole point is "this is what
+    you will see" has to render the shape the way the device will actually
+    show it, not the library's internal convention — the same discipline
+    §14 already asks of an approved mechanism, one step earlier, at the
+    picture itself.
 
 ## How he answers
 
@@ -351,6 +372,55 @@ design-session technique; only the design-session half is recorded here.
   exactly the vacuous kind §16 now rules out — the Fish review's
   band-against-rest contrast metric caught the same defect and was never
   re-run on the other five rows before the room session.
+- Second room verdict (2026-11-18, his second verdict on this feature),
+  verbatim: "Word Shape feedback: I don't need the banner for the word
+  shape test mode. Show the word/effect details on the audio shape on home
+  page. Put the trigger point on the audio shape, not just to top ticker.
+  i should be able to tap the audio shape to learn more. make it clean. In
+  the countdown box, don't show the triggering phrase or word, just say
+  'red' or 'sky blue' or whatever it is getting interpreted as. I told you
+  to have low energy colors hold untl next scene change, instead of a
+  temporary flare, but i want to see it just as a flare, just not as fast.
+  I think you can do this without changing code by changing a setting to
+  0. Oribits is really good at showing shape, we need to get Fish to
+  behave similarly. Ask me questions if it's hard to implement, but you
+  might need to override some min turn radii to match the effect,
+  especially on the star. I think we overtuned the fireworks last time.
+  The background doesn't need to be clear of other fireworks, just they
+  need to be dimmer, so fading out already. I think we can give it 80%
+  less pre-fire darkness time. It also holds too long and fades too
+  abruptly. And it's too well-defined. Let's turn back the increase in
+  blob count, and at the end, the blobs should lightly break apart and
+  fade out. Also, the burst is too fast. Slow the burst by 60% so we can
+  see the blobs moving out to the outline, and then decelerating to almost
+  a stop, but not quite a stop. The blobs should always be slightly
+  drifting. Finally, the shapes should be 'flipped' because they are
+  visually upside-down on this device. Rotate 180 degrees, and make that
+  the 'default' orientation. As I think most of what I want is settings
+  changes, not major coding, no test is needed, just deploy when ready."
+  His W4.4 brightness A/B/C question is SETTLED by this verdict's own
+  words — "Oribits is really good at showing shape" — as A, as built, no
+  further change asked. Wave 5 answered it, parallel-built and merged in
+  this order: W5.7 (the half-turn default orientation, PR #546,
+  `324d411d`), W5.1 (the test-mode banner removed, PR #543, `9fafb6d6`),
+  W5.3 (the countdown box reads the colour word, not the phrase, PR #544,
+  `da75df3e`), W5.2 (Home's audio shape carries the trigger point and a
+  tap-for-details popover, PR #545, `d7245341`), W5.6 (Fireworks retuned —
+  dim not dark, 80% less pre-fire quiet, sparks back to 60/100, the hold
+  stretch dropped, a 60%-slower burst that drifts rather than stopping, PR
+  #547, `c110176a`), W5.5 (Fish takes Orbits' speed-and-trail approach and
+  overrides its own turn radii at the corners, PR #548, `feaaf4c4`); W5.4
+  (the `energy_cutoff` setting written to 0 at deploy, so every low-energy
+  colour word reads as a flare rather than a hold, no code of its own) and
+  W5.8 (this docs row) close the wave. No live room test was asked for
+  this verdict ("no test is needed, just deploy when ready"); the gate was
+  CI green plus the squadron leader's review, then one web build and one
+  `spectra` restart. Two learnings promoted to the standing list above
+  from this verdict specifically: §17 (his own W4 numbers — "+50% blobs",
+  "hold 50% longer" — read back as "overtuned" a day later, so a verdict's
+  magnitude is a first guess, not a target) and §18 (the orientation ask
+  itself — every tile through W4 showed the math's own frame, never the
+  panel's).
 
 ### Template for the next entry
 ```
