@@ -7,7 +7,7 @@
  * frame; React consumers re-render only on mode/manual-bound changes. */
 import { useCallback, useRef, useState } from 'react';
 import { useSticky } from '../../lib/useSticky';
-import { clampWin, followWindowFor } from './followWindow';
+import { centeredWindowFor, clampWin, followWindowFor } from './followWindow';
 import type { Win } from './followWindow';
 
 export type { Win };
@@ -20,8 +20,16 @@ export function useFollowWindow(opts: {
   /** Sticky-key namespace so other pages (Now Playing, Debug) don't share
    * the builder's persisted zoom prefs. Default '' = builder keys. */
   keyPrefix?: string;
+  /** CENTERED FOLLOW (the Admiral, 2026-11-18): while following, the
+   * window is always [anchor − window/2, anchor + window/2] — the playhead
+   * never moves off dead centre — rather than the old anchor+future/−window
+   * shape. Per-instance, not reactive: the song strip/Home's audio shape
+   * (components/songTimelineView.tsx) pass it; the Timeline builder and
+   * Debug page's own look-ahead-while-editing windows leave it unset, so
+   * their draggable future buffer keeps working exactly as before. */
+  centered?: boolean;
 }) {
-  const { getNowMs, durationMs } = opts;
+  const { getNowMs, durationMs, centered = false } = opts;
   const p = opts.keyPrefix ?? '';
   const [follow, setFollow] = useSticky<boolean>(`${p}follow`, true);
   const [windowS, setWindowS] = useSticky<number>(`${p}zoomWindowS`, 30, opts.seedWindowS);
@@ -38,10 +46,11 @@ export function useFollowWindow(opts: {
       return clampWin(s.manualWin, dur);
     }
     if (s.follow) {
+      if (centered) return centeredWindowFor(s.getNowMs() ?? 0, s.windowS);
       return followWindowFor(s.getNowMs() ?? 0, s.windowS, s.futureS, dur);
     }
     return { startMs: 0, endMs: dur };
-  }, []);
+  }, [centered]);
 
   /** Full Song toggles: if already showing the whole song, shrink back to a
    * default-size window (at the playhead when there is one, else the start). */
@@ -101,5 +110,10 @@ export function useFollowWindow(opts: {
     fullSong,
     setFollowSnapped,
     getWin,
+    /** Whether this instance keeps the playhead centred (see `opts.centered`
+     * above) — a fixed per-instance flag, so a consumer that drags the
+     * window's edges (components/SongStrip.tsx) knows whether an edge drag
+     * means "look further ahead" or "zoom, symmetrically, around centre". */
+    centered,
   };
 }

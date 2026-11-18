@@ -257,6 +257,7 @@ export default function NowPlayingPage() {
     seedWindowS: settings ? Number(settings.builder_zoom_window_s ?? 20) : undefined,
     seedFutureS: settings ? Number(settings.builder_future_buffer_s ?? 5) : undefined,
     keyPrefix: 'np.',
+    centered: true,
   });
   // Live view: always resume following on page open and track change. Follow
   // is sticky but manual bounds are not, so a persisted follow=false from a

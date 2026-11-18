@@ -259,7 +259,12 @@ export default function SongStrip() {
    * the strip: in follow mode an EDGE drag resizes the look-behind /
    * look-ahead, and a CENTRE drag always detaches into a manual pan (the
    * plan's own "dragging leaves Follow" rule). One history step per
-   * committed drag, pushed on pointerdown. */
+   * committed drag, pushed on pointerdown.
+   *
+   * THIS WINDOW IS CENTERED (the Admiral, 2026-11-18): `win.centered` is
+   * true here (components/songTimelineView.tsx seeds it), so there is no
+   * separate look-ahead to drag — either edge just zooms the window,
+   * symmetrically, around the playhead that stays dead centre. */
   const dragWin = (edge: 'start' | 'end' | 'center') => (ev: React.PointerEvent) => {
     ev.preventDefault();
     ev.stopPropagation();
@@ -285,6 +290,14 @@ export default function SongStrip() {
       const deltaMs = ((e.clientX - lastX) / span) * Math.max(1, durationMs);
       lastX = e.clientX;
       if (win.follow && edge !== 'center') {
+        if (win.centered) {
+          // Centered: both edges zoom symmetrically (×2, since moving one
+          // edge by deltaMs moves the window's total span by deltaMs on
+          // each side) — there's no separate future buffer to adjust.
+          const sign = edge === 'end' ? 1 : -1;
+          win.setWindowS((sec) => Math.max(2, sec + sign * 2 * (deltaMs / 1000)));
+          return;
+        }
         if (edge === 'end') win.setFutureS((sec) => Math.max(0, sec + deltaMs / 1000));
         else win.setWindowS((sec) => Math.max(2, sec - deltaMs / 1000));
         return;
