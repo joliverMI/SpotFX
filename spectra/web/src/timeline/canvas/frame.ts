@@ -6,6 +6,7 @@ import type {
 import type { DisplaySeq, DropRails, SeqHandle } from '../dropSequences';
 import type { EnergyTimeline } from '../../types';
 import type { Ghost, SnapGuide } from '../dropEdit';
+import type { UpcomingEvent } from '../../components/songStrip';
 
 export interface Win {
   startMs: number;
@@ -95,6 +96,16 @@ export interface LayerDataBag {
    *  (`librosaOverlays`, gated by `view.librosaFilters.beats`) and are
    *  unaffected. */
   beatStrips?: boolean;
+  /** THE WORD TRIGGER POINTS (Home's audio shape only; ./wordsLayer.ts —
+   *  Word Shapes W5.2): the `/api/upcoming` rows a matched word acts on,
+   *  exactly as the top ticker has them — every `kind: "word"` row (a word
+   *  firing on its own) plus every event a word imprints its colour on
+   *  (`wordRowsOf` is the one filter). Absent/empty = the layer draws
+   *  nothing and hit-tests nothing, which is every other canvas. */
+  words?: UpcomingEvent[];
+  /** The word row the details card is open on (`wordRowKey`), ringed on the
+   *  canvas. Null/absent = no card is open. */
+  wordSelected?: string | null;
   /** A Light Show flag being dragged directly on the canvas right now
    *  (hooks/useLightShowDrag.ts) — the live ghost position, drawn in place
    *  of the flag's stored ms until the drag ends and it saves. Null/absent
@@ -172,6 +183,10 @@ export type Hit =
   | { kind: 'beat'; beatMs: number; values: Record<string, number> }
   | { kind: 'drop-seq'; key: string; handle: SeqHandle; chip?: boolean }
   | { kind: 'light-show-flag'; level: 'high' | 'low'; ms: number }
+  /** A word trigger point on Home's audio shape (./wordsLayer.ts): the
+   *  row's own `wordRowKey` and the moment it fires, so the page can
+   *  both find the row and place the details card by its marker. */
+  | { kind: 'word-marker'; key: string; ms: number }
   | null;
 
 export interface CanvasLayer {

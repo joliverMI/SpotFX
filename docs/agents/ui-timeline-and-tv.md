@@ -317,6 +317,98 @@ charge/lull/drop via `dropSeqBody`'s gold-wedge/blue-band/drop, high/low
 via `lightShowMarkers`) before this build touched anything — confirmed,
 not assumed, by reading each layer; no Timeline change was needed.
 
+## HOME'S AUDIO SHAPE CARRIES THE WORD TRIGGER POINTS, AND A TAP SAYS WHAT A WORD DOES (Word Shapes W5.2, 2026-11-18)
+
+The Admiral, verbatim: "Show the word/effect details on the audio shape on
+home page. Put the trigger point on the audio shape, not just to top
+ticker. i should be able to tap the audio shape to learn more. make it
+clean."
+
+- **The layer**: `spectra/web/src/timeline/canvas/wordsLayer.ts`
+  (`wordMarkers`, the `lightShowLayer.ts` pattern — `draw` + `hitTest`),
+  registered in `BUILDER_LAYERS` and fed `LayerDataBag.words` /
+  `wordSelected` by `home/HomeTimeline.tsx` alone. Every other canvas
+  leaves `words` unset, so the layer is invisible and hit-tests nothing
+  there — and that guard is load-bearing, because `TimelineCanvas.hitTest`
+  does NOT consult `visible`.
+- **One source for both surfaces.** Home now calls the ticker's own
+  `useUpcoming(uri)` (same react-query key as `components/SongStrip.tsx`,
+  so it shares that cache entry rather than asking the server again) and
+  hands `wordRowsOf(events)` to the layer: every `kind: "word"` row plus
+  every event a word imprints on. Placement is `eventFireMs`, colour is
+  `wordColour`, the glyph is `shapeGlyph`/`SHAPE_GLYPH_PX`, the diamond is
+  `WORD_DIAMOND_R`, the played dimming is the ticker's own 0.28
+  (`.song-strip-mk-past`) — all from `components/songStrip.ts`. Nothing
+  about a word is re-derived in the layer, which is what makes "the shape
+  and the ticker can never disagree" a property rather than a promise.
+- **An imprint is a TICK, not a halo.** The ticker rings the imprinted
+  marker; on the canvas that marker belongs to the `analysedEvents` layer,
+  which this layer deliberately does not redraw, so an imprint is a small
+  2 px colour tick on the word row at that event's own x instead.
+- **The z is 66, above `dropSeqLayer`'s 65 — deliberately.** `hitTest`
+  walks layers by DESCENDING z and `dropSeqBody` (z 45) grabs anything
+  within 4 px of a charge/lull/drop handle's scan-line across the whole
+  main area, so at a z beside the planned markers (40/41) a word sitting
+  near a drop handle would be untappable. W5.2's spec is explicit that a
+  word hit wins over a drop-sequence hit. Drawing is unaffected on Home
+  (`triggers`/`events`/`calibration` empty, drop rails off) and the
+  playhead (z 80) still draws last.
+- **The tap** resolves through `TimelineCanvas`'s `pointer.onHit` — the
+  first interaction this read-only canvas has ever had. A word hit sets a
+  ref that the shape box's existing `onClick` consumes, so one gesture
+  never both opens a card and selects a drop sequence; every other hit
+  closes the card and falls through to the unchanged drop-select.
+  **The marker's x comes from the canvas's own `frame.timeToX`, never a
+  hand-computed window** — since PR 542 the follow window is CENTRED on
+  the playhead and deliberately not clamped at the song's ends
+  (`timeline/hooks/followWindow.ts::centeredWindowFor`), so only `getWin`
+  knows where a time lands.
+- **The card**: `home/WordDetailsCard.tsx`, a `position: fixed` portal
+  (the `InfoTip.tsx` pattern — `.home-timeline-shape` is
+  `overflow: hidden` and would clip an absolutely-positioned card),
+  centred under its marker and clamped to a 16 px viewport gutter.
+  Four lines: W5.3's `wordReading` first and largest, the sung phrase
+  muted under it, one line of what fires, and `countdownParts`.
+  Dismissed by an outside tap, Escape or the song changing. Read-only —
+  nothing here fires, holds or writes.
+- **NO CHANCE LINE, on purpose.** W5.2 asked for the word's chance on this
+  play with test mode off, under the standing rule "if a field is missing
+  from `/api/upcoming`, say so and leave the line out rather than inventing
+  one". `chance` IS missing: a word row carries `ms`/`end_ms`/`word`/
+  `word_ms`/`swatch`/`word_key`/`momentary`/`shape` (+ `shape_name`/
+  `words`) and, since W5.3, `label`. The roll's numbers live on the Test
+  Bed (`lyric_events.action_payload`), and a row is only on this feed
+  because it already won this play's roll. `momentary` was added to
+  `UpcomingEvent` in this row — the wire already sent it
+  (`lyric_events.word_marks`), the type simply had not declared it.
+- **Proof**: `scripts/check_home_words.mjs` (pure layer+card, ticker/shape
+  agreement, the real `HomeTimeline` tapped in jsdom, the help link).
+  Two harness traps it had to solve, worth knowing for any similar check:
+  jsdom ships no `Element.setPointerCapture` (stub it, or a pointerdown on
+  a drop handle dies inside the listener), and **the one show clock stays
+  null in a mounted-component harness**: `useShowClockSeed`'s first effect
+  run lands before the engine-status poll has data, anchors a NULL clock,
+  and `seedShowClockFromStatus`'s own 2.5 s backstop rule then ignores the
+  real one — while react-query's structural sharing means the 3 s poll
+  never re-runs the effect. Mount the seeder AFTER the status query is in
+  cache. (The app never notices: its 1 Hz WS `clock` pushes arrive.)
+- **Help**: the audio shape's Legend `InfoTip` now deep-links `home-page`
+  (Home's own topic, which `help/routeTopics.ts` already opens for "/" and
+  which had no `topic=` caller at all — one orphan fewer). It used to link
+  `builder-analysed-events`, which keeps its own two callers in
+  `timeline/BuilderPage.tsx`.
+
+**A STALE NOTE CORRECTED while building the above**: `songStrip.ts`'s
+`drawShapeMarkers()` is described below as "the new marker overlay on
+Home's shape canvas". It is not any more — the 2026-10-14 design-fidelity
+pass moved Home onto the shared `TimelineCanvas` + `BUILDER_LAYERS`, whose
+own layers draw those markers, and nothing in the app imports
+`drawShapeMarkers` today; only `scripts/check_song_strip.mjs` §FIVE and
+`check_home_timeline_light_show_markers.mjs` §TWO still drive it, as the
+ticker-side parity reference `check_home_words.mjs` §TWO now also uses it
+for. Treat it as the canvas-primitive twin of `trackPainter.ts`, not as
+Home's live overlay.
+
 **HOME'S RMS BANDS NOW READ THE SAME SCALE MULTIPLIERS THE TIMELINE PAGE
 DOES (2026-10-25, his report: "I don't like the scalings of all the rms
 values on the home page. Match it to what I have right now in the

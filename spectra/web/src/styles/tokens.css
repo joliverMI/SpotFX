@@ -3579,6 +3579,37 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   background: var(--surface);
 }
 .home-timeline-shape canvas { display: block; width: 100%; }
+/* THE WORD DETAILS CARD (Word Shapes W5.2 — "i should be able to tap the
+ * audio shape to learn more. make it clean"). A `position: fixed` portal
+ * placed by the word marker it describes and clamped to the viewport with
+ * a 16px gutter (home/WordDetailsCard.tsx owns the arithmetic), because
+ * `.home-timeline-shape` above is `overflow: hidden` and would cut an
+ * absolutely-positioned card off at the shape's own edge. The reading is
+ * first and largest; the sung phrase is muted under it. */
+.home-word-card {
+  position: fixed;
+  z-index: 70;
+  padding: 9px 11px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  color: var(--text);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.home-word-card-read { display: flex; align-items: center; gap: 7px; }
+.home-word-card-swatch {
+  width: 11px; height: 11px; flex: none;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+.home-word-card-reading { font-size: 16px; font-weight: 700; line-height: 1.15; }
+.home-word-card-phrase { font-size: 11.5px; color: var(--text-muted); font-style: italic; }
+.home-word-card-does { font-size: 12px; line-height: 1.35; margin-top: 2px; }
+.home-word-card-away {
+  font-size: 11.5px; font-weight: 600; color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
 /* ONE THIN ROW under the shape (audit H5 — the live build had none). */
 .home-timeline-controls {
   display: flex; align-items: center; justify-content: space-between;
