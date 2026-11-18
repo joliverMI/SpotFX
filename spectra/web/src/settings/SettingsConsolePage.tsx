@@ -31,6 +31,7 @@ import Icon from '../components/Icon';
 import RoomCard from './RoomCard';
 import ScenesDropsCard from './ScenesDropsCard';
 import SecondAccountCard from './SecondAccountCard';
+import WordTestModeCard from './WordTestModeCard';
 
 function formatValue(spec: SettingValue): string {
   const { value, kind, unit } = spec;
@@ -202,6 +203,10 @@ export default function SettingsConsolePage() {
         * one control for a barrier the server enforces below every caller
         * (fx/second_account.py); see the card's own docstring. */}
       <SecondAccountCard />
+      {/* WORD TEST MODE (2026-11-17) — the switch he asked for, on the page
+        * he asked for it on ("Settings, no auto off"). Above Sonic, like
+        * the other direct cards; see WordTestModeCard.tsx. */}
+      <WordTestModeCard />
 
       <div className="card settings-console-chat">
         <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

@@ -121,6 +121,10 @@ def test_registry_is_an_explicit_allowlist_matching_room_control_bounds():
         "word_shape_form_slow_s", "word_shape_form_fast_s",
         "word_shape_hold_min_s", "word_shape_hold_max_s",
         "word_shape_release_ratio",
+        # 2026-11-17, WORD TEST MODE (the Admiral: "an easy way to make
+        # all words fire regardless of chance, a test mode" — "Settings,
+        # no auto off"): every sung word's chance forced to 1.0
+        "word_test_mode",
     }
     # force_scene_* deliberately excluded — see settings_console.py docstring
     assert "force_scene_enabled" not in sc.SETTINGS_REGISTRY

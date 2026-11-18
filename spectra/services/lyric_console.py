@@ -22,7 +22,9 @@ play rolls which words act, by confidence, with his Always / Chance / Never
 pin per match and "Keep this roll" per song. Sonic already READS it:
 preview_lyric_events passes the Test Bed's payload through, so `roll` (this
 play's number, how many words won, a kept roll) and each action's `chance`
-/`won`/`pin` are in its answer. Not yet here, and named so an audit can tell
+/`won`/`pin` are in its answer — and, since 2026-11-17, whether WORD TEST
+MODE forced them (`test_mode`; the switch itself is an ordinary room
+setting, set through settings_console's set_setting, not an op here). Not yet here, and named so an audit can tell
 "not yet" from "forgotten": an op to pin a match (by phrase, like
 delete_lyric_match; Always on a switched-on show newly lets a word act, so
 it would ask first) and an op to keep or release a song's roll. The weak-
@@ -935,6 +937,11 @@ OPERATIONS: dict[str, SonicOperation] = {
             "is for — `playing` (this play of the song playing, `roll.tag` its number), "
             "`kept` (his kept roll), or `none` (not playing: every word shown as if it "
             "plays) — and `won` false / why `sat_out` marks a word sitting out this play. "
+            "WORD TEST MODE: `test_mode` true (on the result and on every action) means "
+            "the room setting word_test_mode is ON, so every word's chance was forced to "
+            "1.0 and every word wins — the readouts here already show that, and a word "
+            "pinned Never still sits out. Turn it on or off with the ordinary "
+            "set_setting(word_test_mode); it has no auto-off. "
             "A word that reaches a SHAPE has verdict `shape` and carries that shape plus "
             "its forming/hold/release times: a shape word draws instead of changing "
             "colour, even when it also reaches a colour set, and it only reaches the "

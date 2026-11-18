@@ -894,6 +894,20 @@ Three things to know before touching any of it:
   The declaration is not discarded — it stays in `sources` and on the
   payload — it just stops speaking for a run it was not about.
 
+**NOT EVERY "TESTING" STATE BELONGS IN THIS FOLD** (2026-11-17, WORD TEST
+MODE — `docs/SPECTRA_SPEC.md` §129). Every source above is a path HOLDING
+his room, and this bar's whole stated contract — `test_session.py`'s rule
+1, and the `testing-bar` Help topic in his own reading — is that it clears
+itself. A persisted testing SETTING with no auto-off (`RoomControlState.
+word_test_mode`) holds nothing and never expires, so folding it in here
+would make this bar claim his lights were in use while nothing was
+playing, and break the one promise that makes it trustworthy. It gets its
+own bar instead, in its own colours, saying its own thing
+(`spectra/web/src/components/WordTestModeBar.tsx`, mounted beside this one
+in `App.tsx`; the two stack when both are true). Apply the same test to the
+next such switch: does something hold the room, and will it clear itself?
+Both yes = a source here; either no = its own surface.
+
 The ROOM-OWNERSHIP bar (`RoomOwnershipBar.tsx`) is a different surface and
 carries no reason at all: the release button, the released banner, and the
 amber `ActivationStrip`. `light_ownership.commit(detail=)` writes the

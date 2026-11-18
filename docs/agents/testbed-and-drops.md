@@ -360,7 +360,8 @@ section is what is not obvious from it. His rulings are in
   `roll_hits` then `plan_words`, and the trigger clock, the Test Bed preview
   and the `/api/upcoming` join all call it, so the strip, Home's box and the
   Word events row show only this play's winners. A word's chance is
-  `chance_for` (its confidence exactly; his own matches 1.0; his pin overrides)
+  `chance_for` (its confidence exactly; his own matches 1.0; his pin overrides;
+  and, since 2026-11-17, `word_test_mode` forces 1.0 unless the pin is Never)
   — the ONE place to change the mapping. Its draw is
   `sha256(seed|uri|first|last|label)`: independent of every other word, so a
   new match or a pin moves nothing else, and monotone in chance. Rolling

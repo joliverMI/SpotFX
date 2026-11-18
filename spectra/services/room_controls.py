@@ -811,6 +811,37 @@ class RoomControlState(BaseModel):
     word_shape_hold_max_s: float = Field(default=2.0, ge=0.0, le=10.0)
     word_shape_release_ratio: float = Field(default=1.5, ge=0.0, le=5.0)
 
+    # WORD TEST MODE (2026-11-17, the Admiral: "did we implement a system
+    # to 'test' where all word flares (shape or color) fire, no matter the
+    # confidence? how do i turn that on?", and on 2026-11-12 "an easy way
+    # to make all words fire regardless of chance, a test mode". His own
+    # two answers to where it lives and whether it expires, verbatim:
+    # "Settings, no auto off").
+    #
+    # While ON, every word match's CHANCE is 1.0 on every play — colour
+    # words and Word Shapes alike — so every matched word wins the roll
+    # (lyric_events.chance_for, the ONE place the mapping lives; there is
+    # no per-feature hack anywhere else). It is the ROLL ONLY:
+    #   - a match he pinned to NEVER still never plays, and a deleted
+    #     match is still deleted: test mode overrides a chance, never his
+    #     explicit no;
+    #   - nothing else changes — the minimum gap (LyricEventSettings.
+    #     min_gap_s, 8 s by default) still holds, so two words inside it
+    #     still cannot both act; a scene still needs Word colours allowed
+    #     / a Words band for a shape; the form, hold and release timings
+    #     above are untouched;
+    #   - his stored pins and his "Keep this roll" seeds are not written
+    #     to, and neither is any song's data: the switch is read, per
+    #     plan, and nothing else.
+    # Room-wide, durable, and it stays on until HE switches it off — there
+    # is deliberately no auto-off (his answer above), which is why it is
+    # announced loudly on every page while it is on
+    # (spectra/web/src/components/WordTestModeBar.tsx) as well as on
+    # Settings and the Test Bed. Sonic-tellable, exactly like
+    # `drop_testing` above. Read by trigger_engine on each replan, so
+    # flipping it reaches the very next plan without a restart.
+    word_test_mode: bool = False
+
     # ENERGY'S LOOK-AHEAD (2026-10-28, the Energy plan's D2 — spectra/
     # services/energy.py is the binding statement): a drop or a scene
     # change within this many seconds of the next section edge reads the

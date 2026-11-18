@@ -2085,6 +2085,32 @@ kbd {
   border-color: rgba(0, 0, 0, 0.82);
 }
 
+/* WORD TEST MODE (WordTestModeBar.tsx) — the same loudness, deliberately
+ * NOT the same colours: the amber/red hazard stripes above mean "something
+ * is using your lights right now", and this bar is a different claim
+ * ("every word flare fires"), so it must never be mistaken for one. It can
+ * also be up at the same time as either bar above it. */
+.testing-bar-word-test {
+  --testing-bar-a: #7b5cf0;
+  --testing-bar-b: #1fa8c9;
+  color: #f4f1ff;
+}
+
+.testing-bar-word-test .testing-bar-title { color: #e9dcff; }
+
+.testing-bar-action {
+  flex: 0 0 auto;
+  font-weight: 800;
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 2px solid rgba(0, 0, 0, 0.82);
+  background: rgba(0, 0, 0, 0.82);
+  color: #ffd76a;
+  cursor: pointer;
+}
+
+.testing-bar-action:disabled { opacity: 0.6; cursor: default; }
+
 @media (max-width: 720px) {
   .testing-bar {
     flex-wrap: wrap;
@@ -2094,6 +2120,32 @@ kbd {
   .testing-bar-title { font-size: 17px; }
   .testing-bar-headline { font-size: 14px; }
   .testing-bar-sub { font-size: 12px; }
+}
+
+/* ── Settings → Word test mode (WordTestModeCard.tsx, 2026-11-17) ───────
+ * Off, it is an ordinary card. ON, it wears the same violet/cyan the top
+ * bar and the Test Bed banner wear, so the three places that say it are
+ * recognisably one state and not three unrelated notices. */
+.settings-word-test-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.settings-word-test-state { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+.settings-word-test-state.on { color: #d9ccff; font-weight: 700; }
+
+.settings-word-test-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 78ch;
+}
+
+.settings-word-test-on {
+  border-color: #7b5cf0;
+  box-shadow: inset 4px 0 0 0 #7b5cf0;
 }
 
 /* ── Rooms (light-field map) + Room effects ──────────────────────────────
@@ -2501,6 +2553,23 @@ kbd {
 .testbed-word-switch { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--text); }
 .testbed-word-state { font-size: 12px; color: var(--text-muted); }
 .testbed-word-state.on { color: var(--warning); font-weight: 600; }
+/* WORD TEST MODE's own banner on the Test Bed (2026-11-17): it must read
+ * as a STATE OF THE ROOM, not as one more note in a row of muted
+ * sentences — the chips beside it are all telling him "100%" and this is
+ * the only thing that explains why. */
+.testbed-word-test {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-weight: 700;
+  color: #f4f1ff;
+  background: linear-gradient(90deg, rgba(123, 92, 240, 0.9), rgba(31, 168, 201, 0.9));
+  border-radius: 4px;
+  padding: 5px 9px;
+}
+.testbed-word-test-note { font-weight: 500; opacity: 0.92; }
 .testbed-word-sliders { flex: 1; display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--text-muted); }
 .testbed-word-slider { display: inline-flex; align-items: center; gap: 6px; }
 .testbed-word-slider input[type=range] { width: 120px; }

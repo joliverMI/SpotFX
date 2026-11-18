@@ -330,8 +330,13 @@ with the same arithmetic; only the hook differs.
 **THE PLANNER'S SHAPE BRANCH** (`lyric_events.plan_words`), in order, and
 BEFORE the colour branch:
 
-1. sat out (the roll — unchanged, `chance_for`/`roll_hits` untouched) →
-   nothing;
+1. sat out (the roll — `chance_for`/`roll_hits`, whose only addition since
+   is WORD TEST MODE, 2026-11-17: `RoomControlState.word_test_mode` forces
+   every chance to 1.0, so a low-confidence SHAPE word draws on every play
+   too, and a word pinned Never still sits out. It reaches the roll ONLY —
+   the branch below, the form/hold/release and the Words band's own gates
+   are untouched; `.claude/skills/sung-labels/SKILL.md` carries the rest)
+   → nothing;
 2. phrase taken → nothing;
 3. **a DROP inside the imprint window skips the SHAPE** (his Q5 A: the
    drop is the bigger moment) — and the word FALLS THROUGH to the colour

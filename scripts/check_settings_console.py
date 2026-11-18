@@ -175,6 +175,10 @@ check(set(sc.SETTINGS_REGISTRY) == {
     "word_shape_form_slow_s", "word_shape_form_fast_s",
     "word_shape_hold_min_s", "word_shape_hold_max_s",
     "word_shape_release_ratio",
+    # 2026-11-17, WORD TEST MODE (the Admiral: "an easy way to make
+    # all words fire regardless of chance, a test mode" — "Settings,
+    # no auto off"): every sung word's chance forced to 1.0
+    "word_test_mode",
 }, "registry is the deliberate allowlist (eight room keys + the four "
    "analysed-transition knobs + the five 2026-10-06 widening keys + "
    "drop_floor + lull_dark_max_s + lull_breath_hold_s + the four "
