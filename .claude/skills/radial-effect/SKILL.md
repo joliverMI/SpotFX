@@ -347,6 +347,13 @@ Eight things not visible cold:
   shape and size — a holding shape costs one divide a frame) and the
   angle-space divisor (`_word_shape_div`, which `_shape_div(phi, theta)`
   feeds so a lull piece and a transition program ride the shape too).
+  **"Upright" here means NOT SPINNING, not which way up.** The library's
+  own default orientation became a 180-degree half turn on 2026-11-18
+  (row W5.7, `word_shapes.PANEL_ROTATION_DEG`; his verdict was that the
+  shapes read upside-down on the crystal), and nothing in this module
+  changed: the divisor is still read at the SCREEN angle, so the shape
+  still comes to rest rather than turning with the polygon — it simply
+  rests the other way up in the FRAME, which is upright on his panel.
 - **THE DIVISOR ALONE IS NOT THE SHAPE — THE EDGE IS HALF THE WORK.** `u`
   keeps rising past 1 and the strip REPEATS (`twist_index % 1.0`), so a
   divisor on its own leaves the whole panel lit and the shape is an

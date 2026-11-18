@@ -52,7 +52,13 @@ SHIPPED = ("heart", "star", "diamond")
 # live crystal-mapper mask, with every distance in physical pitch units.
 # The outline count is the denominator of every wave-1 outline-coverage
 # bar, so changing one of these numbers means a shape's drawn outline
-# moved, which is never accidental.
+# moved, which is never accidental. The 2026-11-18 half turn
+# (`PANEL_ROTATION_DEG`) did NOT move any of them: the hex lattice is
+# centrally symmetric about the panel's own centre (row r <-> row 36 - r
+# keeps the half-column offset parity, 36 being even), so a 180-degree
+# turn maps real cells onto real cells. If one of these ever moves under
+# an orientation change, that is a finding to report, not a number to
+# re-pin.
 PINNED = {
     #            outline, inside, thinnest
     "heart":   (168, 332, 3),
@@ -151,17 +157,143 @@ def test_a_shape_declared_upright_false_keeps_that():
 
 
 def test_the_shipped_shapes_point_up_the_way_the_panel_does():
-    # y is DOWN: a star's and a diamond's own point is at the TOP, so the
-    # outline's minimum y is reached near x = 0.
+    # Flipped on 2026-11-18 (`PANEL_ROTATION_DEG`): his verdict in the room
+    # was that the shapes read upside-down on the crystal, so a half turn
+    # is the library's default orientation and the FRAME now holds every
+    # shape inverted — upright only once his panel inverts it back.
+    #
+    # y is DOWN, so a star's and a diamond's own point is at the frame's
+    # MAXIMUM y, reached near x = 0.
     for shape_id in ("star", "diamond"):
         pts = word_shapes.get(shape_id).points
-        top = pts[pts[:, 1].argmin()]
-        assert abs(top[0]) < 1e-9
-    # the heart's single point is at the BOTTOM, its cleft at the top
+        point = pts[pts[:, 1].argmax()]
+        assert abs(point[0]) < 1e-9
+    # the heart's single point is at MINIMUM y, its cleft at the bottom
     heart = word_shapes.get("heart").points
-    assert abs(heart[heart[:, 1].argmax()][0]) < 1e-9
-    cleft_x = heart[heart[:, 1].argmin()][0]
-    assert abs(cleft_x) > 0.1       # the top of a heart is two lobes
+    assert abs(heart[heart[:, 1].argmin()][0]) < 1e-9
+    lobe_x = heart[heart[:, 1].argmax()][0]
+    assert abs(lobe_x) > 0.1    # the cleft end of a heart is two lobes
+
+
+def test_the_half_turn_is_the_default_for_any_shape_built_here():
+    # The flip is the DEFAULT for every shape, not a per-shape or
+    # per-device option: `build()` applies it to anything that goes
+    # through it, including a shape the registry does not ship.
+    assert word_shapes.PANEL_ROTATION_DEG == 180
+    pts = [(0.0, -1.0), (1.0, 0.0), (0.0, 1.0)]
+    built = word_shapes.build("tri", "Tri", pts, ("tri",)).points
+    # `build()` centres the box (x spans 0..1, so its centre is 0.5) and
+    # then half-turns, so the declared (1, 0) spike points the other way.
+    assert built[built[:, 0].argmin()][0] == pytest.approx(-0.5)
+    assert built[:, 0].max() == pytest.approx(0.5)
+    # The winding is still counter-clockwise in the algebra — neither the
+    # turn nor the arc-length roll after it can change that.
+    assert word_shapes._signed_area(built) > 0.0
+
+
+def _declared(shape_id: str) -> np.ndarray:
+    """The shape's outline exactly as `_SHAPES` declares it, before
+    `build()` touches it — so a test can recover the array as it stood
+    BEFORE the half turn (`_orient(_normalise_box(...))`, the two steps
+    the turn now follows) and compare the two."""
+    if shape_id == "heart":
+        return word_shapes._heart_points()
+    if shape_id == "star":
+        return word_shapes._polygon_points(word_shapes._star_verts(),
+                                           per_edge=40)
+    if shape_id == "diamond":
+        return word_shapes._polygon_points(
+            [(0.0, -1.0), (0.78, 0.0), (0.0, 1.0), (-0.78, 0.0)],
+            per_edge=60)
+    raise KeyError(shape_id)
+
+
+def _before_the_turn(shape_id: str) -> np.ndarray:
+    pts = word_shapes._as_points(_declared(shape_id))
+    return word_shapes._orient(word_shapes._normalise_box(pts))
+
+
+def test_the_declared_outlines_this_file_rebuilds_are_the_shipped_ones():
+    # every test below leans on `_declared` being the registry's own
+    # outline, so that is checked rather than assumed
+    for shape_id in SHIPPED:
+        rebuilt = word_shapes.build(shape_id, word_shapes.get(shape_id).name,
+                                    _declared(shape_id),
+                                    word_shapes.get(shape_id).words)
+        assert np.array_equal(rebuilt.points, word_shapes.get(shape_id).points)
+
+
+def test_the_flip_is_a_rotation_of_the_picture_and_nothing_else():
+    """The squadron leader's ruling on row W5.7. Every shipped shape's
+    point SET after the flip is exactly its rotated set — the turn moved
+    every point to its antipode and nothing else happened to the geometry
+    — and the list order is that rotated cycle, rolled by some whole
+    number of steps and never reshuffled."""
+    for shape_id in SHIPPED:
+        before = _before_the_turn(shape_id)
+        after = word_shapes.get(shape_id).points
+        assert np.array_equal(
+            np.array(sorted(map(tuple, np.round(after, 12)))),
+            np.array(sorted(map(tuple, np.round(-before, 12)))))
+        turned = -before
+        lead = int(np.linalg.norm(turned - before[0], axis=1).argmin())
+        rolled = np.roll(turned, -lead, axis=0)
+        assert np.array_equal(after, turned) or np.array_equal(after, rolled)
+        # `at(0)` is `points[0]`, the library's own convention
+        assert word_shapes.get(shape_id).at(0.0) == pytest.approx(after[0])
+
+
+def test_the_diamond_is_byte_identical_after_the_flip():
+    """THE STRONGEST PROOF THAT THE IMPLEMENTATION IS A PURE ROTATION (the
+    ruling's own words). A diamond is its OWN half turn, so the turned
+    outline passes exactly through the arc-length origin's old place, the
+    roll lands on it, and the array comes back bit for bit. It is why all
+    24 of Orbits' contrast rows read exactly W4.4's numbers: without the
+    roll the diamond's own `many4 @ Energy 0.8` row fell from 60% of the
+    outline band to 54% against its 55% bar, the line closing 0.63 s
+    after the word instead of 0.53 s.
+    """
+    diamond = word_shapes.get("diamond")
+    assert np.array_equal(diamond.points, _before_the_turn("diamond"))
+    # its point set is invariant under the half turn, which is what lets
+    # the roll land exactly and the bytes match
+    a = np.array(sorted(map(tuple, np.round(diamond.points, 12))))
+    b = np.array(sorted(map(tuple, np.round(-diamond.points, 12))))
+    assert np.array_equal(a, b)
+    assert diamond.points[0] == pytest.approx([0.0, -1.0], abs=1e-15)
+
+
+def test_a_shape_that_is_not_its_own_half_turn_keeps_its_material_origin():
+    """The heart and the star are NOT their own half turn: no turned point
+    sits on the arc-length origin's old PLACE at all — the nearest is
+    0.249 and 0.339 unit lengths away (these minima are measured, and
+    pinned here so a later change to an outline's point count cannot
+    quietly move them). Rolling to that nearest point would land on
+    neither the old physical phase nor the shape's own material one, and
+    measured it moved Orbits' `many4 heart @ Energy 0.8` band/rest ratio
+    from 1.53 to 1.26 against a 1.4 bar. So `at(0)` stays on the same
+    MATERIAL point — the declared vertex, carried round by the turn —
+    which is the only phase a moved outline still has.
+    """
+    minima = {"heart": 0.2488, "star": 0.3387}
+    for shape_id, expected in minima.items():
+        before = _before_the_turn(shape_id)
+        after = word_shapes.get(shape_id).points
+        # no turned point lands on the old place
+        d = np.linalg.norm(after - before[0], axis=1)
+        assert d.min() == pytest.approx(expected, abs=5e-4)
+        assert d.min() > word_shapes._ORIGIN_LANDS_EPS
+        # so the list was NOT rolled: `points[0]` is the declared vertex,
+        # carried round by the turn
+        assert np.array_equal(after, -before)
+        assert after[0] == pytest.approx(-before[0], abs=1e-15)
+    # and the diamond, which IS its own half turn, WAS rolled onto the
+    # old place — the two branches, both exercised
+    diamond_before = _before_the_turn("diamond")
+    diamond_after = word_shapes.get("diamond").points
+    d = np.linalg.norm(diamond_after - diamond_before[0], axis=1)
+    assert d.min() <= word_shapes._ORIGIN_LANDS_EPS
+    assert d[0] == pytest.approx(0.0, abs=1e-15)
 
 
 # ── the radius per angle ───────────────────────────────────────────────────
