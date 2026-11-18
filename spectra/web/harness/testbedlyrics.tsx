@@ -140,6 +140,7 @@ function wordAction(over: Record<string, unknown>) {
   return {
     key: '0-0', first_word: 0, last_word: 0, phrase: 'red', label: 'red', ms: 7600, end_ms: 7900,
     source: 'claude', strength, match_id: matchId, pin, chance, draw: 0.31, won: true,
+    test_mode: false,
     chance_words: pin === 'always' ? 'Pinned to play every time.' : pin === 'never' ? 'Pinned to never play.'
       : `Plays on about ${Math.round(chance * 100)}% of plays (Claude's confidence).`,
     set_names: ['Blood Red'], set_ids: ['red1'], swatch: '#c81e1e',
@@ -159,19 +160,22 @@ function roll(uri: string, sample: number | null, actions: { won: boolean | null
     state, seed, tag: seed == null ? null : (seed & 0xffff).toString(16).padStart(4, '0'),
     started_ms: playing ? Date.now() - 95_000 : null, kept: false, kept_seed: keptSeed, playing,
     n_words: actions.length, n_won: state === 'none' ? 0 : actions.filter((a) => a.won).length,
+    // WORD TEST MODE (2026-11-17): the harness runs with it OFF, which is
+    // the shape every existing eye-check was drawn against.
+    test_mode: false,
   };
 }
 function lyricEvents(uri: string, sample: number | null) {
   if (uri === NONE || uri === STALE) {
     return { uri, status: 'none', note: 'No sung words.', clock_flagged: false, enabled: false,
              settings: { energy_cutoff: 0.5, min_gap_s: 8, imprint_window_s: 2 }, n_events: 0, shows_on: 0,
-             roll: roll(uri, null, []), actions: [] };
+             test_mode: false, roll: roll(uri, null, []), actions: [] };
   }
   const actions = lyricActions();
   return {
     uri, status: 'ok', note: null, clock_flagged: uri === SLIP, enabled: true,
     settings: { energy_cutoff: 0.5, min_gap_s: 8, imprint_window_s: 2 }, n_events: 2, shows_on: 1,
-    roll: roll(uri, sample, actions), actions,
+    test_mode: false, roll: roll(uri, sample, actions), actions,
   };
 }
 function lyricActions() {

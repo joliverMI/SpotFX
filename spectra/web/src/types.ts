@@ -654,6 +654,14 @@ export interface RoomControlState {
    * would, approved or not; removed and switched-off ones never. Default
    * off; stays on until switched off. Optional for an older server. */
   drop_testing?: boolean;
+  /** WORD TEST MODE (2026-11-17, lyric_events.py's "WORD TEST MODE" is the
+   * binding statement — his ask: "an easy way to make all words fire
+   * regardless of chance, a test mode", "Settings, no auto off"): every
+   * matched sung word's chance is 1.0 on every play, colour words and word
+   * shapes alike. A Never pin and a deleted match still never play; the
+   * minimum gap, the scene's own permission and the shape timings are all
+   * unchanged. Default off, no auto-off. Optional for an older server. */
+  word_test_mode?: boolean;
   /** THE DROP COLOUR CHANGE (spectra/services/drop_colour.py, scene_response
    * drop_color_change): every drop that plays arrives in a colour set about
    * opposite the one showing — drop_colour_spread_deg either side of 180°
@@ -2204,6 +2212,10 @@ export interface LyricEventAction {
   chance: number | null;
   draw: number | null;
   won: boolean | null;
+  /** WORD TEST MODE: this word's chance was forced to 1.0 by the room
+   * switch (RoomControlState.word_test_mode), not by its own confidence or
+   * a pin. `chance_words` says both facts while it is on. */
+  test_mode: boolean;
   chance_words: string;
   set_names: string[];
   set_ids: string[];
@@ -2248,6 +2260,11 @@ export interface LyricEvents {
   shows_on: number;
   roll: LyricRoll;
   actions: LyricEventAction[];
+  /** WORD TEST MODE (RoomControlState.word_test_mode): this plan was rolled
+   * with every chance forced to 1.0. Carried on the preview as well as on
+   * each action, so a song with no matched words still says the switch is
+   * on. */
+  test_mode: boolean;
 }
 
 /** Which play a word plan is for (lyric_events.roll_payload): the song
@@ -2263,6 +2280,9 @@ export interface LyricRoll {
   playing: boolean;
   n_words: number;
   n_won: number;
+  /** WORD TEST MODE: `n_won` above is already the test-mode count (every
+   * chance was 1.0 when this roll ran) — this says why. */
+  test_mode: boolean;
 }
 
 /** A word just fired on its own or imprinted on an event (spectra/services/

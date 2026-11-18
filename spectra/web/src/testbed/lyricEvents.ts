@@ -72,19 +72,26 @@ export function actionChipText(action: LyricEventAction): string {
   return `${action.phrase}${tail}`;
 }
 
-/** Which play the plan shows, in one sentence. */
+/** Which play the plan shows, in one sentence.
+ *
+ * WORD TEST MODE (2026-11-17, RoomControlState.word_test_mode): the counts
+ * are ALREADY the test-mode counts — the roll ran with every chance at
+ * 1.0 — so the only thing left to do is say why they read the way they
+ * do, in the same sentence that states them. Without this, "22 of 22
+ * words play" on a song full of 3% guesses looks like a bug. */
 export function rollWords(roll: LyricRoll): string {
   const of = `${roll.n_won} of ${roll.n_words} ${roll.n_words === 1 ? 'word' : 'words'}`;
+  const tail = roll.test_mode ? ' Word test mode is on: every word fires.' : '';
   switch (roll.state) {
     case 'playing':
-      return roll.kept || rollIsKept(roll) ? `This play, your kept roll #${roll.tag}: ${of} play.`
-        : `This play #${roll.tag}: ${of} play.`;
+      return (roll.kept || rollIsKept(roll) ? `This play, your kept roll #${roll.tag}: ${of} play.`
+        : `This play #${roll.tag}: ${of} play.`) + tail;
     case 'kept':
-      return `Kept roll #${roll.tag}: the same ${of} play every time.`;
+      return `Kept roll #${roll.tag}: the same ${of} play every time.` + tail;
     case 'sample':
-      return `Sample play #${roll.tag}: ${of} would play.`;
+      return `Sample play #${roll.tag}: ${of} would play.` + tail;
     default:
-      return 'Each play rolls which words act. Shown here as if every word plays.';
+      return 'Each play rolls which words act. Shown here as if every word plays.' + tail;
   }
 }
 

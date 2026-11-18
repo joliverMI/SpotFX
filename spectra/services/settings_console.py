@@ -30,6 +30,11 @@ Widened again 2026-11-15 with the five WORD SHAPE timings
 (word_shape_form_slow_s / _form_fast_s / _hold_min_s / _hold_max_s /
 _release_ratio — Word Shapes plan W0.3, his Q4 A: "all Sonic-tunable"),
 each carrying the `word-shapes` Help topic id.
+Widened again 2026-11-17 with word_test_mode (the Admiral: "an easy way
+to make all words fire regardless of chance, a test mode" — "Settings, no
+auto off"), the one switch that forces every sung word's chance to 1.0;
+spectra/services/lyric_events.py's "WORD TEST MODE" is the binding
+statement for what it does and does not touch.
 
 force_scene_scene_id/force_color_target_id STAY OUT OF THIS REGISTRY —
 each targets a scene or colour SET/GROUP by OPAQUE ID, a poor fit for
@@ -130,6 +135,7 @@ class SettingChangeError(Exception):
 # _spec argument so the registry's own entries stay a flat (key, label,
 # description) list — nothing below had to change to gain one.
 HELP_TOPICS: dict[str, str] = {
+    "word_test_mode": "word-test-mode",
     "word_shape_form_slow_s": "word-shapes",
     "word_shape_form_fast_s": "word-shapes",
     "word_shape_hold_min_s": "word-shapes",
@@ -436,6 +442,22 @@ SETTINGS_REGISTRY: dict[str, SettingSpec] = {
         "instead decides whether its own bands snap back out of the core "
         "on the drop (off: the plain bloom). Takes effect on the very "
         "next drop."),
+    "word_test_mode": _spec(
+        "word_test_mode", "Word test mode (every word flare fires)",
+        "Off (default): a matched sung word plays on the share of plays "
+        "its confidence says, and he can pin one to Always or Never. On: "
+        "EVERY word match fires on every play, colour words and word "
+        "shapes alike, whatever its confidence — the test mode for "
+        "watching all of them in the room. A match he pinned to NEVER "
+        "still never plays, and a match he deleted is still deleted: this "
+        "overrides a chance, never an explicit no. Nothing else changes — "
+        "two words closer together than the minimum gap (8 s by default) "
+        "still cannot both fire, a scene still has to allow the word's "
+        "colours (or carry a Words band for a shape), and the shape "
+        "timings are untouched. His pins and his kept rolls are not "
+        "written to. There is NO auto-off: it stays on until he switches "
+        "it off, and every page says so loudly while it is on. Reaches "
+        "the very next plan."),
     "drop_testing": _spec(
         "drop_testing", "Drop testing (play every detected drop)",
         "Off (default): a suggested drop waits for his approval on Home's "

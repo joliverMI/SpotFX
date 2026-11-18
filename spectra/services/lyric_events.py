@@ -52,6 +52,37 @@ there." So:
   - With no play (a song not playing and no kept roll) the Test Bed shows
     every word as if it won, each with its chance, and can sample a play.
 
+WORD TEST MODE (2026-11-17 — the Admiral: "did we implement a system to
+'test' where all word flares (shape or color) fire, no matter the
+confidence? how do i turn that on?", and on 2026-11-12 "an easy way to
+make all words fire regardless of chance, a test mode"; where it lives
+and whether it expires, his own words: "Settings, no auto off"). One
+room-wide switch, `RoomControlState.word_test_mode`, read on every replan:
+while it is ON every word's chance is 1.0, applied in `chance_for` and
+nowhere else, so colour words and Word Shapes both get it from the one
+line that already owned the mapping. IT IS THE ROLL ONLY:
+
+  - a match he pinned to NEVER still never plays (`chance_for` asks the
+    pin first) and a deleted match is still deleted — test mode overrides
+    a chance, never his explicit no;
+  - every other rule stands exactly as it is. The MINIMUM GAP still holds,
+    so two matched words closer together than `min_gap_s` still cannot
+    both act and the second still reads WHY_TOO_SOON — the one thing worth
+    saying out loud, because "I turned test mode on and that word still
+    didn't fire" is what the gap looks like from the outside. So do the
+    phrase rule, the shape branch, the imprint window, the scene's own
+    permission (Word colours allowed / a Words band for a shape) and the
+    form/hold/release timings;
+  - the DRAW is still taken and still reported, so the Test Bed's readouts
+    remain the honest record of this play and switching the mode off puts
+    the same words back without re-rolling;
+  - nothing is written: not his pins, not his kept rolls, not any song's
+    data. The switch is read, and that is all.
+
+It stays on until he switches it off (no auto-off, his answer), which is
+why it is announced on every page while it is on — `WordTestModeBar.tsx`,
+plus Settings and the Test Bed.
+
 WORD SHAPES (Word Shapes plan W0.3, 2026-11-15 — the Admiral: "It would
 operate like a flare in the scenes panel, just only fire by sung word"). A
 match may now reach a SHAPE as well as (or instead of) a colour set, and a
@@ -522,6 +553,11 @@ class WordHit:
     chance: Optional[float] = None
     draw: Optional[float] = None
     won: Optional[bool] = None
+    # WORD TEST MODE (2026-11-17): was this hit rolled with every chance
+    # forced to 1.0? Stamped by roll_hits, so a readout built from the hit
+    # alone can say WHY its chance is 100% (`chance_words`). Never stored,
+    # never part of the draw.
+    test_mode: bool = False
 
     @property
     def swatch(self) -> Optional[str]:
@@ -728,14 +764,27 @@ def colour_fallback(action: WordAction,
         form_s=0.0, hold_s=0.0, release_s=0.0)
 
 
-def chance_for(hit: WordHit) -> float:
+def chance_for(hit: WordHit, test_mode: bool = False) -> float:
     """The share of plays this word acts on: its confidence, exactly (his
     own matches are 1.0), unless he pinned it. The one place the mapping
-    lives, so "more math later" changes only this."""
-    if hit.pin == PIN_ALWAYS:
-        return 1.0
+    lives, so "more math later" changes only this.
+
+    WORD TEST MODE (2026-11-17, RoomControlState.word_test_mode — "every
+    word flare fires, colour and shape, whatever its confidence") is a
+    chance of 1.0 for every word, applied HERE and only here, so the
+    colour words and the Word Shapes get it from the same line and no
+    feature needs its own switch. HIS NEVER PIN IS ASKED FIRST and still
+    wins: test mode overrides a CHANCE, never his explicit no. (A deleted
+    match never reaches this function at all — it is gone from the
+    matches, so there is nothing here to override.) Nothing else about a
+    word changes: the minimum gap, the phrase rule, the scene's own
+    permission and the shape timings are all downstream of the roll."""
     if hit.pin == PIN_NEVER:
         return 0.0
+    if test_mode:
+        return 1.0
+    if hit.pin == PIN_ALWAYS:
+        return 1.0
     if hit.his:
         return 1.0
     return _clamp01(hit.strength)
@@ -749,14 +798,27 @@ def draw_for(seed: int, uri: str, hit: WordHit) -> float:
     return int.from_bytes(digest[:8], "big") / float(1 << 64)
 
 
-def roll_hits(hits: Sequence[WordHit], play: Optional[Play]) -> list[WordHit]:
+def roll_hits(hits: Sequence[WordHit], play: Optional[Play],
+              test_mode: bool = False) -> list[WordHit]:
     """Every hit with its chance and, when a play is rolled, its draw and
     whether it won. A word that did not win sits out (WHY_SAT_OUT) BEFORE
     plan_words runs, so it takes no phrase, event or gap from another word.
-    No play: nothing is rolled, and every word is planned as if it won."""
+    No play: nothing is rolled, and every word is planned as if it won.
+
+    `test_mode` is WORD TEST MODE (chance_for above): every chance becomes
+    1.0, so every draw — which is unchanged, still the same hash of the
+    same seed, song and words — comes in under it and every word wins. The
+    DRAW IS DELIBERATELY STILL TAKEN AND STILL REPORTED, so the Test Bed's
+    readouts stay the honest record of this play and switching test mode
+    off puts the very same words back without re-rolling anything. The
+    one word that still sits out is one he pinned to Never (chance 0.0,
+    and a draw is never below zero). It is also STAMPED on each hit, so
+    every readout built from a hit — `chance_words`, the chips' own
+    percentage, `action_payload` — says so without a second parameter."""
     out: list[WordHit] = []
     for hit in hits:
-        chance = chance_for(hit)
+        chance = chance_for(hit, test_mode)
+        hit = replace(hit, test_mode=bool(test_mode))
         if play is None:
             out.append(replace(hit, chance=chance, draw=None, won=None))
             continue
@@ -770,10 +832,16 @@ def roll_hits(hits: Sequence[WordHit], play: Optional[Play]) -> list[WordHit]:
 def plan_play(hits: Sequence[WordHit], events: Sequence[EventMoment],
               tuning: LyricEventSettings, play: Optional[Play],
               shape_timing: Optional[ShapeTiming] = None,
-              can_draw: Optional[CanDraw] = None) -> list[WordAction]:
+              can_draw: Optional[CanDraw] = None,
+              test_mode: bool = False) -> list[WordAction]:
     """Roll this play, then plan the words that won it. What the trigger
-    clock and the Test Bed both call."""
-    return plan_words(roll_hits(hits, play), events, tuning,
+    clock and the Test Bed both call.
+
+    `test_mode` is WORD TEST MODE (RoomControlState.word_test_mode), and it
+    reaches ONLY the roll — `plan_words` below is byte-identical either
+    way, which is what keeps every other rule (the gap, the phrase, the
+    shape branch, the imprint window) exactly as it is."""
+    return plan_words(roll_hits(hits, play, test_mode), events, tuning,
                       shape_timing=shape_timing, can_draw=can_draw)
 
 
@@ -1089,11 +1157,24 @@ def _percent(chance: Optional[float]) -> str:
 
 
 def chance_words(hit: WordHit) -> str:
-    """How often this word plays, in a few words."""
+    """How often this word plays, in a few words.
+
+    WORD TEST MODE comes FIRST on everything but his Never pin, and says
+    both facts: that it plays every time now, and what it would be back
+    to without the switch — so the page never hides what the real chance
+    is while the switch is on."""
+    if hit.pin == PIN_NEVER:
+        return ("Pinned to never play."
+                + (" Word test mode does not override that." if hit.test_mode else ""))
+    if hit.test_mode:
+        if hit.pin == PIN_ALWAYS:
+            return "Pinned to play every time. Word test mode is on, so it would anyway."
+        if hit.his:
+            return "Your own match: plays every time. Word test mode is on, so it would anyway."
+        return ("Word test mode is on: plays every time. Without it, about "
+                f"{_percent(_clamp01(hit.strength))} of plays (Claude's confidence).")
     if hit.pin == PIN_ALWAYS:
         return "Pinned to play every time."
-    if hit.pin == PIN_NEVER:
-        return "Pinned to never play."
     if hit.his:
         return "Your own match: plays every time."
     return f"Plays on about {_percent(hit.chance)} of plays (Claude's confidence)."
@@ -1166,6 +1247,9 @@ def action_payload(action: WordAction) -> dict[str, Any]:
         "match_id": hit.match_id, "pin": hit.pin,
         "chance": None if hit.chance is None else round(hit.chance, 3),
         "draw": None if hit.draw is None else round(hit.draw, 4), "won": hit.won,
+        # WORD TEST MODE (2026-11-17): this word's chance was forced to 1.0
+        # by the room switch, not by its own confidence or a pin.
+        "test_mode": hit.test_mode,
         "chance_words": chance_words(hit),
         "set_names": list(hit.set_names), "set_ids": list(hit.set_ids), "swatch": hit.swatch,
         "shape": hit.shape_id, "shape_name": hit.shape_name,
@@ -1266,6 +1350,11 @@ class Preview:
     play: Optional[Play] = None
     kept_seed: Optional[int] = None
     playing: bool = False
+    # WORD TEST MODE (2026-11-17, RoomControlState.word_test_mode): this
+    # plan was rolled with every chance forced to 1.0. Carried once on the
+    # preview rather than inferred from the actions, so a song with no
+    # words still tells the page the switch is on.
+    test_mode: bool = False
 
 
 def roll_payload(preview: Preview) -> dict[str, Any]:
@@ -1282,6 +1371,10 @@ def roll_payload(preview: Preview) -> dict[str, Any]:
         "playing": preview.playing,
         "n_words": len(preview.actions),
         "n_won": sum(1 for a in rolled if a.hit.won),
+        # WORD TEST MODE: the sampled/this-play counts above are already
+        # the test-mode counts (every chance was 1.0 when the roll ran),
+        # and this says why they read the way they do.
+        "test_mode": bool(preview.test_mode),
     }
 
 
@@ -1290,6 +1383,7 @@ def preview_payload(preview: Preview, tuning: LyricEventSettings) -> dict[str, A
         "uri": preview.words.uri, "status": preview.words.status, "note": preview.words.note,
         "clock_flagged": preview.words.clock_flagged, "enabled": preview.enabled,
         "settings": tuning.model_dump(), "n_events": preview.n_events,
+        "test_mode": bool(preview.test_mode),
         "shows_on": len(shows_on()),
         "roll": roll_payload(preview),
         "actions": [action_payload(a) for a in preview.actions],

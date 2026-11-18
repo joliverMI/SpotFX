@@ -238,8 +238,24 @@ and "if the confidence leve is .97, it runs 97% of the time".
   `plan_words`' own rules are untouched. Rolling BEFORE it is the point: a
   word sitting out (`WHY_SAT_OUT`) frees its line, event and gap.
 - **`chance_for` is the one mapping** (confidence exactly; `his` → 1.0; pin
-  Always/Never → 1.0/0.0). "We might add more math to that later" — add it
-  there and nowhere else.
+  Always/Never → 1.0/0.0, and `test_mode` → 1.0 unless the pin is Never).
+  "We might add more math to that later" — add it there and nowhere else.
+- **WORD TEST MODE (2026-11-17) lives in that one mapping too.**
+  `RoomControlState.word_test_mode` ("Settings, no auto off" — his own
+  answer) forces every word's chance to 1.0, so a 3% guess plays on every
+  play and a word shape fires as readily as a colour. It is threaded as a
+  plain `test_mode` argument through `chance_for` → `roll_hits` →
+  `plan_play`, read by `TriggerEngine._lyric_test_mode` (the
+  `_default_drop_testing` shape) and folded into `_refresh_lyric_plan`'s
+  memo key so a flip reaches the very next plan. THREE things to keep true
+  when you touch it: his NEVER pin is asked BEFORE the switch, so his
+  explicit no survives it; `plan_words` is byte-identical either way, so
+  the gap/phrase/imprint/shape rules cannot drift (the 8 s gap is the one
+  he will read as a bug — say so in any UI you add); and the DRAW is still
+  taken, so switching off restores the same winners without re-rolling.
+  The switch is read, never written, and it writes nothing of his.
+  Proof: `tests/test_word_test_mode.py` +
+  `scripts/check_word_test_mode_ui.mjs`.
 - **`draw_for(seed, uri, hit)`** hashes the seed with the word's own span
   and label: independent per word, monotone in chance, same seed = same
   winners. Never draw from a shared RNG stream: a new match would reshuffle

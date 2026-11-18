@@ -603,6 +603,7 @@ class TriggerEngine:
         lyric_shape: Callable[..., Awaitable[Any]] | None = None,
         lyric_shape_timing: Callable[..., Any] | None = None,
         lyric_can_draw: Callable[[float], bool] | None = None,
+        lyric_test_mode: Callable[[], bool] | None = None,
         lyric_pick: Callable[..., dict] | None = None,
         lyric_note_set: Callable[[Optional[str]], None] | None = None,
         lyric_release_hold: Callable[[], None] | None = None,
@@ -871,6 +872,14 @@ class TriggerEngine:
         # every unknowable in this feature errs (the fire-time fallback
         # catches it).
         self._lyric_can_draw = lyric_can_draw or (lambda _energy: True)
+        # WORD TEST MODE (2026-11-17, RoomControlState.word_test_mode —
+        # lyric_events.py's "WORD TEST MODE"): every word's chance is 1.0
+        # while it is on. Read fresh on each replan AND folded into the
+        # replan memo key below, so flipping it reaches the very next plan
+        # instead of waiting out LYRIC_REPLAN_S — the `drop_testing` shape
+        # exactly. An engine with no room reads False, so a pure spec is
+        # today's behaviour unless it says otherwise.
+        self._lyric_test_mode = lyric_test_mode or self._default_word_test_mode
         self._lyric_pick = lyric_pick or (lambda *_a, **_k: {"result": "unwired"})
         self._lyric_note_set = lyric_note_set or (lambda _set_id: None)
         self._lyric_release_hold = lyric_release_hold or (lambda: None)
@@ -2082,8 +2091,12 @@ class TriggerEngine:
         play = self._lyric_play_now(uri)
         self._keep_play_written(play, now)
         tuning = self._lyric_tuning()
+        # WORD TEST MODE is part of the key, not just of the plan: without
+        # it a flip would sit unapplied for up to LYRIC_REPLAN_S while the
+        # memo still matched.
+        test_mode = bool(self._lyric_test_mode())
         key = (uri, id(words), play.seed, play.started_ms, tuning.energy_cutoff,
-               tuning.min_gap_s, tuning.imprint_window_s)
+               tuning.min_gap_s, tuning.imprint_window_s, test_mode)
         if (key == self._lyric_planned and self._lyric_planned_at is not None
                 and now - self._lyric_planned_at < LYRIC_REPLAN_S):
             return
@@ -2093,7 +2106,7 @@ class TriggerEngine:
         self._lyric_plan = lyric_events.plan_play(
             words.hits, events, tuning, play,
             shape_timing=self._lyric_shape_timing,
-            can_draw=self._lyric_can_draw)
+            can_draw=self._lyric_can_draw, test_mode=test_mode)
         self._lyric_imprints = {
             a.event.id: a for a in self._lyric_plan
             if a.verdict == lyric_events.VERDICT_IMPRINT and a.event is not None}
@@ -2164,7 +2177,11 @@ class TriggerEngine:
     def _log_lyric_roll(self, play: lyric_events.Play) -> None:
         """One row on the show log per play: its number and the words that
         won it, so a play can be told apart from the next and kept."""
-        mark = (play.uri, play.seed, play.started_ms)
+        # WORD TEST MODE is part of the mark, so flipping it mid-song
+        # writes its own row rather than hiding behind the first: the show
+        # log must be able to say which plays ran with every chance forced.
+        test_mode = any(a.hit.test_mode for a in self._lyric_plan)
+        mark = (play.uri, play.seed, play.started_ms, test_mode)
         if self._lyric_roll_logged == mark:
             return
         self._lyric_roll_logged = mark
@@ -2175,6 +2192,7 @@ class TriggerEngine:
                 "triggers", "lyric:roll",
                 {"lyric": True, "roll": True, "seed": play.seed, "tag": play.tag,
                  "kept": play.kept, "restored": play.restored,
+                 "test_mode": test_mode,
                  "n_words": len(self._lyric_plan), "n_won": len(won),
                  "won": [h.phrase for h in won][:40]},
                 uri=play.uri, position_ms=self._last_position_ms)
@@ -2531,12 +2549,17 @@ class TriggerEngine:
             play = lyric_events.Play(uri, int(sample), source=lyric_events.ROLL_SAMPLE)
         elif kept is not None:
             play = lyric_events.Play(uri, kept, kept=True, source=lyric_events.ROLL_KEPT)
+        # WORD TEST MODE: the page and the show read the SAME switch, so
+        # what the Test Bed says a word will do stays what the show does.
+        test_mode = bool(self._lyric_test_mode())
         return lyric_events.Preview(
             enabled=enabled, words=words,
             actions=lyric_events.plan_play(words.hits, events, self._lyric_tuning(), play,
                                             shape_timing=self._lyric_shape_timing,
-                                            can_draw=self._lyric_can_draw),
-            n_events=len(events), play=play, kept_seed=kept, playing=playing)
+                                            can_draw=self._lyric_can_draw,
+                                            test_mode=test_mode),
+            n_events=len(events), play=play, kept_seed=kept, playing=playing,
+            test_mode=test_mode)
 
     def song_event_moments(self, uri: str) -> list[lyric_events.EventMoment]:
         """The events a song would fire, built for any song. tick()'s own
@@ -3372,6 +3395,10 @@ class TriggerEngine:
     def _default_drop_testing(self) -> bool:
         from spectra.services.room_controls import load_room_controls
         return bool(load_room_controls().drop_testing)
+
+    def _default_word_test_mode(self) -> bool:
+        from spectra.services.room_controls import load_room_controls
+        return bool(load_room_controls().word_test_mode)
 
     def _default_transition_intensity(self) -> float:
         # ENERGY at the show clock, with the look-ahead a scene change takes

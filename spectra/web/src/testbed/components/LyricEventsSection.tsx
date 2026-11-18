@@ -1,6 +1,8 @@
 /** Word colours on this show: the switch, the three tuning sliders, which
  * play the plan is for (THE ROLL: this play, his kept roll or a sample, with
- * "Keep this roll"), and what each matched word would do.
+ * "Keep this roll"), and what each matched word would do — plus, while it is
+ * on, WORD TEST MODE (RoomControlState.word_test_mode, 2026-11-17), which is
+ * what makes every chip here read 100%.
  * spectra/services/lyric_events.py is the binding statement. Off for every
  * show until it is turned on here. */
 import { useEffect, useState } from 'react';
@@ -122,6 +124,20 @@ export default function LyricEventsSection({
             </span>
           )}
           <HelpLink topic="testbed-word-colours" title="Word colours" />
+          {/* WORD TEST MODE (2026-11-17): the one thing on this row that
+            * explains why every chip reads 100%, and the switch has no
+            * auto-off, so it is stated wherever the plan is read — here,
+            * on Settings and on the top bar of every route. */}
+          {data.test_mode && (
+            <span className="testbed-word-test">
+              Word test mode: every word fires
+              <span className="testbed-word-test-note">
+                Never pins still never play; the {data.settings.min_gap_s} s minimum gap
+                still holds.
+              </span>
+              <HelpLink topic="word-test-mode" title="What word test mode does" />
+            </span>
+          )}
           {/* WORD SHAPES (W2.3): only on a song that actually has one, so a
             * song whose words reach no shape reads exactly as it does today. */}
           {data.actions.some((a) => a.shape) && (

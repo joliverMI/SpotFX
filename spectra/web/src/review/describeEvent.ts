@@ -224,7 +224,10 @@ export function describeEvent(item: ReviewEventItem): string {
         const nWon = (d.n_won as number | undefined) ?? 0;
         const nWords = (d.n_words as number | undefined) ?? 0;
         const how = d.kept ? ', your kept roll' : d.restored ? ', carried on after a restart' : '';
-        return `Words rolled for this play #${(d.tag as string | undefined) ?? '?'}: ${nWon} of ${nWords} play${how}`;
+        // WORD TEST MODE (2026-11-17): named on the row, because "22 of 22
+        // played" is otherwise indistinguishable from a very lucky roll.
+        const forced = d.test_mode ? ' — word test mode' : '';
+        return `Words rolled for this play #${(d.tag as string | undefined) ?? '?'}: ${nWon} of ${nWords} play${how}${forced}`;
       }
       if (d.lyric && d.verdict === 'shape') {
         // WORD SHAPES (W0.3/W2.3): a `lyric:shape` row — the shape, the
