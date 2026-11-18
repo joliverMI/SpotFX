@@ -901,12 +901,17 @@ his room, and this bar's whole stated contract — `test_session.py`'s rule
 itself. A persisted testing SETTING with no auto-off (`RoomControlState.
 word_test_mode`) holds nothing and never expires, so folding it in here
 would make this bar claim his lights were in use while nothing was
-playing, and break the one promise that makes it trustworthy. It gets its
-own bar instead, in its own colours, saying its own thing
-(`spectra/web/src/components/WordTestModeBar.tsx`, mounted beside this one
-in `App.tsx`; the two stack when both are true). Apply the same test to the
-next such switch: does something hold the room, and will it clear itself?
-Both yes = a source here; either no = its own surface.
+playing, and break the one promise that makes it trustworthy. Apply the
+same test to the next such switch: does something hold the room, and will
+it clear itself? Both yes = a source here; either no = its own surface.
+
+*History:* PR 541 gave Word test mode its own top-bar banner for exactly
+the reasoning above — a persisted, non-expiring setting could not
+honestly share this bar's "it clears itself" promise, so it got its own
+surface in its own colours, mounted beside this one. His 2026-11-18 word
+removed it: "I don't need the banner for the word shape test mode." The
+switch is visible on the Settings card and the Test Bed, by his word no
+bar.
 
 The ROOM-OWNERSHIP bar (`RoomOwnershipBar.tsx`) is a different surface and
 carries no reason at all: the release button, the released banner, and the

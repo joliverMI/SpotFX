@@ -14,13 +14,12 @@
 //         says it stays on until he turns it off; the card states the three
 //         boundaries he is owed (a Never pin, the minimum gap, nothing
 //         written)
-//   TWO   the top bar (components/WordTestModeBar.tsx): nothing at all
-//         while the switch is off — no stray row on any page — the loud bar
-//         the moment it is on, in its OWN class (never the striped
-//         TESTING IN PROGRESS one, a different claim), and its "Turn it
-//         off" button sends exactly ONE PUT back to false
 //   THREE the roll line (testbed/lyricEvents.ts, pure): the counts are the
 //         server's own, and the line says WHY they read 22 of 22
+//
+// (There was once a TWO, a top-bar banner — removed on his 2026-11-18 word,
+// "I don't need the banner for the word shape test mode"; see the night-run
+// doc's "why its own bar" paragraph for the history.)
 //
 // Run: node scripts/check_word_test_mode_ui.mjs
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -99,7 +98,6 @@ import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import WordTestModeCard from ${src('settings/WordTestModeCard.tsx')};
-import WordTestModeBar from ${src('components/WordTestModeBar.tsx')};
 export * as events from ${src('testbed/lyricEvents.ts')};
 
 const container = document.createElement('div');
@@ -117,7 +115,6 @@ export async function mount() {
   await act(async () => {
     root.render(React.createElement(QueryClientProvider, { client: qc },
       React.createElement(MemoryRouter, { initialEntries: ['/settings'] },
-        React.createElement(WordTestModeBar),
         React.createElement(WordTestModeCard))));
   });
   await settle();
@@ -156,7 +153,6 @@ const H = require(outFile);
 const container = await H.mount();
 const puts = () => calls.filter((c) => c.method === 'PUT');
 const card = () => container.querySelector('.settings-word-test-card');
-const bar = () => container.querySelector('.testing-bar-word-test');
 const box = () => card().querySelector('input[type=checkbox]');
 
 console.log('ONE  the Settings card');
@@ -188,30 +184,6 @@ console.log('ONE  the Settings card');
     'and says it stays on until he turns it off — there is no auto-off');
   ok(card().classList.contains('settings-word-test-on'),
     'and the card itself wears the on state');
-}
-
-console.log('TWO  the top bar');
-{
-  ok(bar() !== null, 'the loud bar is up the moment the switch is on');
-  ok(!bar().classList.contains('testing-bar-yes')
-    && !bar().classList.contains('testing-bar-unknown'),
-    'in its OWN class, never the striped TESTING IN PROGRESS one (a different claim)');
-  const text = bar().textContent;
-  ok(/EVERY word flare fires/.test(text), 'and says what is happening');
-  ok(/colour and shape/.test(text), 'colour AND shape, his own words');
-  ok(/Never/.test(text) && /minimum gap/.test(text),
-    'with the two rules that still apply, on the bar itself');
-
-  const off = [...bar().querySelectorAll('button')]
-    .find((b) => /Turn it off/.test(b.textContent));
-  ok(off !== undefined, 'the bar carries its own remedy');
-  const before = puts().length;
-  await H.click(off);
-  const sent = puts().slice(before);
-  ok(sent.length === 1 && sent[0].body.word_test_mode === false,
-    `"Turn it off" sends exactly ONE PUT back to false (${sent.length} PUT(s))`);
-  ok(bar() === null, 'and the bar is then gone entirely — no stray row on any page');
-  ok(box().checked === false, 'the card follows the same one source of truth');
 }
 
 console.log('THREE  the roll line');

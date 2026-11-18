@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { Route, Routes, useLocation } from 'react-router-dom';
 import RoomOwnershipBar from './components/RoomOwnershipBar';
 import TestingBar from './components/TestingBar';
-import WordTestModeBar from './components/WordTestModeBar';
 import { ToastProvider } from './components/Toast';
 import ColorSetsPage from './colorsets/ColorSetsPage';
 import SungLabelsPage from './sunglabels/SungLabelsPage';
@@ -128,12 +127,6 @@ export default function App() {
         * confirmed "not testing", so it costs no vertical space in normal
         * use; see TestingBar.tsx for why "unknown" still shows. */}
       <TestingBar />
-      {/* ... and, beside it, WORD TEST MODE (2026-11-17): a room switch
-        * with no auto-off by his instruction, so it announces itself on
-        * every route instead. Renders nothing while it is off, and never
-        * folds into the bar above — see WordTestModeBar.tsx on why the two
-        * claims stay separate. */}
-      <WordTestModeBar />
       {/* MENU, BAR, TIMELINE — his own 2026-10-15 order (a deliberate
         * departure from the mockups' nav/timeline/bar), and the ONE
         * composition the design-fidelity gate renders too. The page body

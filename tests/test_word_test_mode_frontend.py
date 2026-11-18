@@ -1,9 +1,9 @@
-"""Runs scripts/check_word_test_mode_ui.mjs (WORD TEST MODE's three UI
-surfaces — the Settings card, the top bar and the roll line — the real
-components in jsdom against a fake /room-controls) so the proof fires on
-every full test run. Skipped, not failed, when the frontend toolchain is
-missing; the check itself skips cleanly when jsdom is not installed (it is
-dev-only, not a declared dependency).
+"""Runs scripts/check_word_test_mode_ui.mjs (WORD TEST MODE's two UI
+surfaces — the Settings card and the roll line — the real components in
+jsdom against a fake /room-controls) so the proof fires on every full test
+run. Skipped, not failed, when the frontend toolchain is missing; the
+check itself skips cleanly when jsdom is not installed (it is dev-only,
+not a declared dependency).
 """
 from __future__ import annotations
 

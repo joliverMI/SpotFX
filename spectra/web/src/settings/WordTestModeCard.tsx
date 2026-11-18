@@ -18,9 +18,10 @@
  * key (settings_console.SETTINGS_REGISTRY), so it also shows in "Current
  * settings" below.
  *
- * WHILE IT IS ON the card says so loudly, and so does every other route
- * (components/WordTestModeBar.tsx) and the Test Bed's own Word matches
- * row. A switch that cannot expire has to be impossible to forget. */
+ * WHILE IT IS ON the card says so loudly, and so does the Test Bed's own
+ * Word matches row (by his 2026-11-18 word, no top-bar banner for this
+ * one — see the night-run doc's "why its own bar" paragraph for the
+ * history). A switch that cannot expire has to be impossible to forget. */
 import HelpLink from '../help/HelpLink';
 import Icon from '../components/Icon';
 import { useRoomControls, useSaveRoomControls } from '../queries';
