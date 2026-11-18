@@ -3351,16 +3351,51 @@ against that commit.
     that draws a shape at all: the strips and singles have no shape code.
     A half turn about the centre is exactly `x -> -x, y -> -y`, so it is
     implemented as a plain negation rather than a rotation matrix (no
-    `sin(pi)` epsilon skew in the unit box), it leaves the declared first
-    point first, and it preserves the shoelace sign so the counter-
-    clockwise winding `_orient` enforces survives untouched — `build()`
-    re-runs `_orient` after the turn and RAISES if either the winding or
-    the area moved, and `_rotate_for_panel` raises for any angle but 180,
-    which is the only angle the hex lattice is symmetric under. Every
-    derived view (`polar`, `at`, `tangent`, `sdf`, `sdf_fast`, the polar
-    table, the fast grid) follows for free because each is built from
-    `points`, and NO EFFECT MODULE CHANGED — not one line in radial,
-    blackhole, orbits, fish, sauron or fireworks.
+    `sin(pi)` epsilon skew in the unit box), and it preserves the shoelace
+    sign so the counter-clockwise winding `_orient` enforces survives
+    untouched — `build()` re-runs `_orient` after the turn and RAISES if
+    either the winding or the area moved, and `_rotate_for_panel` raises
+    for any angle but 180, which is the only angle the hex lattice is
+    symmetric under.
+    AND THE TURN KEEPS THE ARC-LENGTH ORIGIN WHERE IT WAS, WHEREVER IT
+    CAN (the squadron leader's ruling on this row: "the flip is a rotation
+    of the PICTURE and nothing else"). `at(s)` is a PHASE, not just a
+    point — Orbits' bead hops, a walk's start and every arc-length number
+    a test reads are measured from `at(0)` — so a bare half turn, leaving
+    that origin half a perimeter from where it was, silently re-assigns
+    them: measured, it cost Orbits' `many4 diamond @ Energy 0.8` contrast
+    row 6 points of outline band (60% to 54% over 64/255 against its 55%
+    bar, the line closing 0.63 s after the word instead of 0.53 s).
+    A SHAPE THAT IS ITS OWN HALF TURN IS THEREFORE ROLLED, and comes back
+    BYTE-IDENTICAL: the diamond's turned outline passes exactly through
+    the origin's old place, the roll lands on it, and the points array is
+    the very same array — the strongest proof the implementation is a pure
+    rotation, and why all 24 of Orbits' contrast rows read exactly #102's
+    W4.4 numbers.
+    A SHAPE THAT IS NOT KEEPS `at(0)` ON ITS OWN MATERIAL POINT (the
+    declared vertex, carried round by the turn), guarded by the one-line
+    `_ORIGIN_LANDS_EPS`. For the heart and the star NO turned point sits
+    on the origin's old place at all — the nearest is 0.249 and 0.339 unit
+    lengths off — so rolling to it would preserve neither the physical nor
+    the material phase, and measured it moved Orbits' `many4 heart @
+    Energy 0.8` band/rest luminance ratio from 1.53 to 1.26 against a 1.4
+    bar; left alone, every row is green. (The ruling's parenthetical named
+    the nearest-point roll unconditionally and expected heart and star to
+    land within 1e-9; that is geometrically impossible for a shape that is
+    not its own half turn, so the guard is what makes the ruling's own
+    goal sentence — `at(0)` on the same physical point — and its refusal
+    of any red contract row both hold. Flagged for the review.)
+    Either way the library's convention is untouched: `at(0) ==
+    points[0]`, counter-clockwise.
+    WHAT DOES MOVE, and why no effect module still had to change: for the
+    heart and the star the flip lands the outline on a DIFFERENT set of
+    real cells — the same 168 and 176 of them, since the lattice is
+    centrally symmetric, but only 30 and 60 shared with the old set — so
+    any measurement of the band ITSELF is of a new band and a heart's or
+    star's W4 number must be re-measured rather than assumed. Nothing
+    anchors to a shape BY INDEX (Orbits FEW anchors to each blob's own
+    phase, Fish enters on each fish's bearing, Fireworks samples `at(s)`
+    at random, STAR/Black Hole/Sauron read `polar` by angle). Every
     IN THE FRAME (y DOWN, row 0 the top tip) a star's and a diamond's own
     point now sits at MAXIMUM y and a heart's point at MINIMUM y with its
     cleft at the bottom; his panel shows that frame inverted, which is why
@@ -3376,8 +3411,10 @@ against that commit.
     119/191/3 — identical to #95's, every shape still star-shaped, the
     thinnest point still 3 cells against a bar of 2. Proofs
     `tests/test_word_shapes.py` (the flipped orientation test and the new
-    `test_the_half_turn_is_the_default_and_moves_no_cell_count`, which also
-    holds the turn's involution and that a non-registry shape built through
-    `build()` is flipped too) plus every effect's own word-shape suite
-    unchanged; `.claude/skills/word-shapes/SKILL.md`'s "What the library is"
-    bullet is the binding record.
+    `test_the_flip_is_a_rotation_of_the_picture_and_nothing_else`,
+    `test_the_diamond_is_byte_identical_after_the_flip`,
+    `test_a_shape_that_is_not_its_own_half_turn_keeps_its_material_origin`
+    and `test_the_half_turn_is_the_default_for_any_shape_built_here`) plus
+    every effect's own word-shape suite unchanged;
+    `.claude/skills/word-shapes/SKILL.md`'s "What the library is" bullets
+    are the binding record.

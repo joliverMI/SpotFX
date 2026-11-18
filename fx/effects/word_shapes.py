@@ -39,6 +39,40 @@ purpose; the script says so at the top of every render. Every derived view
 because each is built from `points`, and NO effect module knows about the
 flip at all.
 
+AND THE TURN KEEPS THE ARC-LENGTH ORIGIN WHERE IT WAS. `at(s)` is a
+PHASE, not just a point: Orbits' bead hops, a walk's start and every
+arc-length number a test reads are measured from `at(0)`. The squadron
+leader's ruling on row W5.7 — "the flip is a rotation of the PICTURE and
+nothing else" — is what the ROLL in `_rotate_for_panel` is for, and it
+applies exactly where it can:
+
+- A SHAPE THAT IS ITS OWN HALF TURN is rolled, and comes back
+  BYTE-IDENTICAL. The diamond is one: the turned outline passes through
+  the origin's old place, so the roll lands on it exactly. That identity
+  is the strongest proof this is a pure rotation, and it is why all 24 of
+  Orbits' contrast rows read exactly W4.4's numbers. Without the roll the
+  diamond's own row fell from 60% of the outline band to 54% against a
+  55% bar — the measurement that put the roll here.
+- A SHAPE THAT IS NOT keeps `at(0)` on its own MATERIAL point (the
+  declared vertex, carried round by the turn). For the heart and the star
+  no turned point sits on the old place at all — the nearest is 0.249 and
+  0.339 unit lengths off — so rolling to it would preserve neither the
+  physical nor the material phase. Measured, rolling them moved Orbits'
+  `many4 heart @ Energy 0.8` band/rest ratio from 1.53 to 1.26 against a
+  1.4 bar; leaving them keeps every row green.
+
+Either way the library's convention is untouched: `at(0) == points[0]`,
+winding counter-clockwise.
+
+WHAT DOES MOVE, and why no effect had to change: for the heart and the
+star the flip lands the outline on a DIFFERENT set of real cells (same
+168 and 176 of them — the lattice is centrally symmetric — but only 30
+and 60 shared with the old set), so any measurement of the band itself is
+of a new band. Nothing anchors to a shape BY INDEX: Orbits FEW anchors to
+each blob's own phase, Fish enters on each fish's bearing, Fireworks
+samples `at(s)` at random, and STAR, Black Hole and Sauron read `polar`
+by angle.
+
 THE CONVENTION AN EFFECT USES — NORMALIZED SPACE, NOT CELLS. A view is in
 unit coordinates; an effect scales it by SIZE, **the shape's half-height in
 the effect's own NORMALIZED coordinates, where 1.0 is the panel's own
@@ -204,6 +238,11 @@ FAST_TOLERANCE = 0.01
 # mean 7%, falling off with distance). Also pinned by the tests.
 FAR_FIELD_TOLERANCE = 0.35
 
+# The roll only happens when the turned outline actually PASSES THROUGH
+# the arc-length origin's old place (a shape that is its own half turn).
+# Farther than this and there is no same-physical-point to return to.
+_ORIGIN_LANDS_EPS = 1e-9
+
 # Points this close together are the same point (a repeated closing point).
 _SAME_POINT_EPS = 1e-9
 
@@ -248,13 +287,36 @@ def _orient(pts: NDArray[np.float64]) -> NDArray[np.float64]:
 
 
 def _rotate_for_panel(pts: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Rotate every point by `PANEL_ROTATION_DEG` about the centre — the
-    library's DEFAULT orientation (his verdict; see the constant).
+    """Rotate every point by `PANEL_ROTATION_DEG` about the centre, and
+    ROLL the list so `at(0)` sits on the same PHYSICAL point it sat on
+    before the turn WHEN SUCH A POINT EXISTS — the library's DEFAULT
+    orientation (his verdict; see the constant).
 
-    The declared first point stays first (a rotation moves points, it does
-    not reorder them) and the winding is unchanged, because a rotation is
-    a rigid motion with positive determinant; the caller re-runs `_orient`
-    anyway and asserts it was a no-op.
+    THE ROLL SERVES "A ROTATION OF THE PICTURE AND NOTHING ELSE" (the
+    squadron leader's ruling on row W5.7). The turn alone would leave the
+    ARC-LENGTH ORIGIN half a perimeter from where it was, and `at(s)` is a
+    PHASE: Orbits' bead hops, a walk's start and every arc-length number a
+    test reads are measured from it. Measured, that cost Orbits' `many4
+    diamond @ Energy 0.8` contrast row 6 points of outline band (60% to
+    54% against a 55% bar) for a change meant to be invisible.
+
+    THE ROLL ONLY HAPPENS FOR A SHAPE THAT IS ITS OWN HALF TURN, because
+    only then is there a same-physical-point to return to. A diamond is:
+    the turned outline passes exactly through the origin's old place
+    (distance 0), the roll lands on it, and the points array comes back
+    BYTE-IDENTICAL. A heart and a star are not — the nearest turned point
+    to the old place is 0.249 and 0.339 unit lengths away, so a roll there
+    would land on NEITHER the old physical point nor the shape's own
+    material one, moving the phase for nothing. Measured: rolling them to
+    the nearest point moved Orbits' `many4 heart @ Energy 0.8` band/rest
+    ratio from 1.53 to 1.26 against a 1.4 bar, while leaving them alone
+    keeps all 24 rows green. So for those `at(0)` stays on the same
+    MATERIAL point of the shape (the declared vertex, carried round by the
+    turn), which is the only phase a moved outline still has.
+
+    Both steps preserve the winding (a rotation is a rigid motion with
+    positive determinant; a roll is a relabelling of the same cycle), so
+    `_orient` is a no-op after this — the caller re-runs it and asserts so.
     """
     if PANEL_ROTATION_DEG % 360 != 180:
         raise NotImplementedError(
@@ -265,7 +327,12 @@ def _rotate_for_panel(pts: NDArray[np.float64]) -> NDArray[np.float64]:
             "is centrally symmetric and symmetric under nothing else: any "
             "other angle also means re-measuring every pinned cell count "
             "in tests/test_word_shapes.py.")
-    return -pts        # x -> -x, y -> -y, exact: no epsilon skew
+    turned = -pts      # x -> -x, y -> -y, exact: no epsilon skew
+    d = np.linalg.norm(turned - pts[0], axis=1)
+    lead = int(d.argmin())
+    if d[lead] > _ORIGIN_LANDS_EPS:
+        return turned
+    return np.roll(turned, -lead, axis=0)
 
 
 def _cum_lengths(pts: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -574,14 +641,18 @@ def build(id: str, name: str, points: ArrayLike, words: tuple[str, ...],
     however many shapes it ships."""
     pts = _orient(_normalise_box(_as_points(points)))
     # His default orientation, applied AFTER normalisation and orientation
-    # so a new entry is still written in whatever units and winding suit it.
+    # so a new entry is still written in whatever units and winding suit
+    # it. `_rotate_for_panel` turns the picture and then rolls the arc-
+    # length origin back onto the physical point it held, so this is a
+    # rotation of the PICTURE and nothing else.
     before = _signed_area(pts)
     rotated = _rotate_for_panel(pts)
     pts = _orient(rotated)
-    if not np.array_equal(pts, rotated):      # a 180 deg turn cannot flip it
+    if not np.array_equal(pts, rotated):   # neither a turn nor a roll can
         raise AssertionError(
             f"shape {id!r}: PANEL_ROTATION_DEG={PANEL_ROTATION_DEG} changed "
-            "the winding, which a rotation about the centre cannot do")
+            "the winding, which a rotation about the centre followed by a "
+            "roll of the same cycle cannot do")
     after = _signed_area(pts)
     if not math.isclose(after, before, rel_tol=1e-12, abs_tol=1e-12):
         raise AssertionError(

@@ -75,6 +75,41 @@ short version an effect needs:
   Every derived view follows for free (each is built from `points`) and
   **no effect module knows about the flip**. An ASCII render of the frame
   therefore looks inverted on purpose, and says so above itself;
+- **and the turn KEEPS the arc-length origin where it was, wherever it
+  can.** `at(s)` is a PHASE — Orbits' bead hops, a walk's start, every
+  arc-length number a test reads are measured from `at(0)` — so a bare
+  half turn, which leaves the origin half a perimeter away, silently
+  re-assigns them. The squadron leader's ruling on W5.7: *"the flip is a
+  rotation of the PICTURE and nothing else"*. So:
+  - **a shape that is its OWN half turn is rolled, and comes back
+    BYTE-IDENTICAL.** The diamond is one. That identity is the strongest
+    proof the implementation is a pure rotation, and it is why **all 24 of
+    Orbits' contrast rows read exactly W4.4's numbers**. Without the roll
+    the diamond's own `many4 @ Energy 0.8` row fell from 60% of the
+    outline band to 54% against its 55% bar (the line closing 0.63 s
+    after the word instead of 0.53 s) — the measurement that put the roll
+    in.
+  - **a shape that is NOT keeps `at(0)` on its own MATERIAL point** (the
+    declared vertex, carried round by the turn). For the heart and the
+    star no turned point sits on the origin's old place at all — the
+    nearest is **0.249** and **0.339** unit lengths off — so rolling to it
+    preserves neither the physical nor the material phase. Measured,
+    rolling them moved Orbits' `many4 heart @ Energy 0.8` band/rest ratio
+    from 1.53 to **1.26** against a 1.4 bar; leaving them keeps every row
+    green. `_ORIGIN_LANDS_EPS` is the one-line guard.
+
+  Either way the convention is untouched: `at(0) == points[0]`,
+  counter-clockwise.
+- **what DOES move.** For the heart and the star the flip lands the
+  outline on a DIFFERENT set of real cells — the same 168 and 176 of them
+  (the lattice is centrally symmetric, which is why the pinned counts
+  hold) but only **30** and **60** shared with the old set. So any
+  measurement of the band ITSELF is of a new band: re-measure, never
+  assume a heart's or star's W4 number transfers. Nothing anchors to a
+  shape BY INDEX — Orbits FEW anchors to each blob's own phase, Fish
+  enters on each fish's bearing, Fireworks samples `at(s)` at random, and
+  STAR, Black Hole and Sauron read `polar` by angle — which is why no
+  effect module changed;
 - an effect scales a view by `SIZE`, **the shape's half-height in the
   effect's own NORMALIZED coordinates, where 1.0 is the panel's own
   half-height** — the same `sx`/`sy` space every Twod effect already works
