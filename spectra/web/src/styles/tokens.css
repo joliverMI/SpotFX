@@ -3419,9 +3419,15 @@ button.linklike { background: none; border: none; padding: 0 4px; color: var(--a
   text-transform: lowercase; color: var(--text-muted);
 }
 .song-strip-next-worded .song-strip-next-word { display: block; }
-/* WORD SHAPES (W2.3): the shaped line prints "love \2192 \2665", so it needs
-   a little more room than a bare word; the shape's NAME is in the hover. */
-.song-strip-next-shaped .song-strip-next-word { max-width: 46px; font-size: 7.5px; }
+/* WORD SHAPES, as W5.3 rewrote the line: a shaped word prints its shape's
+   NAME ("heart"), and "heart \B7 red" where a colour kind is pooled with it
+   — longer than the bare colour reading above, so it gets a smaller type
+   size. THE BUDGET IS THE GLYPH COLUMN, not this rule: `.song-strip-next`
+   is a fixed 96px and the count's own 4.4ch field leaves the column about
+   27px, which `.song-strip-next-kind` caps at 30px. A reading past that
+   ellipsises HERE rather than being clipped at the box's edge, and the
+   whole of it is always on the box's hover (`eventLabel`). */
+.song-strip-next-shaped .song-strip-next-word { max-width: 30px; font-size: 7px; }
 .song-strip-next-worded .song-strip-next-icon { width: 18px; height: 18px; }
 /* THE LIVE PULSE on the box: the word's own colour (`--word-flash`, set by
  * lib/wordColourPush.ts) where the plain fire flash is white. */

@@ -1481,10 +1481,14 @@ def test_word_marks_lend_an_imprint_its_word_and_make_a_fire_alone_word_a_marker
                     [_flare(10_500, "f1")])
     imprints, fires = le.word_marks(actions)
     assert imprints == {"f1": {"word": "red", "word_ms": 10_000, "swatch": "#ff0000",
-                               "word_key": "100-100"}}, "keyed by the event id tick() fires"
+                               "word_key": "100-100", "label": "red"}}, \
+        "keyed by the event id tick() fires"
     [fire] = fires
     assert fire["kind"] == le.KIND_WORD and fire["ms"] == 19_000 and fire["id"] == "lyric:190-190"
     assert fire["word"] == "smoke" and fire["swatch"] == "#5a14b4" and fire["source"] == "word"
+    # W5.3: the PHRASE is `word`, the READING is `label` — the countdown box
+    # prints the reading, the Test Bed the phrase.
+    assert fire["label"] == "red", "what the match was read as, beside the phrase it was read from"
     assert fire["rank"] is None and fire["rank_of"] is None, "the strip's row shape"
     # the word sitting out does nothing and is drawn nowhere outside the Test Bed
     assert not any(f["ms"] == 30_000 for f in fires)

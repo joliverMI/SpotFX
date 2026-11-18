@@ -23,7 +23,7 @@ import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   countdownParts, eventFireMs, eventLabel, FINAL_STRETCH_MS, kindGlyphSvg, NEXT_EVENT_BOX_WIDTH,
-  pickNext, shapeGlyph, wordColour, type UpcomingEvent,
+  pickNext, shapeGlyph, wordColour, wordReading, type UpcomingEvent,
 } from './songStrip';
 import { getShowClockMs } from '../lib/showClock';
 import useMediaQuery from '../lib/useMediaQuery';
@@ -87,7 +87,10 @@ export default function SongNextBox({
   // whichever event it was counting to.
   useEffect(() => onWordColour((push) => {
     if (!boxRef.current || !uri || push.uri !== uri) return;
-    const words = pulseWords(push);
+    // W5.3: the box's pulse says the READING too ("red · Sunset", "heart
+    // · drew"), so the live hover can never print the phrase the countdown
+    // no longer does. The strip's own marker flash keeps the phrase.
+    const words = pulseWords(push, { readAs: true });
     flashInWordColour(boxRef.current, 'song-strip-next-flash-word', push.swatch, words);
     pulseRef.current = words;
     setTimeout(() => {
@@ -109,24 +112,23 @@ export default function SongNextBox({
         // highlight the blue square, like you do in the strip" — and the
         // word itself printed under it; no second swatch, no "→ scene".
         const halo = wordColour(next);
-        const glyphKey = `${next.kind}:${next.num ?? ''}:${halo ?? ''}:${next.word ?? ''}`
+        const reading = wordReading(next);
+        const glyphKey = `${next.kind}:${next.num ?? ''}:${halo ?? ''}:${reading ?? ''}`
           + `:${next.shape ?? ''}`;
         if (iconRef.current && lastGlyphRef.current !== glyphKey) {
           lastGlyphRef.current = glyphKey;
           iconRef.current.innerHTML = kindGlyphSvg(next.kind, next.num, halo, next.shape);
-          // WORD SHAPES (W2.3): the box PRINTS THE WORD AND THE SHAPE —
-          // the shape's own glyph above (kindGlyphSvg), and "love → ♥"
-          // under it, where a plain colour word prints only itself. The
-          // shape's NAME rides in the hover label (eventLabel), which is
-          // where every other detail of this box already lives.
+          // W5.3 (the Admiral, 2026-11-18): the box PRINTS WHAT THE WORD
+          // WAS READ AS — "red", "heart", "heart · red" — and NEVER the
+          // triggering phrase, here or on the hover below. The shape's own
+          // glyph is still drawn above it (kindGlyphSvg); the phrase lives
+          // on the Test Bed, where he reads matches.
           const glyph = shapeGlyph(next.shape);
           if (wordRef.current) {
-            wordRef.current.textContent = next.word
-              ? (glyph ? `${next.word} → ${glyph}` : next.word)
-              : '';
+            wordRef.current.textContent = reading ?? '';
             wordRef.current.style.color = halo ?? '';
           }
-          boxRef.current?.classList.toggle('song-strip-next-worded', !!next.word);
+          boxRef.current?.classList.toggle('song-strip-next-worded', !!reading);
           boxRef.current?.classList.toggle('song-strip-next-shaped', !!glyph);
         }
         const parts = countdownParts(remaining);

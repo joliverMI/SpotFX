@@ -26,6 +26,10 @@
  *           shape's own glyph, from its id, in the word's colour — on the
  *           canvas, in the next-event box's glyph and in its hover label —
  *           and an id with no glyph yet falls back to the colour diamond.
+ *   EIGHT — WHAT THE COUNTDOWN BOX SAYS (row W5.3, the Admiral
+ *           2026-11-18): the box's three texts — a colour word's
+ *           reading, a shape word's shape, and both pooled — plus the
+ *           older-server fallback, and that NONE of them is the phrase.
  *
  * The original stretched-icon fix (the Admiral's report, 2026-10-14) was a
  * per-axis `axisScale`/`compensate` compensation over a stretched
@@ -60,7 +64,7 @@ const mod = await import(js);
 const { fmtCountdown, fmtMMSS, eventLabel, pickNext, markerSizePx, markerOpacity,
        xFraction, FINAL_STRETCH_MS, NEXT_EVENT_BOX_WIDTH, drawShapeMarkers, KIND_COLOR,
        wordColour, kindGlyphSvg, HALO_GAP, SHAPE_GLYPH, SHAPE_GLYPH_PX, shapeGlyph,
-       shapeName, shapeWords } = mod;
+       shapeName, shapeWords, wordReading } = mod;
 
 // THE BOUNDARY IS 99.95s, THE APPROVED MOCKUP'S OWN (`cd()`), not 60s —
 // changed in the 2026-10-14 design-fidelity pass. It is what makes
@@ -204,16 +208,16 @@ console.log('SIX — word colours (data/word-effect-highlight-options, option A)
     };
   };
   const scene = { ms: 10_000, kind: 'scene', rank: 1, rank_of: 10, source: 'analysed', id: 'analysed-scene:k',
-                  word: 'smoke', word_ms: 9600, swatch: '#5a14b4' };
+                  word: 'smoke', label: 'red', word_ms: 9600, swatch: '#5a14b4' };
   const plain = { ms: 20_000, kind: 'flare', rank: 1, rank_of: 10, source: 'analysed', id: 'analysed-flare:k' };
   const word = { ms: 30_000, kind: 'word', rank: null, rank_of: null, source: 'word', id: 'lyric:300-300',
-                 word: 'roses', word_ms: 30_000, swatch: '#ff0000' };
+                 word: 'roses', label: 'red', word_ms: 30_000, swatch: '#ff0000' };
   ok(wordColour(scene) === '#5a14b4', 'an imprinted event lends its word\'s swatch');
   ok(wordColour(plain) === null, 'an event no word reaches lends nothing');
   ok(wordColour(word) === '#ff0000' && wordColour({ ...word, swatch: null }) === KIND_COLOR.word,
     'a word marker wears its swatch, else the kind\'s fallback');
-  ok(eventLabel(scene) === 'Scene · 1 of 10 · word “smoke”' && eventLabel(word) === 'Word “roses”',
-    'the box\'s label names the word');
+  ok(eventLabel(scene) === 'Scene · 1 of 10 · red' && eventLabel(word) === 'Word · red',
+    'the box\'s label names WHAT THE WORD WAS READ AS (W5.3), never the phrase');
   ok(pickNext([scene, word], 25_000) === word, 'a fire-alone word can be "next" like any other event');
   {
     const ctx = makeCtx();
@@ -265,7 +269,7 @@ console.log('SEVEN — word shapes (Word Shapes plan W2.3): the glyph, the label
   };
   const shaped = (over = {}) => ({
     ms: 30_000, kind: 'word', rank: null, rank_of: null, source: 'word',
-    id: 'lyric:300-300', word: 'love', word_ms: 30_000, swatch: '#ff0000',
+    id: 'lyric:300-300', word: 'love', label: 'red', word_ms: 30_000, swatch: '#ff0000',
     shape: 'heart', shape_name: 'Heart', ...over,
   });
 
@@ -280,10 +284,10 @@ console.log('SEVEN — word shapes (Word Shapes plan W2.3): the glyph, the label
     && shapeWords(null, 'heart') === '♥ heart' && shapeWords('love', null) === null,
     'the word and the shape, one string');
 
-  ok(eventLabel(shaped()) === 'Word “love” → heart',
-    'the box\'s hover label names the shape');
-  ok(eventLabel(shaped({ shape: null, shape_name: null })) === 'Word “love”',
-    'a colour word\'s label is unchanged');
+  ok(eventLabel(shaped()) === 'Word · heart · red',
+    'the box\'s hover label names the shape and the colour it was read as');
+  ok(eventLabel(shaped({ shape: null, shape_name: null })) === 'Word · red',
+    'a colour word\'s label is its reading');
 
   {
     const ctx = makeCtx();
@@ -313,6 +317,53 @@ console.log('SEVEN — word shapes (Word Shapes plan W2.3): the glyph, the label
   ok(kindGlyphSvg('scene', null, '#5a14b4', 'heart').includes(`fill="${KIND_COLOR.scene}"`)
     && !kindGlyphSvg('scene', null, '#5a14b4', 'heart').includes('♥'),
     'a shape never replaces another kind\'s own glyph');
+}
+
+// ── EIGHT — WHAT THE COUNTDOWN BOX SAYS A WORD IS (row W5.3) ───────────────
+// The Admiral, 2026-11-18: "In the countdown box, don't show the triggering
+// phrase or word, just say 'red' or 'sky blue' or whatever it is getting
+// interpreted as." `wordReading` is the one function both the box's printed
+// line (SongNextBox.tsx) and its hover (eventLabel) read, so the two can
+// never say different things about the same row.
+console.log('EIGHT — the countdown box says what the word was READ AS');
+{
+  const row = (over = {}) => ({
+    ms: 30_000, kind: 'word', rank: null, rank_of: null, source: 'word',
+    id: 'lyric:300-300', word: 'roses are red', word_ms: 30_000, swatch: '#ff0000',
+    label: 'red', shape: null, shape_name: null, ...over,
+  });
+
+  // the three box texts
+  ok(wordReading(row()) === 'red', `a colour word is its reading, got ${wordReading(row())}`);
+  ok(wordReading(row({ label: 'Sky Blue' })) === 'sky blue',
+    'a two-word reading is printed whole, lower-cased');
+  ok(wordReading(row({ label: undefined, shape: 'heart', shape_name: 'Heart' })) === 'heart',
+    'a shape word is its shape name');
+  const both = row({ shape: 'heart', shape_name: 'Heart' });
+  ok(wordReading(both) === 'heart · red',
+    `a shape word with a colour kind pooled says both, shape first, got ${wordReading(both)}`);
+
+  // the older-server fallback: never the phrase
+  ok(wordReading(row({ label: undefined })) === null,
+    'a colour row from a server with no `label` says nothing rather than the phrase');
+  ok(eventLabel(row({ label: undefined })) === 'Word',
+    'and the box falls back to the kind word alone');
+  ok(wordReading(row({ label: undefined, shape: 'heart' })) === 'heart',
+    'an older server\'s shape row still falls back to the shape name');
+  ok(eventLabel({ kind: 'scene', rank: 1, rank_of: 10, word: 'roses are red' })
+    === 'Scene · 1 of 10 · word',
+    'an imprinted event from an older server says a word reaches it, not which');
+
+  // THE RULE ITSELF: the phrase never reaches the box
+  const phrase = 'roses are red';
+  for (const r of [row(), row({ shape: 'heart', shape_name: 'Heart' }),
+                   row({ label: undefined, shape: 'heart', shape_name: 'Heart' }),
+                   row({ label: undefined })]) {
+    ok(!(wordReading(r) ?? '').includes(phrase) && !eventLabel(r).includes(phrase),
+      'neither the box\'s line nor its hover ever prints the phrase');
+  }
+  ok(eventLabel({ kind: 'drop', num: 2, word: phrase, label: 'gold' }) === 'Drop 2 · gold',
+    'an event a word imprints on says "· gold" the same way');
 }
 
 console.log(failures === 0 ? '\nALL OK' : `\n${failures} FAILURE(S)`);

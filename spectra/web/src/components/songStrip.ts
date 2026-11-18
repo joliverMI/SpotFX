@@ -44,11 +44,19 @@ export interface UpcomingEvent {
   word?: string;
   word_ms?: number;
   swatch?: string | null;
+  /** WHAT THE WORD WAS READ AS (W5.3, the Admiral 2026-11-18: "just say
+   * 'red' or 'sky blue' or whatever it is getting interpreted as") — the
+   * colour word the match was read as (`WordHit.label`). THIS, never
+   * `word`, is what the countdown box prints; the phrase stays for the
+   * Test Bed. Absent on a row whose word reaches no colour set (a
+   * shape-only word), and on an older server that does not send it — in
+   * both cases the box falls back to the shape name or the kind alone. */
+  label?: string;
   /** WORD SHAPES (W2.3): on a `kind: "word"` row whose word DRAWS a shape —
    * the shape's id (`heart`/`star`/`diamond`), its name, and the Test Bed's
    * own sentence for it (spectra/api/upcoming.py's `with_words`). The
-   * marker is then the shape's glyph instead of the colour diamond, and the
-   * next-event box prints the word and the shape. */
+   * marker is then the shape's glyph instead of the colour diamond, and
+   * the next-event box prints the shape's NAME (`wordReading`, W5.3). */
   shape?: string | null;
   shape_name?: string | null;
   words?: string | null;
@@ -79,8 +87,10 @@ export function shapeName(shape: string | null | undefined,
   return shape ? SHAPE_LABEL[shape] ?? shape : null;
 }
 
-/** "love → ♥ heart" — the word and the shape, one string, for the
- * next-event box's own word line and every tooltip that names both. */
+/** "love → ♥ heart" — the PHRASE and the shape, one string, for the Test
+ * Bed's readouts and the live pulse's own words, where he reads matches.
+ * NOT the countdown box: that prints `wordReading` (W5.3), which never
+ * names the phrase. */
 export function shapeWords(word: string | null | undefined, shape: string | null | undefined,
                            name?: string | null): string | null {
   const glyph = shapeGlyph(shape);
@@ -88,6 +98,28 @@ export function shapeWords(word: string | null | undefined, shape: string | null
   if (!printed) return null;
   const tail = glyph ? `${glyph} ${printed}` : printed;
   return word ? `${word} → ${tail}` : tail;
+}
+
+/** WHAT THE COUNTDOWN BOX SAYS A WORD IS (W5.3, the Admiral 2026-11-18:
+ * "In the countdown box, don't show the triggering phrase or word, just
+ * say 'red' or 'sky blue' or whatever it is getting interpreted as").
+ *
+ * A colour word is its reading — "red", "sky blue". A shape word is its
+ * shape — "heart". A word that is both (a shape word with a colour kind
+ * pooled) is "heart · red", the shape first because that is what the room
+ * draws. NEVER the phrase, here or on the box's hover: `shapeWords` and
+ * the Test Bed's own sentences are where the phrase belongs.
+ *
+ * Null when the row says neither — a colour row from an older server with
+ * no `label` — and the box then prints nothing beside its kind glyph
+ * rather than falling back to the phrase. */
+export function wordReading(
+  e: Pick<UpcomingEvent, 'label' | 'shape' | 'shape_name'>,
+): string | null {
+  const shape = shapeName(e.shape, e.shape_name);
+  const read = e.label ? e.label.toLowerCase() : null;
+  if (shape && read) return `${shape} · ${read}`;
+  return shape ?? read;
 }
 
 /** The colour a worded marker lends: the word's own swatch, else the kind's
@@ -148,19 +180,18 @@ const KIND_LABEL: Record<UpcomingKind, string> = {
  * shows only the type icon + countdown, decision: no label text in the
  * box). */
 export function eventLabel(
-  e: Pick<UpcomingEvent, 'kind' | 'rank' | 'rank_of' | 'num' | 'word' | 'shape' | 'shape_name'>,
+  e: Pick<UpcomingEvent, 'kind' | 'rank' | 'rank_of' | 'num' | 'word' | 'label'
+  | 'shape' | 'shape_name'>,
 ): string {
   const base = KIND_LABEL[e.kind];
-  // a word firing alone names itself; an event a word imprints on says so
-  if (e.kind === 'word') {
-    if (!e.word) return base;
-    // WORD SHAPES (W2.3): a shaped word says which shape it draws, so the
-    // box's own hover never reads the same as a plain colour word's.
-    const shape = shapeName(e.shape, e.shape_name);
-    return shape ? `${base} “${e.word}” → ${shape}`
-      : `${base} “${e.word}”`;
-  }
-  const worded = e.word ? ` · word “${e.word}”` : '';
+  // W5.3: a word names WHAT IT WAS READ AS, never the phrase — "Word ·
+  // red", "Word · heart", "Word · heart · red" — and an event a word
+  // imprints on says the same thing the same way ("Scene · 1 of 10 · red").
+  const reading = wordReading(e);
+  if (e.kind === 'word') return reading ? `${base} · ${reading}` : base;
+  // An older server sends the phrase and no reading: the row still says a
+  // word reaches it, with the bare kind word rather than the phrase.
+  const worded = reading ? ` · ${reading}` : (e.word ? ' · word' : '');
   if ((e.kind === 'charge' || e.kind === 'lull') && e.num != null) return `${base} · drop ${e.num}${worded}`;
   if (e.kind === 'drop' && e.num != null) return `${base} ${e.num}${worded}`;
   if (e.kind === 'scene' && e.rank != null && e.rank_of != null) return `${base} · ${e.rank} of ${e.rank_of}${worded}`;
