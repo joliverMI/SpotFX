@@ -364,14 +364,16 @@ water keeping a trace of the loop behind them when there are few;
 
 **TWO EFFECTS DECLARE A MINIMUM FORM** — the FISH
 (`fx.device_model.WORD_SHAPE_FORM_MIN_S["fish"] = 2.0`, since a procession
-has to SWIM onto the outline) and, since row W4.3, FIREWORKS (`2.0` as
-well, so its own launches can HUSH and the panel can go dark in front of
-the shaped burst) — which is exactly why both floors ask the SHOWING
-scene's own effects rather than the whole library's maximum: a Black Hole
-or STAR scene keeps the approved Energy-paced 0.5-0.9 s form even while a
-Fish or Fireworks scene asks for 2.0 s. **A floor is a lead on everything
-else in that band too**: the Words band fires atomically, so a colour kind
-pooled beside the shape on a floored scene lands 2.0 s early as well.
+has to SWIM onto the outline) and FIREWORKS (`2.25` since row W5.6 — `2.0`
+under row W4.3 — a sum of its own `WORD_SHAPE_HUSH_S` (0.25 s) and
+`WORD_SHAPE_FLIGHT_S` (2.0 s), so its own launches can HUSH and the panel
+can go dark in front of the shaped burst) — which is exactly why both
+floors ask the SHOWING scene's own effects rather than the whole library's
+maximum: a Black Hole or STAR scene keeps the approved Energy-paced
+0.5-0.9 s form even while a Fish scene asks for 2.0 s or a Fireworks scene
+for 2.25 s. **A floor is a lead on everything else in that band too**: the
+Words band fires atomically, so a colour kind pooled beside the shape on a
+floored scene lands that early too — 2.0 s on Fish, 2.25 s on Fireworks.
 Proofs: `tests/test_word_shape_contract.py`
 (the whole contract), `tests/test_fish_word_shape.py` +
 `scripts/check_fish_word_shape.py` (the Fish's own clarity bars) and
