@@ -2138,8 +2138,17 @@ class Fireworks2d(Twod, GradientEffect):
             # the last 0.25 s in front of it (W4.3, W5.6). Ungated like the
             # flare burst above — a sung word's shape must land whatever the
             # show is doing — and additive, so nothing live is touched.
+            # WORD_SHAPE_CLOCK_EPS for the same reason the quiet's own
+            # end and the hang take it: the clock ACCUMULATES dt, so a
+            # launch time that is a whole number of frames away is reached
+            # to within a float's dust rather than exactly. Without the
+            # slack a told form whose launch lands on a frame boundary
+            # (2.8 s − 2.0 s = 24 frames at 30 fps) gets ONE frame with
+            # neither the quiet nor the burst — the quiet ends on that
+            # frame and the launch waits for the next.
             if (self._ws_armed is not None and self._ws_t is not None
-                    and self._ws_t >= self._ws_launch_at):
+                    and self._ws_t >= self._ws_launch_at
+                    - WORD_SHAPE_CLOCK_EPS):
                 told = self._ws_armed
                 self._ws_armed = None
                 prev = self.n

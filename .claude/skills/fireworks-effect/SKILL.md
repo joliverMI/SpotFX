@@ -437,6 +437,14 @@ effect's answer to the plan's "no snap". A clearing write
 ## W4.3 — A DARK CANVAS, HALF AGAIN AS MANY SPARKS, AND A 2.0 s FORM
    (2026-11-17, his room verdict)
 
+> **SUPERSEDED IN PART BY W5.6 BELOW** (his second room verdict,
+> 2026-11-18): the hush's span (edge → the hold's end becomes a 0.25 s
+> quiet before the LAUNCH, with the rest DIMMED rather than withheld), the
+> flight (0.8 → 2.0 s), the form floor (2.0 → 2.25 s) and the spark counts
+> (90/150 → back to 60/100). Every number in this section below is W4.3's
+> as shipped, kept as the record of why it was chosen; read the W5.6
+> section beside every paragraph of it.
+
 His words, verbatim: *"Fireworks is too cluttered to visually identiy the
 shape. Let's have it plan to make sure no fireworks fire right before, or
 concurrently, so that it is on a mostly dark canvass. Also, increase the

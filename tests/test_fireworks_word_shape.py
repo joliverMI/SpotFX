@@ -765,6 +765,44 @@ def test_the_fade_is_gentle_and_no_spark_goes_early(capsys):
         f"was about")
 
 
+@pytest.mark.parametrize("form_s", [2.25, 2.55, 2.8])
+def test_the_burst_leaves_the_frame_the_quiet_ends(form_s):
+    """The quiet ends when the burst leaves — there is never a frame with
+    NEITHER, and that needs the same float slack the rest of the clock
+    takes.
+
+    `_ws_t` ACCUMULATES `dt`, so a launch time a whole number of frames away
+    is reached to within a float's dust rather than exactly: 24 frames of
+    1/30 s sum to 0.7999999999999999, not 0.8. The quiet's own end already
+    took `WORD_SHAPE_CLOCK_EPS` for that reason; `draw`'s launch condition
+    did not, so a told form whose launch lands on a frame boundary (2.8 s −
+    the 2.0 s flight = exactly 0.8 s) ended the quiet on one frame and
+    launched on the next — one frame of ordinary launching, un-dimmed by
+    anything the shape was doing, in the gap the quiet exists to make.
+    Found in the W5.6 review.
+
+    Measured at this effect's own floor (where the launch is at t = 0 and
+    the question cannot arise), at a form whose launch lands mid-frame, and
+    at the one that lands exactly on a boundary."""
+    run = alone("heart", 0.8, form_override=form_s)
+    quiet = [i for i, st in enumerate(run.state) if st["hushed"]]
+    assert quiet, f"form {form_s}: the quiet never ran"
+    # it runs as one unbroken stretch ...
+    assert quiet == list(range(quiet[0], quiet[-1] + 1)), quiet
+    # ... WORD_SHAPE_HUSH_S long, within a frame
+    assert abs(len(quiet) - round(FX.WORD_SHAPE_HUSH_S / DT)) <= 1, len(quiet)
+    # ... and the burst leaves on the very next frame, with nothing in
+    # between: no frame is armed-but-not-quiet after the quiet began
+    assert run.launch_frame == quiet[-1] + 1, (
+        f"form {form_s}: the quiet ended on frame {quiet[-1]} and the burst "
+        f"left on {run.launch_frame} — the frames between are neither")
+    assert run.state[run.launch_frame]["sparks"] == run.total_sparks
+    assert run.state[run.launch_frame]["armed"] is False
+    # and the arrival is still on the word whichever way the launch
+    # quantized
+    assert run.arrival_pitch <= 1.0, run.arrival_pitch
+
+
 # ── 5. the clarity bar, on the real mask ──────────────────────────────────
 
 @pytest.mark.parametrize("shape_id", SHAPES)
