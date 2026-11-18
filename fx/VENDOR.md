@@ -3338,3 +3338,46 @@ against that commit.
      `tests/test_orbits_word_shape.py`'s ROW W4.4 sections;
      `.claude/skills/orbits-effect/SKILL.md`'s ROW W4.4 section is the
      binding record.
+
+103. `effects/word_shapes.py` (SpotFX-authored; #95 is this library's birth,
+    alongside STAR's divisor): THE LIBRARY'S DEFAULT ORIENTATION IS A HALF
+    TURN (row W5.7, his second room verdict 2026-11-18: "the shapes should
+    be 'flipped' because they are visually upside-down on this device.
+    Rotate 180 degrees, and make that the 'default' orientation"). One new
+    constant, `PANEL_ROTATION_DEG` = 180, applied inside `build()` AFTER
+    `_normalise_box` and `_orient`, to EVERY shape that goes through it —
+    the library's default, not a per-shape or per-device option, because
+    the crystal (`crystal-mapper`, 976 real hex cells) is the only fixture
+    that draws a shape at all: the strips and singles have no shape code.
+    A half turn about the centre is exactly `x -> -x, y -> -y`, so it is
+    implemented as a plain negation rather than a rotation matrix (no
+    `sin(pi)` epsilon skew in the unit box), it leaves the declared first
+    point first, and it preserves the shoelace sign so the counter-
+    clockwise winding `_orient` enforces survives untouched — `build()`
+    re-runs `_orient` after the turn and RAISES if either the winding or
+    the area moved, and `_rotate_for_panel` raises for any angle but 180,
+    which is the only angle the hex lattice is symmetric under. Every
+    derived view (`polar`, `at`, `tangent`, `sdf`, `sdf_fast`, the polar
+    table, the fast grid) follows for free because each is built from
+    `points`, and NO EFFECT MODULE CHANGED — not one line in radial,
+    blackhole, orbits, fish, sauron or fireworks.
+    IN THE FRAME (y DOWN, row 0 the top tip) a star's and a diamond's own
+    point now sits at MAXIMUM y and a heart's point at MINIMUM y with its
+    cleft at the bottom; his panel shows that frame inverted, which is why
+    this reads the right way up in his room and why an ASCII render of the
+    frame now looks upside-down on purpose (`scripts/check_word_shapes.py
+    --ascii` prints that line above every render).
+    THE PINNED CELL COUNTS DID NOT MOVE, and that was asserted rather than
+    re-pinned: the hex lattice is centrally symmetric about the panel's own
+    centre (row r <-> row 36 - r keeps the half-column offset parity, 36
+    being even), so a half turn maps real cells onto real cells. Re-measured
+    at the plan's default SIZE 0.62 on his stored `crystal-mapper` profile,
+    outline/inside/thinnest are heart 168/332/3, star 176/196/3, diamond
+    119/191/3 — identical to #95's, every shape still star-shaped, the
+    thinnest point still 3 cells against a bar of 2. Proofs
+    `tests/test_word_shapes.py` (the flipped orientation test and the new
+    `test_the_half_turn_is_the_default_and_moves_no_cell_count`, which also
+    holds the turn's involution and that a non-registry shape built through
+    `build()` is flipped too) plus every effect's own word-shape suite
+    unchanged; `.claude/skills/word-shapes/SKILL.md`'s "What the library is"
+    bullet is the binding record.

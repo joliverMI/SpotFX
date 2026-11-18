@@ -65,6 +65,15 @@ cell inside it, `.` a real cell that is neither, a space a gap cell. It is
 the quickest way to see that a new shape is representational before
 anything renders in the room.
 
+**AN ASCII RENDER LOOKS UPSIDE-DOWN, ON PURPOSE.** Since 2026-11-18 the
+library's default orientation is a half turn
+(`word_shapes.PANEL_ROTATION_DEG`, his verdict: the shapes read
+upside-down on the crystal), so in the FRAME a heart's point is at the TOP
+and its cleft at the bottom, and a star's and a diamond's point at the
+BOTTOM. These renders draw the frame, row 0 first; his panel shows that
+frame inverted, so what reads inverted here is upright in his room. Every
+render prints that line above itself.
+
 Pass `--size-fraction` to measure another size, or `--path` another device
 profile. This script never writes anything.
 """
@@ -336,6 +345,10 @@ def main() -> int:
             outline, inside = drawings[m.shape_id]
             print(f"\n{m.shape_id} at SIZE {size} "
                   f"(o outline, + inside, . real, ' ' gap)")
+            print("  this is the FRAME's view (row 0 first); his panel "
+                  "shows it the other way up — the library's default "
+                  f"orientation is a {word_shapes.PANEL_ROTATION_DEG}"
+                  "-degree turn")
             print(render_ascii(panel, outline, inside))
 
     failures = [m for m in measurements if not m.ok]

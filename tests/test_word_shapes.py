@@ -52,7 +52,13 @@ SHIPPED = ("heart", "star", "diamond")
 # live crystal-mapper mask, with every distance in physical pitch units.
 # The outline count is the denominator of every wave-1 outline-coverage
 # bar, so changing one of these numbers means a shape's drawn outline
-# moved, which is never accidental.
+# moved, which is never accidental. The 2026-11-18 half turn
+# (`PANEL_ROTATION_DEG`) did NOT move any of them: the hex lattice is
+# centrally symmetric about the panel's own centre (row r <-> row 36 - r
+# keeps the half-column offset parity, 36 being even), so a 180-degree
+# turn maps real cells onto real cells. If one of these ever moves under
+# an orientation change, that is a finding to report, not a number to
+# re-pin.
 PINNED = {
     #            outline, inside, thinnest
     "heart":   (168, 332, 3),
@@ -151,17 +157,48 @@ def test_a_shape_declared_upright_false_keeps_that():
 
 
 def test_the_shipped_shapes_point_up_the_way_the_panel_does():
-    # y is DOWN: a star's and a diamond's own point is at the TOP, so the
-    # outline's minimum y is reached near x = 0.
+    # Flipped on 2026-11-18 (`PANEL_ROTATION_DEG`): his verdict in the room
+    # was that the shapes read upside-down on the crystal, so a half turn
+    # is the library's default orientation and the FRAME now holds every
+    # shape inverted — upright only once his panel inverts it back.
+    #
+    # y is DOWN, so a star's and a diamond's own point is at the frame's
+    # MAXIMUM y, reached near x = 0.
     for shape_id in ("star", "diamond"):
         pts = word_shapes.get(shape_id).points
-        top = pts[pts[:, 1].argmin()]
-        assert abs(top[0]) < 1e-9
-    # the heart's single point is at the BOTTOM, its cleft at the top
+        point = pts[pts[:, 1].argmax()]
+        assert abs(point[0]) < 1e-9
+    # the heart's single point is at MINIMUM y, its cleft at the bottom
     heart = word_shapes.get("heart").points
-    assert abs(heart[heart[:, 1].argmax()][0]) < 1e-9
-    cleft_x = heart[heart[:, 1].argmin()][0]
-    assert abs(cleft_x) > 0.1       # the top of a heart is two lobes
+    assert abs(heart[heart[:, 1].argmin()][0]) < 1e-9
+    lobe_x = heart[heart[:, 1].argmax()][0]
+    assert abs(lobe_x) > 0.1    # the cleft end of a heart is two lobes
+
+
+def test_the_half_turn_is_the_default_and_moves_no_cell_count():
+    # The flip is the DEFAULT for every shape, not a per-shape or
+    # per-device option: `build()` applies it to anything that goes
+    # through it, including a shape the registry does not ship.
+    assert word_shapes.PANEL_ROTATION_DEG == 180
+    pts = [(0.0, -1.0), (1.0, 0.0), (0.0, 1.0)]
+    built = word_shapes.build("tri", "Tri", pts, ("tri",)).points
+    # `build()` centres the box (x spans 0..1, so its centre is 0.5) and
+    # then half-turns, so the declared (1, 0) spike points the other way.
+    assert built[built[:, 0].argmin()][0] == pytest.approx(-0.5)
+    assert built[:, 0].max() == pytest.approx(0.5)
+    # The declared first point is still first, and the winding still
+    # counter-clockwise in the algebra — a half turn preserves both.
+    assert built[0] == pytest.approx([0.5, 1.0])
+    assert word_shapes._signed_area(built) > 0.0
+    # The turn is a plain negation (`x -> -x, y -> -y`, not a rotation
+    # matrix carrying sin(pi)'s epsilon), so feeding a shipped shape's own
+    # points back through `build()` returns them — a half turn twice is
+    # the identity, to the box-centring's last bit.
+    for shape_id in SHIPPED:
+        shape = word_shapes.get(shape_id)
+        twice = word_shapes.build(shape_id, shape.name,
+                                  -shape.points, shape.words).points
+        assert np.allclose(twice, shape.points, atol=1e-15, rtol=0.0)
 
 
 # ── the radius per angle ───────────────────────────────────────────────────

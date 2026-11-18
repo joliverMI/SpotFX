@@ -17,12 +17,27 @@ THE UNIT BOX. `points` is a dense closed polyline (no repeated closing
 point) in a unit box: centred on (0, 0) with height exactly 2.0 (y from -1
 to +1) and whatever width the shape needs — the heart is wider than it is
 tall, the diamond narrower. **y points DOWN**, as it does on the panel and
-in every effect here, so a shape's "up" is -y and `theta = atan2(y, x)`
+in every effect here, so -y is the frame's top and `theta = atan2(y, x)`
 is the same angle an effect already computes. The outline runs
 counter-clockwise in the coordinate algebra (a positive shoelace area,
 the direction of increasing `theta`); drawn on the panel with y downward
 that reads as clockwise. `build()` enforces the box and the orientation, so
 a new entry can be written in whatever units and winding are natural for it.
+
+THE DEFAULT ORIENTATION IS A HALF TURN (`PANEL_ROTATION_DEG`, 2026-11-18).
+`build()` rotates every shape 180 degrees about the centre, AFTER the box
+and the winding, as the library's default for every shape — his verdict in
+the room: *"the shapes should be 'flipped' because they are visually
+upside-down on this device. Rotate 180 degrees, and make that the 'default'
+orientation."* So in the FRAME a star's and a diamond's own point now sits
+at the MAXIMUM y (the frame's bottom row) and a heart's single point at the
+MINIMUM y with its cleft at the bottom — and on his panel, which shows this
+frame inverted, that reads the right way up. An ASCII render of the frame
+(`scripts/check_word_shapes.py --ascii`) therefore looks upside-down on
+purpose; the script says so at the top of every render. Every derived view
+(`polar`, `at`, `tangent`, `sdf`, `sdf_fast`, every table) follows for free
+because each is built from `points`, and NO effect module knows about the
+flip at all.
 
 THE CONVENTION AN EFFECT USES — NORMALIZED SPACE, NOT CELLS. A view is in
 unit coordinates; an effect scales it by SIZE, **the shape's half-height in
@@ -137,6 +152,20 @@ from dataclasses import dataclass, field
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+# EVERY SHAPE IS ROTATED BY THIS, AS THE DEFAULT, in `build()`. His verdict
+# in the room, 2026-11-18: "the shapes should be 'flipped' because they are
+# visually upside-down on this device. Rotate 180 degrees, and make that the
+# 'default' orientation." The crystal is the ONLY fixture that draws a shape
+# (the strips and singles have no shape code), so "this device" is the one
+# surface and the flip belongs here, as the library's own default, not as a
+# per-shape or per-device option nobody else needs. 180 degrees about the
+# centre is exactly `x -> -x, y -> -y`, which preserves the shoelace sign,
+# so the winding `_orient` enforces survives it untouched; the hex lattice
+# is centrally symmetric (row r <-> row 36-r keeps the half-column offset
+# parity), so the outline's real-cell counts are unchanged too — both
+# asserted, in `build()` and in the tests.
+PANEL_ROTATION_DEG = 180
+
 # The radius-per-angle table's resolution: the plan's own figure. 720 bins
 # is half a degree, so every WHOLE degree is a table entry read exactly.
 # Between two bins the radius is interpolated linearly, which is exact
@@ -216,6 +245,27 @@ def _orient(pts: NDArray[np.float64]) -> NDArray[np.float64]:
     if _signed_area(pts) >= 0.0:
         return pts
     return np.concatenate([pts[:1], pts[1:][::-1]])
+
+
+def _rotate_for_panel(pts: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Rotate every point by `PANEL_ROTATION_DEG` about the centre — the
+    library's DEFAULT orientation (his verdict; see the constant).
+
+    The declared first point stays first (a rotation moves points, it does
+    not reorder them) and the winding is unchanged, because a rotation is
+    a rigid motion with positive determinant; the caller re-runs `_orient`
+    anyway and asserts it was a no-op.
+    """
+    if PANEL_ROTATION_DEG % 360 != 180:
+        raise NotImplementedError(
+            f"PANEL_ROTATION_DEG={PANEL_ROTATION_DEG} is not a half turn. "
+            "Only 180 is implemented, because a half turn is exactly "
+            "`x -> -x, y -> -y` and needs no rotation matrix (so no "
+            "sin(pi) epsilon in the unit box), AND because the hex lattice "
+            "is centrally symmetric and symmetric under nothing else: any "
+            "other angle also means re-measuring every pinned cell count "
+            "in tests/test_word_shapes.py.")
+    return -pts        # x -> -x, y -> -y, exact: no epsilon skew
 
 
 def _cum_lengths(pts: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -523,6 +573,21 @@ def build(id: str, name: str, points: ArrayLike, words: tuple[str, ...],
     module docstring), so importing this module stays a few milliseconds
     however many shapes it ships."""
     pts = _orient(_normalise_box(_as_points(points)))
+    # His default orientation, applied AFTER normalisation and orientation
+    # so a new entry is still written in whatever units and winding suit it.
+    before = _signed_area(pts)
+    rotated = _rotate_for_panel(pts)
+    pts = _orient(rotated)
+    if not np.array_equal(pts, rotated):      # a 180 deg turn cannot flip it
+        raise AssertionError(
+            f"shape {id!r}: PANEL_ROTATION_DEG={PANEL_ROTATION_DEG} changed "
+            "the winding, which a rotation about the centre cannot do")
+    after = _signed_area(pts)
+    if not math.isclose(after, before, rel_tol=1e-12, abs_tol=1e-12):
+        raise AssertionError(
+            f"shape {id!r}: PANEL_ROTATION_DEG={PANEL_ROTATION_DEG} changed "
+            f"the shoelace area ({before!r} -> {after!r}); a rotation about "
+            "the centre preserves it")
     cum = _cum_lengths(pts)
     closed = np.concatenate([pts, pts[:1]])
     perimeter = float(cum[-1])
@@ -561,7 +626,11 @@ def polar_table_by_bisection(shape: Shape) -> NDArray[np.float64]:
 def _heart_points(n: int = 360) -> NDArray[np.float64]:
     """The parametric heart `x = 16 sin^3 t`, `y = 13 cos t - 5 cos 2t -
     2 cos 3t - cos 4t`, with y negated for the panel's y-DOWN box (the
-    formula's +y is up), normalised by `build()`."""
+    formula's +y is up), normalised by `build()`.
+
+    As DECLARED here the cleft is at the frame's top and the point at the
+    bottom; `build()`'s `PANEL_ROTATION_DEG` half turn then puts the cleft
+    at the frame's bottom, which is the way up his panel shows."""
     t = np.linspace(0.0, 2.0 * math.pi, n, endpoint=False)
     x = 16.0 * np.sin(t) ** 3
     y = -(13.0 * np.cos(t) - 5.0 * np.cos(2 * t)
@@ -583,8 +652,10 @@ def _polygon_points(verts: ArrayLike, per_edge: int) -> NDArray[np.float64]:
 
 def _star_verts(points: int = 5, outer: float = 1.0, inner: float = 0.45,
                 ) -> NDArray[np.float64]:
-    """A `points`-pointed star with one point straight UP (-y on the panel),
-    alternating outer and inner radii, in increasing-theta order."""
+    """A `points`-pointed star with one point at -y as DECLARED here,
+    alternating outer and inner radii, in increasing-theta order.
+    `build()`'s `PANEL_ROTATION_DEG` half turn then sends that point to +y
+    in the frame, which is upright on his panel."""
     step = 2.0 * math.pi / points
     out = []
     for k in range(points):
@@ -634,7 +705,7 @@ def has(id: str) -> bool:
 
 __all__ = [
     "FAR_FIELD_TOLERANCE", "FAST_EXTENT", "FAST_SPACING", "FAST_TOLERANCE",
-    "POLAR_BINS", "Shape",
+    "PANEL_ROTATION_DEG", "POLAR_BINS", "Shape",
     "SHAPES", "build", "get", "has", "polar_table_by_bisection",
     "ray_radius", "shape_ids",
 ]

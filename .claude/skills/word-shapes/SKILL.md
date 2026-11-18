@@ -62,6 +62,19 @@ short version an effect needs:
 
 - the outline lives in a **unit box**: centred on (0, 0), height exactly
   2.0, width whatever the shape needs; **y points DOWN**, as on the panel;
+- **the default orientation is a HALF TURN** (`PANEL_ROTATION_DEG` = 180,
+  2026-11-18, his second room verdict: *"the shapes should be 'flipped'
+  because they are visually upside-down on this device. Rotate 180
+  degrees, and make that the 'default' orientation."*). `build()` applies
+  it to EVERY shape, after the box and the winding — it is the library's
+  default, not a per-shape or per-device option, because the crystal is
+  the only fixture that draws a shape. In the FRAME that means a star's
+  and a diamond's own point sits at the **maximum** y (the bottom row) and
+  a heart's point at the **minimum** y with its **cleft at the bottom**;
+  his panel shows that frame inverted, so it reads upright in the room.
+  Every derived view follows for free (each is built from `points`) and
+  **no effect module knows about the flip**. An ASCII render of the frame
+  therefore looks inverted on purpose, and says so above itself;
 - an effect scales a view by `SIZE`, **the shape's half-height in the
   effect's own NORMALIZED coordinates, where 1.0 is the panel's own
   half-height** — the same `sx`/`sy` space every Twod effect already works
