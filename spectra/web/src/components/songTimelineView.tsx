@@ -153,7 +153,9 @@ const Ctx = createContext<SongTimelineView | null>(null);
  * friends mount single components in isolation, and a context a test
  * harness must remember to wrap is a gate nobody exercises. */
 function useFallback(): SongTimelineView {
-  const win = useFollowWindow({ getNowMs: () => null, durationMs: 1, keyPrefix: 'songtl-fallback' });
+  const win = useFollowWindow({
+    getNowMs: () => null, durationMs: 1, keyPrefix: 'songtl-fallback', centered: true,
+  });
   return useMemo(() => ({
     win,
     track: null,
@@ -211,7 +213,7 @@ export function SongTimelineViewProvider({ children }: { children: ReactNode }) 
 
   const getNow = useMemo(() => () => getShowClockMs(), []);
   const win = useFollowWindow({
-    getNowMs: getNow, durationMs: Math.max(1, durationMs), keyPrefix: 'home',
+    getNowMs: getNow, durationMs: Math.max(1, durationMs), keyPrefix: 'home', centered: true,
   });
   // `useFollowWindow` returns a fresh object every render (only its own
   // `getWin` is memoized), so everything below reads it through a ref —

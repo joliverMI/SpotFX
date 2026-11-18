@@ -35,6 +35,21 @@ export function followWindowFor(
   return clampWin({ startMs: end - winMs, endMs: end }, Math.max(1, durationMs), winMs);
 }
 
+/** CENTERED follow (the Admiral, 2026-11-18: "the playhead is always
+ * centered"): [anchor − window/2, anchor + window/2] — the playhead sits
+ * dead centre and the graph scrolls under it, same as the song strip's own
+ * rAF-moved playhead. Deliberately NOT run through `clampWin`: clamping to
+ * [0, duration] would shove the window off-centre for the first/last half
+ * window of a song, which is exactly the edge case this is for. The
+ * uncovered span beyond 0 or the song's end draws as nothing — every layer
+ * that reads `win.startMs`/`win.endMs` already skips a timestamp outside
+ * its own data (`windowIndices` in canvas/layers.ts) — so it comes out as
+ * blank padding, not a clamp-driven jump. */
+export function centeredWindowFor(anchorMs: number, windowS: number): Win {
+  const half = Math.max(500, windowS * 1000) / 2;
+  return { startMs: anchorMs - half, endMs: anchorMs + half };
+}
+
 export function clampWin(win: Win, durationMs: number, minSpanMs = 1000): Win {
   let { startMs, endMs } = win;
   const span = Math.max(minSpanMs, endMs - startMs);
