@@ -30,8 +30,9 @@ THE KEYS
   `docs/SPECTRA_TIMING_CONVENTIONS.md`), so the shape completes ON the word.
 - `word_shape_hold_s` (float s): how long it stands complete — the sung
   phrase, clamped (0.8 to 2.0 s), then stretched per effect
-  (`device_model.WORD_SHAPE_HOLD_X`: STAR, the Black Hole and Fireworks are
-  told 1.2 to 3.0 s).
+  (`device_model.WORD_SHAPE_HOLD_X`: STAR and the Black Hole are told 1.2
+  to 3.0 s. Fireworks was a third until row W5.6 — "It also holds too
+  long").
 - `word_shape_release_s` (float s): how long it takes to let go (1.5x the
   form by default).
 - `word_shape_level` (float 0..1): the word's Energy. Size, spark counts

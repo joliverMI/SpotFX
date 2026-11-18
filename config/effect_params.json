@@ -4640,7 +4640,7 @@
           "aspect": "shape",
           "note": "Word shapes: how many sparks the burst throws at Energy 0. The count rises evenly to the loud one with the word's own Energy, so a loud word bursts bigger.",
           "help_topic": "fireworks-word-shape",
-          "default": 90
+          "default": 60
         },
         "word_shape_sparks_loud": {
           "label": "Word Shape Sparks (loud)",
@@ -4651,7 +4651,7 @@
           "aspect": "shape",
           "note": "Word shapes: how many sparks the burst throws at Energy 1.",
           "help_topic": "fireworks-word-shape",
-          "default": 150
+          "default": 100
         }
       },
       "defaults": {

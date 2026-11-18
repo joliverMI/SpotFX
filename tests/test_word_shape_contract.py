@@ -565,27 +565,28 @@ def test_every_timing_is_his_to_tune():
 
 def test_a_per_effect_minimum_form_floors_the_lead():
     """Plan section 2.4. TWO FLOORS ARE LIVE: the FISH's 2.0 s (row W1.4 —
-    a procession has to swim onto the outline) and FIREWORKS' 2.0 s (row
-    W4.3 — the panel has to go dark in front of the burst, "no fireworks
-    fire right before, or concurrently"). Both are declared in
-    `fx.device_model.WORD_SHAPE_FORM_MIN_S` — never as a registered param
-    (fx/effects/word_shape_keys.py's own "HOW AN EFFECT OPTS IN"). The
-    floor applies to the LEAD and never shortens it."""
+    a procession has to swim onto the outline) and FIREWORKS' 2.25 s (row
+    W4.3 gave it a hush in front of the burst; row W5.6 made that quiet
+    0.25 s and the flight 2.0 s, so the floor is their sum). Both are
+    declared in `fx.device_model.WORD_SHAPE_FORM_MIN_S` — never as a
+    registered param (fx/effects/word_shape_keys.py's own "HOW AN EFFECT
+    OPTS IN"). The floor applies to the LEAD and never shortens it."""
     assert device_model.WORD_SHAPE_FORM_MIN_S == {"fish": 2.0,
-                                                  "fireworks": 2.0}
+                                                  "fireworks": 2.25}
     assert device_model.word_shape_form_min_s(["fish"]) == 2.0
     # PLAN TIME with no room wired: no idea which scene will show, so the
-    # global maximum — the only safe answer there.
-    assert device_model.word_shape_form_min_s() == 2.0
+    # global maximum — the only safe answer there. Fireworks' is the larger
+    # of the two since W5.6.
+    assert device_model.word_shape_form_min_s() == 2.25
     # FIRE TIME: exactly the showing effects, so a scene with no Fish in it
     # keeps the approved Energy-paced 0.5-0.9 s form.
     assert device_model.word_shape_form_min_s(["orbits"]) == 0.0
     assert device_model.word_shape_form_min_s(["orbits", "fish"]) == 2.0
-    assert device_model.word_shape_form_min_s(["fireworks"]) == 2.0
+    assert device_model.word_shape_form_min_s(["fireworks"]) == 2.25
     st = RoomControlState()
-    assert word_shape_timing(1.0, 1000, st)[0] == 2.0, "the floor wins"
+    assert word_shape_timing(1.0, 1000, st)[0] == 2.25, "the floor wins"
     assert word_shape_timing(1.0, 1000, st, ["fish"])[0] == 2.0
-    assert word_shape_timing(1.0, 1000, st, ["fireworks"])[0] == 2.0
+    assert word_shape_timing(1.0, 1000, st, ["fireworks"])[0] == 2.25
     assert word_shape_timing(1.0, 1000, st, ["orbits"])[0] == 0.5
     # a quiet word would be paced at 0.9 s; Fish still gets 2.0
     assert word_shape_timing(0.0, 1000, st, ["orbits"])[0] == 0.9
@@ -595,9 +596,15 @@ def test_a_per_effect_hold_stretch_lengthens_the_hold():
     """Row W4.2, his room verdict 2026-11-17: "star and black hole look
     pretty good, but could last a little longer" / Fireworks "have it hold
     50% longer". ONE factor, 1.5, on the three effects he named — a code
-    constant beside the form floor, never a registered param."""
+    constant beside the form floor, never a registered param.
+
+    ROW W5.6 TOOK FIREWORKS BACK OUT (his second room verdict, 2026-11-18:
+    "It also holds too long and fades too abruptly"), so the stretch is
+    STAR's and the Black Hole's — the two he liked — and Fireworks is on
+    the room's own 0.8-2.0 s hold again."""
     assert device_model.WORD_SHAPE_HOLD_X == {
-        "radial": 1.5, "blackhole": 1.5, "fireworks": 1.5}
+        "radial": 1.5, "blackhole": 1.5}
+    assert device_model.word_shape_hold_x(["fireworks"]) == 1.0, "W5.6"
     assert device_model.word_shape_hold_x(["radial"]) == 1.5
     assert device_model.word_shape_hold_x(["sauron"]) == 1.0
     # the LARGEST among the showing types, like the form floor
@@ -613,9 +620,8 @@ def test_a_per_effect_hold_stretch_lengthens_the_hold():
     assert word_shape_timing(0.5, 0, st, ["radial"])[1] == 1.2
     assert word_shape_timing(0.5, 5000, st, ["radial"])[1] == 3.0
     assert word_shape_timing(0.5, 5000, st, ["blackhole"])[1] == 3.0
-    assert word_shape_timing(0.5, 5000, st, ["fireworks"])[1] == 3.0
-    # Sauron, Orbits and Fish are untouched — he did not ask for them
-    for untouched in ("sauron", EFFECT, "fish"):
+    # Sauron, Orbits, Fish and (since W5.6) Fireworks are untouched
+    for untouched in ("sauron", EFFECT, "fish", "fireworks"):
         assert word_shape_timing(0.5, 0, st, [untouched])[1] == 0.8, untouched
         assert word_shape_timing(0.5, 5000, st, [untouched])[1] == 2.0, untouched
     # and a room nobody named keeps the unstretched hold
@@ -684,8 +690,10 @@ def test_the_previews_longest_hold_carries_the_stretch_too():
     against a second hand-written multiply, so the two cannot drift apart
     if the stretch ever moves relative to the clamp."""
     st = RoomControlState()
+    # W5.6 took `fireworks` out of WORD_SHAPE_HOLD_X, so it reads with the
+    # unstretched effects now
     for types, stretched in ((["blackhole"], True), (["radial"], True),
-                             (["fireworks"], True), (["sauron"], False),
+                             (["fireworks"], False), (["sauron"], False),
                              ([EFFECT], False), (["fish"], False)):
         virtuals = {"v1": SimpleNamespace(effect_type=types[0])}
         preview = sr.preview_word_shape(0.5, "heart", virtuals)
@@ -715,39 +723,51 @@ def test_the_previews_longest_hold_follows_his_own_retuned_maximum():
         preview = sr.preview_word_shape(0.5, "heart", virtuals)
     assert preview.hold_max_s == pytest.approx(2.1), "1.4 x 1.5"
     assert preview.hold_s == pytest.approx(1.5), "1.0 x 1.5"
-def test_the_stretch_composes_with_fireworks_own_form_floor():
-    """W4.2 and W4.3 landed in the same wave and both touch Fireworks, so
-    pin that they compose rather than interfere. They are ORTHOGONAL by
-    construction: W4.3's floor raises the FORM (and the release with it,
-    being a multiple of the form), W4.2's stretch multiplies the HOLD, and
-    neither reaches the other's quantity.
+def test_the_stretch_no_longer_composes_with_fireworks_own_form_floor():
+    """W4.2 and W4.3 landed in the same wave and both touched Fireworks, so
+    this pinned that they composed rather than interfered: W4.3's floor
+    raised the FORM (and the release with it, being a multiple of the
+    form), W4.2's stretch multiplied the HOLD, and neither reached the
+    other's quantity.
 
-    `fx/effects/fireworks.py`'s own W4.3 block says the longer hold is the
-    ROOM's and "nothing here stretches it", so there is exactly one stretch
-    in the system — this one — and no double-counting."""
+    ROW W5.6 REMOVED ONE OF THE TWO. His second room verdict took the hold
+    stretch off Fireworks ("It also holds too long") and moved the floor
+    from 2.0 to 2.25 s, so what is pinned here now is that the floor
+    reaches the form and the release and NOTHING reaches this effect's
+    hold — the orthogonality, read from the other side. The two effects
+    that kept the stretch are STAR and the Black Hole, pinned in
+    test_a_per_effect_hold_stretch_lengthens_the_hold above.
+
+    `fx/effects/fireworks.py` never stretched the hold itself, so there is
+    still exactly ONE stretch in the system and no double-counting."""
     st = RoomControlState()
-    assert device_model.WORD_SHAPE_FORM_MIN_S["fireworks"] == 2.0, "W4.3's"
-    assert device_model.WORD_SHAPE_HOLD_X["fireworks"] == 1.5, "W4.2's"
+    assert device_model.WORD_SHAPE_FORM_MIN_S["fireworks"] == 2.25, "W5.6's"
+    assert "fireworks" not in device_model.WORD_SHAPE_HOLD_X, "W5.6 took it"
 
     short = word_shape_timing(0.8, 0, st, ["fireworks"])
     long = word_shape_timing(0.8, 5000, st, ["fireworks"])
-    assert short == (2.0, 1.2, 3.0), "W4.3's form, W4.2's floor hold"
-    assert long == (2.0, 3.0, 3.0), "W4.3's form, W4.2's ceiling hold"
+    assert short == (2.25, 0.8, 3.375), "the floored form, the room's hold"
+    assert long == (2.25, 2.0, 3.375), "the floored form, the room's hold"
 
-    # THE FORM FLOOR DOES NOT MOVE THE HOLD, and the stretch does not move
-    # the form: Fish declares the same 2.0 s floor and no stretch, so its
-    # form matches Fireworks' while its hold stays unstretched.
+    # THE FORM FLOOR DOES NOT REACH THE HOLD: Fish declares a floor of its
+    # own and no stretch, and now the only difference between the two is
+    # the quarter-second Fireworks' quiet adds to the form.
     fish = word_shape_timing(0.8, 5000, st, ["fish"])
-    assert fish[0] == long[0] and fish[2] == long[2], "the same form/release"
-    assert fish[1] == 2.0 and long[1] == 3.0, "only the hold differs"
+    assert fish[1] == long[1] == 2.0, "the same, unstretched, hold"
+    assert fish[0] == 2.0 and long[0] == 2.25, "only the floor differs"
 
-    # CONSEQUENCE WORTH PINNING: the effect's hush runs from the SEQ edge to
-    # the END OF THE HOLD (`fireworks._ws_hush_until = form + hold`), so the
-    # stretch lengthens the dark canvas too — 3.2 s to 5.0 s rather than
-    # W4.3's own 2.8 s to 4.0 s. Both of his asks pull the same way here, so
-    # this is the intended direction, not a surprise.
-    assert short[0] + short[1] == pytest.approx(3.2)
-    assert long[0] + long[1] == pytest.approx(5.0)
+    # CONSEQUENCE WORTH PINNING: the effect's QUIET is the 0.25 s in front
+    # of the launch and no longer spans form + hold, so the hold's own
+    # length does not change how long the ordinary show is withheld at all
+    # — which is the whole of what his "80% less pre-fire darkness time"
+    # asked for (`fireworks.WORD_SHAPE_HUSH_S`).
+    from fx.effects import fireworks as fx_fireworks
+    assert fx_fireworks.WORD_SHAPE_HUSH_S == 0.25
+    assert (fx_fireworks.WORD_SHAPE_HUSH_S
+            + fx_fireworks.WORD_SHAPE_FLIGHT_S) == pytest.approx(
+        device_model.WORD_SHAPE_FORM_MIN_S["fireworks"]), (
+        "the floor must stay the quiet plus the flight, or the engine "
+        "stops firing early enough for both")
 
 def test_the_hold_stretch_never_moves_the_planned_lead():
     """The lead is the FORM (LEAD family, positive = earlier). The stretch

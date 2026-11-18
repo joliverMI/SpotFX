@@ -563,22 +563,26 @@ WORD_SHAPE_FORM_MIN_S: dict[str, float] = {
     # shoal still crossing the pond. 2.0 s is what the measured approach
     # needs (scripts/check_fish_word_shape.py section 4).
     "fish": 2.0,
-    # FIREWORKS (plan row W4.3, his room verdict 2026-11-17: "Fireworks is
-    # too cluttered to visually identiy the shape. Let's have it plan to
-    # make sure no fireworks fire right before, or concurrently, so that it
-    # is on a mostly dark canvass"). The floor is HOW EARLY THE WRITE
-    # ARRIVES, which is all a hush needs: the effect stops launching at the
-    # SEQ edge and the panel has 1.2 s to empty before the shaped burst
-    # leaves the centre (`fx/effects/fireworks.py`'s WORD SHAPES block —
-    # the flight itself is still 0.8 s, so the burst looks as W1.2 measured
-    # it). There is deliberately no seventh told key for a "quiet": that
-    # would reopen the W0.3 told-key contract for one effect, and the form
-    # already means exactly this.
+    # FIREWORKS (plan row W4.3, his room verdict 2026-11-17, REVISED by row
+    # W5.6, his second room verdict 2026-11-18). The floor is HOW EARLY THE
+    # WRITE ARRIVES, which is all this effect needs: it goes quiet 0.25 s
+    # before the shaped burst leaves the centre, and the burst's own flight
+    # is 2.0 s (`fx/effects/fireworks.py`'s WORD SHAPES block). So the floor
+    # is exactly `WORD_SHAPE_HUSH_S + WORD_SHAPE_FLIGHT_S` = 0.25 + 2.0.
+    #
+    # W4.3 READ 2.0 (a 1.2 s quiet in front of a 0.8 s flight); his second
+    # verdict gave the quiet 80% less time — "I think we can give it 80%
+    # less pre-fire darkness time" — and the burst 60% less speed — "Slow
+    # the burst by 60% so we can see the blobs moving out to the outline" —
+    # so the two halves swapped sizes and the floor went UP by a quarter of
+    # a second. There is deliberately no seventh told key for a "quiet":
+    # that would reopen the W0.3 told-key contract for one effect, and the
+    # form already means exactly this.
     #
     # It has the same consequence Fish's floor has, and it is worth stating
-    # rather than discovering: the band fires 2.0 s EARLY, so a COLOUR kind
-    # pooled in a Fireworks scene's Words band lands 2.0 s early too.
-    "fireworks": 2.0,
+    # rather than discovering: the band fires 2.25 s EARLY, so a COLOUR kind
+    # pooled in a Fireworks scene's Words band lands 2.25 s early too.
+    "fireworks": 2.25,
 }
 
 
@@ -625,20 +629,28 @@ def word_shape_form_min_s(effect_types=None) -> float:
 # the maximum stretches too: today's 0.8-2.0 s hold becomes 1.2-3.0 s on
 # these three, and Sauron, Orbits and Fish are untouched.
 #
-# ONE FACTOR, 1.5, FOR ALL THREE: his own Fireworks number, so there is one
-# number for his eye to learn and one constant to retune. Not the room's two
-# hold settings, which would stretch every wired effect, which he did not
-# ask for.
+# ONE FACTOR, 1.5: it began as his own Fireworks number ("have it hold 50%
+# longer"), applied to all three so there was one number for his eye to
+# learn and one constant to retune. Fireworks itself came back OUT on
+# 2026-11-18 (row W5.6 — "It also holds too long"); the factor stays what it
+# was for the two effects he liked. Not the room's two hold settings, which
+# would stretch every wired effect, which he did not ask for.
 #
 # LIKE THE FORM FLOOR ABOVE, IT LIVES HERE AND IS NOT SONIC-TELLABLE: it is
 # a code constant the planner needs before it has asked any effect anything.
 # If he later wants to tune it live, the follow-up is a per-effect registry
 # param read off `conductor.virtuals[...].param_baseline` (the
 # `pulse_effect_ms` pattern) — not this constant.
+# W5.6 (his SECOND room verdict, 2026-11-18): FIREWORKS LEFT THIS DICT —
+# "It also holds too long and fades too abruptly." STAR and the Black Hole
+# keep their 1.5 ("star and black hole look pretty good, but could last a
+# little longer" still stands, and he did not revisit them), so Fireworks is
+# back on the room's own 0.8-2.0 s hold while those two hold 1.2-3.0 s. The
+# 1.5 is no longer "one number for all three" — it is the number he gave for
+# the two he liked.
 WORD_SHAPE_HOLD_X: dict[str, float] = {
     "radial": 1.5,      # STAR
     "blackhole": 1.5,   # the Black Hole's event horizon
-    "fireworks": 1.5,   # his own number
 }
 
 

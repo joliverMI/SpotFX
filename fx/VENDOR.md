@@ -3418,3 +3418,151 @@ against that commit.
     every effect's own word-shape suite unchanged;
     `.claude/skills/word-shapes/SKILL.md`'s "What the library is" bullets
     are the binding record.
+
+104. `effects/fireworks.py` (SpotFX-authored on top of #96/#101): W5.6 — DIM
+     NOT DARK, A 60%-SLOWER BURST THAT NEVER QUITE STOPS, A GENTLE
+     BREAK-APART, AND BACK TO 60/100 SPARKS (his SECOND room verdict,
+     2026-11-18, verbatim: "I think we overtuned the fireworks last time.
+     The background doesn't need to be clear of other fireworks, just they
+     need to be dimmer, so fading out already. I think we can give it 80%
+     less pre-fire darkness time. It also holds too long and fades too
+     abruptly. And it's too well-defined. Let's turn back the increase in
+     blob count, and at the end, the blobs should lightly break apart and
+     fade out. Also, the burst is too fast. Slow the burst by 60% so we can
+     see the blobs moving out to the outline, and then decelerating to
+     almost a stop, but not quite a stop. The blobs should always be
+     slightly drifting."). **THIS REVISES #101 RATHER THAN ADDING TO IT**:
+     the hush's span, the flight's length and the spark counts are all
+     superseded. Every number he gave is ONE module constant with his own
+     sentence beside it: `WORD_SHAPE_HUSH_S` (0.25 s — the quiet is now
+     only that, immediately before the LAUNCH, anchored to it rather than
+     to the edge, where #101's ran from the SEQ edge to the END OF THE
+     HOLD); `WORD_SHAPE_BACKGROUND_DIM` (0.40) + `WORD_SHAPE_DIM_RAMP_S`
+     (0.25 s) — from the edge to the hold's end every ORDINARY spark is
+     DRAWN at 0.40 of its brightness, ramped in over the quiet's own length
+     and back out over the whole release, with launches carrying on through
+     it at that lower light (a BRIGHTNESS on `p_shown` and nothing else: no
+     particle is retimed, killed or moved, and a phase arrival or a
+     clearing write ends the dim with the quiet, so a lull's rockets and a
+     drop's payoff are never dimmed); `word_shape_sparks_quiet`/`_loud`
+     90/150 -> **60/100**, back to #96's, in the CONFIG_SCHEMA and
+     `config/effect_params.json`; `WORD_SHAPE_FLIGHT_S` 0.8 -> **2.0 s**
+     ("slow the burst by 60%" read as a SPEED, x0.4 — the other reading,
+     "60% LONGER" = 1.3 s, is stated in the skill beside the constant);
+     `WORD_SHAPE_FLIGHT_HL_S` (**0.65 s**, NEW) — the shaped sparks' own
+     velocity half-life during the flight, used by `_word_shape_burst`'s
+     geometric solve AND by `draw`'s integration, because this effect's own
+     `0.6 - 0.5*drag` (0.255 s at his drag 0.69) saturates in ~0.4 s and
+     over a 2 s flight would land every spark in the first fifth of it and
+     leave it sitting; `WORD_SHAPE_DRIFT_KEEP` (0.04),
+     `WORD_SHAPE_DRIFT` (0.03 cell pitches/s) and `WORD_SHAPE_DRIFT_HL_S`
+     (0.5 s) replacing #101's `WORD_SHAPE_HANG_HL_S` (0.05 s, a dead stop
+     in three frames) — `_word_shape_drift` (NEW) takes 4% of each spark's
+     own ARRIVAL speed on the arrival frame and then runs a MEAN-REVERTING
+     walk `v -> (v - mean)*ou + mean + sigma*z` whose stationary spread is
+     exactly `WORD_SHAPE_DRIFT` (plain additive jitter is a DIFFUSING walk,
+     speed growing as sqrt(t), which would blur the outline off its line
+     over a 3 s hold — that is what the half-life is for); and
+     `WORD_SHAPE_BREAK_DRIFT` (0.30 cell pitches/s outward, the walk's
+     spread growing to half of it, ramped linearly over the release),
+     `WORD_SHAPE_FADE_POWER` 1.3 -> **1.0** (linear; 1.3 holds the
+     brightness up and then drops it, which is the "abruptly") and
+     `WORD_SHAPE_FADE_FRAC` (0.45, 1.0) -> **(0.6, 1.0)** (no spark gone
+     before 60% of the release, the last exactly at its end). The PLANNER
+     halves: `fx.device_model.WORD_SHAPE_FORM_MIN_S["fireworks"]` 2.0 ->
+     **2.25** (asserted AS `WORD_SHAPE_HUSH_S + WORD_SHAPE_FLIGHT_S`, so
+     neither half can move without it), and `fireworks` **LEFT**
+     `WORD_SHAPE_HOLD_X` ("It also holds too long") while `radial` and
+     `blackhole` keep their 1.5 — the 1.5 was originally Fireworks' own
+     number. Untold, every branch returns before touching state and the
+     effect renders byte for byte what it rendered before — proven against
+     the PINNED pre-#96 module over 320 busy and 320 quiet frames on his
+     real mask. No vendored line changed.
+
+     TWO MEASURED CORRECTIONS THE SLOWER DEPARTURE FORCED, neither of them
+     one of his numbers, both documented at the constant.
+     `WORD_SHAPE_FADE_IN_FRAC` (**NEW**, 0.225 of the FLIGHT) replaces a
+     fixed `WORD_SHAPE_FADE_IN_S` of 0.18 s: #96's reasoning for the
+     fade-in is "by the time they are full bright they have flown over half
+     of the way out", which is only true at ONE flight length — at 0.18 s
+     into a 2 s flight the sparks are 20% of the way out instead of 44%,
+     and 100 of them still stacked near their origins saturated TWO CELLS
+     to white 0.1 s after the launch (4.88-6.12% of the lit cells at Energy
+     1.0, against #101's "no white cell at all at any Energy"). 0.225 is
+     exactly 0.18/0.8, so the geometry is what #101 measured and a later
+     flight change carries it. `WORD_SHAPE_LAUNCH_PITCH` 1.0 -> **2.0**:
+     with the fade-in fixed, ONE cell of the star's 73 lit ones still went
+     white 0.27 s after the launch at Energy 1.0 (1.37%) — the trail is a
+     channel-wise MAX over TIME, so a slow spark's track lingers in a cell
+     far longer than a fast one's, and the scatter that sufficed at 17
+     pitches/s does not at 7. At 2.0 all three shapes light no white cell
+     at any Energy again and the coverage/fill ratio do not move at all
+     between 1.0, 1.5 and 2.0.
+
+     MEASURED (`scripts/check_fireworks_word_shape.py` prints all of it;
+     `tests/test_fireworks_word_shape.py` pins it). THE DIM BAR REPLACES
+     #101's DARK CANVAS, which is exactly what his verdict overturns: the
+     ORDINARY light on the panel ON THE WORD against THE SAME SEED'S UNTOLD
+     frame, bounded on BOTH sides (<= 45% of it, and > 0 — "dimmer" has a
+     floor as well as a ceiling, and a one-sided bar cannot tell a dim from
+     a blackout). Over 20 seeds at Energy 1.0, 120 bpm, his scene at its
+     busiest (`beat_burst` 6 x `burst_size` 14, 1.9 s lives, `max_blobs`
+     100): **39.7% of the untold light POOLED** (against the 0.40 dim),
+     per-seed median 40.7%, least 25.1%, and the panel is still a show —
+     57.8% of his 976 real cells lit at 20/255 against the same seeds
+     untold's 80.3%, where #101 read 0.00%. ZERO ordinary launches inside
+     the 0.25 s quiet, every seed. Light is the panel's MEAN LUMINANCE over
+     his real cells and not a cell count, because a share of cells above a
+     threshold cannot SEE a cell that merely went dimmer. **THE ONE NUMBER
+     ABOVE THE ROW'S LETTER, reported rather than moved: the WORST single
+     seed reads 53.8%** — the bar is asserted POOLED because one frame of
+     one seed compares two shows whose last beat landed differently (the
+     quiet withheld it on one of them), so a single seed's ratio is a noisy
+     estimate of a multiplier rather than a measurement of it; the lever if
+     he wants the worst frame under the letter is
+     `WORD_SHAPE_BACKGROUND_DIM` at about 0.33, and the cost is a dimmer
+     background than he asked for on the median frame. THE FLIGHT'S SPEED
+     CURVE, mean cell pitches/s at 25/50/75% and the flight's last frame:
+     heart 5.94/3.49/2.05/1.24, star 5.27/3.09/1.81/1.10, diamond
+     4.58/2.69/1.58/0.96 — falling at every quarter, about three quarters
+     of the way out at the halfway mark (a 0.255 s kernel would have had
+     them at 98%), and 0.038-0.048 on the word after the 4% keep. THE
+     RESIDUAL DRIFT over the hold, read on the SLOWEST spark of every
+     frame: 0.000-0.002 cell pitches/s, **never exactly zero on any
+     frame**, mean 0.035-0.040 — which is about a tenth of a cell of travel
+     over a 0.8-2.0 s hold (a breath at the cell-pitch scale, stated rather
+     than implied; `WORD_SHAPE_DRIFT` is the lever for more). THE
+     BREAK-APART, read on the COMPLETE POPULATION because
+     `WORD_SHAPE_FADE_FRAC`'s 0.6 floor guarantees no spark is gone before
+     60% of the release: mean radius 8.288 -> 8.381 pitches (heart 0.8),
+     7.300 -> 7.389 (star), 6.711 -> 6.815 (diamond), mean speed 0.040 ->
+     0.131. At the release's END the radius reads 6.6-11.1 and THAT NUMBER
+     IS NOISE, not a measurement — a handful of sparks are left and which
+     ones is random; it is printed with the caveat beside it. CLARITY,
+     the shape alone at SIZE 0.62 (bar >= 70% coverage, <= 0.70 fill):
+     80.4-98.3% on the word, 70.8-97.5% at mid-hold, fill 0.28-0.48, with
+     68 sparks at Energy 0.2 and 92 at 0.8 — lower than #101's 96.4-100%,
+     which is his "it's too well-defined". CONTRAST 9.07-13.19x on the word
+     and 9.93-13.61x at mid-hold (bar 3.0), up from #101's 6.0-11.5x with
+     half again as many sparks, the W5.7 flip having moved the band onto a
+     different set of real cells. ARRIVAL still **0.000 cell pitches**,
+     every spark, all three shapes, at Energy 0.2/0.8/the floor and at a
+     told form longer than the floor — which is the proof that the solve
+     and the integration read the same half-life. WHITE: the shape alone
+     lights NO white cell at any Energy; over a live show 1.40-1.45% at
+     Energy 0.8 and 0.52% at Energy 1.0 against the room alone's 1.46% over
+     the same frames, so every row sits at or below the room's own number
+     (#101 read 0.97-2.17%) and his 2026-11-17 option-A ruling no longer
+     has anything to cover. "NOTHING JUMPS" 0.0169-0.0451 told against an
+     own-worst of 0.0736, every one of the four stretches under it (the
+     first is now "the dim comes in" rather than "the hush empties").
+     COST +0.10 ms p50 (0.48 -> 0.57 ms, bar 1.0). #101's additive proof is
+     REWRITTEN AGAIN, to **"dimmed, never killed; launches withheld only in
+     the 0.25 s quiet"** — and the dim is a brightness and ONLY a
+     brightness: the same seed rendered told and untold has every ordinary
+     particle's position, velocity, age and colour matching frame for
+     frame, the light being this effect's own forward envelope times the
+     dim factor, and ON THE EDGE FRAME ITSELF the dim is 0.0, so the frame
+     the shape is told renders exactly as it would untold.
+     `.claude/skills/fireworks-effect/SKILL.md`'s W5.6 section is the
+     binding record of the measured bars.
