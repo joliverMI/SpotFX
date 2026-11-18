@@ -23,6 +23,30 @@ star."* Five levers moved (`word_shape_speed_x`, `WS_TURN_X`,
 `WS_TURN_GAIN_X`, the pursuit aim and the wall's own floor), and the
 measured proof gained a CORNER section and a lever SWEEP.
 
+ROW W6.1 (2026-11-18) — his THIRD room verdict: *"Only thing left is the
+fish needs a little more tuning. ... The shape outline needs to reach at
+least a moment where it is either filled with fish or trail. Right now, the
+fish seem to jitter out of the outline and so it isn't distinct enough.
+Also, if we did a highlight of the shape in orbits, do it on fish."*
+
+EVERYTHING HERE IS NOW PROVEN AT 30 fps, his crystal's own rate (`DT`
+below), because three of the row's four findings do not exist at the 60 the
+rig used to measure at — a PROPORTIONAL steer's stability, a turn clamp's
+per-frame meaning and a pursuit aim's length are all functions of `dt`. The
+row's own laws pinned below:
+  * THE STEP IS THE EXACT FIRST-ORDER FORM under a shape — `1 - exp(-gain
+    * dt)` of the heading error, never more than the error at ANY frame
+    rate — and the ordinary proportional step to the bit at `m = 0`.
+  * THE CLAMP STILL MEANS AN ARC: no more than `WS_TURN_MAX_RAD_FRAME` of
+    heading in one RENDERED frame, STAR's own per-frame cap precedent.
+  * THE AIM IS NEVER SHORTER THAN A FRAME'S TRAVEL (`WS_AIM_STEP_X`).
+  * THE TRAIL AND THE TRACE OUTLIVE THE REVISIT GAP (`WS_TRAIL_GAP_X`) —
+    Orbits' persistence ported, which is what his "if we did a highlight of
+    the shape in orbits" actually names, there being no highlight in Orbits
+    at all.
+  * THE WANDER AND THE ORDINARY WAKE HAND OVER TO THE LOOP, by `m`, the way
+    the swirl and the kicks already did.
+
 Pinned in-process below:
   * THE CONTRACT — the opt-in (schema, ADVANCED_KEYS, WORD_SHAPE_EFFECTS,
     the registry), the SEQ edge and its creation baseline, and the told
@@ -60,7 +84,12 @@ from fx.effects import fish as FX  # noqa: E402
 from fx.effects import word_shape_keys as wsk  # noqa: E402
 from fx.effects import word_shapes  # noqa: E402
 
-DT = 1.0 / 60.0
+# ROW W6.1: HIS CRYSTAL RENDERS AT 30 fps (the `crystal` WLED device's
+# `refresh_rate`, and a virtual renders at its slowest device —
+# `.claude/skills/radial-effect`'s own note), and every law in this file is
+# now proven at that rate. The 60 fps cross-check lives in the check
+# script (`--fps 60`), which is where the measured bars are.
+DT = 1.0 / 30.0
 ROWS, COLS = 37, 72
 VID = "fish-word-shape-test"
 FORM_S, HOLD_S, RELEASE_S = 2.0, 1.2, 3.0
@@ -403,11 +432,20 @@ def test_the_trail_and_the_wake_are_exactly_his_again_after_the_release(
             # at a standing envelope the targets are the pair and the
             # trace's life, each divided by the lap's own speed-up
             few, _many = FX.WS_TRAIL_HALF_LIFE_S
-            want_trail = few / FX.WS_SPEED_X
-            want_wake = (FX.WS_RIPPLE_LIFE_S / FX.WS_SPEED_X
-                         * FX.WAKE_HALF_LIFE_X)
+            # ROW W6.1: each target is FLOORED at the revisit gap, which
+            # with his three fish at x3 is the binding term — the whole
+            # point of the row's port from Orbits.
+            gap = eff._word_shape_revisit_gap(1.0)
+            assert gap == pytest.approx(
+                FX.WS_LOOP_S_FEW / (3 * FX.WS_SPEED_X))
+            want_trail = max(few / FX.WS_SPEED_X, FX.WS_TRAIL_GAP_X * gap)
+            want_wake = max(
+                FX.WS_RIPPLE_LIFE_S / FX.WS_SPEED_X * FX.WAKE_HALF_LIFE_X,
+                FX.WS_TRAIL_GAP_X * gap)
             assert eff._trail_half_life() == pytest.approx(want_trail)
             assert eff._wake_half_life() == pytest.approx(want_wake)
+            # ... and the floor really is what binds, not the pair
+            assert want_trail > few / FX.WS_SPEED_X
             # ... and both really are LONGER than his own, which is his
             # note ("lower decay briefly"), just not by the x3 the slow lap
             # needed
@@ -470,8 +508,11 @@ def test_the_water_trace_is_few_fish_only(tmp_path):
                 # FEW eases the trace's life up to WS_RIPPLE_LIFE_S over
                 # the lap's own speed-up (row W5.5 reads it as a LENGTH —
                 # see `_wake_half_life`); MANY is left exactly as it is
-                want = (FX.WS_RIPPLE_LIFE_S / FX.WS_SPEED_X
-                        * FX.WAKE_HALF_LIFE_X)
+                want = max(
+                    FX.WS_RIPPLE_LIFE_S / FX.WS_SPEED_X
+                    * FX.WAKE_HALF_LIFE_X,
+                    FX.WS_TRAIL_GAP_X
+                    * eff._word_shape_revisit_gap(1.0))
                 longer = eff._wake_half_life() > base + 1e-9
                 assert longer is expect, count
                 assert eff._wake_half_life() == pytest.approx(
@@ -739,9 +780,33 @@ def test_the_aim_and_the_circle_both_fit_inside_one_cell_pitch(shape_id):
     # WS_REACH + WS_TARGET_LEAD of it.
     loop_pitch = float(seg.sum())
     lead_arc = (FX.WS_REACH + FX.WS_TARGET_LEAD) * loop_pitch
-    aim_cut = 0.5 * lead_arc * math.sin(min(sharpest, math.pi) / 2.0)
+    # ROW W6.1: the aim is also FLOORED at WS_AIM_STEP_X of a frame's own
+    # travel, and at 30 fps that floor is the binding term — so the budget
+    # this test is about is the floor's, not the lead's. A frame's travel
+    # is the procession's own pace (`loop_px / lap`) times `dt`, in cell
+    # pitches, which is what `loop_pitch` is measured in.
+    lap_s = FX.WS_LOOP_S_FEW / FX.WS_SPEED_X
+    step_pitch = loop_pitch / lap_s * DT
+    aim_arc = max(lead_arc, FX.WS_AIM_STEP_X * step_pitch)
+    assert aim_arc > lead_arc, "at 30 fps the frame-step floor binds"
+    aim_cut = 0.5 * aim_arc * math.sin(min(sharpest, math.pi) / 2.0)
     deg = math.degrees(sharpest)
-    assert aim_cut <= 1.0, (shape_id, deg, aim_cut)
+    # AND ROW W6.1 SPENT PART OF THIS BUDGET ON PURPOSE. The floor above is
+    # what stopped the nose wagging (11.4 -> 6.1 reversals per fish-second
+    # at his own rate), and it costs chord cut: 0.63 cell pitches on the
+    # heart, 0.56 on the diamond, and 1.01 ON THE STAR, whose point turns
+    # 139 degrees. That last one is OVER the row's 1.0-pitch corner bar AS
+    # AN UPPER BOUND — `(L / 2) sin(theta / 2)` is the most a chord of that
+    # arc could cut, reached only by a steer that aims straight across the
+    # point and turns not at all, and the real paths do not: section 9 of
+    # the check script measures 0.79 cell pitches on the worst corner of
+    # the worst seed, every shape, both modes. So the bound is PINNED here
+    # with its own number rather than asserted at the bar, exactly as
+    # section 5 pins the white tail it exceeds, and the bar itself stays
+    # the measured paths.
+    assert aim_cut <= 1.05, (shape_id, deg, aim_cut)
+    if shape_id != "star":
+        assert aim_cut <= 1.0, (shape_id, deg, aim_cut)
     # ... and the circle, as HIS own instruction for the row reads it:
     # "you might need to override some min turn radii to match the effect,
     # especially on the star" — under half a cell pitch, measured along the
@@ -822,18 +887,266 @@ def test_the_help_page_tells_him_about_the_run_and_the_corners():
         assert token in fish, token
 
 
+# ── ROW W6.1's OWN LAWS ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("fps", [30.0, 60.0, 15.0])
+def test_the_shaped_heading_step_never_passes_the_error_at_any_rate(fps):
+    """ROW W6.1's FIRST LAW, as arithmetic: the shaped step is the EXACT
+    first-order form, `k = 1 - exp(-gain * dt)` of the heading error
+    commanded as `d_hd * k / dt`, so `k < 1` at every frame rate and the
+    error can never change sign because the step passed it.
+
+    WHAT IT REPLACED, and why the row exists: `omega = d_hd * gain` with
+    `gain = TURN_GAIN * (1 + WS_TURN_GAIN_X)` corrects `gain * dt` of the
+    error per frame — fine at the 60 fps the rig used to measure at, and
+    PAST THE TARGET at his crystal's 30, where it alternates sign every
+    frame. This test holds at 15 fps too, which is the point of a closed
+    form: there is no frame rate at which it misbehaves."""
+    dt = 1.0 / fps
+    gain_ws = FX.TURN_GAIN * (1.0 + FX.WS_TURN_GAIN_X)
+    k = -np.expm1(-gain_ws * dt)
+    # the step as a FRACTION of the error, which is the quantity that must
+    # stay under 1
+    assert 0.0 < k < 1.0, (fps, k)
+    # ... and the old law really did pass it at his own rate
+    proportional = gain_ws * dt
+    if fps <= 30.0:
+        assert proportional > 1.0, (fps, proportional)
+    # the rate commanded is the error times k / dt
+    omega_per_rad = k / dt
+    assert omega_per_rad < gain_ws
+    assert omega_per_rad * dt == pytest.approx(k)
+
+
+def test_the_shaped_step_is_his_own_expression_at_m_zero(tmp_path):
+    """... and the blend is byte-exact at `m = 0`: `TURN_GAIN * (1 - 0) +
+    k / dt * 0` IS `TURN_GAIN`, in IEEE arithmetic and not just in
+    algebra — which is half of why section 1 of the check script still
+    reads IDENTICAL at both frame rates (the other half being that the
+    whole block is gated on `ws is not None`)."""
+    for fps in (30.0, 60.0):
+        dt = 1.0 / fps
+        gain_ws = FX.TURN_GAIN * (1.0 + FX.WS_TURN_GAIN_X)
+        k_ws = -np.expm1(-gain_ws * dt) / max(dt, 1e-6)
+        blended = FX.TURN_GAIN * (1.0 - 0.0) + k_ws * 0.0
+        assert blended == FX.TURN_GAIN
+        # and at m = 1 it IS the closed form
+        assert (FX.TURN_GAIN * (1.0 - 1.0) + k_ws * 1.0) == k_ws
+
+
+def test_the_clamp_still_means_an_arc_at_his_own_frame_rate(tmp_path):
+    """ROW W6.1's SECOND LAW: the shaped clamp carries a per-RENDERED-FRAME
+    ceiling, so `omega_max * dt` can never pass `WS_TURN_MAX_RAD_FRAME` and
+    the turn-circle guarantee's own sentence — "an about-face is always an
+    arc and never a flip" — stays TRUE at 30 fps.
+
+    Measured before the ceiling existed: a fish on the loop with the wall's
+    glance saturating the clamp turned 6.6 radians in one frame (more than
+    a full circle) and travelled 20.5 px OFF THE LIT PANEL. STAR's
+    `ROTATION_CAP_DEG_FRAME` is the precedent for a cap per rendered frame.
+    """
+    async def go():
+        host, cm, clock, virtual, eff = await _effect(
+            tmp_path, "fish-ws-arc", particle_count=3)
+        try:
+            _render(clock, virtual, 120)
+            eff.update_config(_told())
+            hd0 = eff.p_hd[:eff.n].copy()
+            worst = 0.0
+            seen_shape = False
+            for _ in range(int((FORM_S + HOLD_S) / DT)):
+                _render(clock, virtual, 1)
+                n = eff.n
+                if eff._ws is not None:
+                    seen_shape = True
+                step = np.abs(FX._wrap_pi(eff.p_hd[:n] - hd0[:n]))
+                worst = max(worst, float(np.max(step)))
+                hd0 = eff.p_hd[:n].copy()
+            assert seen_shape
+            # EVERY per-frame heading change, at his own rate, inside the
+            # ceiling — and the ceiling is well under a half turn, so it
+            # really is an arc
+            assert worst <= FX.WS_TURN_MAX_RAD_FRAME + 1e-6, worst
+            assert FX.WS_TURN_MAX_RAD_FRAME <= np.pi
+            # AND THE CEILING CANNOT BIND AT m = 0, which is why it needs
+            # no gate of its own beyond the shape block it sits in: the
+            # ordinary clamp would have to belong to a fish swimming
+            # `ceiling / dt * turn_radius_px` = 214 px/s at 30 fps, and
+            # this effect's own fastest ordinary fish is the swim burst's
+            # dash plus the lunge, 4.2x cruise. (The SHAPED dash cap is
+            # 7.5x cruise and does pass it — but a fish moving that fast is
+            # a fish ON the loop at a standing envelope, which is exactly
+            # the case the ceiling is FOR.)
+            need = (FX.WS_TURN_MAX_RAD_FRAME / DT) * eff.turn_radius_px
+            own_max = ((1.0 + FX.SWIM_BURST_SPEED_X + FX.LUNGE_GAIN)
+                       * eff.cruise_px)
+            assert need > own_max, (need, own_max)
+        finally:
+            cm.__exit__(None, None, None)
+            await host.shutdown()
+    asyncio.run(go())
+
+
+def test_the_aim_is_never_shorter_than_a_frames_travel(tmp_path):
+    """ROW W6.1's THIRD LAW, and the one that owns the WAG: the aim is an
+    ARC and a frame's travel is a LENGTH, and at 30 fps the second is the
+    bigger one. Measured frame by frame on the diamond before the floor
+    existed — the target 0.2-1.1 px of arc ahead against 1.5 px of travel,
+    so at a corner the aim point jumped across it within ONE frame and the
+    steer spent 90 degrees in a single step.
+
+    Proven here as the arithmetic the effect applies: the aim arc every
+    shaped fish gets is at least `WS_AIM_STEP_X` of its own frame step,
+    converted into loop fractions by the loop's own measured length."""
+    async def go():
+        host, cm, clock, virtual, eff = await _effect(
+            tmp_path, "fish-ws-aim", particle_count=3)
+        try:
+            _render(clock, virtual, 120)
+            eff.update_config(_told())
+            _render(clock, virtual, int((FORM_S + HOLD_S / 2) / DT))
+            st = eff._ws
+            assert st is not None and st["loop_px"] > 0.0
+            n = eff.n
+            placed = np.flatnonzero(np.isfinite(eff.p_ws_s[:n]))
+            assert placed.size >= 1
+            # the floor the effect computes, in loop fractions
+            floor = (FX.WS_AIM_STEP_X * eff.p_spd[placed]
+                     * float(eff.passed_dt) / st["loop_px"])
+            # ... and it really is bigger than the lead the aim would
+            # otherwise be, at HIS frame rate
+            assert float(np.min(floor)) > FX.WS_TARGET_LEAD, (
+                float(np.min(floor)), FX.WS_TARGET_LEAD)
+            # in PX the floor is exactly WS_AIM_STEP_X frame steps
+            step_px = eff.p_spd[placed] * float(eff.passed_dt)
+            assert np.allclose(floor * st["loop_px"],
+                               FX.WS_AIM_STEP_X * step_px)
+        finally:
+            cm.__exit__(None, None, None)
+            await host.shutdown()
+    asyncio.run(go())
+
+
+def test_the_revisit_gap_is_the_latched_lap_over_the_latched_count(tmp_path):
+    """ROW W6.1's FOURTH LAW — the quantity the two half-lives are floored
+    at, and the one Orbits' W4.4 finding is about. It reads the LATCHED lap
+    and the LATCHED count, so a fish leaving mid-shape cannot step the
+    floor, and it is ZERO before the entries exist (which is what makes the
+    floor inert on those frames)."""
+    async def go():
+        for count, loop_s in ((3, FX.WS_LOOP_S_FEW),
+                              (6, FX.WS_LOOP_S_MANY)):
+            host, cm, clock, virtual, eff = await _effect(
+                tmp_path, f"fish-ws-gap-{count}", particle_count=count)
+            try:
+                # before a shape there is no gap at all
+                assert eff._word_shape_revisit_gap(1.0) == 0.0
+                _render(clock, virtual, 180)
+                eff.update_config(_told())
+                _render(clock, virtual, int(FORM_S / DT))
+                st = eff._ws
+                assert st is not None and st["assigned"]
+                k = int(st["count"])
+                want = loop_s / (k * FX.WS_SPEED_X)
+                assert eff._word_shape_revisit_gap(1.0) == pytest.approx(
+                    want)
+                # the numbers the row quotes: 0.61 s with three fish on the
+                # heart, 0.39 s with six
+                assert want == pytest.approx(
+                    0.611 if count == 3 else 0.389, abs=5e-3)
+                # at m = 0 the gap is the UNSPED lap's, so the floor it
+                # feeds is zero there anyway (it is multiplied by m)
+                assert eff._word_shape_revisit_gap(0.0) == pytest.approx(
+                    loop_s / k)
+            finally:
+                cm.__exit__(None, None, None)
+                await host.shutdown()
+    asyncio.run(go())
+
+
+def test_the_wander_and_the_ordinary_wake_hand_over_to_the_loop(tmp_path):
+    """ROW W6.1: the two terms W1.4 and W5.5 left ungated. THE WANDER was
+    the one steering term still pushing the DESIRED heading about while a
+    shape ran (`WANDER_W` 1.0 against the loop's `WS_SEEK_W` 14, about 0.7
+    degrees of noise a frame, which the shaped gain then chased); THE
+    ORDINARY WAKE was half the off-band light at the moment bar 4 is read
+    at. Both now ease out by `m` exactly as the swirl and the beat's kicks
+    already did, and both are his own again by the release's end.
+
+    Asserted as the CONSTANTS and the gate rather than as pixels, because
+    the pixels are section 11's job: the wake's fade is a real number under
+    1 and the blend is per fish, so an unplaced fish keeps its whole wake.
+    """
+    assert FX.WS_WAKE_FADE < 1.0, "the ordinary wake really does ease out"
+    assert 0.0 <= FX.WS_WAKE_FADE
+    src = (REPO / "fx" / "effects" / "fish.py").read_text()
+    # the wander's blend is gated on a shape running and uses m_fish, so an
+    # untold frame is the same expression it always was
+    assert 'w_wander = w_wander * (1.0 - ws["m_fish"])' in src
+    assert 'if ws is not None and WS_WAKE_FADE < 1.0:' in src
+
+    async def go():
+        host, cm, clock, virtual, eff = await _effect(
+            tmp_path, "fish-ws-hand-over", particle_count=3)
+        try:
+            _render(clock, virtual, 120)
+            base = float(eff.ripple_amount)
+            eff.update_config(_told())
+            _render(clock, virtual, int((FORM_S + HOLD_S) / DT))
+            # `ripple_amount` itself is NEVER written — the scaling is the
+            # quantity it drives, which is what makes the restore exact
+            assert float(eff.ripple_amount) == base
+            _render(clock, virtual, int(RELEASE_S / DT) + 30)
+            assert eff._ws is None
+            assert float(eff.ripple_amount) == base
+        finally:
+            cm.__exit__(None, None, None)
+            await host.shutdown()
+    asyncio.run(go())
+
+
+def test_the_port_from_orbits_is_persistence_and_not_a_highlight():
+    """HIS WORDS: "if we did a highlight of the shape in orbits, do it on
+    fish." THERE IS NO HIGHLIGHT IN ORBITS TO PORT, and this test is what
+    keeps that straight for the next row: `fx/effects/orbits.py` carries
+    four WORD_SHAPE_* constants and no shape-time brightness, glow or line
+    lift — W4.4's option B was framed and never built, he settled option A.
+    What makes Orbits' outline read whole is its TRAIL outliving the
+    revisit gap at x4, and that is what row W6.1 gave Fish."""
+    orbits = (REPO / "fx" / "effects" / "orbits.py").read_text()
+    names = {n for n in ("WORD_SHAPE_FEW", "WORD_SHAPE_MANY",
+                         "WORD_SHAPE_TRAIL_S", "WORD_SHAPE_SPEED_X")
+             if f"\n{n} " in orbits or f"\n{n}=" in orbits}
+    assert names == {"WORD_SHAPE_FEW", "WORD_SHAPE_MANY",
+                     "WORD_SHAPE_TRAIL_S", "WORD_SHAPE_SPEED_X"}, names
+    # no FIFTH word-shape constant has appeared that could be a highlight
+    import re
+    found = set(re.findall(r"^WORD_SHAPE_[A-Z_]+", orbits, re.M))
+    assert found == names, found
+    # ... and Fish's own answer is a DURATION floor, not a brightness
+    assert FX.WS_TRAIL_GAP_X > 0.0
+    fish_src = (REPO / "fx" / "effects" / "fish.py").read_text()
+    assert "THERE IS NO HIGHLIGHT IN ORBITS TO PORT" in fish_src
+    # the trail's own BOOST is W1.4's and is untouched by this row
+    assert FX.WS_TRAIL_GAIN == pytest.approx(1.6)
+
+
 def test_the_skill_and_the_map_name_this_rows_proofs():
     """The skill gate (scripts/check_effect_scene_skills_current.py): row
     W5.5 changed a mapped effect file, so the effect's own skill carries
     its levers and its proofs."""
     skill = (REPO / ".claude/skills/fish-effect/SKILL.md").read_text()
     assert "ROW W5.5" in skill
+    assert "ROW W6.1" in skill
     for token in ("word_shape_speed_x", "WS_TURN_X", "WS_TURN_GAIN_X",
                   "WS_TARGET_LEAD", "WS_WALL_TURN_X",
+                  "WS_AIM_STEP_X", "WS_TURN_MAX_RAD_FRAME",
+                  "WS_TRAIL_GAP_X", "WS_WAKE_FADE", "30 fps",
                   "check_fish_word_shape.py"):
         assert token in skill, token
     shapes = (REPO / ".claude/skills/word-shapes/SKILL.md").read_text()
     assert "ROW W5.5" in shapes
+    assert "ROW W6.1" in shapes
     mapping = json.loads(
         (REPO / ".claude/skills/EFFECT_SCENE_MAP.json").read_text())
     files = mapping["effects"]["fish-effect"]["files"]

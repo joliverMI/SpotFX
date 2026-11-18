@@ -1262,3 +1262,262 @@ proof for the whole design. Three things:
   out as it does for any live change.
 
 Proofs: `tests/test_shoal_burst.py`, `tests/shoal_burst_harness.py`.
+
+## ROW W6.1 (2026-11-18) — THE NOSE STOPS WAGGING, AND THE RIG MOVES TO HIS
+   OWN 30 fps
+
+His THIRD room verdict, verbatim: *"Only thing left is the fish needs a
+little more tuning. Everything else was good. The shape outline needs to
+reach at least a moment where it is either filled with fish or trail. Right
+now, the fish seem to jitter out of the outline and so it isn't distinct
+enough. Also, if we did a highlight of the shape in orbits, do it on
+fish."* Everything the W1.4 and W5.5 sections above describe still stands;
+where this section and those disagree on a NUMBER, this one wins.
+
+**THE ROW'S FIRST ACT WAS TO MOVE THE RIG, AND THREE OF ITS FOUR FINDINGS
+ONLY EXIST AT 30 fps.** His crystal's `refresh_rate` is 30 and a virtual
+renders at its slowest device (`.claude/skills/radial-effect`'s own note;
+`fx/virtuals.py`), while `scripts/check_fish_word_shape.py` had `DT = 1 /
+60`. So EVERY W5.5 number — the corner bar, the smoothness bars, the sweep
+that chose x12 — was read at twice the live rate, and three separate things
+in this effect's shaped steering are functions of `dt`:
+
+| read at his own 30 fps, on master | 60 fps (what W5.5 measured) |
+|---|---|
+| nose WAGS 18.57-27.71 per fish-second | 3.38-12.11 |
+| the HEAD's p95 from the band 2.75-8.18 cell pitches | 2.37-2.97 |
+| a middle's p95 0.29-**7.44** | 0.18-1.12 |
+| worst corner 0.72 p (bar 1.0, still met) | 0.49 p |
+| **fish up to 14.5 px OFF THE LIT PANEL** (0.00 untold) | 0.00 px |
+| the band FILLED (over 128/255) at the best hold frame 44.0-88.2% | — |
+| smoothness: worst lit-cell change 3.18%, speed 9.7% of its own max | 2.14% / 8.3% |
+
+The smoothness bars HOLD at 30 fps (3.18% against 8%, 9.7% against 100%),
+and so does the corner bar. What does not hold is everything about the
+NOSE — and the wall, which nobody had measured at his rate.
+
+**FOUR CAUSES, each arithmetic rather than a guess, each measured before it
+was changed.**
+
+1. **THE PROPORTIONAL STEER OVERSHOOTS.** `omega = d_hd * turn_gain` then
+   `hd += omega * dt` corrects `turn_gain * dt` of the heading error per
+   frame: at the shaped 39 /s that is 0.65 at 60 fps and **1.30 at 30** —
+   past the target, with the error alternating sign. The step is now the
+   exact first-order form, `k = 1 - exp(-gain_ws * dt)` of the error
+   commanded as `d_hd * k / dt`, BLENDED by `m_fish` so that `m = 0` is
+   `TURN_GAIN * 1.0 + (...) * 0.0` — his own expression in IEEE arithmetic,
+   not just in algebra. 0.73 of the error at 30 fps, 0.48 at 60, never more
+   than the error at ANY rate. `WS_TURN_GAIN_X` therefore names a SETTLING
+   TIME now rather than a per-frame fraction, which is what makes x24 safe.
+2. **THE CLAMP STOPPED MEANING AN ARC.** `omega_max = speed /
+   turn_radius_px / WS_TURN_X` is the right angular RATE for a 0.45 px
+   circle; what a drawn frame gets is `omega_max * dt`, and at the x3 pace
+   that is **4.7 to 7.2 RADIANS** — more than a full turn. Measured: a fish
+   on the loop with the wall's glance saturating the clamp (urgency 1.00,
+   omega 190-214 rad/s) corkscrewed a complete circle every frame and
+   travelled **20.5 px off the lit panel**, against 0.00 on the same seed
+   untold. The guarantee's own sentence ("an about-face is always an arc
+   and never a flip") was simply false. `WS_TURN_MAX_RAD_FRAME` (pi / 2) is
+   a per-RENDERED-FRAME ceiling on the bound — STAR's
+   `ROTATION_CAP_DEG_FRAME` precedent — and it is still the one `np.clip`.
+   It cannot bind at `m = 0` by arithmetic: the ordinary clamp would need a
+   fish at 214 px/s and this effect's own fastest is 4.2x cruise.
+3. **THE AIM WAS SHORTER THAN A FRAME'S TRAVEL, and this is the one that
+   owns the WAG.** The aim is an ARC (`WS_REACH + WS_TARGET_LEAD`, 0.016 of
+   the loop = 0.2-1.1 px) and a frame's travel is a LENGTH (1.5-2.4 px at
+   30 fps). Measured frame by frame on the diamond — whose own tangent
+   never reverses, so every reversal read there is the effect's: at a
+   corner the aim point jumps from one side of it to the other WITHIN one
+   frame, the error arrives as 90 degrees in a single step, and the next
+   three frames bring the fish back (-9, -13, -7 deg). `WS_AIM_STEP_X`
+   (1.5) floors the aim arc at that many of the fish's OWN frame steps, per
+   fish, read from its own speed. At 60 fps it barely binds (one step is
+   0.7 px against the 0.96 px the aim already was), which is why W5.5 never
+   saw it.
+4. **THE WANDER WAS THE ONE UNGATED STEERING TERM.** `WANDER_W` 1.0 against
+   the loop's `WS_SEEK_W` 14 moved the DESIRED heading about 0.7 degrees
+   every frame, which the shaped gain then chased. It now eases out by `m`
+   exactly as the swirl and the beat's kicks already did — the loop IS the
+   current while a shape runs.
+
+**AND WHAT HIS "HIGHLIGHT" ACTUALLY NAMES IS PERSISTENCE.** `fx/effects/
+orbits.py` carries exactly four `WORD_SHAPE_*` constants (`FEW`, `MANY`,
+`TRAIL_S` 1.8, `SPEED_X` 4.0) and **no shape-time brightness, glow or line
+lift at all** — W4.4's option B was framed and never built; he settled
+option A, as built. What makes Orbits' outline read whole is its trail
+OUTLIVING THE REVISIT GAP at x4 (`WORD_SHAPE_TRAIL_S` as a DURATION add-on,
+0.9 -> 1.8 s). W5.5 had done the OPPOSITE here, reading both half-lives as
+smear LENGTHS divided by the pace: 0.20 s of trail against a 0.61 s gap
+(FEW heart) or 0.39 s (MANY), so each smear sat at 12% of itself when the
+next fish arrived. `WS_TRAIL_GAP_X` (1.0) floors both the body trail's
+half-life and the FEW water trace's at the revisit gap
+(`_word_shape_revisit_gap`, the LATCHED lap over the LATCHED count, ramped
+by `m` so the form's first frame is still his own value).
+`tests/test_fish_word_shape.py::test_the_port_from_orbits_is_persistence_and_not_a_highlight`
+is what keeps this straight for the next row.
+
+**THE LEVERS, re-swept at 30 fps** (`--only sweep`'s own four new tables;
+each figure the worst of 6 (mode, shape) rows, 2 seeds):
+
+| lever | was | is | what it buys |
+|---|---|---|---|
+| the heading STEP | `d_hd * gain` | `d_hd * (1 - exp(-gain dt)) / dt` | no overshoot at any frame rate |
+| `WS_TURN_GAIN_X` | 12.0 | **24.0** | worst corner 1.04 -> 0.79 p, band filled 75.6 -> 77.8% |
+| `WS_TURN_X` | 0.10 | **0.10**, measured and KEPT | 0.15 gave 0.75 p against 0.79 — inside two seeds' noise, and would have broken his pinned "under half a cell pitch" |
+| `WS_TURN_MAX_RAD_FRAME` | — | **pi / 2** | 20.5 px off the lit panel -> 0.00; wags 8.86 -> 6.14/s, band FILLED 60 -> 78%, worst corner 0.87 -> 0.70 p |
+| `WS_AIM_STEP_X` | — | **1.5** | wags 12.00 -> 6.14/s; costs the corner 0.33 -> 0.70 p |
+| the WANDER under a shape | ungated | `* (1 - m)` | part of the same overshoot |
+| `WS_TRAIL_GAP_X` | — | **1.0** | band FILLED 36 -> 78%, band>64 61 -> 94%, white 19.6 -> 31.0% |
+| `WS_WAKE_FADE` | 1.0 | **0.0** | ratio 8.1 -> 10.5x and white 33.8 -> 31.0%, for NO band cost |
+| `WS_FLAP_X` | — | **None**, measured and refused | 1 glide size: ratio 10.5 -> 14.6x but band FILLED 78 -> 74% and white 31.0 -> 35.4% |
+| `WS_TRACE_MANY` | (few only) | **False**, measured and refused | extending the trace to MANY moved the band FILLED 0 points (78 -> 78%) and cost 5 of white; brighter too, 82% for 39.2% white |
+
+**THE TWO REFUSALS ARE RE-MEASURABLE FROM THE SHIPPED SCRIPT**, not just
+recorded here: `--only sweep`'s own OFF-BAND table runs the flap at one and
+three glide sizes, the ordinary wake as W1.4 had it, and the trace extended
+to MANY (plain and brighter) against the shipped configuration, so a later
+row overturns either with one command.
+
+**THE AIM AND THE CORNER PULL AGAINST EACH OTHER, and that is the row's own
+trade.** A longer aim moves the target continuously through a corner (fewer
+reversals) and cuts the corner by `(L / 2) sin(theta / 2)`:
+
+Section 10's own aim table, at the shipped gain, cap and gap:
+
+| `WS_AIM_STEP_X` | wags/fish-s | worst corner | band>64 | band FILLED | white |
+|---|---|---|---|---|---|
+| 0.0 (W5.5's) | 12.00 | **0.39 p** | 96% | 79% | 32.0% |
+| 1.0 | 7.14 | 0.33 | 95% | 76% | 30.5% |
+| **1.5 (shipped)** | **6.14** | 0.70 | 94% | 78% | 31.0% |
+| 2.0 | 5.14 | 1.46 — OVER the bar | 95% | 74% | 32.3% |
+
+The corner bar of 1.0 is what bounds it at 1.5, and section 9's own
+three-seed figure at that setting is 0.79. (An earlier pass of this sweep,
+at the W5.5 gain of x12, read 11.43 -> 6.00 -> 4.86 wags down the same axis
+with the corner going 0.50 -> 1.04 -> 1.51 — the same trade, one gain
+lower.)
+
+And the clamp's own ceiling, which is the axis nothing else could reach:
+
+| `WS_TURN_MAX_RAD_FRAME` | wags/fish-s | worst corner | band>64 | band FILLED | band/off |
+|---|---|---|---|---|---|
+| 180 deg (no ceiling) | 8.86 | 0.87 p | 80% | 60% | 11.0x |
+| **90 deg (shipped)** | **6.14** | **0.70** | **94%** | **78%** | 10.5x |
+| 60 deg | 5.57 | 0.82 | 94% | 77% | 7.5x |
+| 45 deg | 5.71 | 1.82 — OVER the bar | 90% | 66% | 5.7x |
+
+The 180-degree row is the one that walks a fish 20.5 px off the lit panel
+(section 9's own two depths), so its corner figure is not the whole cost.
+
+**THE GAIN IS NOT THE WAG'S LEVER, which the row did not expect.** The
+re-sweep of `WS_TURN_GAIN_X` x `WS_TURN_X` at 30 fps moves the corner (3.28
+cell pitches at x6, 0.79-1.04 at x12 and x24) and moves the wag HARDLY AT
+ALL — 4.86 to 7.43 per fish-second across all nine combinations. x6 is pure
+lag and costs the band (61.9% filled) and the white (40.2%) as well as the
+corner.
+
+**A ONE-POLE ON THE TURN COMMAND WAS BUILT AND IS NOT SHIPPED** — this
+row's version of W1.4's curvature feed-forward, and recorded for the same
+reason. STAR's `_govern_rotation` smooths that effect's jerk with a
+unity-DC-gain one-pole on the per-frame advance, so the same filter on the
+shaped turn command (state `p_om`, in RENDERED frames) is the textbook
+answer. Swept over 0, 1, 1.5, 2.5 and 4 frames it barely touched the wag
+(6.00 -> 4.86) and destroyed everything the row is for: worst corner 1.04
+-> **10.73** cell pitches, band filled 75.6 -> **29.2%**, white 33.1 ->
+43.8%. A fish that cannot spend its turn WHEN the corner arrives does not
+round the corner at all.
+
+**THE TWO NEW SECTIONS, and the one honest miss.**
+
+**Section 11, THE OUTLINE IS WHOLE FOR A MOMENT** — his own bar. The hold
+frame that MAXIMISES the band's share over 128/255 ("filled", not "lit"),
+and at THAT frame the OFF-band light: every real cell outside the band and
+outside a ONE-CELL MARGIN around it, because a body is a cell wide and its
+own width is not jitter. Bars: 95% of the band filled AND band/off-band
+20x, on every seed of three, both modes, all three shapes. **It is a
+different, tighter question than section 4's** (93-100% over 64/255 and
+3.6-8.0x at mid-hold) and it is the one he asked.
+
+Section 10's own OFF-BAND table is the one those three rows are read off,
+worst of its six (mode, shape) rows at 30 fps:
+
+| configuration | band>64 | FILLED | band/off | white | corner |
+|---|---|---|---|---|---|
+| **as shipped** (flap his own, wake eased out, trace FEW) | 94% | **78%** | **10.5x** | **31.0%** | 0.70 p |
+| the FLAP eased to 1 glide size | 92% | 74% | 14.6x | 35.4% | 0.70 |
+| the FLAP eased to 3 glide sizes | 92% | 74% | 14.6x | 35.3% | 0.70 |
+| the ORDINARY WAKE left as W1.4 had it | 95% | 78% | 8.1x | 33.8% | 0.70 |
+| the TRACE extended to MANY too | 95% | 78% | 10.4x | 36.0% | 0.70 |
+| the TRACE to MANY and brighter (amp x1.4) | 99% | 82% | 9.6x | 39.2% | 0.70 |
+
+Nothing down this axis moves the CORNER at all, which is the same clean
+separation the gap axis shows: the trail, the water and the steering are
+three independent defects in this effect and the row treated them as such.
+
+Section 11 also ATTRIBUTES the off-band light between the BODY layer
+(`eff.trail`) and the WATER layer (`eff.wake`), which is how this row chose
+between its two candidate levers instead of guessing: at the moment, FEW
+reads 15.2 body / 14.4 water and MANY 13.8 / 7.7. Both are real, and the
+water's half is free to remove while the body's half is not.
+
+**Section 12, THE NOSE DOES NOT WAG.** Per fish per frame of the hold, the
+signed heading change; a WAG is a sign reversal between consecutive frames
+with both `|d_hd|` past 2 degrees, counted per fish-SECOND so the two frame
+rates compare. The HEAD is the point `_draw_bodies` really draws — the
+middle extrapolated HALF A BODY along `p_hd` (`SPINE_U[0] = 0`, and
+`SPINE_THROW = SPINE_U ** 1.6` is ZERO at the nose, so this is a heading
+measure and not a flap one) — and not the middle section 4 reads.
+
+**BOTH OF SECTION 12's BARS HAVE A DERIVED GEOMETRIC FLOOR UNDER THEM, and
+one of them is unreachable.** The floors are printed beside every number
+and the ASSERTED figures are the measured worsts, PINNED — section 5's own
+shape for the white tail it exceeds:
+
+| mode shape | wags/fish-s | its floor | head p95 | its floor | middle p95 |
+|---|---|---|---|---|---|
+| few heart | 6.00 | 1.64 | 3.04 p | 1.32 p | 1.43 p |
+| few star | 2.00 | 0.00 | 3.40 | 2.14 | 1.33 |
+| few diamond | 0.86 | 0.00 | 2.15 | 2.07 | 0.15 |
+| many heart | 6.57 | 1.29 | 2.99 | 1.32 | 1.22 |
+| many star | 1.00 | 0.00 | 2.95 | 2.14 | 0.99 |
+| many diamond | **0.43** | 0.00 | **2.07** | 2.07 | 0.10 |
+
+- **THE WAG'S FLOOR** is the OUTLINE's own tangent reversals for a point
+  walking it at the procession's pace at the rate being measured. The
+  heart's cleft turns IN and back OUT, so its floor is 1.29-1.64 per second
+  — already past the plan's 0.5 bar. The star's and the diamond's are 0.00.
+  **many-diamond MEETS the plan's bar outright (0.43)**; the heart is the
+  outlier at 4x its own floor, and its cleft is a cusp.
+- **THE HEAD'S FLOOR** is where the nose of a fish exactly ON the line
+  pointing exactly along its TANGENT actually lands. His fish is **4.33
+  cell pitches long** and the nose is half of that ahead, so on a curve it
+  leaves the band by construction: p95 1.32 (heart), 2.14 (star), 2.07
+  (diamond). **The plan's 1.0-pitch bar is therefore unreachable at his own
+  `blob_size`** — arithmetic, not tuning, the same reading W5.5 gave
+  many-star's 2-cell bar. Both diamond rows now sit AT their floor (2.07
+  and 2.15 against 2.07).
+
+Row W6.1 took the wag from **18.57-27.71** per fish-second to **0.43-6.57**
+and the head's p95 from **2.75-8.18** cell pitches to **2.07-3.40**, at his
+own frame rate. The plan's 0.5 bar is missed on five rows of six and is
+reported; it is not moved.
+
+**AND THE WALL IS FIXED AT HIS RATE, which is the row's quietest win.**
+Past the landing line 0.46-0.50 px told (his own untold worst over the real
+arcs is 1.78) and **0.00 px past the LIT silhouette**, against 20.65 px and
+13.76 px on master at 30 fps. No fish leaves the panel any more.
+
+**WHITE IS REPORTED, under his standing option A** (2026-11-17: ship as
+built, his to judge by eye). The whole-outline moment costs white — the
+trail floor is a longer smear and overlapping bodies sum two gradient hues,
+his 2026-10-26 arithmetic unchanged — and the ordinary wake's removal pays
+some of it back. The root fix is still to narrow the gradient span a
+procession draws from, which is his authored colour behaviour and not a
+build row's to change. Section 5 prints the number and names the bar.
+
+**Proofs**: `scripts/check_fish_word_shape.py` (TWELVE sections now, at 30
+fps with `--fps 60` as the cross-check; section 1 reads IDENTICAL against
+the pinned module at BOTH rates) and `tests/test_fish_word_shape.py` (its
+own laws at 30 fps: the first-order step at 15, 30 and 60 fps, the clamp's
+per-frame ceiling, the aim's floor, the revisit gap, the hand-overs, and
+that there is no highlight in Orbits to port).

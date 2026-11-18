@@ -1222,7 +1222,7 @@ including how an effect opts in. Four things:
   `tests/test_drop_shock_switches.py`, `tests/test_drop_feedback_1012.py`;
   help `drop-shockwave-switches`, `pulse-flash-energy`.
 
-## WORD SHAPES — cross-cutting mechanics (rows W0.1/W0.3, 2026-11-15; wave 1, 2026-11-15/17)
+## WORD SHAPES — cross-cutting mechanics (rows W0.1/W0.3, 2026-11-15; wave 1, 2026-11-15/17; row W6.1, 2026-11-18)
 
 `fx/effects/word_shapes.py` (the shape library) and `word_shape_keys.py`
 (the told-key helper) are the one engine-to-effect contract six effects now
@@ -1231,6 +1231,24 @@ each effect's own skill has a "WORD SHAPES" section. Three mechanics every
 adopter repeats, worth having in one place rather than re-derived per
 effect:
 
+- **MEASURE A SHAPED EFFECT AT 30 fps, NOT 60 (row W6.1).** His crystal's
+  `refresh_rate` is 30 and a virtual renders at its slowest device
+  (`fx/virtuals.py`), while the audio callback still runs at 60 Hz — so one
+  rendered frame carries two callbacks' worth of audio and TWICE the `dt`
+  any 60 fps rig measured with. `scripts/check_fish_word_shape.py` measured
+  at 60 until row W6.1 and every W5.5 figure, including the sweep that
+  chose Fish's heading gain, was read at a rate his room never sees. At 30
+  fps the SAME SHIPPED CODE walked fish 14.5 px off the lit panel. **Three
+  mechanisms a shaped effect is likely to have are dt-dependent and all
+  three were wrong at his rate**: a PROPORTIONAL steer is stable only while
+  `gain * dt < 1`; a turn CLAMP written as an angular rate means an arc
+  only while `omega_max * dt` is small (STAR's `ROTATION_CAP_DEG_FRAME` is
+  the in-repo answer — a cap per RENDERED frame, whatever `dt`); and a
+  pursuit AIM written as an arc is only an aim while it is longer than a
+  frame's own travel. The word-shapes skill's Fish subsection (finding 5)
+  is the binding record; `fx/effects/radial.py:87` and
+  `scripts/check_fireworks_word_shape.py:88` had already corrected
+  themselves.
 - **THE SEQ EDGE AND ITS CREATION BASELINE.** An effect watches
   `word_shape_seq` (`word_shape_keys.SEQ_KEY`), never the shape id — two
   words of the same shape back to back must both fire, which an id-equality

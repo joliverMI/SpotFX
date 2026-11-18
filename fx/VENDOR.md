@@ -3779,3 +3779,146 @@ against that commit.
      `.claude/skills/radial-effect/SKILL.md` is the binding record.
      Unverified against his live room (standing order 35, no live test
      without his word).
+
+107. `effects/fish.py` (SpotFX-authored on top of #99/#105): W6.1 — THE NOSE
+     STOPS WAGGING, AND EVERY NUMBER IS RE-READ AT HIS CRYSTAL'S OWN 30 fps
+     (his THIRD room verdict, 2026-11-18, verbatim: "Only thing left is the
+     fish needs a little more tuning. Everything else was good. The shape
+     outline needs to reach at least a moment where it is either filled with
+     fish or trail. Right now, the fish seem to jitter out of the outline
+     and so it isn't distinct enough. Also, if we did a highlight of the
+     shape in orbits, do it on fish.").
+     THE ROW'S FIRST ACT WAS TO MOVE THE RIG. His `crystal` WLED device's
+     `refresh_rate` is 30 and a virtual renders at its slowest device, while
+     `scripts/check_fish_word_shape.py` had `DT = 1 / 60` — so every #105
+     number, including the sweep that chose the heading gain, was read at
+     TWICE the live rate, and three separate things in this effect's shaped
+     steering are functions of `dt`. Read at 30 fps on #105 as shipped: nose
+     WAGS 18.57-27.71 per fish-second, the drawn HEAD's p95 distance from
+     the outline band 2.75-8.18 cell pitches (its MIDDLE's p95 up to 7.44),
+     the band FILLED over half of full at the best hold frame 44.0-88.2%,
+     and — the one nobody had measured at his rate — fish up to 14.5 px OFF
+     THE LIT PANEL against 0.00 px on the same seed untold. The smoothness
+     bars and the corner bar both still hold at 30 fps (2.80% worst
+     lit-cell change against 8%, worst corner 0.72 against 1.0).
+     FOUR CAUSES, each arithmetic, each measured before it was changed.
+     (1) THE PROPORTIONAL STEER OVERSHOOTS: `omega = d_hd * turn_gain` then
+     `hd += omega * dt` corrects `turn_gain * dt` of the heading error per
+     frame, which at the shaped 39 /s is 0.65 at 60 fps and 1.30 at 30 —
+     past the target, the error alternating sign, re-excited by the marching
+     aim and by a clamp that no longer binds. The shaped step is now the
+     EXACT first-order form, `k = 1 - exp(-gain_ws * dt)` of the error
+     commanded as `d_hd * k / dt` (0.73 at 30 fps, 0.48 at 60, never more
+     than the error at any rate), BLENDED by `m_fish` so `m = 0` is
+     `TURN_GAIN * 1.0 + (...) * 0.0` — his own expression in IEEE arithmetic
+     and not only in algebra — and gated on `ws is not None` besides.
+     `WS_TURN_GAIN_X` therefore names a SETTLING TIME rather than a
+     per-frame fraction now, which is what makes 12.0 -> 24.0 safe.
+     (2) THE CLAMP STOPPED MEANING AN ARC. `omega_max = speed /
+     turn_radius_px / WS_TURN_X` is the right angular RATE for a 0.45 px
+     circle, but a drawn frame gets `omega_max * dt`, which at the x3 pace
+     is 4.7 to 7.2 RADIANS — more than a full turn. Measured: a fish on the
+     loop with the wall's glance saturating the clamp (urgency 1.00, omega
+     190-214 rad/s) corkscrewed a complete circle every frame and travelled
+     20.5 px off the lit panel. NEW CONSTANT `WS_TURN_MAX_RAD_FRAME`
+     (pi / 2) is a per-RENDERED-FRAME ceiling on that bound — STAR's own
+     `ROTATION_CAP_DEG_FRAME` precedent (#54), a cap per frame whatever
+     `dt` — applied as one `np.minimum` inside the existing shape block, so
+     the structural guarantee is still the single `np.clip(omega,
+     -omega_max, omega_max)` it always was. It cannot bind at `m = 0` by
+     arithmetic: the ordinary clamp would need a fish at 214 px/s and this
+     effect's own fastest ordinary fish is 4.2x cruise.
+     (3) THE AIM WAS SHORTER THAN A FRAME'S TRAVEL, and this is the one that
+     owns the wag. The aim is an ARC (`WS_REACH + WS_TARGET_LEAD`, 0.016 of
+     the loop = 0.2-1.1 px) while a frame's travel is a LENGTH (1.5-2.4 px
+     at 30 fps). Measured frame by frame on the diamond — whose own tangent
+     never reverses, so every reversal read there is the effect's: at a
+     corner the aim point jumps from one side of it to the other WITHIN one
+     frame, the heading error arrives as 90 degrees in a single step, and
+     the next three frames bring the fish back (-9, -13, -7 deg). NEW
+     CONSTANT `WS_AIM_STEP_X` (1.5) floors the aim arc at that many of each
+     fish's OWN frame steps, read per fish from its own speed and converted
+     into loop fractions by the loop's measured length; the floor goes on
+     the WHOLE aim and not on the lead alone, because a fish ahead of its
+     station has `lag` negative and `-WS_REACH + WS_TARGET_LEAD` is exactly
+     zero, which aims a fish at its own place. At 60 fps it barely binds
+     (one step 0.7 px against the 0.96 px the aim already was), which is
+     why #105 never saw it.
+     (4) THE WANDER WAS THE ONE UNGATED STEERING TERM: `WANDER_W` 1.0
+     against the loop's `WS_SEEK_W` 14 moved the DESIRED heading about 0.7
+     degrees a frame, which the shaped gain then chased. It now eases out by
+     `m_fish` exactly as the swirl and the beat's kicks already did.
+     AND HIS "HIGHLIGHT" IS PERSISTENCE, NOT A HIGHLIGHT. `effects/
+     orbits.py` carries exactly four `WORD_SHAPE_*` constants (#102: `FEW`,
+     `MANY`, `TRAIL_S` 1.8, `SPEED_X` 4.0) and no shape-time brightness,
+     glow or line lift at all — W4.4's option B was framed and never built,
+     he settled option A. What makes Orbits' outline read whole is its trail
+     OUTLIVING THE REVISIT GAP at x4. #105 had done the opposite here,
+     reading both half-lives as smear LENGTHS divided by the pace: 0.20 s of
+     trail against a 0.61 s gap (FEW heart) or 0.39 s (MANY), each smear at
+     12% of itself when the next fish arrives. NEW CONSTANT
+     `WS_TRAIL_GAP_X` (1.0) floors BOTH the body trail's half-life and the
+     FEW water trace's at `WS_TRAIL_GAP_X` revisit gaps, the gap being the
+     new `_word_shape_revisit_gap()` — the LATCHED lap over the LATCHED
+     count at this frame's pace, so a fish leaving mid-shape cannot step it,
+     and ZERO before the entries exist. The floor is RAMPED BY `m` like
+     everything else here: applied flat it would step the half-life from
+     0.165 s to 0.61 s on the form's first frame, which his standing rule
+     forbids and Orbits' own W1.3 finding (a lingering trail's per-frame
+     decay is hyperbolic in its half-life) says would be visible. Neither
+     `trail_decay` nor `ripple_life` is ever written, so the release's end
+     restores his values exactly, as before.
+     AND THE ORDINARY WAKE EASES OUT OF THE WATER A SHAPED FISH SWIMS
+     THROUGH: NEW CONSTANT `WS_WAKE_FADE` (0.0), applied to the ordinary
+     per-fish tail deposit's amplitude by that fish's own `m_fish` — never
+     to the TRACE's deposit, which IS the line, and never to
+     `ripple_amount`, which stays his. Chosen by measurement: the row
+     attributes the off-band light between the BODY layer (`eff.trail`) and
+     the WATER layer (`eff.wake`) at the frame the bar is read at (FEW 15.2
+     / 14.4, MANY 13.8 / 7.7), and easing the wake out costs the band
+     NOTHING, lifts the band/off-band ratio 7.8x -> 10.5x and takes 2.8
+     points OFF the white share.
+     TWO MECHANISMS WERE BUILT AND ARE NOT SHIPPED, both recorded as
+     constants that re-measure them rather than as prose alone.
+     `WS_FLAP_X` (None): easing the drawn flap toward the tail drive's own
+     GLIDE size under a shape lifts the ratio 7.8x -> 12.6x, so the
+     attribution was right — but it costs SEVEN points of the band he asked
+     for (77.8% -> 70.5% filled) and four of white, because the band is one
+     cell pitch wide and the tail's throw lands IN it as often as beside it.
+     `WS_TRACE_MANY` (False): extending the FEW-only water trace to MANY
+     moved the band 0.0 points and cost five of white — with six fish the
+     revisit gap is already 0.39 s and the floored trail covers it, so W1.4's
+     scoping reason survives after all. A one-pole on the shaped turn
+     command (STAR's `_govern_rotation` shape, state `p_om`, in rendered
+     frames) was built and REMOVED: swept over 0 to 4 frames it barely
+     touched the wag (6.00 -> 4.86) and took the worst corner 1.04 -> 10.73
+     cell pitches and the band filled 75.6% -> 29.2%.
+     `WS_TURN_X` was re-swept at 30 fps and KEPT at 0.10: 0.15 measured 0.75
+     cell pitches of worst corner against 0.79, inside two seeds' noise, and
+     would have broken the "a turn circle under half a cell pitch" sentence
+     `tests/test_fish_word_shape.py` pins for nothing.
+     MEASURED AT HIS OWN 30 fps, after: nose wags 0.43-6.57 per fish-second
+     (from 18.57-27.71; many-diamond MEETS the plan's 0.5 bar, and the
+     OUTLINE's own tangent-reversal floor is 1.29-1.64 on the heart and 0.00
+     on the star and the diamond), the drawn HEAD's p95 2.07-3.40 cell
+     pitches (from 2.75-8.18; a PERFECT fish's own p95 is 1.32-2.14, since
+     his fish is 4.33 cell pitches long and its nose is half of that ahead,
+     so the plan's 1.0-pitch bar is unreachable at his `blob_size` —
+     arithmetic, not tuning), worst corner 0.79 cell pitches against the 1.0
+     bar on the worst of three seeds, 0.46-0.50 px past the wall's own
+     landing line and 0.00 px past the LIT silhouette (from 20.65 and
+     13.76), and the smoothness bars at 2.80% / 11.4%. Both of the row's own
+     new bars — 95% of the band over 128/255 at the fullest hold frame, and
+     band/off-band 20x at that same frame — are MISSED and reported with the
+     per-row numbers and the graded renders of the frame they are read at;
+     white stays an open exceedance under his standing option A
+     (2026-11-17, ship as built, his to judge by eye).
+     No vendored line changed; `effects/fish.py` is SpotFX-authored (#21)
+     throughout. Evidence: `scripts/check_fish_word_shape.py` (twelve
+     sections, 30 fps by default with `--fps 60` as the cross-check; section
+     1 reads IDENTICAL against the pinned pre-change module at BOTH rates)
+     and `tests/test_fish_word_shape.py`.
+     `.claude/skills/fish-effect/SKILL.md`'s ROW W6.1 section is the binding
+     record. Unverified against his live room (standing order 35, no live
+     test without his word — and his word on W5 stands, "just deploy when
+     ready").

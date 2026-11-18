@@ -959,7 +959,7 @@ hyperbolic in the half-life, so ramping the half-life collapsed it from
 1.2% to 11% per frame over the last few release frames and dumped 23-28%
 of the lit cells in one frame).
 
-### Fish / `fish` (row W1.4, 2026-11-15; row W5.5, 2026-11-18) — a procession along the outline, RUN
+### Fish / `fish` (row W1.4, 2026-11-15; row W5.5, 2026-11-18; row W6.1, 2026-11-18) — a procession along the outline, RUN
 
 His revision of the row, verbatim: *"Fish: similar to orbits ... they need
 to smoothly accelerate and not have sudden velocity shifts"*, then *"the
@@ -1108,6 +1108,75 @@ record; what belongs HERE, because it is about this contract:
    wider when its aim cuts the corner and closer when it overshoots into a
    cusp and comes back (the heart's cleft: a 1.52-pitch arc depth against
    0.04 pitches of real path).
+
+**ROW W6.1 (2026-11-18) — FOUR THINGS ABOUT THIS CONTRACT, not about the
+fish.** His third room verdict: *"Only thing left is the fish needs a little
+more tuning. ... The shape outline needs to reach at least a moment where it
+is either filled with fish or trail. Right now, the fish seem to jitter out
+of the outline and so it isn't distinct enough. Also, if we did a highlight
+of the shape in orbits, do it on fish."*
+`.claude/skills/fish-effect/SKILL.md`'s ROW W6.1 section is the binding
+record for the levers; what belongs HERE:
+
+5. **EVERY BAR IN THIS WAVE IS A FUNCTION OF `dt`, AND HIS CRYSTAL RENDERS
+   AT 30 fps.** `scripts/check_fish_word_shape.py` measured at 60 — twice
+   the live rate — and so every W5.5 figure, including the sweep that chose
+   its heading gain, was read at a frame rate his room never sees. At 30 fps
+   the SAME SHIPPED CODE read 18.6-27.7 nose reversals per fish-second
+   against 3.4-12.1, a drawn head 2.75-8.18 cell pitches off the band
+   against 2.37-2.97, and fish up to **14.5 px off the lit panel** against
+   0.00. **Three separate mechanisms in a shaped effect are dt-dependent and
+   every one of them was wrong at his rate**: a PROPORTIONAL steer is stable
+   only while `gain * dt < 1`; a turn CLAMP expressed as an angular rate
+   means an arc only while `omega_max * dt` is small (at a sub-pixel shaped
+   circle it was 4.7-7.2 RADIANS a frame, so "an about-face is always an arc
+   and never a flip" was false); and a pursuit AIM expressed as an ARC is
+   only an aim while it is longer than a frame's own TRAVEL. **Any effect
+   that steers, clamps or aims under a shape owes all three sums at 30 fps
+   before it quotes a number** — `fx/effects/radial.py:87` and
+   `scripts/check_fireworks_word_shape.py:88` had already corrected
+   themselves, and nothing carried it to Fish. Fireworks' own 30 fps note
+   (this skill's "the form is 15 frames at 30 fps" figure) is the same
+   lesson from the other side.
+6. **"LIT", "FILLED" AND "DISTINCT" ARE THREE DIFFERENT BARS, and W4.4's
+   finding (1) only got as far as the first two.** This wave learned twice
+   that a ">= LIT" share is vacuous and moved to the share over 64/255 plus
+   a band/rest ratio. His third verdict asks a THIRD question: is there a
+   MOMENT in the hold where the band is **FILLED** — over HALF of full — and
+   the rest of the panel is dark around it? Fish read 93-100% over 64/255
+   and 3.6-8.0x band/rest at every hold frame and he still called it not
+   distinct enough; the same frames read **44-88% over 128/255** and
+   **7.7-26x band/OFF-band**. So: a coverage bar wants the threshold AND the
+   statistic named — every frame or the best frame, over a light threshold
+   or over half of full, against the whole rest of the panel or against the
+   water just outside the band. **And the off-band half needs a one-cell
+   MARGIN around the band**: a body is a cell wide, so without the margin
+   the measure counts the procession's own width as the clutter beside it.
+7. **A COVERAGE LEVER HAS TO BE CHOSEN BY ATTRIBUTION, NOT BY GUESS.**
+   Fish's off-band light at that moment is read per LAYER — the body layer
+   (its own width, its flap and its smear) against the water layer (the
+   ordinary wake and the loop trace) — because the row's two candidate
+   levers live in different layers and the measurement is what says which
+   is affordable. Here the water's half was free to remove (no band cost,
+   2.8 points LESS white) and the body's half was not (easing the drawn flap
+   to a glide bought 4.8x of ratio and cost SEVEN points of the band he
+   asked for, because the band is one cell pitch wide and a tail's throw
+   lands IN it as often as beside it). **Any effect asked to make its
+   outline more distinct owes the same split before it dims anything.**
+8. **A MOTION BAR WANTS A DERIVED GEOMETRIC FLOOR BESIDE IT, like the
+   corner bar's own arc depth (finding 4).** Two of this row's bars are
+   unreachable or near-unreachable by construction, and only the floor says
+   so. The WAG floor is the OUTLINE's own tangent reversals at the
+   procession's pace and the measured frame rate — the heart's cleft turns
+   in and back out, so no follower can beat 1.29-1.64 per second there,
+   while the star's and the diamond's are 0.00. The HEAD floor is where the
+   NOSE of a follower exactly on the line pointing exactly along its tangent
+   lands: Fish is 4.33 cell pitches long and draws its head half a body
+   ahead by straight extrapolation, so its p95 cannot beat 1.32-2.14 cell
+   pitches whatever it steers like. **A bar written in a plan against a
+   point follower has to be re-derived against the thing that is actually
+   drawn** — W5.5 learned this once for many-star's 2-cell bar and W1.6
+   twice for STAR.
 
 ### Sauron / `sauron` (row W1.5, 2026-11-15) — the shaped iris and pupil
 
