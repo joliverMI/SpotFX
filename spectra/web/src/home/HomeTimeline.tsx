@@ -42,6 +42,21 @@
  * write that would not move anything — so it costs nothing per frame
  * either.
  *
+ * THE WORD TRIGGER POINTS, AND A TAP FOR THE DETAILS (Word Shapes W5.2 —
+ * the Admiral, 2026-11-18: "Show the word/effect details on the audio
+ * shape on home page. Put the trigger point on the audio shape, not just
+ * to top ticker. i should be able to tap the audio shape to learn more").
+ * Home now calls `useUpcoming(uri)` — the EXACT query the top ticker
+ * already reads, shared through react-query's cache, so this costs no
+ * second request — and hands its word rows (`wordRowsOf`) to the new
+ * `wordMarkers` canvas layer (../timeline/canvas/wordsLayer.ts). Drawing
+ * and placement are entirely that layer's, from the SAME helpers the
+ * ticker draws with, so the two can never disagree. A tap resolves
+ * through the canvas's own pointer path and opens ./WordDetailsCard.tsx;
+ * the drop-select tap below is unchanged except that a word hit, which
+ * arrives on pointerdown, consumes the click so one gesture never both
+ * opens a card and selects a drop.
+ *
  * THE BAND TOGGLES (T/B/M/H) ARE SHARED, NOT LOCAL (his 2026-10-29 ask:
  * the drop-sequence editor dialog's own shape should match whichever of
  * total/bass/mid/high draw here). `shapeBands`/`toggleShapeBand` live on
@@ -62,12 +77,14 @@ import type { LayerDataBag, ViewState } from '../timeline/canvas/frame';
 import { buildDisplay } from '../timeline/dropSequences';
 import { lightShowCueMarkers } from '../timeline/lightShowMarkers';
 import { songPositionMarkers } from '../debug/plannedEvents';
+import { wordRowKey, wordRowsOf, WORD_ROW_CY } from '../timeline/canvas/wordsLayer';
+import WordDetailsCard from './WordDetailsCard';
 import {
   useAnalysedPlan, useAudioShapeData, useAudioShapeMeta, useDropSequences,
   useLibrosa, useShowArms,
 } from '../timeline/queries';
 import { useSettings } from '../api/queries';
-import { useEnergyTimeline } from '../queries';
+import { useEnergyTimeline, useUpcoming } from '../queries';
 import { useSticky } from '../lib/useSticky';
 import { DEFAULT_SHAPE_SCALES, shapeScalesSeed } from '../lib/shapeScales';
 import { getShowClockMs } from '../lib/showClock';
@@ -133,6 +150,12 @@ export default function HomeTimeline({
   const { data: analysedPlan } = useAnalysedPlan(uri);
   const { data: showArms } = useShowArms(!!uri);
   const { data: dropResp } = useDropSequences(uri);
+  // THE WORD ROWS, FROM THE TICKER'S OWN QUERY (W5.2). `useUpcoming(uri)`
+  // is the same react-query key components/SongStrip.tsx already holds, so
+  // this shares its cache entry rather than asking the server again — and
+  // it is the one source of "what will fire", which is exactly why the
+  // markers here and the ticker's can never drift apart.
+  const { data: upcoming } = useUpcoming(uri);
   const offsetMs = Number(meta?.timestamp_offset_ms ?? 0);
 
   // THE SAME RMS SCALE MULTIPLIERS THE TIMELINE PAGE USES — his 2026-10-25
@@ -165,6 +188,18 @@ export default function HomeTimeline({
   const [lanes, setLanes] = useState({ sections: true, beats: true, more: false });
   const [intensityBg, setIntensityBg] = useState(false);
 
+  // THE WORD DETAILS CARD (W5.2): which word row it is open on, and where
+  // that row's marker is in viewport coordinates, so the card is placed by
+  // the MARKER rather than by the finger. Null = nothing open.
+  const [wordCard, setWordCard] = useState<{ key: string; x: number; y: number } | null>(null);
+  // A word hit arrives on pointerdown; the drop-select click that follows
+  // on the same gesture must not also fire (W5.2: a word hit wins over a
+  // drop-sequence hit, and the drop-select behaviour is unchanged
+  // otherwise). A ref, not state: it is consumed inside one gesture.
+  const wordTapRef = useRef(false);
+  // The song changing closes the card — its row belongs to the old song.
+  useEffect(() => { setWordCard(null); }, [uri]);
+
   // ── the shape ──────────────────────────────────────────────────────────
   const averages = useMemo(() => (shape ? computeAverages(shape, 4000) : null), [shape]);
   const mfccDistances = useMemo(() => computeMfccDistances(librosa ?? null), [librosa]);
@@ -174,6 +209,9 @@ export default function HomeTimeline({
   const lightShowCues = useMemo(
     () => (filters.lightShow ? lightShowCueMarkers(analysedPlan?.show_cues, showArms, uri) : []),
     [filters.lightShow, analysedPlan, showArms, uri]);
+  // Every `kind: "word"` row plus every event a word imprints on — the
+  // layer's own filter, so the bag and the check agree by construction.
+  const wordRows = useMemo(() => wordRowsOf(upcoming?.events), [upcoming]);
   const dropSeqs = useMemo(
     () => (filters.drop ? buildDisplay(dropResp, { showDismissed: false, analysedApplies: analysedPlan?.applies ?? true }) : []),
     [filters.drop, dropResp, analysedPlan]);
@@ -251,8 +289,13 @@ export default function HomeTimeline({
       }
       : null,
     lightShow: lightShowCues,
+    // THE WORD TRIGGER POINTS (W5.2) — drawn and hit-tested by
+    // ../timeline/canvas/wordsLayer.ts, ringed on whichever row the
+    // details card is open on.
+    words: wordRows,
+    wordSelected: wordCard?.key ?? null,
   }), [shape, averages, meta, librosa, energyTl, mfccDistances, analysedMarkers, dropSeqs,
-       dropResp, lightShowCues]);
+       dropResp, lightShowCues, wordRows, wordCard]);
 
   // ── ALIGNED WITH THE TIMELINE TRACK ────────────────────────────────────
   const alignedRef = useRef<HTMLDivElement>(null);
@@ -291,6 +334,12 @@ export default function HomeTimeline({
     return () => { observer.disconnect(); window.removeEventListener('resize', apply); };
   }, [showAudioShape]);
 
+  // The row the card is open on, by its own key — a refetch that drops the
+  // row (the song moved on, the plan changed) closes the card by itself.
+  const wordCardRow = wordCard
+    ? wordRows.find((e) => wordRowKey(e) === wordCard.key) ?? null
+    : null;
+
   if (!showAudioShape) return null;
 
   return (
@@ -302,6 +351,10 @@ export default function HomeTimeline({
           * step 1's tie-in): anywhere from its first handle to its drop. */}
         <div ref={canvasBoxRef} className="home-timeline-shape"
           onClick={(e) => {
+            // A WORD WON THIS GESTURE (W5.2): the canvas's own pointer
+            // path already opened its details card on pointerdown, so the
+            // click it ends with must not also select a drop sequence.
+            if (wordTapRef.current) { wordTapRef.current = false; return; }
             const box = canvasBoxRef.current?.getBoundingClientRect();
             if (!box || box.width <= 0 || dropSeqs.length === 0) return;
             const w = win.getWin();
@@ -319,7 +372,51 @@ export default function HomeTimeline({
             getWin={win.getWin}
             getNowMs={getShowClockMs}
             height={CANVAS_H}
+            // THE ONE INTERACTION THIS READ-ONLY CANVAS HAS (W5.2): a word
+            // marker's own tap. Everything else is left exactly as it was
+            // — no editing pointer is wired, so nothing here can author
+            // anything, and a tap on anything that is not a word closes
+            // the card and falls through to the drop-select above.
+            //
+            // THE MARKER'S x COMES FROM THE CANVAS'S OWN `frame.timeToX`,
+            // never a hand-computed window: since PR 542 the follow window
+            // is CENTRED on the playhead and deliberately not clamped at
+            // the song's ends (timeline/hooks/followWindow.ts::
+            // centeredWindowFor), so only the canvas's own `getWin` knows
+            // where a time lands.
+            pointer={{
+              onHit: (hit, _ev, frame) => {
+                // CLEARED HERE, NOT ON THE CLICK ALONE: a touch that lands
+                // on a word and then becomes a page scroll fires no click
+                // at all, so the flag would otherwise still be set and
+                // would swallow the NEXT gesture's drop-select. Every
+                // click is preceded by its own pointerdown on this canvas,
+                // so setting/clearing it here always leaves it right for
+                // the click that follows.
+                if (hit?.kind !== 'word-marker') {
+                  wordTapRef.current = false;
+                  setWordCard(null);
+                  return;
+                }
+                wordTapRef.current = true;
+                const box = canvasBoxRef.current?.getBoundingClientRect();
+                setWordCard({
+                  key: hit.key,
+                  x: (box?.left ?? 0) + frame.timeToX(hit.ms),
+                  y: (box?.top ?? 0) + WORD_ROW_CY,
+                });
+              },
+              cursorFor: (hit) => (hit?.kind === 'word-marker' ? 'pointer' : undefined),
+            }}
           />
+          {wordCardRow && wordCard && (
+            <WordDetailsCard
+              row={wordCardRow}
+              marker={{ x: wordCard.x, y: wordCard.y }}
+              ignore={canvasBoxRef.current}
+              onClose={() => setWordCard(null)}
+            />
+          )}
         </div>
         {/* ONE THIN ROW of controls, the mockup's own (audit H5). */}
         <div className="home-timeline-controls">
@@ -382,8 +479,14 @@ export default function HomeTimeline({
               onClick={() => { pushHistory(); win.fullSong(); }}>
               <Icon name="full" size={15} />
             </button>
-            <InfoTip topic="builder-analysed-events"
-              text="Cyan squares are scene changes and lime dots analysed flares, sized and shaded by rank. Gold is a charge, sky a lull, pink a drop. White and indigo flags are the Light Show's High and Low Triggers. Drag the window on the timeline above to choose what this shows.">
+            {/* THE LEGEND POINTS AT HOME'S OWN HELP TOPIC (W5.2). It used
+              * to deep-link `builder-analysed-events`, the Timeline
+              * builder's marker legend, which BuilderPage.tsx still links
+              * from its own two places; `home-page` is this shape's own
+              * topic (help/routeTopics.ts already opens it for "/") and
+              * had no `topic=` caller at all until now. */}
+            <InfoTip topic="home-page"
+              text="Cyan squares are scene changes and lime dots analysed flares, sized and shaded by rank. Gold is a charge, sky a lull, pink a drop. White and indigo flags are the Light Show's High and Low Triggers. A diamond or a ♥ ★ ◆ glyph on its own stem is a sung WORD, at the moment it fires — tap it for what it will do. Drag the window on the timeline above to choose what this shows.">
               <span className="home-timeline-tool home-timeline-tool-wide">
                 <Icon name="info" size={14} /> Legend
               </span>

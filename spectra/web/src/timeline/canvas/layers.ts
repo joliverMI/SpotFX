@@ -12,6 +12,7 @@ import { energyFill } from '../../lib/energyAt';
 // ../../debug/plannedEvents.ts's module docstring for why they differ).
 import { plannedEvents as analysedEvents } from '../../debug/layers';
 import { lightShowMarkers } from './lightShowLayer';
+import { wordMarkers } from './wordsLayer';
 import { dropSeqBody, dropSeqRail, dropSeqRailBand } from './dropSeqLayer';
 // Home's drop-sequence editor dialog (home/HomeDropEditor.tsx) draws its
 // own small strip with these SAME four colours, from this SAME shared
@@ -678,6 +679,10 @@ export const beatStrips: CanvasLayer = {
 // (./dropSeqLayer.ts) slot in at z 1, 45 and 65 — see that module for why.
 export const BUILDER_LAYERS: CanvasLayer[] = [
   intensityBackground, dropSeqRailBand, blendSpans, rmsBands, avgLines, diamonds, librosaOverlays,
-  analysedEvents, lightShowMarkers, dropSeqBody, musicMarks, triggers, dropSeqRail, calibration,
+  analysedEvents, lightShowMarkers, dropSeqBody, musicMarks, triggers, dropSeqRail,
+  // Home's word trigger points (./wordsLayer.ts, z 66) sit here — ABOVE
+  // the drop-sequence layer on purpose, so a word's tap is never stolen by
+  // a drop handle's scan-line; see that module's own docstring.
+  wordMarkers, calibration,
   playhead, beatStrips,
 ];

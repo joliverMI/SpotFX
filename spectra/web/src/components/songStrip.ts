@@ -60,6 +60,14 @@ export interface UpcomingEvent {
   shape?: string | null;
   shape_name?: string | null;
   words?: string | null;
+  /** A `kind: "word"` row only (`lyric_events.word_marks`): whether this
+   * word's colour is MOMENTARY — it arrives, dwells the sung span and
+   * fades — or HOLDS to the next scene change or matched word. The one
+   * rule is `is_momentary(energy, cutoff)`: at or above the Energy
+   * cut-off it is momentary, below it holds. Absent on an imprint row and
+   * on an older server, in which case Home's word details card leaves
+   * that line out rather than guessing. */
+  momentary?: boolean;
 }
 
 /** THE SHAPE GLYPHS (Word Shapes W2.3): one character per shape id in
@@ -174,6 +182,14 @@ const KIND_LABEL: Record<UpcomingKind, string> = {
   charge: 'Charge', lull: 'Lull', drop: 'Drop',
   high: 'High trigger', low: 'Low trigger', word: 'Word',
 };
+
+/** The kind's own printed word, on its own — what Home's word details card
+ * names as the thing a word gives its colour to ("Gives its colour to the
+ * scene change at 1:23", W5.2). Exported so that card and `eventLabel`
+ * below can never disagree about what a kind is called. */
+export function kindLabel(kind: UpcomingKind): string {
+  return KIND_LABEL[kind] ?? KIND_LABEL.word;
+}
 
 /** "Scene · 7 of 15", "Flare", "Charge · drop 1", "Drop 1", "High trigger"
  * — the next-event box's full label (shown on hover; the box itself
