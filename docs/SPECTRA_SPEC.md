@@ -206,7 +206,14 @@ checking before saying "ready."
 Flat is `star = 0` (the shaping is radius × (1 + star·cos(edges·angle)); he had assumed 0.5 until
 the −0.7..+0.7 × 3–6 edges grid showed otherwise). On STAR the `star` value sways continuously
 between −0.2 and +0.4 (`star_wave`, pace by the told section energy) and nothing on the scene —
-binding or flare kind — writes it outside that range. STAR spins from its first frame (a 1 s
+binding or flare kind — writes it outside that range. Since 2026-11-18 that sway follows a CURVE
+(`star_wave_curve`, STAR `plateau`) which holds at −0.2, at flat, at +0.4 and at flat again —
+45% of a cycle flat against the cosine's 11% — and takes 28 s over a cycle in calm music against
+3 s when loud, while every rotation source is halved (`ROTATION_SPEED_SCALE` 0.8 → 0.4, the cap
+18 → 9 deg per frame): his "slow the star rotation by 50% at all speeds, including the burst
+speeds ... slow the star setting drift by 75%, but keep the burst speeds ... have it follow a
+curve so that it spends more time flat, and at the ends", then "D2 and all recs"
+(`data/star-curve-study/report.md`, PR fm/star-curve-study). STAR spins from its first frame (a 1 s
 ease-in, and the fire-time sign-flip-then-clamp defect that landed Speed 0 on half of all fires is
 fixed); the per-frame advance is clamped at `ROTATION_CAP_DEG_FRAME` = 18 deg per rendered frame
 (replacing the original 3.36 rev/s rate cap, which proved to be 40 deg per rendered frame at the

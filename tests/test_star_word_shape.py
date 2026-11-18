@@ -147,6 +147,19 @@ def _pinned_type():
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
+    # The baseline predates the 2026-11-18 rotation halving (ROTATION_SPEED_
+    # SCALE 0.8 -> 0.4 and the per-frame cap 18 -> 9 deg,
+    # data/star-curve-study/report.md), which is a deliberate change of the
+    # picture and nothing to do with Word Shapes. Give the twin today's
+    # rotation constants so this test keeps isolating the ONE claim it is for:
+    # that an UNTOLD Word Shapes module renders what the pre-Word-Shapes one
+    # did. They are module globals read at call time, so patching them here is
+    # enough; the schema's own base_rotation Range was bound at class creation
+    # and is only wider, which accepts every value this test uses.
+    for const in ("ROTATION_SPEED_SCALE", "CHARGE_SPIN_REV_S",
+                  "ROTATION_CAP_DEG_FRAME", "ROTATION_CAP_REV_FRAME"):
+        if hasattr(module, const):
+            setattr(module, const, getattr(radial, const))
     _PINNED["name"] = name
     return name
 

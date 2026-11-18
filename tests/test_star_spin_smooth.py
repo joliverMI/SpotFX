@@ -7,9 +7,10 @@ dynamic"; after the analysis page: "the burst fade should be snappier at
 higher energies and lazier at low energies. do 18 degrees per frame for
 now".
 
-  1. THE CAP is 18 degrees per RENDERED FRAME (under the 180/edges at which
-     a 6-point star's turn reads backwards), whatever the frame's length;
-     identity below it.
+  1. THE CAP is a per-RENDERED-FRAME angle (under the 180/edges at which a
+     6-point star's turn reads backwards), whatever the frame's length;
+     identity below it. 18 degrees when this plan shipped, 9 since the star
+     curve study of 2026-11-18 halved every rotation source.
   2. THE RELEASE at 0 is today's motion to the frame — the governed advance
      equals the pre-plan ease+clamp arithmetic replayed on the same drive.
   3. THE RELEASE on: the shipped law equals the analysed law (the scout rig's
@@ -98,9 +99,11 @@ def _room_turn(radial_cfg, drive, frames, on_frame=None):
 
 # ── 1. the cap ─────────────────────────────────────────────────────────────
 
-def test_cap_is_eighteen_degrees_per_rendered_frame_whatever_the_frame_length():
-    assert radial.ROTATION_CAP_DEG_FRAME == 18.0
-    assert abs(CAP * 360.0 - 18.0) < 1e-12
+def test_cap_is_nine_degrees_per_rendered_frame_whatever_the_frame_length():
+    # 18 when the spin smooth plan shipped; halved 2026-11-18 with
+    # ROTATION_SPEED_SCALE (data/star-curve-study/report.md)
+    assert radial.ROTATION_CAP_DEG_FRAME == 9.0
+    assert abs(CAP * 360.0 - 9.0) < 1e-12
     # under the aliasing limit of every edge count STAR rolls (3..6)
     for edges in (3, 4, 5, 6):
         assert radial.ROTATION_CAP_DEG_FRAME < 180.0 / edges
@@ -124,8 +127,10 @@ def test_cap_is_eighteen_degrees_per_rendered_frame_whatever_the_frame_length():
 
 
 def test_cap_is_identity_below_it():
-    adv = _room_turn({}, lambda t: 2.0, 30)                    # 2 rev/s = 12 deg/frame at 60 fps
-    assert np.allclose(adv[1:] / DT, 2.0, atol=1e-9)
+    # 1 rev/s = 6 deg/frame at 60 fps, under the 9 deg cap (it was 2 rev/s =
+    # 12 deg/frame while the cap was 18)
+    adv = _room_turn({}, lambda t: 1.0, 30)
+    assert np.allclose(adv[1:] / DT, 1.0, atol=1e-9)
 
 
 # ── 2. release 0 is today ──────────────────────────────────────────────────
@@ -149,10 +154,11 @@ def test_release_is_the_analysed_law_to_the_frame():
 
 
 def test_release_spreads_a_bass_hit_and_keeps_the_total_turn():
-    # a hit that stays under the cap either way (2.5 rev/s = 15 deg per
-    # 60 fps frame), so the clamp takes no turn from today's burst and the
-    # two runs must turn exactly as far
-    drive = lambda t: _hit(t, at=0.5, peak=2.5)                 # noqa: E731
+    # a hit that stays under the cap either way (1.4 rev/s = 8.4 deg per
+    # 60 fps frame, under the 9 deg cap — it was 2.5 rev/s while the cap was
+    # 18), so the clamp takes no turn from today's burst and the two runs must
+    # turn exactly as far
+    drive = lambda t: _hit(t, at=0.5, peak=1.4)                 # noqa: E731
     frames = 180                                                # 3 s: the floor, the hit, the settle
     today = _room_turn({}, drive, frames)
     eased = _room_turn({"energy": 1.0, **STAR_RELEASE}, drive, frames)   # tau 0.2 s

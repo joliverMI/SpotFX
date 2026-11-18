@@ -1291,10 +1291,11 @@ effect:
 
 `fx/effects/radial.py`'s ONLY motion source is the audio callback:
 `spin_total += lows_impulse * spin_cfg²/10 * ROTATION_SPEED_SCALE` per
-60 Hz callback, i.e. **rev/s = 4.8 × lows_impulse × spin²**
-(`ROTATION_SPEED_SCALE=0.8`, the Admiral's 2026-10-06 20% cut — see "THE
-MAXIMUM ROTATION SPEED WAS CUT 20%" below for the full before/after across
-every rotation source) — `spin` is a gain on the LIVE captured lows power
+60 Hz callback, i.e. **rev/s = 2.4 × lows_impulse × spin²**
+(`ROTATION_SPEED_SCALE=0.4` since 2026-11-18; 0.8 and 4.8 rev/s between the
+Admiral's 2026-10-06 20% cut and then — see "THE MAXIMUM ROTATION SPEED WAS
+CUT 20%" and "HALVED AGAIN" below for the full before/after across every
+rotation source) — `spin` is a gain on the LIVE captured lows power
 (snapcast.monitor melbank), NOT a motor speed, and NOT the bridge's
 "intensity" (that's stored librosa file analysis; the two diverge freely).
 During bass-light passages the lows impulse idles ~0.01, so a healthy spin
@@ -1334,7 +1335,7 @@ verbatim: "reduce the maximum speed of rotation of Star by 20 percent").**
 applied to every source above that contributes to rotation speed, so the
 *ceiling* drops uniformly rather than just a default: the reactive
 ceiling (spin at its own unchanged max 1.0, full audio impulse) was
-6 rev/s, now 4.8 (`self.spin`'s own `/10.0` divisor gained the scale, so
+6 rev/s, then 4.8 (`self.spin`'s own `/10.0` divisor gained the scale, so
 `spin`'s input range stays `[-1, 1]` — a binding already set to `spin`'s
 "max" reaches the new, lower ceiling automatically, nothing about how a
 binding reaches max changed); `CHARGE_SPIN_REV_S` (charge-phase spin-up)
@@ -1367,11 +1368,12 @@ binding on a 0..1 param flipped then clamped to 0 — `binding_resolver.
 _maybe_flip_sign` now skips any param with `lo >= 0`); `_govern_rotation`
 eases the first `spin_ease_in_s` seconds (STAR 1.0, effect default 0) and
 clamps every frame's TOTAL advance (shipped at `ROTATION_CAP_REV_S` 3.36
-rev/s; since the spin smooth plan below `ROTATION_CAP_DEG_FRAME` 18 deg per
-rendered frame);
+rev/s; since the spin smooth plan below `ROTATION_CAP_DEG_FRAME`, 18 deg per
+rendered frame then and 9 since the star curve study);
 `_star_wave_step` sways `star` between `star_wave_lo`/`_hi` (STAR −0.2..
-+0.4, through flat = 0 — flat is 0, not 0.5) at a pace set by the pushed
-`energy` (the pulse feed now feeds radial, energy only); "Edge Morph" is a
++0.4, through flat = 0 — flat is 0, not 0.5) on the curve
+`star_wave_curve` names (the star curve study below) at a pace set by the
+pushed `energy` (the pulse feed now feeds radial, energy only); "Edge Morph" is a
 `ParamTarget` mode `random_other` on `edges` 3..6, permanent, on STAR's two
 upper flare bands; Melt's `dark_floor` (VENDOR.md #92) and the TV's
 `pixel_map` (#93, `docs/agents/devices-and-ownership.md`) are the strip
@@ -1386,8 +1388,8 @@ measured evidence. In one line each: the crystal renders at 30 fps (its
 WLED `refresh_rate`; a virtual renders at its slowest device) while audio
 callbacks run at 60 Hz, so the 3.36 rev/s cap was 40 deg per rendered frame
 — past the 180/edges deg at which a 6-point star's turn reads backwards,
-his "hard to tell it moved"; the cap is now `ROTATION_CAP_DEG_FRAME` = 18
-deg per rendered frame, any dt; the jerk was the lows filter's ~6-frame
+his "hard to tell it moved"; the cap became `ROTATION_CAP_DEG_FRAME` = 18
+deg per rendered frame, any dt (9 since the star curve study below); the jerk was the lows filter's ~6-frame
 burst shape squared by `spin`, not the cap, so `_govern_rotation` now runs
 a unity-gain one-pole on the per-frame ADVANCE (total turn and mean speed
 preserved) whose time runs `spin_release_low_s` (STAR 0.45) at pushed
@@ -1396,6 +1398,48 @@ effect default 0/0 is today to the frame. `scripts/star_spin_smooth_
 scene_data.py` writes the two STAR params (DJ, at deploy). Proofs:
 `tests/test_star_spin_smooth.py`. Per-frame STAR reasoning uses dt = 1/30;
 `tests/star_harness.py` steps at 1/60.
+
+## Radial (STAR) — the star curve study (2026-11-18): the rotation halved, the sway given a curve
+
+The radial-effect skill's `star_wave_curve` bullet and `fx/VENDOR.md` #106
+are the binding statements; `data/star-curve-study/report.md` is the
+evidence and `https://claude.ai/artifact/8fARSnijd8RsAiskzBmKad` the
+five-curve artifact he picked from ("D2 and all recs").
+
+**The rotation, ×0.5 at every speed.** `ROTATION_SPEED_SCALE` 0.8 → 0.4 and
+`ROTATION_CAP_DEG_FRAME` 18 → 9. Both, not either: a bass-hit burst is the
+same squared-audio law at a high impulse, so the scale slows the steady
+speed and the bursts together, while a loud fire's steady speed already sat
+ON the 18 deg clamp, so the cap had to halve or those frames would have kept
+the old angle. Everything derived follows the one scale —
+`CHARGE_SPIN_REV_S` 0.72 → 0.36, `base_rotation`'s ceiling 1.6 → 0.8 (and
+with it `config/effect_params.json`'s declared max and
+`spectra/models/scene.py`'s `RADIAL_BASE_ROTATION_MAX`, which are hand
+mirrors). The `spin` values STAR's flare kinds patch and its `spin` binding
+are INPUTS to the squared law: they halved on their own, do not "fix" them.
+`PRE_DROP_SPIN_FROM/_TO` (the pre-drop outline, never capped) was left alone
+by his choice and is now the scene's fastest turn.
+
+**The sway's shape is a param.** `star_wave_curve`
+(`cosine|linear|smooth|plateau|steps`, effect default `cosine` = bit-for-bit
+what shipped before, so House Star is byte-identical) selects
+`_star_wave_u`; `star_wave_dwell_flat`/`_dwell_end` (0.161 / 0.089) are the
+plateau's hold shares of one cycle. His premise was wrong in a useful way:
+it never linearly bounced — the cosine already dwelt at the LIMITS (37% of a
+cycle) and ran fastest through FLAT (11%), which is the shape you never saw.
+`plateau` holds four times a cycle (lo, flat, hi, flat) at 45% flat / 31%
+ends, each glide timed in proportion to the value span it covers so every
+glide shares one peak rate. **The hold is at the VALUE 0, not the midpoint
+of the bounds** — with −0.2..+0.4 flat is at one third, and the midpoint
+would hold a half-pointed +0.1; bounds that never cross 0 give their flat
+time to the limits. The seeding (`_star_wave_phase_for`) keeps `arccos` for
+`cosine` and inverts the rest from a table of the rising span, landing on
+the START of a hold so the binding's own `star = 0.0` enters flat and waits
+out the dwell. **The drift, ×0.25 at the calm end only**: STAR's
+`star_wave_period_slow_s` 7 → 28 s with `_fast_s` kept at 3 — the
+energy-paced period is what "keep the burst speeds" names. Scene data:
+`scripts/star_curve_scene_data.py` (five params, backup + `--revert`).
+Proofs: `tests/test_star_curve.py`.
 
 ## `crystal-mapper` (the hex Matrix virtual) — read the skill before touching it
 
