@@ -962,6 +962,15 @@ def test_registry_defaults_are_orbits_own_except_the_named_divergence():
     # (an orbit radius) is deliberately NOT inherited — see the PR.
     diverge = {"orbit_radius"}
     for key, value in orb.items():
+        # ... and the `word_shape_*` family is exempt here for the same
+        # reason it is exempt from the param mirror above: each effect
+        # registers the settings ITS OWN shape needs, with its own measured
+        # default. Orbits' `word_shape_speed_x` is 4.0 because a bead's
+        # trail has to bridge a 9 s ring lap; Fish's is 3.0 because row
+        # W5.5 measured a 1.83 s lap against a swimmer's own trail
+        # (fx/effects/fish.py's WS_SPEED_X block).
+        if key.startswith("word_shape_"):
+            continue
         if key in diverge or key not in fish:
             continue
         assert fish[key] == value, (

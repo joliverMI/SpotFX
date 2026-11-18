@@ -3566,3 +3566,151 @@ against that commit.
      the shape is told renders exactly as it would untold.
      `.claude/skills/fireworks-effect/SKILL.md`'s W5.6 section is the
      binding record of the measured bars.
+
+105. `effects/fish.py` (SpotFX-authored on top of #99): W5.5 — THE LOOP IS RUN
+     AND THE CORNERS ARE CORNERS (his second room verdict, 2026-11-18,
+     verbatim: "Oribits is really good at showing shape, we need to get Fish
+     to behave similarly. Ask me questions if it's hard to implement, but
+     you might need to override some min turn radii to match the effect,
+     especially on the star." — with W4's framing under it, "I think fish
+     are going to have to override some of the motion rules to move sharply
+     enough to form corners, like on the star" — plus his standing rule for
+     the feature, "they need to smoothly accelerate and not have sudden
+     velocity shifts"). FIVE levers moved, and only two of them were the
+     ones the row expected.
+     ONE new registered param, `word_shape_speed_x` (1.0-6.0, default 3.0,
+     `WS_SPEED_X`), resolved per frame by `_word_shape_speed_x()` as
+     `1 + (x - 1) * m` — Orbits' #102 shape — and applied to FOUR quantities
+     together, because the procession's law stops being one law if they come
+     apart: the LINE's own `march` (so the lap really is `loop_s / x`:
+     5.5 s -> 1.83 s few, 7.0 -> 2.33 many), the procession's `pace`, the
+     DASH CAP (`WS_DASH_X * cruise`, an ABSOLUTE px/s ceiling — left alone
+     it binds at x3, the heart's pace going 21 -> 64 px/s against a 44 px/s
+     cap, and the fish would chase a line it can never catch; scaled, it
+     keeps exactly today's 2.04x headroom over the pace) and the PHASE EASE
+     (`WS_PHASE_GAIN`, loop fractions a second, so a common-mode lag closes
+     in the same number of LAPS at any speed). `WS_SPACING_GAIN` needs
+     nothing: it is already a multiplier ON the pace.
+     THE TURN CIRCLE WAS OVERRIDDEN AS HE ASKED — `WS_TURN_X` 0.25 -> 0.10,
+     a 1.13 px circle down to 0.45 px, which is 0.23-0.39 of a cell pitch —
+     AND THAT IS NOT WHAT BOUND THE CORNERS, which is the row's first
+     finding and is measured: at x1, taking `WS_TURN_X` from 0.25 to 0.08
+     moved a star's worst corner from 5.39 cell pitches to 5.45, no movement
+     at all. What bound it was the AIM, in two terms. The heading GAIN
+     (`WS_TURN_GAIN_X` 2.0 -> 12.0): a proportional steer needs a heading
+     error to command a rate and the lag that error stands for gets worse
+     the faster the line runs, so at x3 on the shaped circle a star's worst
+     corner reads 3.88 cell pitches at x2, 1.40 at x6, 0.99 at x12 and 1.27
+     at x24 (over-steer coming back), with the per-instant median distance
+     1.31 -> 0.10 and the p90 2.92 -> 0.50. And the pursuit LEAD
+     (`WS_TARGET_LEAD` and `WS_REACH` 0.015 -> 0.008 each, which are one
+     quantity because the aim is their sum): a steer aimed `L` of arc ahead
+     has a chord that passes a corner of exterior angle theta at
+     `(L / 2) sin(theta / 2)` whatever it can turn — 1.7 px at the heart's
+     cleft on the old lead, 0.9-1.5 cell pitches of a 1.0-pitch bar spent
+     before the circle is ever consulted (swept: 0.99 cell pitches of worst
+     corner at 0.030, 0.79 at 0.024, 0.37 at 0.016, 0.24 at 0.010 — and
+     0.010 drops the worst band row to 83%, so 0.016 is where it bottoms out
+     without paying for it). AND THE GAIN WAS LOAD-BEARING FOR THE CONTRAST
+     BAR TOO, which the row did not expect: at the gain #99 shipped with,
+     the worst row's share of the band over 64/255 reads 59% — under its own
+     60% FEW bar — and 93% at x12, the same mechanism seen from the other
+     side, since a fish that lags the line is not ON the band. The sweep's
+     lap axis also says his own estimate of 3 was right: x4 COLLAPSES the
+     band to 65-68% at the tighter circles.
+     THE CLAMP IS STILL THE CLAMP, and it is what makes the high gain safe:
+     every steering term is bounded by the same single
+     `np.clip(omega, -omega_max, omega_max)` in `draw()`, on a tighter
+     circle while a shape runs and his own to the bit at `m = 0`. #99's
+     smoothness bar reads the clamp IN FORCE for exactly this reason and
+     measures 100.0% of it (saturated at the cusps) against 1000% of the
+     untightened circle, by design; the lit-cell jump is 1.6-2.1% of 8% and
+     the worst per-frame speed change 8-10% of this effect's own maximum.
+     THE WALL'S OWN FLOOR WENT WITH IT. `_glance_radius` floored its arc at
+     the fish's OWN turn radius, and the wall is the one authority that
+     still OVERRIDES the loop's steer while it runs — so near the pond's
+     edge a glance planned on a 4.54 px circle rounds a star's notch wide of
+     the line however tight the shape's circle is. `_ws_wall` is now a
+     THREE-tuple (look-ahead, arc divisor, floor divisor), `WS_WALL_TURN_X`
+     is `1 / WS_TURN_X` rather than a flat 2.0, and the floor takes the same
+     `1 - (1 - WS_TURN_X) * m` factor the clamp uses. A new `own_floor=True`
+     keeps the fish's own radius for the two callers that are NOT steering:
+     `_landing`'s corner rounding (how a long BODY rounds a panel corner,
+     and a per-frame rho would thrash `_landing_field`'s cache) and
+     `_wall_steer`'s probe reach (only ever safer the wider it is). BOTH
+     HALVES EARN THEIR PLACE, measured over three seeds of all six (mode,
+     shape) rows: the arc divisor is what buys the CORNER (0.80 -> 0.49 cell
+     pitches), and the floor is what buys the RECOVERY (3.19 -> 2.75 px of
+     overshoot past the landing line, because a glance that can command the
+     full shaped clamp comes back sooner). And the depth is measured on the
+     right line — the LANDING LINE is the glance's own target, pulled
+     `WALL_GRAZE` half-widths inside the lit edge with its corners rounded,
+     so an ordinary fish crosses it routinely (untold over his real-audio
+     arcs: 1.77 px FEW, 1.78 MANY), while the LIT SILHOUETTE is whether a
+     middle is off the panel at all. No configuration puts one there: the
+     deepest middle under a shape is 0.48 px INSIDE the lit edge. Section 9
+     prints both depths beside the same seed untold and pins both.
+     W1.4's TWO HALF-LIVES ARE NOW SMEAR LENGTHS RATHER THAN DURATIONS:
+     `WS_RIPPLE_LIFE_S` is untouched at 3.0 and `WS_TRAIL_HALF_LIFE_S` is
+     (0.6, 0.6), each DIVIDED BY THE LAP'S OWN SPEED-UP in
+     `_trail_half_life` / `_wake_half_life`, so a fish's smear keeps the
+     length that was measured instead of three times it. That division is
+     also what pays for the clarity: at the unscaled duration the white
+     share runs to 40.8% against 33.0% scaled, for four points of band share
+     nobody needs. THE DIVISION GOES ON THE BLENDED VALUE, NOT THE TARGET —
+     blending toward `want / x` makes the half-life non-monotonic in `m`
+     (0.233 s at mid-ramp against 0.200 at the hold, because the target
+     falls faster than the blend climbs), while blending first and dividing
+     after makes the smear LENGTH follow #99's own ramp exactly. AND #99's
+     (FEW, MANY) PAIR MEASURED AWAY: it existed because MANY had no water
+     trace and the trail WAS how the band between the fish stayed lit, and
+     at x3 MANY clears its 70% band bar by 16-30 points at the FEW end too
+     (its revisit gap is 7.0 / (6 x 3) = 0.39 s) while the longer end costs
+     4-5 points of white on exactly the rows where white is the open
+     exceedance — the row's own instruction, speed first and the trail only
+     as far as the bar needs. Kept as a TUPLE because the mode latch is
+     still what would re-open it. `WS_TRAIL_GAIN` stays at 1.6 — lowering it
+     costs band light and RAISES white, the non-monotonicity #99 already
+     recorded. Both quantities still RISE while a shape holds (his "lower
+     decay briefly") but by less than the x3 the slow lap needed, so the
+     proof and the tests assert the arithmetic rather than a loose multiple.
+     UNTOLD IS BYTE FOR BYTE TODAY'S, proven against the same pinned
+     pre-#99 module over both of his real-audio arcs (1,320 frames each,
+     pixels and kinematics): every lever is read only inside the
+     shape-gated block, `_ws_wall` is `None` on an untold frame so
+     `_glance_radius` evaluates exactly the expression it did, and
+     `own_floor` changes nothing when it is.
+     A NEW CORNER MEASURE (section 9 of `scripts/check_fish_word_shape.py`)
+     and a NEW SWEEP (section 10, opt-in with `--only sweep`: loop x turn,
+     trail, gain, aim). The corner measure is the distance from each outline
+     VERTEX to the nearest fish PATH through the hold, in cell pitches,
+     printed per corner — a path and not an instant, because a corner is
+     drawn by a fish going round it at some point in the hold and smeared
+     there for a trail half-life afterwards. Its vertex detector is VERIFIED
+     rather than trusted (`CORNER_COUNTS` pins the heart's point and cleft,
+     a star's five points and five notches and the diamond's four tips), and
+     the turn circle's own minimal-arc depth is printed beside it as a
+     REFERENCE, never asserted: a fish can come in either side of it, wider
+     when its aim cuts the corner and CLOSER when it overshoots into a cusp
+     and comes back (the heart's cleft, a 1.52-pitch arc depth against 0.04
+     pitches of real path). Bar: 1.0 cell pitch on every corner of every
+     shape in both modes AND EVERY SEED; measured worst 0.49 on the star,
+     median seed 0.31. THE STATISTIC IS PER SEED, NEVER POOLED ACROSS THEM:
+     the first version of this measure took each corner's BEST reading over
+     the seeds and then the worst corner, which mixes runs that never
+     happened together and read 0.32 against 0.49 per seed on the same three
+     seeds. A shape fires once, on one seed.
+     THE WHITE TAIL REMAINS THE OPEN EXCEEDANCE AND IT REMAINS HIS CALL. At
+     the shipped levers it sits where his 2026-11-17 ruling left it (option
+     A, ship as built, his to judge by eye) rather than better: a tighter
+     procession puts more bodies on the same cells and overlapping bodies
+     sum two gradient hues. The root fix is unchanged — narrow the gradient
+     span a procession draws from, one colour for one drawn shape — and that
+     is his authored colour behaviour, not a build row's to change.
+     Proofs `scripts/check_fish_word_shape.py` (ten sections) and
+     `tests/test_fish_word_shape.py` (four new contract tests: the
+     registered speed and its envelope ramp, the lap and the dash cap, the
+     turn circle in force, and the corner budget as arithmetic);
+     `.claude/skills/fish-effect/SKILL.md`'s ROW W5.5 section and
+     `.claude/skills/word-shapes/SKILL.md`'s ROW W5.5 bullets are the
+     binding record.
