@@ -834,10 +834,10 @@ class RoomControlState(BaseModel):
     #     to, and neither is any song's data: the switch is read, per
     #     plan, and nothing else.
     # Room-wide, durable, and it stays on until HE switches it off — there
-    # is deliberately no auto-off (his answer above), which is why it is
-    # announced loudly on every page while it is on
-    # (spectra/web/src/components/WordTestModeBar.tsx) as well as on
-    # Settings and the Test Bed. Sonic-tellable, exactly like
+    # is deliberately no auto-off (his answer above). It is visible on
+    # Settings and the Test Bed; by his 2026-11-18 word there is no
+    # top-bar banner for it (see the night-run doc's "why its own bar"
+    # paragraph for the history). Sonic-tellable, exactly like
     # `drop_testing` above. Read by trigger_engine on each replan, so
     # flipping it reaches the very next plan without a restart.
     word_test_mode: bool = False

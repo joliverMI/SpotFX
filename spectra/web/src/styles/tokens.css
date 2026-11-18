@@ -2085,32 +2085,6 @@ kbd {
   border-color: rgba(0, 0, 0, 0.82);
 }
 
-/* WORD TEST MODE (WordTestModeBar.tsx) — the same loudness, deliberately
- * NOT the same colours: the amber/red hazard stripes above mean "something
- * is using your lights right now", and this bar is a different claim
- * ("every word flare fires"), so it must never be mistaken for one. It can
- * also be up at the same time as either bar above it. */
-.testing-bar-word-test {
-  --testing-bar-a: #7b5cf0;
-  --testing-bar-b: #1fa8c9;
-  color: #f4f1ff;
-}
-
-.testing-bar-word-test .testing-bar-title { color: #e9dcff; }
-
-.testing-bar-action {
-  flex: 0 0 auto;
-  font-weight: 800;
-  padding: 6px 12px;
-  border-radius: 4px;
-  border: 2px solid rgba(0, 0, 0, 0.82);
-  background: rgba(0, 0, 0, 0.82);
-  color: #ffd76a;
-  cursor: pointer;
-}
-
-.testing-bar-action:disabled { opacity: 0.6; cursor: default; }
-
 @media (max-width: 720px) {
   .testing-bar {
     flex-wrap: wrap;
@@ -2123,9 +2097,11 @@ kbd {
 }
 
 /* ── Settings → Word test mode (WordTestModeCard.tsx, 2026-11-17) ───────
- * Off, it is an ordinary card. ON, it wears the same violet/cyan the top
- * bar and the Test Bed banner wear, so the three places that say it are
- * recognisably one state and not three unrelated notices. */
+ * Off, it is an ordinary card. ON, it wears the same violet/cyan the Test
+ * Bed banner wears, so the two places that say it are recognisably one
+ * state and not two unrelated notices. (A third place, a top-bar banner,
+ * existed from PR 541 until his 2026-11-18 word — see the night-run doc's
+ * "why its own bar" paragraph.) */
 .settings-word-test-switch {
   display: flex;
   align-items: center;

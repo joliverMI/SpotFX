@@ -79,9 +79,10 @@ line that already owned the mapping. IT IS THE ROLL ONLY:
   - nothing is written: not his pins, not his kept rolls, not any song's
     data. The switch is read, and that is all.
 
-It stays on until he switches it off (no auto-off, his answer), which is
-why it is announced on every page while it is on — `WordTestModeBar.tsx`,
-plus Settings and the Test Bed.
+It stays on until he switches it off (no auto-off, his answer). It is
+visible on the Settings card and the Test Bed's own readouts; by his
+2026-11-18 word there is no top-bar banner for it (see the night-run
+doc's "why its own bar" paragraph for the history).
 
 WORD SHAPES (Word Shapes plan W0.3, 2026-11-15 — the Admiral: "It would
 operate like a flare in the scenes panel, just only fire by sung word"). A
