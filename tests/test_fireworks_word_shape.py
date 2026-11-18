@@ -28,9 +28,41 @@ longer." What that row proves here, beside everything below:
     nothing here stretches it;
   * A PHASE ARRIVING ENDS THE HUSH — the drop payoff still bursts.
 
+ROW W5.6 (his SECOND room verdict, 2026-11-18) RETUNED ALL OF THAT,
+verbatim: "I think we overtuned the fireworks last time. The background
+doesn't need to be clear of other fireworks, just they need to be dimmer,
+so fading out already. I think we can give it 80% less pre-fire darkness
+time. It also holds too long and fades too abruptly. And it's too
+well-defined. Let's turn back the increase in blob count, and at the end,
+the blobs should lightly break apart and fade out. Also, the burst is too
+fast. Slow the burst by 60% so we can see the blobs moving out to the
+outline, and then decelerating to almost a stop, but not quite a stop. The
+blobs should always be slightly drifting." What that row proves here:
+
+  * THE QUIET IS 0.25 s (WORD_SHAPE_HUSH_S), immediately before the launch
+    — 80% less than W4.3's 1.2 s — and it is the ONLY withholding left;
+  * DIM, NOT DARK: from the edge to the hold's end every ORDINARY spark is
+    drawn at WORD_SHAPE_BACKGROUND_DIM (0.40) of its brightness, ramped so
+    nothing steps, with launches carrying on through it. The headline bar is
+    a DIM one — the ordinary light on the word against the same seeds'
+    untold light — bounded on BOTH sides, because "dimmer" is not "clear";
+  * 60 SPARKS QUIET, 100 LOUD: W4.3's increase turned back;
+  * THE HOLD IS THE ROOM'S OWN AGAIN: `fireworks` left
+    `fx.device_model.WORD_SHAPE_HOLD_X` (STAR and the Black Hole keep 1.5);
+  * THE BURST IS 60% SLOWER AS A SPEED: a 2.0 s flight whose deceleration
+    spans the whole of it (WORD_SHAPE_FLIGHT_HL_S 0.65 s, the shaped
+    sparks' own, not the effect's 0.255 s), still arriving ON the word;
+  * ALMOST A STOP, NEVER QUITE: the hang keeps 4% of the arrival speed and
+    then rides a mean-reverting walk, so no shaped spark's speed is EXACTLY
+    zero on any frame of the hold;
+  * LIGHTLY BREAK APART AND FADE OUT: the drift grows tenfold outward over
+    the release while the fade is linear (WORD_SHAPE_FADE_POWER 1.0) over
+    WORD_SHAPE_FADE_FRAC (0.6..1.0), so no spark is gone before 60% of it.
+
 W1.2's own "the ordinary particles are untouched across the edge" is
-RETIRED by that verdict and rewritten to the new rule
-(test_the_shaped_burst_is_additive_except_the_hush).
+RETIRED by W4.3's verdict and rewritten to the rule W5.6 leaves:
+dimmed, never killed; launches withheld only in the 0.25 s quiet
+(test_the_shaped_burst_is_additive_except_the_quiet_and_the_dim).
 
 What is proven here, in the plan's own order (section 6 is the row's gate):
 
@@ -243,7 +275,7 @@ def _engine(clock):
     return executor, conductor, responder
 
 
-@pytest.mark.parametrize("form_s", [2.0, 2.6])
+@pytest.mark.parametrize("form_s", [2.25, 2.8])
 def test_the_shape_is_complete_on_the_word_through_the_real_engine(
         tmp_path, form_s):
     """The whole path: the real ResponseEngine fires the showing scene's
@@ -252,11 +284,11 @@ def test_the_shape_is_complete_on_the_word_through_the_real_engine(
     ONE rendered frame of edge + form_s. The engine's own lead is what makes
     that the word (tests/test_word_shape_contract.py proves the lead).
 
-    W4.3: the two forms are the ones the engine can actually tell this
-    effect — its own 2.0 s floor, and a longer one from a long phrase. And
-    the burst no longer leaves at the edge: nothing is launched until
-    WORD_SHAPE_FLIGHT_S before the word, with THE HUSH emptying the panel
-    in front of it, which is asserted here frame by frame."""
+    The two forms are the ones the engine can actually tell this effect —
+    its own floor (2.25 s since W5.6: the 0.25 s quiet plus the 2.0 s
+    flight) and a longer one from a long phrase. And the burst does not
+    leave at the edge: nothing is launched until WORD_SHAPE_FLIGHT_S before
+    the word, which is asserted here frame by frame."""
     from fx import facade
     from spectra.services.scene_response import PreviewWordShape
 
@@ -302,13 +334,24 @@ def test_the_shape_is_complete_on_the_word_through_the_real_engine(
                 # proof's own arithmetic)
                 headless.render_frames(virtual, 2, clock=clock, dt=DT)
                 state = eff.word_shape_state()
-                # W4.3: the EDGE arms the shape and opens the hush; the
-                # burst is still in the barrel
+                # the EDGE arms the shape and starts the dim; the burst
+                # is still in the barrel. Two frames in, the 0.25 s quiet
+                # has not started yet on a form this long — it is anchored
+                # to the LAUNCH (W5.6), not to the edge
                 assert state["armed"] is True, "the told write never landed"
-                assert state["hushed"] is True
+                # THE QUIET IS ANCHORED TO THE LAUNCH (W5.6), so where it
+                # starts depends on the told form: at this effect's own
+                # floor (quiet + flight) it runs from the edge, and a
+                # LONGER form puts it later and leaves the ordinary show
+                # launching (dimmed) in front of it
+                at_floor = form_s <= (FX.WORD_SHAPE_HUSH_S
+                                      + FX.WORD_SHAPE_FLIGHT_S + 1e-9)
+                assert state["hushed"] is at_floor, (form_s, at_floor)
+                assert 0.0 < state["dim"] <= 1.0, (
+                    "the dim never started at the edge")
                 assert state["sparks"] == 0, (
-                    "the burst left at the edge — the hush has nothing to "
-                    "empty the panel in front of")
+                    "the burst left at the edge — there is nothing in front "
+                    "of it then")
                 # the form, frame by frame from here
                 frames = max(2, int(round(max(form_s, 0.1) / DT)))
                 fracs, sparks = [], []
@@ -357,15 +400,21 @@ def test_every_spark_is_inside_one_cell_of_its_target_on_the_word(shape_id):
     it was aimed. Measured in real-cell pitches on his crystal.
 
     W4.3 CHANGED WHAT THE SOLVE IS OVER. The told form is the LEAD, and
-    this effect's lead is floored at 2.0 s, so Energy no longer moves it
-    (every row below reads 2.00 s) — what the sparks are solved against is
-    the FLIGHT, the time left to the word at the launch. Both told forms the
-    engine can produce are measured: the floor, and a longer one from a long
-    phrase."""
+    this effect's lead is floored (2.25 s since W5.6), so Energy no longer
+    moves it (every row below reads 2.25 s) — what the sparks are solved
+    against is the FLIGHT, the time left to the word at the launch. Both
+    told forms the engine can produce are measured: the floor, and a longer
+    one from a long phrase.
+
+    W5.6 ALSO CHANGED WHAT DRAG THE SOLVE USES — the shaped sparks' own
+    WORD_SHAPE_FLIGHT_HL_S rather than this effect's `0.6 - 0.5*drag` — and
+    the arrival is the proof that the two halves agree: a solve done against
+    one kernel and an integration done with another would land every spark
+    far off its target, and this asserts it lands inside a cell."""
     for energy in ENERGIES + (wsk.LEVEL_FLOOR,):
         run = alone(shape_id, energy)
-        assert run.form_s == pytest.approx(2.0, abs=0.01), (
-            "the planner floors this effect's form at 2.0 s, so Energy "
+        assert run.form_s == pytest.approx(2.25, abs=0.01), (
+            "the planner floors this effect's form at 2.25 s, so Energy "
             "cannot pace it")
         assert run.targets is not None and len(run.targets)
         assert run.arrival_pitch <= 1.0, (
@@ -375,12 +424,13 @@ def test_every_spark_is_inside_one_cell_of_its_target_on_the_word(shape_id):
         # at the edge
         flight_frames = int(round(FX.WORD_SHAPE_FLIGHT_S / DT))
         assert abs((run.word_frame - run.launch_frame) - flight_frames) <= 1
-    long_form = alone(shape_id, 0.8, form_override=2.6)
-    assert long_form.form_s == pytest.approx(2.6)
+    long_form = alone(shape_id, 0.8, form_override=2.8)
+    assert long_form.form_s == pytest.approx(2.8)
     assert long_form.arrival_pitch <= 1.0, long_form.arrival_pitch
     assert abs((long_form.word_frame - long_form.launch_frame)
                - int(round(FX.WORD_SHAPE_FLIGHT_S / DT))) <= 1, (
-        "a longer form only lengthens the hush, never the flight")
+        "a longer form only lengthens the dim's own run-up in front of the "
+        "quiet, never the flight")
 
 
 def test_the_outline_inside_split_is_the_told_share():
@@ -393,24 +443,25 @@ def test_the_outline_inside_split_is_the_told_share():
 
 
 def test_the_spark_count_runs_from_quiet_to_loud_with_the_words_energy():
-    """90 sparks at the floor Energy, 150 at a full one — W1.2's 60/100 with
-    his W4.3 "increase the amount of blobs by 50%" applied, linear
-    between."""
+    """60 sparks at the floor Energy, 100 at a full one — W1.2's own pair,
+    which W5.6 puts back: "Let's turn back the increase in blob count"
+    retires W4.3's 90/150. Linear between."""
     lo = alone("heart", wsk.LEVEL_FLOOR, tail_frames=2)
     hi = alone("heart", 1.0, tail_frames=2)
     # the floor Energy is 0.01, not 0 (word_shape_keys.LEVEL_FLOOR: 0 means
-    # NOT TOLD), so the quietest word a scene can get is one spark over the
-    # quiet count — 90 + 60 x 0.01, rounded
-    assert lo.total_sparks == 91
-    assert hi.total_sparks == 150
+    # NOT TOLD), so the quietest word a scene can get is the quiet count
+    # itself — 60 + 40 x 0.01, rounded
+    assert lo.total_sparks == 60
+    assert hi.total_sparks == 100
     mid = alone("heart", 0.5, tail_frames=2)
-    assert mid.total_sparks == 120
+    assert mid.total_sparks == 80
 
 
 def test_a_saturated_show_plus_the_loud_burst_fits_in_the_capacity():
-    """W4.3's headroom. The shaped sparks are UNCAPPED (`p_nocap`), so they
-    are bounded only by the module's own CAP: 150 of them on top of a show
-    saturating his `max_blobs` of 100 is 250 of 1024, so the burst can never
+    """W4.3's headroom, still asserted at W5.6's 100 sparks. The shaped
+    sparks are UNCAPPED (`p_nocap`), so they are bounded only by the
+    module's own CAP: 100 of them on top of a show saturating his
+    `max_blobs` of 100 is 200 of 1024, so the burst can never
     be clipped by the array and the ordinary show can never be starved by
     it. The clamp exists anyway (`_word_shape_burst`'s `CAP - self.n`), and
     this is the arithmetic that says it is unreachable in his room."""
@@ -418,7 +469,7 @@ def test_a_saturated_show_plus_the_loud_burst_fits_in_the_capacity():
     schema = {str(k): k.default() for k in Fireworks2d.CONFIG_SCHEMA.schema
               if hasattr(k, "default")}
     loud = int(schema["word_shape_sparks_loud"])
-    assert loud == 150
+    assert loud == 100
     his_cap = int(C.HIS_CFG["max_blobs"])
     assert his_cap + loud <= CAP, (his_cap, loud, CAP)
     # and even the registry's own maximum for the param still fits
@@ -449,7 +500,7 @@ def test_the_shape_hangs_through_the_hold_and_is_gone_by_the_release(shape_id):
     assert any(0 < v < launched for v in middling)
 
 
-@pytest.mark.parametrize("burst_life,expected", [(1.9, 2.0), (1.2, 3.0)])
+@pytest.mark.parametrize("burst_life,expected", [(1.9, 3.0), (1.2, 4.5)])
 def test_the_shaped_sparks_hang_longer_than_the_others(
         burst_life, expected, capsys):
     """"hang longer than the others", measured rather than asserted from the
@@ -465,16 +516,19 @@ def test_the_shaped_sparks_hang_longer_than_the_others(
     the shape's duration is the told envelope's, which is the room's
     setting, not this effect's to stretch.
 
-    W4.3 MOVED BOTH NUMBERS WITHOUT TOUCHING EITHER LEVER. A shaped spark
-    now lives THE FLIGHT (not the whole form) plus the hold plus its own
-    share of the release — it is not born until WORD_SHAPE_FLIGHT_S before
-    the word — but the release is 1.5x the FORM, and the form is floored at
-    2.0 s, so the release is 3.0 s and the spark outlives W1.2's by a long
-    way. Neither this effect nor this row chose that: the ratio is the
-    ROOM's two settings and the planner's floor."""
+    W4.3 MOVED BOTH NUMBERS WITHOUT TOUCHING EITHER LEVER, AND W5.6 MOVED
+    THEM AGAIN THE SAME WAY. A shaped spark lives THE FLIGHT (not the whole
+    form) plus the hold plus its own share of the release — it is not born
+    until WORD_SHAPE_FLIGHT_S before the word — but the release is 1.5x the
+    FORM and the form is floored, so W5.6's 2.25 s floor makes the release
+    3.375 s. The flight's own 0.8 -> 2.0 s and the fade window's floor
+    0.45 -> 0.6 lengthen it further. Neither this effect nor either row
+    chose that: the ratio is the ROOM's two settings, the planner's floor
+    and his own "slow the burst by 60%". The lever for the WHOLE length is
+    `word_shape_release_ratio`, which is his."""
     run = alone("heart", 0.8, config={"burst_life": burst_life})
     shaped = (FX.WORD_SHAPE_FLIGHT_S + run.hold_s
-              + (0.45 + 1.0) / 2 * run.release_s)
+              + sum(FX.WORD_SHAPE_FADE_FRAC) / 2 * run.release_s)
     ordinary = 0.925 * burst_life
     with capsys.disabled():
         print(f"  burst_life {burst_life}: a shaped spark lives "
@@ -488,11 +542,14 @@ def test_the_shaped_sparks_hang_longer_than_the_others(
 
 
 def test_the_hang_follows_the_told_hold_and_nothing_here_stretches_it():
-    """W4.2 is what made the hold half again as long, by telling a longer
-    `word_shape_hold_s`; W4.3 changes NOTHING about it. So the proof is that
-    the hang is the TOLD number: tell two holds and the shape stands for
-    each of them, measured on the effect's own `hanging` flag and on the
-    sparks still alive."""
+    """W4.2 made the hold half again as long by telling a longer
+    `word_shape_hold_s`, and W5.6 took that stretch back off this effect by
+    removing its `WORD_SHAPE_HOLD_X` entry — NEITHER row changes anything
+    in this module, which is the point. The hang is the TOLD number: tell
+    two holds and the shape stands for each of them, measured on the
+    effect's own `hanging` flag and on the sparks still alive. The rig tells
+    the room's own unstretched hold, so these are the numbers his scene gets
+    now."""
     short = alone("heart", 0.8, phrase_s=0.9, tail_frames=2)
     long_ = alone("heart", 0.8, phrase_s=1.8, tail_frames=2)
     assert short.hold_s == pytest.approx(0.9)
@@ -513,7 +570,11 @@ def test_the_hang_follows_the_told_hold_and_nothing_here_stretches_it():
 
 def test_the_sparks_hang_where_they_arrived_rather_than_drifting_on():
     """The hang damps their velocity: the shape standing at mid-hold is
-    within a cell of the shape that arrived on the word."""
+    within a cell of the shape that arrived on the word. W5.6 damps toward
+    a DRIFT rather than to zero (see
+    test_no_shaped_spark_is_ever_exactly_stopped_during_the_hold), and this
+    is the other side of that coin — a drift small enough that the outline
+    is still the outline a whole hold later."""
     run = alone("heart", 0.8)
     mid = (run.word_frame + run.hold_end_frame) // 2
     out, fill = C.cell_sets(word_shapes.get("heart"), panel(), 0.62)
@@ -522,6 +583,186 @@ def test_the_sparks_hang_where_they_arrived_rather_than_drifting_on():
     cov_mid, _r2, _o2, _f2 = C.measure_frame(
         run.frames[mid], panel(), out, fill)
     assert cov_mid >= cov_word - 0.1, (cov_word, cov_mid)
+
+
+# ── 4b. W5.6: the slower burst, the drift, the break-apart, the fade ─────
+
+def _flight_marks(run):
+    """The flight's own frames at 25/50/75/100% of it. 100% is its LAST
+    frame and not the word's own, which is already the hang — by then
+    WORD_SHAPE_DRIFT_KEEP has taken 4% of the arrival speed."""
+    launch = run.launch_frame if run.launch_frame >= 0 else run.word_frame
+    span = run.word_frame - launch
+    marks = [launch + int(round(f * span)) for f in (0.25, 0.5, 0.75)]
+    marks.append(max(launch, run.word_frame - 1))
+    return marks
+
+
+@pytest.mark.parametrize("shape_id", SHAPES)
+def test_the_burst_decelerates_across_the_whole_flight(shape_id, capsys):
+    """"Slow the burst by 60% so we can see the blobs moving out to the
+    outline, and then decelerating to almost a stop, but not quite a stop."
+
+    TWO THINGS, and the second is the one that needed a second constant.
+    The flight is 2.0 s — his 60% read as a SPEED (x0.4 of W4.3's 0.8 s),
+    which is the only sense a viewer has of a burst's speed; the other
+    reading, "60% LONGER" (1.3 s), is stated in the skill beside the
+    constant. And the DECELERATION spans the whole flight, because this
+    effect's own drag kernel (`0.6 - 0.5 * drag` = 0.255 s at his 0.69)
+    saturates in about 0.4 s: over a 2 s flight it would land every spark
+    in the first fifth and leave it sitting, which is the opposite of what
+    he asked to see. WORD_SHAPE_FLIGHT_HL_S (0.65 s, about a third of the
+    flight) is the shaped sparks' own.
+
+    So: the mean speed falls at every quarter of the flight, it is still
+    well above the drift at the last frame of it, and — the arithmetic that
+    says the kernel really spans the flight — at the halfway mark the
+    sparks are nowhere near their targets, which a 0.255 s kernel would
+    have put them at."""
+    run = alone(shape_id, 0.8)
+    marks = _flight_marks(run)
+    means = [run.ws_speed[m][1] for m in marks]
+    radii = [run.ws_spread[m] for m in marks]
+    with capsys.disabled():
+        print(f"  {shape_id:8s}: speed "
+              + " -> ".join(f"{v:.2f}" for v in means)
+              + " cell pitches/s over the flight; radius "
+              + " -> ".join(f"{v:.1f}" for v in radii))
+    assert all(b < a for a, b in zip(means, means[1:])), means
+    # still MOVING at the end of the flight, by a long way more than the
+    # hold's own drift — the deceleration has not finished early
+    assert means[-1] > 10 * FX.WORD_SHAPE_DRIFT, means[-1]
+    # ... and the sparks are still crossing the panel at the halfway mark:
+    # under this effect's own 0.255 s kernel they would be at 98% of their
+    # targets by here (0.5 ** (1.0 / 0.255) is 6%) instead of about 75%
+    half = radii[1] / max(radii[-1], 1e-9)
+    assert 0.6 <= half <= 0.85, (
+        f"{shape_id}: the sparks were {half:.0%} of the way out at the "
+        f"flight's halfway mark — the deceleration is not spanning the "
+        f"flight")
+
+
+@pytest.mark.parametrize("shape_id", SHAPES)
+def test_no_shaped_spark_is_ever_exactly_stopped_during_the_hold(
+        shape_id, capsys):
+    """"decelerating to almost a stop, but not quite a stop. The blobs
+    should always be slightly drifting."
+
+    W4.3's hang damped the arrived sparks to a dead stop in three frames (a
+    0.05 s velocity half-life). Now a spark keeps WORD_SHAPE_DRIFT_KEEP
+    (4%) of the speed it arrived with and then rides a mean-reverting
+    random walk whose stationary spread is WORD_SHAPE_DRIFT, so its speed
+    is never exactly zero — measured on the SLOWEST spark of every frame of
+    the hold, which is the only honest place to read "always"."""
+    run = alone(shape_id, 0.8)
+    hold = run.ws_speed[run.word_frame:run.hold_end_frame + 1]
+    assert len(hold) > 20, len(hold)
+    slowest = [v[0] for v in hold]
+    means = [v[1] for v in hold]
+    with capsys.disabled():
+        print(f"  {shape_id:8s}: over {len(hold)} frames of the hold the "
+              f"slowest shaped spark runs {min(slowest):.4f}-"
+              f"{max(slowest):.4f} cell pitches/s, the mean "
+              f"{float(np.mean(means)):.3f}")
+    assert min(slowest) > 0.0, (
+        "a shaped spark was exactly stopped during the hold")
+    # and the drift is a BREATH, not a wander: the mean speed sits around
+    # the drift constant rather than carrying the shape off its outline
+    assert float(np.mean(means)) <= 4 * FX.WORD_SHAPE_DRIFT, (
+        float(np.mean(means)), FX.WORD_SHAPE_DRIFT)
+
+
+@pytest.mark.parametrize("shape_id", SHAPES)
+def test_the_release_breaks_the_shape_apart_rather_than_cutting_it(
+        shape_id, capsys):
+    """"at the end, the blobs should lightly break apart and fade out", and
+    "fades too abruptly" answered.
+
+    THE BREAK-APART is read on the COMPLETE POPULATION. WORD_SHAPE_FADE_FRAC
+    is (0.6, 1.0) of the release, so NO spark is gone before 60% of it:
+    the frame just inside that carries the same sparks the hold's end did,
+    and their mean radius there is a TRAVEL rather than a survivorship
+    effect (at the release's end a handful are left and which ones is
+    random, which is why the radius there is printed and not asserted).
+
+    THE FADE is gentler two ways: WORD_SHAPE_FADE_POWER is 1.0 (linear)
+    where W4.3's 1.3 held the brightness up and then dropped it, and the
+    window's floor is 0.6 where W4.3's was 0.45."""
+    run = alone(shape_id, 0.8)
+    rel_end = min(run.release_end_frame, len(run.ws_spread) - 1)
+    full = min(run.hold_end_frame
+               + int(FX.WORD_SHAPE_FADE_FRAC[0] * run.release_s / DT) - 1,
+               rel_end)
+    r0, r1 = run.ws_spread[run.hold_end_frame], run.ws_spread[full]
+    rel_speed = [v[1] for v in run.ws_speed[run.hold_end_frame + 1:full + 1]]
+    hold_speed = [v[1] for v in
+                  run.ws_speed[run.word_frame:run.hold_end_frame + 1]]
+    # the population really is complete up to there
+    alive = run.state[full]["sparks"]
+    with capsys.disabled():
+        print(f"  {shape_id:8s}: the drift grows "
+              f"{float(np.mean(hold_speed)):.3f} -> "
+              f"{float(np.mean(rel_speed)):.3f} cell pitches/s and the "
+              f"sparks' mean radius {r0:.3f} -> {r1:.3f} pitches over the "
+              f"complete-population stretch ({alive} of "
+              f"{run.total_sparks} still lit)")
+    assert alive == run.total_sparks, (
+        f"{alive} of {run.total_sparks} sparks left before "
+        f"{FX.WORD_SHAPE_FADE_FRAC[0]:.0%} of the release — "
+        f"WORD_SHAPE_FADE_FRAC says none may")
+    assert r1 > r0, (
+        f"{shape_id}: the shape did not break apart ({r0:.3f} -> "
+        f"{r1:.3f} cell pitches)")
+    assert float(np.mean(rel_speed)) > 2 * float(np.mean(hold_speed)), (
+        "the release's drift is no bigger than the hold's own")
+
+
+def test_the_fade_is_gentle_and_no_spark_goes_early(capsys):
+    """"It also holds too long and fades too abruptly." The hold is the
+    ROOM's again (the stretch is gone — see
+    test_fireworks_declares_its_own_minimum_form_and_leaves_the_stretch);
+    the fade is this effect's, and these are its two constants:
+
+      * WORD_SHAPE_FADE_FRAC (0.6, 1.0) — every spark's own fade window is
+        between 60% and 100% of the told release, so the FIRST one goes at
+        60% of it and the LAST at its end. Measured on the live count;
+      * WORD_SHAPE_FADE_POWER 1.0 — linear. W4.3's 1.3 is a curve that
+        holds the brightness up and then drops it, which is what "abruptly"
+        is, so this asserts the shape's own light falls at a roughly even
+        rate over the release rather than in a late cliff."""
+    run = alone("heart", 0.8)
+    rel_end = min(run.release_end_frame, len(run.state) - 1)
+    counts = [run.state[i]["sparks"]
+              for i in range(run.hold_end_frame, rel_end + 1)]
+    total = run.total_sparks
+    first_loss = next((i for i, k in enumerate(counts) if k < total), None)
+    assert first_loss is not None, "no spark ever went out"
+    frac = first_loss * DT / run.release_s
+    with capsys.disabled():
+        print(f"  the first spark goes at {frac:.0%} of the release "
+              f"(WORD_SHAPE_FADE_FRAC floor "
+              f"{FX.WORD_SHAPE_FADE_FRAC[0]:.0%}), the last by its end; "
+              f"{total} -> {counts[-1]} sparks")
+    assert frac >= FX.WORD_SHAPE_FADE_FRAC[0] - 2 * DT / run.release_s, frac
+    assert counts[-1] <= 0.1 * total, counts[-1]
+    # THE LIGHT, not the count: the shape's own light over the release
+    # falls without a cliff. The steepest one-frame drop is no more than a
+    # few times the even rate it would fall at if it fell linearly.
+    out, fill = C.cell_sets(word_shapes.get("heart"), panel(), 0.62)
+    band = out & panel().grid
+    light = [float(f.max(axis=2)[band].mean())
+             for f in run.frames[run.hold_end_frame:rel_end + 1]]
+    drops = [a - b for a, b in zip(light, light[1:])]
+    even = max(light[0], 1e-9) / max(len(light) - 1, 1)
+    with capsys.disabled():
+        print(f"  the outline band's own light falls {light[0]:.3f} -> "
+              f"{light[-1]:.3f} over the release; the steepest one-frame "
+              f"drop is {max(drops):.4f} against an even "
+              f"{even:.4f} ({max(drops) / even:.1f}x)")
+    assert max(drops) <= 6.0 * even, (
+        f"the shape's light fell {max(drops) / even:.1f}x the even rate in "
+        f"one frame — that is a cliff, which is what 'fades too abruptly' "
+        f"was about")
 
 
 # ── 5. the clarity bar, on the real mask ──────────────────────────────────
@@ -707,18 +948,23 @@ def test_the_live_show_white_is_recorded_above_the_plans_letter(capsys):
 
 # ── 7. additive: the ordinary show is untouched ───────────────────────────
 
-def test_the_shaped_burst_is_additive_except_the_hush(tmp_path):
+def test_the_shaped_burst_is_additive_except_the_quiet_and_the_dim(
+        tmp_path):
     """tests/test_firework_burst.py's own additive proof, REWRITTEN TO W4.3's
-    RULE. His 2026-11-17 verdict retires W1.2's "the ordinary particles are
-    untouched across the edge" — "no fireworks fire right before, or
-    concurrently" is exactly a statement that they are touched. What holds
-    now:
+    RULE AND THEN TO W5.6's. His 2026-11-17 verdict retired W1.2's "the
+    ordinary particles are untouched across the edge"; his 2026-11-18 one
+    softened what replaced it from a blackout to a dim. What holds now:
 
       * ordinary sparks are SHORTENED, never killed: each one's remaining
         life is capped at its own share of WORD_SHAPE_HUSH_FADE_S, so it
-        fades out rather than blinking out, and nothing else about it moves
-        — it keeps its age, its colour and its motion;
-      * ordinary LAUNCHES are withheld from the edge to the hold's end;
+        fades out rather than blinking out ("so fading out already"), and
+        nothing else about it moves — it keeps its age, its colour and its
+        motion;
+      * ordinary sparks are DIMMED — a brightness on `p_shown` and nothing
+        else, so no position, life, age, colour or velocity of theirs reads
+        it;
+      * ordinary LAUNCHES are withheld in the 0.25 s quiet before the
+        launch, and NOWHERE ELSE;
       * everything else is as additive as it was: the shaped sparks are
         appended after the live ones, flagged, uncapped, and the density cap
         the ordinary show reads is exactly the one it had."""
@@ -743,6 +989,7 @@ def test_the_shaped_burst_is_additive_except_the_hush(tmp_path):
                 pre_life = eff.p_life[:pre_n].copy()
                 pre_grad = eff.p_grad[:pre_n].copy()
                 pre_x = eff.p_x[:pre_n].copy()
+                pre_vx = eff.p_vx[:pre_n].copy()
                 room_before = eff._capacity()
 
                 # a told form that makes the burst launch on the same frame
@@ -780,12 +1027,24 @@ def test_the_shaped_burst_is_additive_except_the_hush(tmp_path):
                 assert not np.array_equal(eff.p_x[:pre_n], pre_x), (
                     "the ordinary particles stopped moving")
                 shaped = eff.p_wfade[:eff.n] > 0.0
-                assert shaped.sum() == 138           # 90 + 60 x 0.8
+                assert shaped.sum() == 92            # 60 + 40 x 0.8
                 assert not shaped[:pre_n].any(), "an old particle was flagged"
                 # uncapped: the shape never occupies max_blobs, so the
                 # ordinary show has exactly the room it had
                 assert (eff.p_nocap[:eff.n][shaped] == 1.0).all()
                 assert eff._capacity() == room_before
+                # W5.6: ON THE EDGE FRAME ITSELF THE DIM IS ZERO, which is
+                # the whole point of ramping it (WORD_SHAPE_DIM_RAMP_S) —
+                # the ordinary show is rendered exactly as it was on the
+                # frame the shape is told, and darkens over the next
+                # quarter-second. That the dim is a brightness and ONLY a
+                # brightness is
+                # test_the_dim_is_a_brightness_and_only_a_brightness.
+                assert eff.word_shape_state()["dim"] == 0.0
+                # ... and the ordinary sparks' own velocities took the
+                # effect's own drag and nothing else
+                assert eff.p_vx[:pre_n] == pytest.approx(pre_vx * (
+                    0.5 ** (DT / max(0.6 - 0.5 * eff.drag, 0.05))), rel=1e-4)
         finally:
             await host.shutdown()
 
@@ -830,7 +1089,9 @@ def _beat_step(virtual, clock, eff, n, i0=0, audio=None):
             virtual.flush(out)
 
 
-HUSH_FORM, HUSH_HOLD = 2.0, 1.2
+# W5.6: the engine's floor for this effect is the 0.25 s quiet plus the
+# 2.0 s flight, and the hold is the room's own again (no stretch)
+HUSH_FORM, HUSH_HOLD = 2.25, 1.2
 HUSH_KEYS = dict(form_s=HUSH_FORM, hold_s=HUSH_HOLD,
                  release_s=1.5 * HUSH_FORM, level=1.0)
 
@@ -843,14 +1104,24 @@ def _told(seq=1, shape="heart", **kw):
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3, 4, 5])
-def test_not_one_ordinary_launch_happens_inside_the_hush(tmp_path, seed):
-    """HIS ASK, MEASURED AT THE CALL: "make sure no fireworks fire right
-    before, or concurrently". From the SEQ edge to the END OF THE HOLD the
-    effect makes NO `_spawn_burst` call of any kind — the spawn rate, the
-    beat bursts and the drop tail's shower all withheld — and launching
-    resumes with the RELEASE, because W1.2's vision ends "the ordinary
-    fireworks carry on around them". Driven with real 120 bpm beats at his
-    scene's busiest binding, across seeds."""
+def test_not_one_ordinary_launch_happens_inside_the_quiet(tmp_path, seed):
+    """HIS TWO ASKS, MEASURED AT THE CALL. W4.3's was "make sure no
+    fireworks fire right before, or concurrently", which withheld every
+    ordinary launch from the SEQ edge to the END OF THE HOLD. W5.6's is "the
+    background doesn't need to be clear of other fireworks ... I think we
+    can give it 80% less pre-fire darkness time", so what is asserted now
+    is BOTH halves of that:
+
+      * inside the WORD_SHAPE_HUSH_S (0.25 s) before the launch there is no
+        `_spawn_burst` call of any kind — the spawn rate, the beat bursts
+        and the drop tail's shower all withheld;
+      * and OUTSIDE it, over the flight and the hold, the ordinary
+        fireworks keep launching — the dim is the only thing happening to
+        them. A test that only counted zeroes would pass just as well on
+        W4.3's blackout, which is the thing he overturned.
+
+    Driven with real 120 bpm beats at his scene's busiest binding, across
+    seeds."""
     async def main():
         host, virtual, cm, clock, eff, calls = await _hush_effect(
             tmp_path, f"hush{seed}")()
@@ -859,18 +1130,35 @@ def test_not_one_ordinary_launch_happens_inside_the_hush(tmp_path, seed):
             _beat_step(virtual, clock, eff, 60)
             assert len(calls) > 0, "nothing was launching to begin with"
             eff.update_config(_told())
+            # the stretch in front of the quiet: the dim is coming in and
+            # the ordinary show is still launching through it
+            launch_at = HUSH_FORM - FX.WORD_SHAPE_FLIGHT_S
+            lead_frames = int(round(
+                (launch_at - FX.WORD_SHAPE_HUSH_S) / DT))
+            assert lead_frames == 0, (
+                "this effect's floored form is exactly the quiet plus the "
+                "flight, so there is no stretch in front of the quiet")
             calls.clear()
-            hush_frames = int(round((HUSH_FORM + HUSH_HOLD) / DT))
-            _beat_step(virtual, clock, eff, hush_frames, 60)
+            quiet_frames = int(round(FX.WORD_SHAPE_HUSH_S / DT))
+            _beat_step(virtual, clock, eff, quiet_frames, 60)
             assert len(calls) == 0, (
-                f"{len(calls)} ordinary launches happened inside the hush")
+                f"{len(calls)} ordinary launches happened inside the quiet")
+            assert eff.word_shape_state()["sparks"] == 0, (
+                "the burst left before the quiet was over")
+            # the LAUNCH frame, and from there the ordinary show carries on
+            calls.clear()
+            _beat_step(virtual, clock, eff, 2, 60 + quiet_frames)
             assert eff.word_shape_state()["sparks"] > 0, (
                 "the shaped burst itself never fired")
-            # ... and the release opens launching again
-            _beat_step(virtual, clock, eff, int(round(1.0 / DT)),
-                       60 + hush_frames)
+            # ... through the whole flight and hold, dimmed but launching
+            _beat_step(virtual, clock, eff,
+                       int(round((FX.WORD_SHAPE_FLIGHT_S + HUSH_HOLD) / DT)),
+                       62 + quiet_frames)
             assert len(calls) > 0, (
-                "the ordinary fireworks never came back on the release")
+                "the ordinary fireworks were still being withheld over the "
+                "flight and the hold — W5.6 dims them, it does not withhold "
+                "them")
+            assert eff.word_shape_state()["dim"] > 0.0
         finally:
             cm.__exit__(None, None, None)
             await host.shutdown()
@@ -878,18 +1166,21 @@ def test_not_one_ordinary_launch_happens_inside_the_hush(tmp_path, seed):
     asyncio.run(main())
 
 
-def test_a_flare_poke_inside_the_hush_is_dropped_not_deferred(tmp_path):
-    """A `burst_rockets` poke landing in the hush spawns NOTHING, and it is
-    not held over to the release either — the pre-drop breath's own swallow
+def test_a_flare_poke_inside_the_quiet_is_dropped_not_deferred(tmp_path):
+    """A `burst_rockets` poke landing in the 0.25 s quiet spawns NOTHING,
+    and it is not held over either — the pre-drop breath's own swallow
     (`_pre_drop_step`). The key is still self-reset, so an identical later
-    write edges again."""
+    write edges again. W5.6 narrows WHERE that applies to the quiet alone:
+    a poke after it lands, dimmed, like any other launch."""
     async def main():
         host, virtual, cm, clock, eff, _calls = await _hush_effect(
             tmp_path, "hushpoke")()
         try:
             _beat_step(virtual, clock, eff, 10, audio=C.QuietAudio)
             eff.update_config(_told())
-            _beat_step(virtual, clock, eff, 6, 10, audio=C.QuietAudio)
+            # 3 frames in: inside the 0.25 s quiet (7 frames at 30 fps)
+            _beat_step(virtual, clock, eff, 3, 10, audio=C.QuietAudio)
+            assert eff.word_shape_state()["hushed"] is True
             before = eff.n
             eff.update_config({"burst_rockets": 6})
             _beat_step(virtual, clock, eff, 2, 16, audio=C.QuietAudio)
@@ -900,16 +1191,18 @@ def test_a_flare_poke_inside_the_hush_is_dropped_not_deferred(tmp_path):
             assert int(eff._config["burst_rockets"]) == 0, (
                 "the key was not self-reset, so an identical later write "
                 "could not edge")
-            # it is DROPPED, not deferred: nothing of it appears later
+            # it is DROPPED, not deferred: nothing of it appears later. The
+            # feed is QuietAudio and his Matrix entry runs spawn_rate 0, so
+            # nothing ordinary launches of its own accord to confuse this
             rest = int(round((HUSH_FORM + HUSH_HOLD) / DT))
-            _beat_step(virtual, clock, eff, rest, 18, audio=C.QuietAudio)
+            _beat_step(virtual, clock, eff, rest, 15, audio=C.QuietAudio)
             shaped = int(np.count_nonzero(eff.p_wfade[:eff.n] > 0.0))
             assert eff.n == shaped, (
                 f"{eff.n - shaped} unshaped particles appeared — a withheld "
                 f"poke was deferred rather than dropped")
-            # ... and a poke AFTER the hold's end lands as it always did
+            # ... and a poke AFTER the quiet lands as it always did
             eff.update_config({"burst_rockets": 6})
-            _beat_step(virtual, clock, eff, 2, 18 + rest, audio=C.QuietAudio)
+            _beat_step(virtual, clock, eff, 2, 15 + rest, audio=C.QuietAudio)
             assert eff.n > shaped, "the flare never came back"
         finally:
             cm.__exit__(None, None, None)
@@ -918,49 +1211,91 @@ def test_a_flare_poke_inside_the_hush_is_dropped_not_deferred(tmp_path):
     asyncio.run(main())
 
 
-def test_the_canvas_is_mostly_dark_when_the_shape_arrives(capsys):
-    """W4.3'S HEADLINE BAR, on his real mask at his scene's busiest binding
-    (`beat_burst` 6 x `burst_size` 14 a beat at Energy 1.0, each spark
-    living 1.9 s into a `max_blobs` of 100 — the clutter his verdict is
-    about), over 20 seeds at 120 bpm: ON THE WORD, ordinary (non-shaped)
-    light covers at most 5% of his real cells at 20/255. The SAME SEED
-    untold is printed beside it — that difference IS the clutter the hush
-    takes away."""
+def test_the_ordinary_show_is_dimmed_not_dark_when_the_shape_arrives(
+        capsys):
+    """W5.6'S HEADLINE BAR, and it is bounded on BOTH SIDES because his
+    second verdict overturns W4.3's: "The background doesn't need to be
+    clear of other fireworks, just they need to be dimmer, so fading out
+    already." W4.3 measured 0.00% of his real cells carrying ordinary light
+    on the word; that is exactly what he does not want.
+
+    So the measure is a RATIO — the ORDINARY light on the panel at the word
+    against the SAME SEED's untold frame — and the bars are: at most
+    DIM_BAR (45%) of it, and MORE THAN ZERO on every seed. Measured on his
+    real mask at his scene's busiest binding (`beat_burst` 6 x `burst_size`
+    14 a beat at Energy 1.0, each spark living 1.9 s into a `max_blobs` of
+    100) over 20 seeds at 120 bpm, with the shaped burst stubbed out so the
+    light being read is only ever the ordinary show's.
+
+    THE BAR IS THE POOLED RATIO and the per-seed worst is PRINTED, not
+    asserted: one frame of one seed compares two shows whose last beat
+    landed differently (the quiet withheld it on one of them), so a single
+    seed's ratio is a noisy estimate of a 0.40 dim rather than a measurement
+    of it. The worst seed reads above the row's letter and
+    `scripts/check_fireworks_word_shape.py` reports it under "ABOVE THE
+    PLAN'S LETTER" rather than moving the bar."""
     real_cells = int(panel().grid.sum())
-    shares, twins, launches = [], [], []
+    lights, twins, shares, launches = [], [], [], []
     for seed in range(1, C.CANVAS_SEEDS + 1):
         kw = dict(energy=1.0, config=C.WORST_CFG,
                   audio_cls=C.Beat120Audio, settle_frames=60,
                   stop_at_hold_end=True, seed=seed)
         run = run_for("heart", no_burst=True, **kw)
         twin = run_for("heart", told=False, **kw)
+        lights.append(C.panel_light(run.frames[run.word_frame], panel()))
+        twins.append(C.panel_light(twin.frames[twin.word_frame], panel()))
         shares.append(run.canvas[run.word_frame] / real_cells)
-        twins.append(twin.canvas[twin.word_frame] / real_cells)
-        launches.append(sum(
-            run.launches[run.edge_frame:run.hold_end_frame + 1]))
+        # `no_burst` stubs the burst out, so the run has no launch FRAME to
+        # read — the launch is where the clock says it is
+        launch_f = run.word_frame - int(round(FX.WORD_SHAPE_FLIGHT_S / DT))
+        quiet_from = max(run.edge_frame,
+                         launch_f - int(round(FX.WORD_SHAPE_HUSH_S / DT)))
+        launches.append(sum(run.launches[quiet_from:launch_f]))
+    ratios = [a / b for a, b in zip(lights, twins)]
+    pooled = sum(lights) / sum(twins)
     with capsys.disabled():
-        print(f"  the canvas on the word over {C.CANVAS_SEEDS} seeds: worst "
-              f"{max(shares):.2%} of {real_cells} real cells, median "
-              f"{float(np.median(shares)):.2%} — against the same seeds "
-              f"untold, worst {max(twins):.2%}, median "
-              f"{float(np.median(twins)):.2%}")
-        print(f"  ordinary launches inside the hush: {max(launches)} at "
+        print(f"  the ordinary light on the word over {C.CANVAS_SEEDS} "
+              f"seeds: POOLED {pooled:.1%} of the untold light "
+              f"(WORD_SHAPE_BACKGROUND_DIM is "
+              f"{FX.WORD_SHAPE_BACKGROUND_DIM:.2f}); per seed worst "
+              f"{max(ratios):.1%}, median {float(np.median(ratios)):.1%}, "
+              f"least {min(ratios):.1%}")
+        print(f"  ... and still a show: {float(np.median(shares)):.1%} of "
+              f"{real_cells} real cells lit at 20/255, median over the "
+              f"seeds")
+        print(f"  ordinary launches inside the "
+              f"{FX.WORD_SHAPE_HUSH_S:.2f} s quiet: {max(launches)} at "
               f"worst")
-    assert max(shares) <= C.CANVAS_BAR, (
-        f"the canvas carries {max(shares):.2%} of his real cells of ordinary "
-        f"light on the word (bar {C.CANVAS_BAR:.0%})")
+    assert pooled <= C.DIM_BAR, (
+        f"the ordinary light on the word is {pooled:.1%} of the untold "
+        f"light pooled over {C.CANVAS_SEEDS} seeds (bar {C.DIM_BAR:.0%})")
+    # DIM, NOT DARK — the half of the bar W4.3 would have failed
+    assert min(ratios) > 0.0, (
+        "the panel went dark rather than dim on at least one seed")
+    assert min(shares) > 0.0, (
+        "not one of his real cells carried ordinary light on the word — "
+        "that is W4.3's dark canvas, which his second verdict retires")
     assert max(launches) == 0, max(launches)
-    # and the untold show really was the cluttered one, or the bar is empty
-    assert min(twins) > 4 * C.CANVAS_BAR, (
-        "the untold show was not busy, so this measures nothing")
+    # and the untold show really was the cluttered one, or this measures
+    # nothing at all
+    assert min(twins) > 0.05, (
+        f"the untold show was not busy ({min(twins):.4f} mean luminance), "
+        f"so this measures nothing")
 
 
 def test_an_ordinary_sparks_remaining_life_is_capped_at_the_edge(tmp_path):
     """What is already in the air is NOT killed — blinking a panel full of
     sparks out in one frame is exactly the jump the plan bars. Each one's
     remaining life is capped at its own share of WORD_SHAPE_HUSH_FADE_S, so
-    they fade out a few at a time, and the panel really is empty by the
-    time the burst leaves."""
+    they fade out a few at a time.
+
+    W5.6 KEEPS THE CAP AND DROPS WHAT IT WAS FOR. W4.3 asserted that by the
+    time the burst left there was not one ordinary spark alive; his second
+    verdict asks for the opposite ("the background doesn't need to be clear
+    of other fireworks, just they need to be dimmer, so fading out
+    already"), and the cap IS the "fading out already" half of that
+    sentence. So what is asserted now is the cap itself, and that the panel
+    the burst leaves into still carries an ordinary show."""
     async def main():
         host, virtual, cm, clock, eff, _calls = await _hush_effect(
             tmp_path, "hushcap")()
@@ -979,12 +1314,19 @@ def test_an_ordinary_sparks_remaining_life_is_capped_at_the_edge(tmp_path):
             left = (eff.p_life[:n] - eff.p_age[:n])[ordinary]
             assert left.size
             assert float(left.max()) <= FX.WORD_SHAPE_HUSH_FADE_S + 1e-5
-            # ... and by the launch the panel is empty of them
+            # ... and by the launch there IS still an ordinary show, dimmed
             launch = int(round((HUSH_FORM - FX.WORD_SHAPE_FLIGHT_S) / DT))
             _beat_step(virtual, clock, eff, launch, 61)
             n = eff.n
-            assert int(np.count_nonzero(eff.p_wfade[:n] <= 0.0)) == 0, (
-                "an ordinary spark was still alive when the burst left")
+            assert int(np.count_nonzero(eff.p_wfade[:n] <= 0.0)) > 0, (
+                "the panel was empty of ordinary sparks when the burst "
+                "left — that is W4.3's dark canvas, which W5.6 retires")
+            # the ones from BEFORE the edge are gone (the cap did its work)
+            # and what is there launched during the dim, at 0.40 brightness
+            st = eff.word_shape_state()
+            assert st["dim"] == pytest.approx(1.0, abs=1e-6)
+            assert st["background"] == pytest.approx(
+                FX.WORD_SHAPE_BACKGROUND_DIM, abs=1e-6)
         finally:
             cm.__exit__(None, None, None)
             await host.shutdown()
@@ -992,11 +1334,89 @@ def test_an_ordinary_sparks_remaining_life_is_capped_at_the_edge(tmp_path):
     asyncio.run(main())
 
 
-def test_a_phase_arriving_during_the_hush_ends_it(tmp_path):
+def test_the_dim_is_a_brightness_and_only_a_brightness(tmp_path):
+    """"just they need to be dimmer" — so the ordinary show is DRAWN
+    darker and nothing else about it changes. Rendered twice from the same
+    seed over the same frames, told and untold, with the shaped burst
+    stubbed out: every ordinary particle's position, age, life, colour and
+    velocity matches frame for frame outside the 0.25 s quiet's own
+    withheld launches, and only the rendered light differs."""
+    async def main():
+        out = {}
+        for tag, told in (("told", True), ("untold", False)):
+            host, virtual, cm, clock, eff, _c = await _hush_effect(
+                tmp_path, f"dimonly{tag}")()
+            try:
+                eff._word_shape_burst = lambda *a, **kw: None
+                # BEATS FIRST to put an ordinary show on the panel, then
+                # QUIET so nothing new launches while the dim is measured:
+                # his Matrix entry runs spawn_rate 0, so a quiet feed
+                # launches nothing at all and the two runs are the SAME
+                # particles. 8 frames is past the dim's own ramp (0.25 s)
+                # and inside the earliest the life cap can kill anything
+                # (0.5 x WORD_SHAPE_HUSH_FADE_S = 0.35 s), so the two
+                # populations are identical and the comparison is exact.
+                _beat_step(virtual, clock, eff, 30)
+                if told:
+                    eff.update_config(_told())
+                _beat_step(virtual, clock, eff, 8, 30, audio=C.QuietAudio)
+                n = eff.n
+                out[tag] = dict(
+                    n=n, x=eff.p_x[:n].copy(), y=eff.p_y[:n].copy(),
+                    vx=eff.p_vx[:n].copy(), age=eff.p_age[:n].copy(),
+                    grad=eff.p_grad[:n].copy(), rev=eff.p_rev[:n].copy(),
+                    bright=eff.p_bright[:n].copy(),
+                    life=eff.p_life[:n].copy(),
+                    shown=eff.p_shown[:n].copy(),
+                    dim=eff.word_shape_state()["dim"])
+            finally:
+                cm.__exit__(None, None, None)
+                await host.shutdown()
+        a, b = out["told"], out["untold"]
+        assert a["n"] == b["n"] and a["n"] > 0, (a["n"], b["n"])
+        # the QUIET withholds nothing here: QuietAudio launches nothing of
+        # its own (his Matrix entry runs spawn_rate 0), so the two
+        # populations are the same particles and the comparison is exact
+        assert a["x"] == pytest.approx(b["x"])
+        assert a["y"] == pytest.approx(b["y"])
+        assert a["vx"] == pytest.approx(b["vx"])
+        assert a["grad"] == pytest.approx(b["grad"])
+        assert a["age"] == pytest.approx(b["age"])
+        # ... AND THE LIGHT IS THIS EFFECT'S OWN ORDINARY ENVELOPE TIMES
+        # THE DIM, exactly. It is NOT the untold frame's light times the
+        # dim, and the reason is worth stating: the W4.3 LIFE CAP (which
+        # W5.6 keeps — it is the "so fading out already" half of his
+        # sentence) shortens `p_life` at the edge, and `frac_t = age/life`
+        # is what the fade envelope reads, so a capped spark is at a
+        # different point of its OWN curve than the untold one beside it.
+        # So the expected brightness is computed from the told effect's own
+        # age/life/bright, with nothing but the dim factor applied on top —
+        # which is the whole claim.
+        assert a["dim"] > 0.9, a["dim"]
+        factor = 1.0 - (1.0 - FX.WORD_SHAPE_BACKGROUND_DIM) * a["dim"]
+        assert (a["rev"] == 0.0).all(), "no reverse envelope here"
+        frac_t = np.clip(a["age"] / a["life"], 0.0, 1.0)
+        fwd = ((1.0 - frac_t) ** 1.4) * np.minimum(
+            a["age"] / FX.FADE_IN_S + 0.3, 1.0)
+        lit = b["shown"] > 0.0
+        assert lit.any(), "nothing was lit, so nothing was dimmed"
+        assert a["shown"][lit] == pytest.approx(
+            (a["bright"] * fwd * factor)[lit], rel=1e-4, abs=1e-6)
+        # and it really is DIMMER than the same spark untold — the dim did
+        # something, and in the right direction
+        assert float(a["shown"][lit].sum()) < float(b["shown"][lit].sum())
+
+    asyncio.run(main())
+
+
+def test_a_phase_arriving_during_the_shape_ends_the_quiet_and_the_dim(
+        tmp_path):
     """P3 A means a shape is never TOLD while a charge, lull or drop is
     armed — but one that ARRIVES on a standing shape owns the panel. The
-    drop payoff and its tail fire exactly as they do today, and the shaped
-    sparks, additive, keep flying or hanging over them."""
+    drop payoff and its tail fire exactly as they do today, AT FULL
+    BRIGHTNESS (W5.6: the dim ends with the quiet, so a drop is never
+    dimmed and neither are a lull's rockets), and the shaped sparks,
+    additive, keep flying or hanging over them."""
     async def main():
         host, virtual, cm, clock, eff, calls = await _hush_effect(
             tmp_path, "hushdrop")()
@@ -1009,14 +1429,20 @@ def test_a_phase_arriving_during_the_hush_ends_it(tmp_path):
                        audio=C.QuietAudio)
             shaped_before = int(np.count_nonzero(eff.p_wfade[:eff.n] > 0.0))
             assert shaped_before > 0
-            assert eff.word_shape_state()["hushed"] is True
+            # the 0.25 s quiet is long over by here; the DIM is what the
+            # phase has to end
+            assert eff.word_shape_state()["hushed"] is False
+            assert eff.word_shape_state()["dim"] > 0.0
             n_before = eff.n
             calls.clear()
             eff.update_config({"phase": "drop", "phase_progress": 1.0})
             _beat_step(virtual, clock, eff, 2, 200, audio=C.QuietAudio)
-            assert eff.word_shape_state()["hushed"] is False, (
-                "a phase arriving must end the hush — the panel is the "
-                "drop's")
+            st = eff.word_shape_state()
+            assert st["hushed"] is False and st["dim"] == 0.0, (
+                "a phase arriving must end the quiet AND the dim — the "
+                "panel is the drop's, at the drop's own brightness")
+            assert st["background"] == pytest.approx(1.0), (
+                "the drop's own payoff was dimmed")
             assert eff.n > n_before, "the drop payoff never burst"
             # the shape is still there, on its own clock
             assert int(np.count_nonzero(eff.p_wfade[:eff.n] > 0.0)) == \
@@ -1073,12 +1499,15 @@ def test_two_words_of_the_same_shape_both_fire_and_neither_snaps(tmp_path):
             eff.update_config(wsk.keys_for("heart", 1, 0.5, 0.8, 0.75, 0.5))
             _step(virtual, clock, eff, 2, 10)
             first = eff.n
-            assert first == 120           # 90 + 60 x 0.5
-            # mid-RELEASE of the first (form + hold + half the release)
-            _step(virtual, clock, eff, int(round((0.5 + 0.8 + 0.37) / DT)), 12)
+            assert first == 80            # 60 + 40 x 0.5
+            # INTO THE RELEASE of the first, past the point where its
+            # own sparks start going out. W5.6's WORD_SHAPE_FADE_FRAC floor
+            # is 0.6, so none of them is gone before 60% of the release —
+            # at W4.3's 0.45 floor half the release was enough
+            _step(virtual, clock, eff, int(round((0.5 + 0.8 + 0.50) / DT)), 12)
             held = eff.p_wfade[:eff.n] > 0.0
             fading = int(held.sum())
-            assert 0 < fading < 120, fading
+            assert 0 < fading < 80, fading
             lit_before = float(eff.p_shown[:eff.n][held].mean())
             # every first-burst spark's time left, sorted: an identity that
             # survives compaction (which moves a dead particle's slot)
@@ -1093,7 +1522,7 @@ def test_two_words_of_the_same_shape_both_fire_and_neither_snaps(tmp_path):
             age = eff.p_age[:eff.n]
             old = held & (age > 0.5)
             new = held & (age <= 0.5)
-            assert int(new.sum()) == 120, "the second word never fired"
+            assert int(new.sum()) == 80, "the second word never fired"
             assert int(old.sum()) > 0, (
                 "the second word took the first's sparks with it")
             # THE FIRST BURST WAS NEVER RE-TIMED AND NEVER CUT SHORT: its
@@ -1118,10 +1547,13 @@ def test_a_clearing_write_mid_shape_takes_nothing_away(tmp_path):
     every spark is already on its own clock. Nothing is killed, nothing is
     re-lit, and the shape finishes its own fade.
 
-    W4.3 adds one thing it DOES take away: THE HUSH. A clearing write says
-    no shape is standing, and holding the panel dark for a shape that will
-    never arrive is worse than doing nothing, so launching resumes at once —
-    while the sparks already in the air go on fading untouched."""
+    W4.3 added one thing it DOES take away: the hold on the ordinary
+    show. A clearing write says no shape is standing, and holding the
+    ordinary fireworks down for a shape that will never arrive is worse
+    than doing nothing — so launching resumes at once and the DIM ends in
+    the same frame (W5.6: the quiet is only the 0.25 s before the launch,
+    so 0.9 s in it is the dim that is still running), while the sparks
+    already in the air go on fading untouched."""
     async def main():
         host, virtual, cm, clock, eff = await _effect(tmp_path, "clear")()
         try:
@@ -1129,12 +1561,16 @@ def test_a_clearing_write_mid_shape_takes_nothing_away(tmp_path):
             eff.update_config(wsk.keys_for("heart", 1, 0.5, 1.2, 0.75, 0.8))
             _step(virtual, clock, eff, int(round((0.5 + 0.4) / DT)), 10)
             held = int(np.count_nonzero(eff.p_wfade[:eff.n] > 0.0))
-            assert held == 138           # 90 + 60 x 0.8
+            assert held == 92            # 60 + 40 x 0.8
             lit_before = int(np.count_nonzero(eff.p_shown[:eff.n] > 0.01))
-            assert eff.word_shape_state()["hushed"] is True
+            st = eff.word_shape_state()
+            assert st["hushed"] is False, "the 0.25 s quiet is long over"
+            assert st["dim"] > 0.0, "the dim should still be running"
             eff.update_config(dict(wsk.NOT_TOLD))
-            assert eff.word_shape_state()["hushed"] is False, (
-                "a clearing write must let the ordinary fireworks back")
+            st = eff.word_shape_state()
+            assert st["hushed"] is False and st["dim"] == 0.0, (
+                "a clearing write must let the ordinary fireworks back, at "
+                "their own brightness")
             _step(virtual, clock, eff, 1, 60)
             assert int(np.count_nonzero(eff.p_wfade[:eff.n] > 0.0)) == held
             lit_after = int(np.count_nonzero(eff.p_shown[:eff.n] > 0.01))
@@ -1161,7 +1597,7 @@ def test_a_form_shorter_than_any_minimum_is_clamped_not_a_divisor(tmp_path):
             eff.update_config(wsk.keys_for("heart", 1, 0.0, 0.8, 0.0, 0.8))
             _step(virtual, clock, eff, 2, 5)
             held = eff.p_wfade[:eff.n] > 0.0
-            assert held.sum() == 138
+            assert held.sum() == 92
             assert np.isfinite(eff.p_vx[:eff.n]).all()
             assert np.isfinite(eff.p_vy[:eff.n]).all()
             # it still flies rather than teleporting: after the clamped
@@ -1199,7 +1635,7 @@ def test_a_stale_persisted_seq_never_fires_on_a_fresh_instance(tmp_path):
             assert int(np.count_nonzero(eff.p_wfade[:eff.n] > 0.0)) == 0
             eff.update_config(wsk.keys_for("heart", 8, 0.5, 0.8, 0.75, 0.8))
             _step(virtual, clock, eff, 2, 7)
-            assert int(np.count_nonzero(eff.p_wfade[:eff.n] > 0.0)) == 138
+            assert int(np.count_nonzero(eff.p_wfade[:eff.n] > 0.0)) == 92
         finally:
             cm.__exit__(None, None, None)
             await host.shutdown()
@@ -1246,18 +1682,28 @@ def test_the_shape_costs_under_a_millisecond_a_frame(capsys):
 
 # ── 10. the wiring ────────────────────────────────────────────────────────
 
-def test_fireworks_declares_its_own_two_second_minimum_form():
-    """W4.3's planner half. The floor is HOW EARLY THE WRITE ARRIVES, which
-    is all the hush needs — the effect stops launching at the SEQ edge and
-    has 1.2 s to empty the panel before the burst leaves. It lives in
-    `fx.device_model`, never as a registered param, because the planner
-    needs it before it has asked any effect anything, and it applies ONLY to
-    a scene showing this effect (the W0.3 review's own point: the lead IS
-    the form, so a global floor would stretch every scene's shape)."""
-    assert device_model.WORD_SHAPE_FORM_MIN_S["fireworks"] == 2.0
-    assert device_model.word_shape_form_min_s(["fireworks"]) == 2.0
+def test_fireworks_declares_its_own_minimum_form_and_leaves_the_stretch():
+    """The planner half, W4.3's floor as W5.6 revises it. The floor is HOW
+    EARLY THE WRITE ARRIVES, and it is exactly what this effect needs in
+    front of the word: `WORD_SHAPE_HUSH_S` (the 0.25 s quiet) plus
+    `WORD_SHAPE_FLIGHT_S` (the 2.0 s flight) = 2.25 s. Asserted as that SUM
+    and not as a literal, so neither half can move without the floor
+    following it. It lives in `fx.device_model`, never as a registered
+    param, because the planner needs it before it has asked any effect
+    anything, and it applies ONLY to a scene showing this effect (the W0.3
+    review's own point: the lead IS the form, so a global floor would
+    stretch every scene's shape).
+
+    AND THE HOLD STRETCH IS GONE (his "It also holds too long"):
+    `fireworks` has left `WORD_SHAPE_HOLD_X`, so the room's own 0.8-2.0 s
+    hold reaches this effect unmultiplied while STAR and the Black Hole
+    keep their 1.5 — he liked those two."""
+    floor = FX.WORD_SHAPE_HUSH_S + FX.WORD_SHAPE_FLIGHT_S
+    assert floor == pytest.approx(2.25)
+    assert device_model.WORD_SHAPE_FORM_MIN_S["fireworks"] == floor
+    assert device_model.word_shape_form_min_s(["fireworks"]) == 2.25
     assert device_model.word_shape_form_min_s(["radial"]) == 0.0
-    assert device_model.word_shape_form_min_s(["radial", "fireworks"]) == 2.0
+    assert device_model.word_shape_form_min_s(["radial", "fireworks"]) == 2.25
     # ... and it is NOT a registered param
     registry = json.loads(
         (REPO / "config" / "effect_params.json").read_text())
@@ -1267,13 +1713,20 @@ def test_fireworks_declares_its_own_two_second_minimum_form():
     from spectra.services.room_controls import (RoomControlState,
                                                 word_shape_timing)
     st = RoomControlState()
-    assert word_shape_timing(1.0, 1000, st, ["fireworks"])[0] == 2.0
-    assert word_shape_timing(0.0, 1000, st, ["fireworks"])[0] == 2.0
+    assert word_shape_timing(1.0, 1000, st, ["fireworks"])[0] == 2.25
+    assert word_shape_timing(0.0, 1000, st, ["fireworks"])[0] == 2.25
     assert word_shape_timing(1.0, 1000, st, ["radial"])[0] == 0.5
-    # A CONSEQUENCE WORTH STATING: the band fires 2.0 s early, so a COLOUR
-    # kind pooled in a Fireworks scene's Words band lands 2.0 s early too —
+    # A CONSEQUENCE WORTH STATING: the band fires 2.25 s early, so a COLOUR
+    # kind pooled in a Fireworks scene's Words band lands 2.25 s early too —
     # exactly as it already does on Fish, the other declared floor.
     assert device_model.word_shape_form_min_s(["fish"]) == 2.0
+    # THE HOLD: back to the room's own, and the other two keep the stretch
+    assert "fireworks" not in device_model.WORD_SHAPE_HOLD_X
+    assert device_model.word_shape_hold_x(["fireworks"]) == 1.0
+    assert device_model.word_shape_hold_x(["radial"]) == 1.5
+    assert device_model.word_shape_hold_x(["blackhole"]) == 1.5
+    assert word_shape_timing(0.5, 0, st, ["fireworks"])[1] == 0.8
+    assert word_shape_timing(0.5, 5000, st, ["fireworks"])[1] == 2.0
 
 
 def test_only_the_matrix_fireworks_is_wired_for_shapes():
@@ -1291,7 +1744,7 @@ def test_the_four_tunables_are_registered_and_sonic_tellable():
         (REPO / "config" / "effect_params.json").read_text())
     params = registry["effects"]["fireworks"]["params"]
     expected = {"word_shape_size": 0.62, "word_shape_outline_share": 0.7,
-                "word_shape_sparks_quiet": 90, "word_shape_sparks_loud": 150}
+                "word_shape_sparks_quiet": 60, "word_shape_sparks_loud": 100}
     for name, default in expected.items():
         meta = params.get(name)
         assert meta is not None, f"{name} is not registered"

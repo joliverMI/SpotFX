@@ -244,24 +244,24 @@ the six told keys, the envelope and the engine contract above all of this.
 NOT and must not be** (there is nowhere to draw a shape on one line), and
 the strip's schema does not carry the keys.
 
-**ITS HOLD IS STRETCHED ×1.5 (row W4.2, his room verdict 2026-11-17).**
-`fireworks` is in `fx.device_model.WORD_SHAPE_HOLD_X`, so the
-`word_shape_hold_s` this effect is TOLD is already 1.2–3.0 s rather than
-0.8–2.0 s — "have it hold 50% longer". Nothing in this module changed: it
-runs whatever hold it is told (`.claude/skills/word-shapes`, THE HOLD
-STRETCH), and the W4.3 block in `fx/effects/fireworks.py` says the same
-("the longer hold is the ROOM's ... nothing here stretches it"), so there
-is exactly ONE stretch in the system and no double-counting.
+**ITS HOLD IS THE ROOM'S OWN AGAIN — 0.8–2.0 s (row W5.6, his SECOND room
+verdict 2026-11-18: "It also holds too long").** Row W4.2 had put
+`fireworks` in `fx.device_model.WORD_SHAPE_HOLD_X` at ×1.5 (1.2–3.0 s);
+W5.6 **took it back out**, leaving `radial` (STAR) and `blackhole` there —
+the two he said "look pretty good, but could last a little longer". Nothing
+in this module ever stretched the hold: it runs whatever it is told
+(`.claude/skills/word-shapes`, THE HOLD STRETCH), so removing the entry is
+the whole change and there is still exactly ONE stretch in the system.
 
-**IT COMPOSES WITH W4.3's FORM FLOOR, AND LENGTHENS THE HUSH WITH IT.** The
-two wave-4 rows are orthogonal in what they set — W4.3 floors the FORM at
-2.0 s, W4.2 multiplies the HOLD — but the HUSH spans both
-(`_ws_hush_until = form + hold`), so no ordinary launch happens for
-**3.2–5.0 s** from the SEQ edge rather than W4.3's own 2.8–4.0 s. Both of
-his asks pull the same way here (a dark canvas AND a longer hold), so that
-is the intended direction; `tests/test_word_shape_contract.py`'s
-`test_the_stretch_composes_with_fireworks_own_form_floor` pins it so a
-later change to either constant has to notice the other.
+**AND THE QUIET NO LONGER SPANS THE HOLD AT ALL** (W5.6). W4.3's hush ran
+from the SEQ edge to the END OF THE HOLD, so the stretched hold lengthened
+the dark canvas with it — 3.2–5.0 s of withheld launches. Now the only
+withholding is `WORD_SHAPE_HUSH_S` (0.25 s) in front of the launch, and the
+hold's length does not change it by a frame.
+`tests/test_word_shape_contract.py`'s
+`test_the_stretch_no_longer_composes_with_fireworks_own_form_floor` pins
+both halves, including that the form floor stays
+`WORD_SHAPE_HUSH_S + WORD_SHAPE_FLIGHT_S`.
 
 **ONE BURST PER TOLD WORD, from the centre.** The SEQ edge (never the id —
 two hearts back to back both fire) arms `_ws_pending` in `config_updated`,
@@ -585,6 +585,227 @@ share of 3.0 s, which is **2.0-3.0× an ordinary burst's** life against
 W1.2's 1.22×. Neither this effect nor this row chose that — it is the
 room's `word_shape_release_ratio` times the planner's floor, and the lever
 is the room's, not the effect's.
+
+## W5.6 — DIM NOT DARK, SLOWER, SOFTER, BACK TO 60/100
+   (2026-11-18, his SECOND room verdict)
+
+His words, verbatim: *"I think we overtuned the fireworks last time. The
+background doesn't need to be clear of other fireworks, just they need to be
+dimmer, so fading out already. I think we can give it 80% less pre-fire
+darkness time. It also holds too long and fades too abruptly. And it's too
+well-defined. Let's turn back the increase in blob count, and at the end,
+the blobs should lightly break apart and fade out. Also, the burst is too
+fast. Slow the burst by 60% so we can see the blobs moving out to the
+outline, and then decelerating to almost a stop, but not quite a stop. The
+blobs should always be slightly drifting."*
+
+**THIS ROW REVISES W4.3 ABOVE RATHER THAN ADDING TO IT.** Read every
+paragraph of that section beside this one: the hush's span, the flight's
+length and the spark counts are all superseded here. **EVERY NUMBER HE GAVE
+IS ONE MODULE CONSTANT, with his own sentence beside it in
+`fx/effects/fireworks.py`**, so the next retune is a number change and not
+a build:
+
+| his words | the constant | was | is |
+|---|---|---|---|
+| "80% less pre-fire darkness time" | `WORD_SHAPE_HUSH_S` | the form's own 1.2 s of lead | **0.25 s** |
+| "just they need to be dimmer" | `WORD_SHAPE_BACKGROUND_DIM`, `WORD_SHAPE_DIM_RAMP_S` | — (launches withheld) | **0.40**, ramped over **0.25 s** |
+| "turn back the increase in blob count" | `word_shape_sparks_quiet` / `_loud` | 90 / 150 | **60 / 100** |
+| "it also holds too long" | `fx.device_model.WORD_SHAPE_HOLD_X["fireworks"]` | 1.5 | **gone** (the room's 0.8–2.0 s) |
+| "slow the burst by 60%" | `WORD_SHAPE_FLIGHT_S`, `WORD_SHAPE_FLIGHT_HL_S` | 0.8 s, the effect's own drag | **2.0 s**, **0.65 s** |
+| "almost a stop, but not quite ... always slightly drifting" | `WORD_SHAPE_DRIFT_KEEP`, `WORD_SHAPE_DRIFT`, `WORD_SHAPE_DRIFT_HL_S` | `WORD_SHAPE_HANG_HL_S` 0.05 s (a dead stop) | **0.04**, **0.03 pitches/s**, **0.5 s** |
+| "lightly break apart and fade out" / "fades too abruptly" | `WORD_SHAPE_BREAK_DRIFT`, `WORD_SHAPE_FADE_POWER`, `WORD_SHAPE_FADE_FRAC` | — , 1.3, (0.45, 1.0) | **0.30 pitches/s**, **1.0**, **(0.6, 1.0)** |
+
+Two more constants moved, and they are **measured corrections rather than
+his asks** — both of them consequences of the slower departure, both
+documented at the constant:
+`WORD_SHAPE_FADE_IN_FRAC` (new: the fade-in is now **0.225 of the flight**,
+which is W4.3's own 0.18 / 0.8, instead of a fixed 0.18 s) and
+`WORD_SHAPE_LAUNCH_PITCH` (**1.0 → 2.0**). See "the two corrections" below.
+
+**"SLOW THE BURST BY 60%" IS READ AS A SPEED, and the other reading is
+stated here so the retune is one constant either way.** ×0.4 of W4.3's 0.8 s
+flight is **2.0 s**; "60% LONGER" would be 1.3 s. 2.0 s was taken because
+his sentence says what he wants to SEE — "so we can see the blobs moving out
+to the outline, and then decelerating" — and a burst that covers the same
+distance in two and a half times the time is 60% slower in the only sense a
+viewer has. If he wants 1.3 s, that is `WORD_SHAPE_FLIGHT_S` and
+`WORD_SHAPE_FORM_MIN_S["fireworks"]` (which must stay hush + flight).
+
+**THE SECOND HALF OF THE SLOW BURST IS A SECOND CONSTANT, and without it the
+longer flight would have made the problem worse.** The effect's own drag
+gives a velocity half-life of `0.6 − 0.5 × drag` = **0.255 s** at his `drag`
+0.69. Over a 2 s flight that kernel saturates in about 0.4 s: the solve
+would still land every spark on the word, but it would get there in the
+FIRST FIFTH of the flight and sit on the outline for the other four — the
+opposite of "moving out to the outline, and then decelerating".
+`WORD_SHAPE_FLIGHT_HL_S` (0.65 s, about a third of the flight) is the shaped
+sparks' own, used BY THE SOLVE AND BY THE INTEGRATION ALIKE (a mismatch
+between the two would throw every arrival off its target, which is why the
+arrival test is the proof that they agree). Measured mean speed over the
+flight, in real cell pitches a second:
+
+| shape | 25% | 50% | 75% | the flight's last frame | on the word (after the 4% keep) |
+|---|---|---|---|---|---|
+| heart | 5.94 | 3.49 | 2.05 | 1.24 | 0.048 |
+| star | 5.27 | 3.09 | 1.81 | 1.10 | 0.043 |
+| diamond | 4.58 | 2.69 | 1.58 | 0.96 | 0.038 |
+
+— falling at every quarter, and at the halfway mark the sparks are about
+three quarters of the way out (a 0.255 s kernel would have had them at 98%).
+
+**"ALMOST A STOP, NEVER QUITE" IS A MEAN-REVERTING WALK, AND THE
+MEAN-REVERSION IS THE PART THAT MATTERS.** `_word_shape_drift` (new) does
+two things to the flagged sparks on and after the arrival frame: it takes
+`WORD_SHAPE_DRIFT_KEEP` (4%) of the speed each one arrived with — a fraction
+of its OWN speed, so a far target drifts a little faster than a near one —
+and then every frame it runs `v → (v − mean)·ou + mean + σ·z`, with `ou`
+from `WORD_SHAPE_DRIFT_HL_S` and σ set so the stationary spread is exactly
+`WORD_SHAPE_DRIFT`. **Plain additive jitter would have been wrong**: that is
+a diffusing walk whose speed grows as √t and whose displacement grows faster
+still, so a 3 s hold would have blurred the outline off its own line.
+Measured over the hold, the SLOWEST spark of every frame: **0.000–0.002
+cell pitches/s, never exactly zero on any frame**, mean 0.035–0.040 — and
+the shape at mid-hold still covers 70.8–97.5% of the outline cells (the
+clarity table below), so the breath does not cost the outline.
+
+**WHAT 0.03 CELL PITCHES A SECOND ACTUALLY BUYS, stated rather than
+implied**: about a tenth of a cell of travel over a 0.8–2.0 s hold. It is a
+breath at the cell-pitch scale, which is what "slightly drifting" asks for,
+and it is NOT visible motion. If he wants more, `WORD_SHAPE_DRIFT` is the
+one number; `WORD_SHAPE_DRIFT_HL_S` is the one that would let the shape
+wander off its outline, so raise that one last.
+
+**THE BREAK-APART IS SMALL, AND THE MEASURE IS SURVIVORSHIP-FREE.** Over the
+release the drift grows to `WORD_SHAPE_BREAK_DRIFT` (0.30 pitches/s) of
+common OUTWARD push, with the walk's own spread growing to half of that on
+top, ramped linearly from the hold's end so there is no step. Ramped, the
+outward travel is about half of `BREAK_DRIFT × release` — half a cell over a
+3.4 s release, which is "lightly". **Measured on the COMPLETE POPULATION**:
+`WORD_SHAPE_FADE_FRAC` (0.6, 1.0) guarantees no spark is gone before 60% of
+the release, so the frame just inside that holds exactly the sparks the
+hold's end held, and the mean radius there is a TRAVEL rather than a
+survivorship effect — 8.288 → 8.381 pitches (heart 0.8), 7.300 → 7.389
+(star), 6.711 → 6.815 (diamond), with the mean speed 0.040 → 0.131. **At the
+release's END the radius reads anywhere from 6.6 to 11.1 pitches and that
+number is noise, not a measurement**: a handful of sparks are left by then
+and which ones is random, which is why the bar is read where the population
+is whole and the last-lit radius is printed with the caveat beside it.
+
+**THE FADE IS GENTLER TWO WAYS** ("fades too abruptly"):
+`WORD_SHAPE_FADE_POWER` 1.3 → **1.0** (linear; 1.3 is a curve that holds the
+brightness up and then drops it, which is the abrupt end he saw) and
+`WORD_SHAPE_FADE_FRAC` (0.45, 1.0) → **(0.6, 1.0)** (the first spark goes at
+60% of the release, the last exactly at its end). Measured: the outline
+band's own light falls over the release with a steepest one-frame drop of
+**2.6×** the even rate (bar 6×), and the first spark goes at **60%** of the
+release.
+
+### What W5.6 measured, and the bar it had to re-read
+
+`scripts/check_fireworks_word_shape.py` prints all of it.
+
+- **THE DIM BAR REPLACES W4.3's DARK CANVAS**, because that bar is exactly
+  what his verdict overturns. W4.3 measured 0.00% of his 976 real cells
+  carrying ordinary light on the word; the measure now is the ORDINARY LIGHT
+  on the panel at the word against **the same seed's untold frame**, bounded
+  on BOTH sides. Over 20 seeds at Energy 1.0, 120 bpm, his scene at its
+  busiest: **39.7% of the untold light POOLED** (against
+  `WORD_SHAPE_BACKGROUND_DIM` 0.40 — the dim is exactly what it says),
+  per seed median 40.7%, least 25.1%. The panel is still a show: **57.8% of
+  his real cells lit at 20/255** against the same seeds untold's 80.3%.
+  **ZERO** ordinary launches inside the 0.25 s quiet, every seed.
+  Light is the panel's MEAN LUMINANCE over his real cells, not a cell count:
+  a share of cells above a threshold cannot see a cell that merely went
+  dimmer, which is the whole of what this row does to the background.
+- **THE ONE NUMBER ABOVE THE ROW'S LETTER, reported rather than moved.** The
+  row's bar is "≤ 45% of the same-seed untold frame's". **The WORST single
+  seed reads 53.8%.** The bar is asserted on the POOLED ratio and the worst
+  seed is printed under the check script's "ABOVE THE PLAN'S LETTER" block
+  and in the test's own output. Why the pooled number is the one that
+  measures the claim: one frame of one seed compares two shows whose last
+  beat landed differently — the 0.25 s quiet withholds a beat's launches on
+  some seeds and not others — so a single seed's ratio is a noisy estimate
+  of a 0.40 dim rather than a measurement of it (per-seed range 25.1–53.8%,
+  pooled 39.7%). **If he wants the worst frame under 45% the lever is
+  `WORD_SHAPE_BACKGROUND_DIM` at about 0.33**, and the trade is that the
+  background goes dimmer than he asked for on the median frame.
+- **CLARITY**, the shape alone on his real mask at SIZE 0.62 (bar: ≥70%
+  coverage, ≤0.70 fill): **80.4–98.3% on the word** and **70.8–97.5% at
+  mid-hold** (fill 0.28–0.48), with 68 sparks at Energy 0.2 and 92 at 0.8.
+  Lower than W4.3's 96.4–100% — 60/100 sparks instead of 90/150 is exactly
+  his "it's too well-defined", and the bar is still clear everywhere.
+- **CONTRAST** (bar 3.0): the outline band's mean luminance is **9.07–13.19×
+  the rest of the panel's** on the word and 9.93–13.61× at mid-hold, with
+  49.4–83.2% of the band above 128/255. W4.3 read 6.0–11.5× with half again
+  as many sparks — the contrast went UP because the W5.7 flip moved the band
+  onto a different set of real cells and the fill is dimmer relative to it.
+- **ARRIVAL: still 0.000 cell pitches**, every spark, all three shapes, at
+  Energy 0.2, 0.8 and the floor, and at a told form longer than the floor —
+  the proof that the solve and the integration read the same half-life.
+- **WHITE**: the shape alone lights **no white cell at all** at any Energy,
+  all three shapes — after the two corrections below. Over a live show the
+  told worst is **1.40–1.45% at Energy 0.8 and 0.52% at Energy 1.0** against
+  the room alone's **1.46%** over the same frames, so every row sits at or
+  below the room's own number (W4.3 read 0.97–2.17%). His 2026-11-17 ruling
+  stands and no longer has anything to cover.
+- **"NOTHING JUMPS"**, the four stretches against the effect's own untold
+  worst over the same span: **0.0169–0.0451 told against an own-worst of
+  0.0736**, every stretch under it. The first stretch is now "the dim comes
+  in" rather than "the hush empties".
+- **COST**: +0.10 ms p50 a frame with the shape holding (0.48 → 0.57 ms,
+  bar 1.0). The drift adds one `standard_normal` draw over 60–100 sparks a
+  frame and only while a shape is hanging.
+- **THE ADDITIVE PROOF IS REWRITTEN AGAIN.** W1.2's rule was "untouched
+  across the edge"; W4.3's was "shortened, never killed; launches withheld
+  from the edge to the hold's end". W5.6's is **"dimmed, never killed;
+  launches withheld only in the 0.25 s quiet"** —
+  `test_the_shaped_burst_is_additive_except_the_quiet_and_the_dim`. The dim
+  is a brightness and ONLY a brightness: `test_the_dim_is_a_brightness_and_
+  only_a_brightness` renders the same seed told and untold and asserts every
+  ordinary particle's position, velocity, age and colour matches frame for
+  frame, with the light being this effect's own forward envelope times the
+  dim factor. **And ON THE EDGE FRAME ITSELF the dim is 0.0** — the ramp is
+  why — so the frame the shape is told renders exactly as it would untold.
+
+### The two corrections the slower burst forced
+
+Neither is one of his numbers; both are measured consequences of a departure
+at 0.4× the speed, and both are documented at the constant.
+
+- **`WORD_SHAPE_FADE_IN_FRAC` (new, 0.225 of the flight) replaces a fixed
+  `WORD_SHAPE_FADE_IN_S` of 0.18 s.** W4.3's own reasoning for the fade-in
+  is "by the time they are full bright they have flown over half of the way
+  out, so the burst GROWS out of the centre instead of flashing in it" —
+  which is only true at ONE flight length. At 0.18 s into a 2 s flight the
+  sparks are 20% of the way out instead of 44%, and 100 of them still
+  stacked near their origins **saturated two cells to white 0.1 s after the
+  launch** (4.88–6.12% of the lit cells at Energy 1.0, against W4.3's "no
+  white cell at all at any Energy"). 0.225 is exactly 0.18 / 0.8, so the
+  geometry is what W4.3 measured, and a later flight change carries it.
+- **`WORD_SHAPE_LAUNCH_PITCH` 1.0 → 2.0.** With the fade-in fixed, ONE cell
+  of the star's 73 lit ones still went white 0.27 s after the launch at
+  Energy 1.0 (1.37%). The trail is a channel-wise MAX over TIME, so a slow
+  spark's track lingers in a cell far longer than a fast one's, and the
+  scatter that was enough at 17 pitches/s is not at 7. At 2.0 all three
+  shapes light no white cell at any Energy again, and **the coverage and
+  fill ratio do not move at all** between 1.0, 1.5 and 2.0 (96.4%/0.29
+  heart, 97.2%/0.47 star, 100%/0.47 diamond at Energy 1.0) — the scatter
+  lives in the burst's first few frames and nothing about where the sparks
+  LAND reads it.
+
+### One length consequence of this row, stated rather than discovered
+
+The form floor went 2.0 → **2.25 s** (`WORD_SHAPE_HUSH_S` + 
+`WORD_SHAPE_FLIGHT_S`), and the room's release is **1.5 × the FORM**, so the
+release went 3.0 → **3.375 s**. With the hold back to the room's 0.8–2.0 s a
+shaped spark now lives the flight (2.0 s) + the hold + its own share of
+3.375 s — **3.0–4.5× an ordinary burst's** life, measured, against W4.3's
+2.0–3.0×. Neither this effect nor this row chose that: it is
+`word_shape_release_ratio` times the planner's floor, and **the lever for
+the whole length is the room's, not the effect's**. He asked for the HOLD to
+be shorter and it is; if the whole thing is still too long, that setting is
+where it lives.
 
 **Proofs:** `tests/test_fireworks_word_shape.py` (the pinned-module
 byte-identity over 320 busy and 320 quiet frames, the real `ResponseEngine`

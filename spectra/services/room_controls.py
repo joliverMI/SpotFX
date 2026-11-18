@@ -1879,10 +1879,11 @@ def word_shape_timing(energy: float, phrase_ms: float,
       hold     the sung phrase's own length, clamped to
                [`word_shape_hold_min_s`, `word_shape_hold_max_s`], then
                MULTIPLIED by the per-effect hold stretch
-               (fx.device_model.word_shape_hold_x — STAR, the Black Hole
-               and Fireworks hold x1.5 since his room verdict of
-               2026-11-17, so their hold runs 1.2-3.0 s where every other
-               effect's runs 0.8-2.0 s). The stretch is applied AFTER the
+               (fx.device_model.word_shape_hold_x — STAR and the Black
+               Hole hold x1.5 since his room verdict of 2026-11-17, so
+               their hold runs 1.2-3.0 s where every other effect's runs
+               0.8-2.0 s. Fireworks was a third until row W5.6, his second
+               verdict: "It also holds too long"). The stretch is applied AFTER the
                clamp on purpose: the maximum is meant to stretch with it,
                or his "half again as long" would be silently cut back to
                2.0 s on exactly the long phrases he was watching. With no

@@ -305,12 +305,15 @@ effect_types)`:
 | `word_shape_hold_min_s` / `_hold_max_s` | 0.8 / 2.0 | the hold is the sung phrase's own length, clamped |
 | `word_shape_release_ratio` | 1.5 | the release is this × the form |
 
-**THE HOLD STRETCH (row W4.2, his room verdict 2026-11-17).** The clamped
-hold is then MULTIPLIED by `fx.device_model.word_shape_hold_x(effect_types)`
-— `WORD_SHAPE_HOLD_X = {"radial": 1.5, "blackhole": 1.5, "fireworks":
-1.5}`, from his own words ("star and black hole look pretty good, but could
-last a little longer" / Fireworks "have it hold 50% longer"). So those three
-hold **1.2–3.0 s**; Sauron, Orbits and Fish still hold 0.8–2.0 s. Four
+**THE HOLD STRETCH (row W4.2, his room verdict 2026-11-17; row W5.6 took
+Fireworks back out of it, 2026-11-18).** The clamped hold is then MULTIPLIED
+by `fx.device_model.word_shape_hold_x(effect_types)` —
+`WORD_SHAPE_HOLD_X = {"radial": 1.5, "blackhole": 1.5}`, from his own words
+("star and black hole look pretty good, but could last a little longer").
+**Fireworks was the third entry and the 1.5 was originally ITS number**
+("have it hold 50% longer"); his second room verdict — "It also holds too
+long and fades too abruptly" — removed it, so STAR and the Black Hole hold
+**1.2–3.0 s** and Sauron, Orbits, Fish and Fireworks hold 0.8–2.0 s. Four
 things to know, every one of them a place to go wrong:
 
 - **AFTER the clamp, on purpose**, so the MAXIMUM stretches too. Clamping
@@ -331,7 +334,9 @@ things to know, every one of them a place to go wrong:
 
 It is a code constant, **not Sonic-tellable**, for the form floor's own
 reason; the two hold settings' Sonic text and the `word-shapes` Help topic
-both say "STAR, Black Hole and Fireworks hold half again as long as this."
+say "STAR and the Black Hole hold half again as long as this" (they named
+Fireworks too until W5.6 took its entry out — check both if the dict moves
+again).
 A live knob would be a per-effect registry param read off
 `conductor.virtuals[...].param_baseline` (the `pulse_effect_ms` pattern),
 not this constant. The preview (`scene_response.preview_word_shape`) and
@@ -341,8 +346,9 @@ the stretch never reaches it.
 
 The form is floored at `fx.device_model.word_shape_form_min_s` — a
 per-effect minimum (`WORD_SHAPE_FORM_MIN_S`; **two are declared**, the
-Fish's 2.0 s since row W1.4 and FIREWORKS' 2.0 s since row W4.3 — STAR,
-Sauron, Orbits and the Black Hole take the approved Energy-paced form).
+Fish's 2.0 s since row W1.4 and FIREWORKS' **2.25 s** since row W5.6
+(2.0 s as W4.3 shipped it) — STAR, Sauron, Orbits and the Black Hole take
+the approved Energy-paced form).
 **That accessor is the one thing easiest to get wrong here, and the
 W0.3 review caught exactly this:**
 
@@ -366,8 +372,9 @@ W0.3 review caught exactly this:**
 **A FLOOR IS ALSO A LEAD ON EVERYTHING ELSE IN THAT BAND.** Because the
 form is the lead and `on_word_shape` fires the band ATOMICALLY, a colour
 kind pooled in a Words band on a floored scene lands that early too — 2.0 s
-early on a Fish or a Fireworks scene. Stated here rather than discovered:
-it is a property of the band, not of the effect that declared the floor.
+early on a Fish scene, 2.25 s on a Fireworks one. Stated here rather than
+discovered: it is a property of the band, not of the effect that declared
+the floor.
 
 **THE LEAD.** The form IS the lead: `fire_at = word − form` (LEAD family,
 positive = earlier — `docs/SPECTRA_TIMING_CONVENTIONS.md` has both rows
@@ -665,7 +672,7 @@ quiet-Energy binding spawns 0.8 blobs/s for a 176-cell outline, and
 the same room. `.claude/skills/blackhole-effect/SKILL.md`'s own "WORD
 SHAPES" section is the full record.
 
-### Fireworks / `fireworks` (row W1.2, 2026-11-16) — the shaped payoff burst
+### Fireworks / `fireworks` (row W1.2, 2026-11-16; W4.3, 2026-11-17; W5.6, 2026-11-18) — the shaped payoff burst
 
 `.claude/skills/fireworks-effect/SKILL.md`'s "WORD SHAPES" section;
 `fx/effects/fireworks.py`'s WORD SHAPES block comment; evidence
@@ -673,19 +680,25 @@ SHAPES" section is the full record.
 mask, and since W4.3 also graded by luminance), proofs
 `tests/test_fireworks_word_shape.py`. Four registered params
 (`word_shape_size` 0.62, `word_shape_outline_share` 0.70,
-`word_shape_sparks_quiet` **90**, `word_shape_sparks_loud` **150** — W1.2
-shipped 60/100; W4.3 raised them); **`WORD_SHAPE_FORM_MIN_S["fireworks"] =
-2.0` since W4.3**. **`fireworks1d` is deliberately NOT a member** — there
-is nowhere to draw a shape on one line.
+`word_shape_sparks_quiet` **60**, `word_shape_sparks_loud` **100** — W1.2
+shipped 60/100, W4.3 raised them to 90/150 and **W5.6 put them back**);
+**`WORD_SHAPE_FORM_MIN_S["fireworks"] = 2.25` since W5.6** (2.0 under
+W4.3), which is exactly its own `WORD_SHAPE_HUSH_S + WORD_SHAPE_FLIGHT_S`.
+**`fireworks1d` is deliberately NOT a member** — there is nowhere to draw a
+shape on one line.
 
 ONE big burst from the centre per told word, 60 sparks at Energy 0 to 100 at
 Energy 1, 70% of them aimed along the outline BY ARC LENGTH with half a cell
 of jitter and the rest inside at a random depth, nothing on a lattice.
-**Every spark's launch velocity is solved from the effect's own drag** (the
-draw's own geometric sum, computed per burst for the frame rate it
-integrates at) so it is standing on its target the frame the form ends —
-measured arrival error 0.000 cell pitches. A separate damper then holds them
-where they arrived (the hang), each twinkling off its own position, and they
+**Every spark's launch velocity is solved from the drag it will be
+integrated with** (the draw's own geometric sum, computed per burst for the
+frame rate it integrates at) so it is standing on its target the frame the
+form ends — measured arrival error 0.000 cell pitches. **Since W5.6 that
+drag is the shaped sparks' OWN `WORD_SHAPE_FLIGHT_HL_S` (0.65 s), not the
+effect's `0.6 − 0.5 × drag`** — over the 2.0 s flight the effect's own
+kernel would land every spark in the first fifth of it. A separate damper
+then holds them roughly where they arrived — **a DRIFT since W5.6, never a
+dead stop** — each twinkling off its own position, and they
 fade spark by spark over the release on their own `p_life`: about 1.93x an
 ordinary burst's life at the effect's DEFAULT `burst_life`, which is where
 the plan's "about twice" comes from, and 1.22x against his own entry's tuned
@@ -767,6 +780,68 @@ that effect:
   it on the panel's own MEAN LIGHT instead, against the effect's own untold
   worst over the same span, and prints W1.2's form of the number beside it
   rather than dropping it.
+
+#### W5.6 (2026-11-18) — dim not dark, slower, softer, back to 60/100
+
+His second room verdict, verbatim: *"I think we overtuned the fireworks last
+time. The background doesn't need to be clear of other fireworks, just they
+need to be dimmer, so fading out already. I think we can give it 80% less
+pre-fire darkness time. It also holds too long and fades too abruptly. And
+it's too well-defined. Let's turn back the increase in blob count, and at
+the end, the blobs should lightly break apart and fade out. Also, the burst
+is too fast. Slow the burst by 60% so we can see the blobs moving out to the
+outline, and then decelerating to almost a stop, but not quite a stop. The
+blobs should always be slightly drifting."*
+
+`.claude/skills/fireworks-effect/SKILL.md`'s W5.6 section is the full
+record — the seven constants with his sentence beside each, the two measured
+corrections the slower burst forced, and every bar. What belongs HERE,
+because it is about this contract rather than that effect:
+
+- **THE FLOOR MOVED AND IT IS NOW A SUM, not a literal.**
+  `WORD_SHAPE_FORM_MIN_S["fireworks"]` = `WORD_SHAPE_HUSH_S` (0.25 s) +
+  `WORD_SHAPE_FLIGHT_S` (2.0 s) = **2.25 s**. W4.3's 2.0 was a 1.2 s quiet
+  in front of a 0.8 s flight; the two halves swapped sizes and the sum went
+  up a quarter of a second. `tests/test_word_shape_contract.py` asserts the
+  floor AS that sum, so neither half can move without the floor following.
+- **So a colour kind pooled in a Fireworks Words band now lands 2.25 s
+  early**, not 2.0. Same mechanism, one more quarter-second.
+- **THE HOLD STRETCH LOST ITS THIRD ENTRY** — see THE HOLD STRETCH above.
+  Fireworks is back on the room's own 0.8–2.0 s; STAR and the Black Hole,
+  which he liked, keep ×1.5. The effect never stretched the hold itself, so
+  removing the dict entry was the whole change.
+- **THE RELEASE FOLLOWS THE FORM, so the floor moving made it longer again**
+  — 1.5 × 2.25 = **3.375 s**, where W4.3 made it 3.0. His ask was for the
+  HOLD to be shorter and it is; if the whole envelope is still too long, the
+  lever is `word_shape_release_ratio`, which is his. Worth saying plainly
+  because the two pull in opposite directions and only one of them is this
+  row's.
+- **"A DARK CANVAS" AS A BAR DID NOT SURVIVE HIS OWN SECOND LOOK**, and
+  that is a lesson for any row tempted to measure a shape's legibility by
+  taking the room away. W4.3's headline was 0.00% of his real cells
+  carrying ordinary light on the word, measured over 20 seeds and green on
+  every one — and his verdict on it was that it had been overtuned. The bar
+  that replaced it is a RATIO against the same seed's untold frame, bounded
+  on BOTH sides (≤ 45% of it, and > 0), because "dimmer" has a floor as
+  well as a ceiling and a one-sided bar cannot see the difference. **Any
+  wave-1-to-4 bar that reads "the room was taken away" should expect the
+  same question.**
+- **A PER-SEED WORST IS NOT A MEASUREMENT OF A MULTIPLIER.** The dim bar's
+  worst single seed reads 53.8% against the row's 45% letter while the
+  POOLED ratio is 39.7% against a 0.40 dim — because one frame of one seed
+  compares two shows whose last beat landed differently. The bar is
+  asserted pooled and the worst seed is REPORTED, never moved; the lever if
+  he wants the worst frame under the letter is `WORD_SHAPE_BACKGROUND_DIM`
+  at about 0.33, and the cost is a dimmer background than he asked for on
+  the median frame.
+- **A SURVIVORSHIP TRAP WORTH KNOWING FOR ANY "IT BREAKS APART" BAR.**
+  Measuring the sparks' mean radius at the END of the release reads the
+  handful that happen to still be lit, and that number swung 6.6–11.1 cell
+  pitches across shapes — it looked like a collapse on one row and a
+  doubling on another. `WORD_SHAPE_FADE_FRAC`'s floor (0.6) guarantees the
+  population is COMPLETE up to 60% of the release, so the bar is read
+  there: same sparks, so the radius change is a travel. The end-of-release
+  number is still printed, with the caveat beside it.
 
 ### Orbits V2 / `orbits` (row W1.3, 2026-11-16; row W4.4, 2026-11-17) — few trace it, many become it, FAST
 
@@ -899,9 +974,10 @@ there, circle it for the phrase and peel away. `.claude/skills/fish-effect`
 because it is about this contract rather than that effect:
 
 - **Fish was the FIRST effect with a MINIMUM FORM, and since W4.3 it is
-  one of two** (Fireworks declares 2.0 s as well, for a different reason —
-  emptying its panel rather than swimming onto a line; STAR, Sauron, Orbits
-  and the Black Hole all take the approved Energy-paced one). Its 2.0 s is
+  one of two** (Fireworks declares 2.25 s since W5.6 — 2.0 s under W4.3 —
+  for a different reason: a quiet and a slow flight in front of the word
+  rather than swimming onto a line; STAR, Sauron, Orbits and the Black Hole
+  all take the approved Energy-paced one). Its 2.0 s is
   why W0.3's "both floors ask the SHOWING scene's own effects" rule exists
   at all: a procession has to SWIM onto the outline, and the lead IS the
   form in practice, so asking globally would stretch every other scene's

@@ -123,9 +123,14 @@ KEEPER_HOLD_S = 0.6    # held keepers with no drop arm by now burst on their
 # frame for frame.
 #
 # W4.3 — A DARK CANVAS, AND HALF AGAIN AS MANY SPARKS (wave 4, his room
-# verdict 2026-11-17, verbatim: "Fireworks is too cluttered to visually
-# identiy the shape. Let's have it plan to make sure no fireworks fire
-# right before, or concurrently, so that it is on a mostly dark canvass.
+# verdict 2026-11-17). **W5.6 SUPERSEDES THREE OF ITS NUMBERS** — the
+# hush's span (the whole form + hold -> a 0.25 s quiet before the launch),
+# the flight (0.8 -> 2.0 s) and the spark counts (90/150 -> back to 60/100)
+# — and turns the withholding into a DIM; read the W5.6 section below
+# beside every paragraph of this one. Verbatim: "Fireworks is too
+# cluttered to visually identiy the shape. Let's have it plan to make sure
+# no fireworks fire right before, or concurrently, so that it is on a
+# mostly dark canvass.
 # Also, increase the amount of blobs by 50% so it is more clearly visible,
 # and have it hold 50% longer." The longer hold is the ROOM's, told as
 # `word_shape_hold_s` — row W4.2 — and nothing here stretches it.)
@@ -158,7 +163,62 @@ KEEPER_HOLD_S = 0.6    # held keepers with no drop arm by now burst on their
 # charge, lull or drop is armed, but one that lands on a standing shape
 # owns the panel: the drop payoff and its tail fire as they do today and
 # the shaped sparks, additive, keep flying or hanging over them.
-WORD_SHAPE_FADE_POWER = 1.3      # a shaped spark's own fade curve
+#
+# W5.6 — DIM, NOT DARK; SLOWER; SOFTER; BACK TO 60/100 (wave 5, his SECOND
+# room verdict 2026-11-18, verbatim: "I think we overtuned the fireworks
+# last time. The background doesn't need to be clear of other fireworks,
+# just they need to be dimmer, so fading out already. I think we can give
+# it 80% less pre-fire darkness time. It also holds too long and fades too
+# abruptly. And it's too well-defined. Let's turn back the increase in blob
+# count, and at the end, the blobs should lightly break apart and fade out.
+# Also, the burst is too fast. Slow the burst by 60% so we can see the
+# blobs moving out to the outline, and then decelerating to almost a stop,
+# but not quite a stop. The blobs should always be slightly drifting.")
+# Every number he gave is ONE CONSTANT here, so the next retune is a number
+# change — the seven of them are, in his own order:
+#
+#   1. WORD_SHAPE_HUSH_S (0.25 s, was the form's own 1.2 s of lead) — the
+#      80% less pre-fire darkness. The hush is now a QUIET IMMEDIATELY
+#      BEFORE THE LAUNCH, not the whole stretch to the hold's end.
+#   2. WORD_SHAPE_BACKGROUND_DIM (0.40) + WORD_SHAPE_DIM_RAMP_S — "dimmer,
+#      so fading out already" instead of withheld. W4.3's HUSH withheld
+#      every ordinary launch from the edge to the hold's end; now only the
+#      0.25 s hush withholds, and from the edge to the hold's end the
+#      ordinary show is DRAWN AT 0.40 of its brightness, ramped in over
+#      WORD_SHAPE_DIM_RAMP_S and back out over the release so nothing
+#      steps. The sparks alive at the edge keep W4.3's staggered life cap,
+#      which is what "fading out already" is.
+#   3. the spark counts back to W1.2's 60/100 (`word_shape_sparks_quiet` /
+#      `_loud`, the schema and config/effect_params.json) — "turn back the
+#      increase in blob count", and half of his "too well-defined".
+#   4. the HOLD back to the room's own 0.8-2.0 s: `fireworks` LEAVES
+#      `fx.device_model.WORD_SHAPE_HOLD_X` (STAR and the Black Hole keep
+#      their 1.5 — he liked those). Nothing in this module ever stretched
+#      the hold, so there is nothing to undo here.
+#   5. WORD_SHAPE_FLIGHT_S (2.0 s, was 0.8) + WORD_SHAPE_FLIGHT_HL_S
+#      (0.65 s) — "slow the burst by 60%" read as a SPEED (0.8 / 0.4 =
+#      2.0 s), with the shaped sparks' own drag relaxed so the
+#      deceleration spans the whole flight instead of finishing in its
+#      first fifth. See both constants.
+#   6. WORD_SHAPE_DRIFT_KEEP (0.04), WORD_SHAPE_DRIFT (0.03 cell pitches/s)
+#      and WORD_SHAPE_DRIFT_HL_S — "almost a stop, but not quite ... always
+#      slightly drifting". The hang no longer damps to zero: a spark keeps
+#      4% of the speed it arrived with and then rides a slow mean-reverting
+#      random walk that never reaches zero.
+#   7. WORD_SHAPE_BREAK_DRIFT (0.30 cell pitches/s), WORD_SHAPE_FADE_POWER
+#      (1.0, was 1.3) and WORD_SHAPE_FADE_FRAC (0.6..1.0, was 0.45..1.0) —
+#      "the blobs should lightly break apart and fade out", not abruptly:
+#      over the release the drift grows tenfold, outward-and-random, while
+#      the fade is linear and no spark is gone before 60% of the release.
+#
+# The told-key contract is untouched (no seventh key), and everything else
+# of W4.3 stands: the flight is the time LEFT to the word, `_ws_hang` flips
+# ON the word, a phase arrival or a clearing write ends the quiet AND the
+# dim, and the burst is still additive — now "dimmed, never killed;
+# launches withheld only in the 0.25 s hush".
+WORD_SHAPE_FADE_POWER = 1.0      # a shaped spark's own fade curve: LINEAR
+# since W5.6 ("fades too abruptly" — 1.3 held the brightness up and then
+# dropped it, which is exactly the abrupt end he saw)
 WORD_SHAPE_OUTLINE_BRIGHT = 1.0  # an outline spark, full bright
 # THE COLOURS COME OFF THE SET'S GRADIENT BY POSITION — the angle the spark
 # lands at, read across this much of the gradient from a per-burst random
@@ -185,10 +245,44 @@ WORD_SHAPE_TWINKLE_HZ = 6.5
 # per-particle array is needed for it
 WORD_SHAPE_TWINKLE_PX = 53.0
 WORD_SHAPE_TWINKLE_PY = 97.0
-WORD_SHAPE_HANG_HL_S = 0.05      # velocity half-life once a spark arrives
-WORD_SHAPE_FADE_FRAC = (0.45, 1.0)  # each spark's fade window, as a
+# W5.6 — THE HANG DAMPS TOWARD A DRIFT, NOT TO ZERO ("decelerating to
+# almost a stop, but not quite a stop. The blobs should always be slightly
+# drifting"). W4.3's `WORD_SHAPE_HANG_HL_S` (a 0.05 s velocity half-life)
+# was a dead stop in three frames; it is GONE, and these three take its
+# place:
+WORD_SHAPE_DRIFT_KEEP = 0.04     # on the arrival frame a shaped spark keeps
+# this much of the speed it arrived with — his "almost a stop, but not
+# quite". It is a fraction of the spark's OWN arrival speed rather than an
+# absolute, so a target far out of the centre keeps drifting a little
+# faster than one near it, which is what the flight itself already looks
+# like.
+WORD_SHAPE_DRIFT = 0.03          # ... and then it rides a random walk this
+# fast, in REAL CELL PITCHES A SECOND (rms per axis, scaled by
+# `_ws_pitch`): the outline never freezes, and over a 0.8-2.0 s hold that
+# is at most a tenth of a cell of travel — a breath at the cell-pitch
+# scale, not a visible wander. The lever if he wants more motion is this
+# number; the one that would move the shape OFF its outline is
+# WORD_SHAPE_DRIFT_HL_S below.
+WORD_SHAPE_DRIFT_HL_S = 0.5      # the walk's own mean-reversion half-life.
+# IT IS WHAT MAKES THE WALK A DRIFT RATHER THAN A WANDER: plain additive
+# jitter is a diffusing random walk, whose speed grows as sqrt(t) and whose
+# displacement grows faster still, so a 3 s hold would blur the outline.
+# Mean-reverted at this half-life the velocity has a stationary spread of
+# exactly WORD_SHAPE_DRIFT and the position only breathes.
+WORD_SHAPE_BREAK_DRIFT = 0.30    # ... and over the RELEASE the sparks
+# drift OUTWARD at up to this, in cell pitches a second, with the walk's own
+# spread growing to half of it on top: his "at the end, the blobs should
+# lightly break apart and fade out" — mostly outward, partly random. Ten
+# times the hold's drift, ramped linearly over the release so the hold's end
+# is not a step, which makes the measured outward travel about half of
+# `BREAK_DRIFT x release` (0.5 of a cell over a 3.4 s release — "lightly").
+# `scripts/check_fireworks_word_shape.py` prints the travel beside the
+# speed, so what this number buys is a number he can see.
+WORD_SHAPE_FADE_FRAC = (0.6, 1.0)  # each spark's fade window, as a
 # fraction of the told release: the shape goes out spark by spark, never in
-# one step, and the last of them is gone by the release's end
+# one step, and the last of them is gone by the release's end. W5.6 raised
+# the floor 0.45 -> 0.6 ("fades too abruptly"): no spark is gone before 60%
+# of the release, where W4.3's earliest went at 45% of it
 WORD_SHAPE_MIN_FADE_S = 0.12     # a told release of 0 still fades out
 WORD_SHAPE_MIN_FORM_S = 0.1      # the flight is never shorter than this
 # (a form shorter than the effect's own minimum is impossible by contract —
@@ -201,25 +295,77 @@ WORD_SHAPE_FILL_DEPTH = (0.15, 0.85)  # an inside target's depth along its
 # uniformly in depth: depth-uniform piles the filling into the middle,
 # where every ray converges — which both reads as a blob and sums a pile of
 # different gradient colours into white (measured, 2026-11-16)
-WORD_SHAPE_LAUNCH_PITCH = 1.0    # the burst's origins are scattered within
+WORD_SHAPE_LAUNCH_PITCH = 2.0    # the burst's origins are scattered within
 # this many real-cell pitches of the centre, uniformly by area: a firework
 # leaves from one place, but 100 sparks stacked on ONE cell saturate it to
-# white before they separate
-WORD_SHAPE_FADE_IN_S = 0.18      # a shaped spark's own fade-in (the
-# ordinary FADE_IN_S starts at 0.3 of full, which is what white at the
-# origin is made of); by the time they are full bright they have flown over
-# half of the way out, so the burst GROWS out of the centre instead of
-# flashing in it
-# W4.3 — THE FLIGHT: how long before the word the shaped burst leaves the
-# centre. The told form is the LEAD (2.0 s for this effect since W4.3), and
-# the stretch in front of the flight is the panel emptying out. 0.8 s is
-# inside the 0.5-0.9 s Energy-paced form W1.2's own measurements were taken
-# at, so the burst's own look — the spread, the arrival, the hang — is
-# unchanged. A told form SHORTER than this is impossible from the engine
-# (it floors the form at the effect's own minimum); the clamp in
-# `_word_shape_arm` makes flight = form there rather than launching before
-# the edge.
-WORD_SHAPE_FLIGHT_S = 0.8
+# white before they separate.
+#
+# W5.6 RAISED IT 1.0 -> 2.0, and that is the same measured correction
+# WORD_SHAPE_FADE_IN_FRAC above is: at 0.4x the departure speed the sparks
+# are bunched near their origins two and a half times longer, and the trail
+# (a channel-wise MAX over time) holds a slow spark's track in a cell far
+# longer than a fast one's. With the fade-in fixed and this still at 1.0,
+# ONE cell of the star's 73 lit ones went white 0.27 s after the launch at
+# Energy 1.0 (1.37%, against W4.3's "no white cell at all at any Energy").
+# At 2.0 all three shapes light none at any Energy again, and the measured
+# coverage and fill ratio do not move at all (96.4% / 0.29 heart, 97.2% /
+# 0.47 star, 100% / 0.47 diamond at Energy 1.0, identical at 1.0, 1.5 and
+# 2.0) — the scatter is inside the burst's first few frames and nothing
+# about where the sparks LAND reads it.
+WORD_SHAPE_FADE_IN_FRAC = 0.225  # a shaped spark's own fade-in, AS A
+# SHARE OF THE FLIGHT (the ordinary FADE_IN_S starts at 0.3 of full, which
+# is what white at the origin is made of). By the time they are full bright
+# they have flown over 40% of the way out, so the burst GROWS out of the
+# centre instead of flashing in it.
+#
+# W5.6 MADE IT A SHARE RATHER THAN THE 0.18 s IT WAS, and that is a
+# MEASURED correction rather than tidiness: a fade-in fixed in seconds is
+# only "they are full bright once they are out of the centre" at ONE flight
+# length. Over the 2 s flight, 0.18 s put them 20% of the way out instead
+# of 44%, and 100 sparks still stacked near their origins saturated TWO
+# CELLS to white 0.1 s after the launch — 4.9-6.1% of the lit cells at
+# Energy 1.0, against W4.3's "no white cell at all at any Energy". 0.225 is
+# exactly W4.3's own 0.18 / 0.8, so the burst's own look at the origin is
+# what it was measured to be, and a later flight change carries it.
+# THE FLIGHT: how long before the word the shaped burst leaves the centre.
+# The told form is the LEAD (2.25 s for this effect since W5.6 — the hush
+# plus the flight), and the 0.25 s in front of the flight is the quiet.
+#
+# W5.6 — 2.0 s, "SLOW THE BURST BY 60%" READ AS A SPEED. His sentence is
+# about what he SEES ("so we can see the blobs moving out to the outline,
+# and then decelerating"), and what he sees is a speed: 60% slower is x0.4,
+# so W4.3's 0.8 s flight becomes 2.0 s. The other reading — "60% LONGER",
+# 1.3 s — is stated in `.claude/skills/fireworks-effect/SKILL.md` beside
+# this number so the retune is one constant either way; 2.0 s was taken
+# because a burst that covers the same distance in 2.5x the time is 60%
+# slower in the only sense a viewer has.
+#
+# A told form SHORTER than this is impossible from the engine (it floors
+# the form at the effect's own minimum, which is hush + flight); the clamp
+# in `_word_shape_arm` makes flight = form there rather than launching
+# before the edge.
+WORD_SHAPE_FLIGHT_S = 2.0
+# W5.6 — THE SHAPED SPARKS' OWN VELOCITY HALF-LIFE DURING THE FLIGHT, which
+# is the other half of "so we can see the blobs moving out to the outline,
+# and then decelerating to almost a stop". This effect's own drag gives a
+# half-life of `0.6 - 0.5 * drag` = 0.255 s at his `drag` 0.69: over a 2 s
+# flight that kernel saturates in about 0.4 s, so a longer flight ALONE
+# would have landed every spark in the first fifth of it and left them
+# sitting on the outline for the other four fifths — the opposite of what
+# he asked to see. At a third of the flight the deceleration spans the
+# whole of it: a spark still carries 12% of its launch speed when it
+# arrives (which is what WORD_SHAPE_DRIFT_KEEP then takes 4% of).
+#
+# THE SOLVE USES THIS HALF-LIFE, not the effect's drag, so the arrival is
+# still ON the word to within a cell: `_word_shape_burst`'s geometric sum
+# and the integration in `draw` read the same constant, and the ordinary
+# show's physics is untouched (only the FLAGGED sparks are integrated this
+# way, and only while they are still flying).
+WORD_SHAPE_FLIGHT_HL_S = 0.65
+# ... and the fade-in that keeps the origin from saturating is a share of
+# that flight (see WORD_SHAPE_FADE_IN_FRAC for the two cells of white that
+# proved it has to be)
+WORD_SHAPE_FADE_IN_S = WORD_SHAPE_FADE_IN_FRAC * WORD_SHAPE_FLIGHT_S
 # W4.3 — THE HUSH's one mercy: the remaining life an ordinary particle
 # still in the air at the edge is capped to. It fades out over this instead
 # of blinking out (the plan's "nothing jumps" bar is a frame-to-frame one,
@@ -237,6 +383,38 @@ WORD_SHAPE_HUSH_FADE_S = 0.7
 # effect's own untold worst of 3.7%. Staggered, they go out a few at a time
 # and the whole panel is still empty by WORD_SHAPE_HUSH_FADE_S.
 WORD_SHAPE_HUSH_FADE_FRAC = (0.5, 1.0)
+# W5.6 — THE QUIET, 80% SHORTER ("I think we can give it 80% less pre-fire
+# darkness time"). W4.3's quiet was the whole stretch in front of the
+# flight — the form's 2.0 s floor less the 0.8 s flight, so 1.2 s — and
+# nothing ordinary launched from the SEQ edge all the way to the hold's
+# end. Now the withholding is THIS LONG and no longer: 0.25 s (1.2 x 0.2),
+# ending the frame the shaped burst leaves the centre. It is anchored to
+# the LAUNCH rather than to the edge, so it is still "pre-fire" darkness
+# for any told form (a form longer than hush + flight — impossible from the
+# engine, which floors it at exactly that — would simply put the quiet
+# later). `fx.device_model.WORD_SHAPE_FORM_MIN_S["fireworks"]` is this plus
+# WORD_SHAPE_FLIGHT_S.
+WORD_SHAPE_HUSH_S = 0.25
+# W5.6 — AND FROM THE EDGE TO THE HOLD'S END THE ORDINARY SHOW IS DIMMED
+# RATHER THAN WITHHELD: "The background doesn't need to be clear of other
+# fireworks, just they need to be dimmer, so fading out already." Every
+# ORDINARY (non-shaped) particle is drawn at this much of its own
+# brightness — launches keep coming at the lower light, and the ones in the
+# air at the edge are ALSO on W4.3's staggered life cap, which is the
+# "fading out already" half of his sentence. 0.40 is what puts the ordinary
+# light on the panel at the word under 45% of the same-seed untold frame's
+# while leaving a show there at all (`scripts/check_fireworks_word_shape.py`
+# prints both, and the bar is a DIM bar now, never a 0% one).
+#
+# IT IS A BRIGHTNESS, NOT A KILL: nothing is retimed, nothing is dropped,
+# and the moment a phase or a clearing write takes over the dim ends — so a
+# lull's rockets and a drop's payoff are never dimmed.
+WORD_SHAPE_BACKGROUND_DIM = 0.40
+# ... ramped in over this long from the SEQ edge, and back out over the
+# whole RELEASE ("while the ordinary fireworks come back up"), so neither
+# end of the dim is a step on the panel. The ramp in is the hush's own
+# length deliberately: the dim is full by the frame the burst leaves.
+WORD_SHAPE_DIM_RAMP_S = 0.25
 # the shape's clock accumulates dt a frame, so a told time is reached to
 # within a float's dust rather than exactly; this is the slack the hang and
 # the form fraction flip on, so they land ON the word's own frame
@@ -414,21 +592,23 @@ class Fireworks2d(Twod, GradientEffect):
                 description="Word shape: the share of the burst's sparks that land on the outline",
                 default=0.70,
             ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=0.9)),
-            # W4.3: half again as many sparks as W1.2 shipped (60/100) —
-            # his "increase the amount of blobs by 50% so it is more
-            # clearly visible". These defaults ARE his live values (no
-            # scene carries a word_shape_* param) and they are duplicated
-            # in config/effect_params.json, which one test pins against
-            # these.
+            # W5.6: BACK TO W1.2's 60/100. W4.3 raised them to 90/150 on
+            # his "increase the amount of blobs by 50%"; his second room
+            # verdict (2026-11-18) is "Let's turn back the increase in blob
+            # count" — half of the answer to "it's too well-defined", the
+            # other half being the looser break-apart end. These defaults
+            # ARE his live values (no scene carries a word_shape_* param)
+            # and they are duplicated in config/effect_params.json, which
+            # one test pins against these.
             vol.Optional(
                 "word_shape_sparks_quiet",
                 description="Word shape: sparks in the burst at Energy 0",
-                default=90,
+                default=60,
             ): vol.All(vol.Coerce(int), vol.Range(min=10, max=400)),
             vol.Optional(
                 "word_shape_sparks_loud",
                 description="Word shape: sparks in the burst at Energy 1",
-                default=150,
+                default=100,
             ): vol.All(vol.Coerce(int), vol.Range(min=10, max=400)),
             # THE PRE-DROP: the four told keys and the breath-hold before it
             # (Fireworks is no breath-hold effect, so it is told a breath
@@ -570,24 +750,37 @@ class Fireworks2d(Twod, GradientEffect):
             self._ws_frac = 0.0       # how far formed, 0..1
             self._ws_hang = False     # arrived: the sparks are damped
             self._ws_live = False     # any shaped spark still flying
-            # W4.3: armed at the edge, launched WORD_SHAPE_FLIGHT_S before
-            # the word — the stretch between is THE HUSH, the dark canvas
+            # armed at the edge, launched WORD_SHAPE_FLIGHT_S before the
+            # word; the 0.25 s in front of the launch is THE QUIET (W5.6)
             self._ws_armed = None     # the told shape awaiting its launch
             self._ws_launch_at = 0.0  # when on this clock the burst leaves
             self._ws_hush = False     # no ordinary launch of any kind
-            self._ws_hush_until = 0.0  # ... until here (the hold's end)
+            self._ws_hush_from = 0.0  # ... from here on this clock, until
+            self._ws_hush_until = 0.0  # here (W5.6: the launch itself)
+            # W5.6: the shape owns the ordinary show's BACKGROUND — the
+            # quiet, and the DIM that outlasts it. A phase arriving or a
+            # clearing write ends it for good (`_word_shape_clock`).
+            self._ws_bg = False
+            self._ws_dim = 0.0        # 0 = full brightness, 1 = fully dimmed
+            self._ws_hold_end = 0.0   # form + hold, on this clock
+            self._ws_release = 0.0    # the told release: the dim's own
+            #                           return, and the break-apart's ramp
+            self._ws_hung = False     # the arrival frame has been taken
         else:
             if ws_told is not None and ws_seq != self._ws_seq:
                 self._ws_pending = ws_told
-            elif ws_told is None and self._ws_hush:
-                # W4.3 — A CLEARING WRITE ENDS THE HUSH. `told() is None`
-                # (the preview's revert, an older SpotFX) says no shape is
-                # standing, and holding the panel dark for a shape that will
-                # never arrive is worse than doing nothing. The CLOCK is
-                # left alone, so any spark already in the air keeps fading
-                # on its own exactly as W1.2 has it — there is nothing to
-                # blend — and a burst still in the barrel is dropped.
+            elif ws_told is None and self._ws_bg:
+                # A CLEARING WRITE ENDS THE QUIET AND THE DIM (W4.3's rule,
+                # W5.6's two quantities). `told() is None` (the preview's
+                # revert, an older SpotFX) says no shape is standing, and
+                # holding the ordinary show down for a shape that will never
+                # arrive is worse than doing nothing. The CLOCK is left
+                # alone, so any spark already in the air keeps fading on its
+                # own exactly as W1.2 has it — there is nothing to blend —
+                # and a burst still in the barrel is dropped.
+                self._ws_bg = False
                 self._ws_hush = False
+                self._ws_dim = 0.0
                 self._ws_armed = None
             self._ws_seq = ws_seq
 
@@ -1223,13 +1416,15 @@ class Fireworks2d(Twod, GradientEffect):
         every one of its sparks has outlived its own `p_life`. The LAUNCH is
         not here but in `draw`, where the frame's own dt is what the launch
         velocities are solved against."""
-        if self._ws_hush and self._phase != "none":
+        if self._ws_bg and self._phase != "none":
             # A PHASE OWNS THE PANEL. P3 A means a shape is never told while
             # a charge, lull or drop is armed; one ARRIVING on a standing
-            # shape ends the hush, so the drop payoff and its tail fire as
-            # they do today and the shaped sparks keep flying over them.
-            # (`_phase_step` runs first, so an arrival is already visible.)
-            self._ws_hush = False
+            # shape ends the quiet AND the dim, so the drop payoff and its
+            # tail fire at full brightness as they do today and the shaped
+            # sparks keep flying over them. (`_phase_step` runs first, so an
+            # arrival is already visible.) A lull's own rockets are
+            # therefore never dimmed either.
+            self._ws_bg = False
         if self._ws_t is not None:
             self._ws_t += dt
             # the clock accumulates dt a frame, so the word's own instant is
@@ -1240,39 +1435,68 @@ class Fireworks2d(Twod, GradientEffect):
             self._ws_frac = (1.0 if self._ws_form <= 0.0 or arrived
                              else min(1.0, self._ws_t / self._ws_form))
             self._ws_hang = arrived
-            if self._ws_hush and self._ws_t >= self._ws_hush_until:
-                # the hold is over: the ordinary fireworks carry on around
-                # the shape as it fades (W1.2's own vision for the release)
-                self._ws_hush = False
             if self._ws_t >= self._ws_total:
                 self._ws_t = None
                 self._ws_frac = 0.0
                 self._ws_hang = False
+                self._ws_hung = False
                 self._ws_armed = None
-                self._ws_hush = False
+                self._ws_bg = False
         if self._ws_pending is not None:
             told = self._ws_pending
             self._ws_pending = None
             self._word_shape_arm(told)
+        # W5.6 — THE QUIET AND THE DIM, both derived from the one clock.
+        # The quiet (`_ws_hush`) is WORD_SHAPE_HUSH_S long and ends the
+        # frame the burst leaves; the dim rides the whole envelope: in over
+        # WORD_SHAPE_DIM_RAMP_S from the edge, full through the form and the
+        # hold, out over the release as the ordinary fireworks come back up.
+        self._ws_hush = False
+        self._ws_dim = 0.0
+        if self._ws_bg and self._ws_t is not None:
+            t = self._ws_t
+            self._ws_hush = bool(
+                t >= self._ws_hush_from - WORD_SHAPE_CLOCK_EPS
+                and t < self._ws_hush_until - WORD_SHAPE_CLOCK_EPS)
+            if t <= self._ws_hold_end:
+                self._ws_dim = float(min(
+                    1.0, t / max(WORD_SHAPE_DIM_RAMP_S, 1e-6)))
+            else:
+                self._ws_dim = float(max(0.0, 1.0 - (t - self._ws_hold_end)
+                                         / max(self._ws_release, 1e-6)))
         if self._ws_hush:
-            # a `burst_rockets` poke landing in the hush is DROPPED, not
+            # a `burst_rockets` poke landing in the quiet is DROPPED, not
             # deferred — the pre-drop breath's own swallow. `draw` still
             # self-resets the key, so an identical later write edges again.
             self._burst_pending = 0
 
     def _word_shape_arm(self, told):
-        """THE SEQ EDGE (W4.3): the shape's clock starts and THE HUSH opens,
-        but nothing is launched yet — the burst leaves the centre
-        WORD_SHAPE_FLIGHT_S before the word (`draw`'s launch block), so it
-        arrives onto a panel the hush has emptied.
+        """THE SEQ EDGE: the shape's clock starts and the shape takes over
+        the ordinary show's BACKGROUND, but nothing is launched yet — the
+        burst leaves the centre WORD_SHAPE_FLIGHT_S before the word
+        (`draw`'s launch block).
 
-        What is already in the air is NOT killed: each particle's remaining
-        life is capped at its OWN share of WORD_SHAPE_HUSH_FADE_S (over
-        WORD_SHAPE_HUSH_FADE_FRAC — see that constant for why one number for
-        all of them is a cliff), so they fade out a few at a time rather
-        than blinking out together. Lull rockets are left alone — they are a
-        phase's own choreography, not the ordinary show, and capping their
-        life would cut a lull's rockets off mid-flight."""
+        W5.6 SPLIT THAT TAKEOVER IN TWO, because his second verdict is "the
+        background doesn't need to be clear of other fireworks, just they
+        need to be dimmer, so fading out already":
+
+          * THE QUIET — the only withholding left — is the
+            WORD_SHAPE_HUSH_S (0.25 s) immediately BEFORE the launch, so the
+            burst leaves into a lull of its own rather than onto a fresh
+            beat's rockets;
+          * THE DIM runs from here to the END OF THE HOLD and back out over
+            the release: the ordinary show keeps launching, every ordinary
+            spark drawn at WORD_SHAPE_BACKGROUND_DIM of its own brightness
+            (the brightness block in `draw`).
+
+        What is already in the air is NOT killed and never was: each
+        particle's remaining life is capped at its OWN share of
+        WORD_SHAPE_HUSH_FADE_S (over WORD_SHAPE_HUSH_FADE_FRAC — see that
+        constant for why one number for all of them is a cliff), so they
+        fade out a few at a time rather than blinking out together, which is
+        exactly his "so fading out already". Lull rockets are left alone —
+        they are a phase's own choreography, not the ordinary show, and
+        capping their life would cut a lull's rockets off mid-flight."""
         form = max(float(told.form_s), WORD_SHAPE_MIN_FORM_S)
         hold = max(float(told.hold_s), 0.0)
         release = max(float(told.release_s), WORD_SHAPE_MIN_FADE_S)
@@ -1286,8 +1510,19 @@ class Fireworks2d(Twod, GradientEffect):
         # told form shorter than it (impossible from the engine, which
         # floors the form) simply launches at the edge
         self._ws_launch_at = form - min(WORD_SHAPE_FLIGHT_S, form)
-        self._ws_hush = True
-        self._ws_hush_until = form + hold
+        # W5.6: the quiet is the 0.25 s in front of the LAUNCH, clamped to
+        # the clock's own start — a form of exactly hush + flight (the
+        # engine's floor for this effect) runs it from the edge to the
+        # launch, and a shorter one simply has less of it
+        self._ws_hush_until = self._ws_launch_at
+        self._ws_hush_from = max(0.0, self._ws_launch_at - WORD_SHAPE_HUSH_S)
+        self._ws_bg = True
+        self._ws_hush = bool(self._ws_hush_from <= WORD_SHAPE_CLOCK_EPS
+                             < self._ws_hush_until)
+        self._ws_dim = 0.0
+        self._ws_hold_end = form + hold
+        self._ws_release = release
+        self._ws_hung = False
         self._burst_pending = 0
         self.spawn_acc = 0.0
         self._beat_pending = False
@@ -1316,14 +1551,19 @@ class Fireworks2d(Twod, GradientEffect):
         The sparks therefore live `flight + hold + their own fade`, which
         ends exactly where W1.2's own `form + hold + fade` did.
 
-        EVERY SPARK'S LAUNCH VELOCITY IS SOLVED FROM THIS EFFECT'S OWN DRAG.
-        `draw` integrates `x += v*dt` and then `v *= 0.5**(dt/hl)` once per
-        frame, so the distance one unit of launch speed covers over `m`
-        frames is a geometric sum — computed once per burst for the frame
-        rate this effect is actually integrating at — and dividing the
-        target by it lands the spark on the target the frame the FLIGHT
-        ends, which is the word. That is what makes "the shape arrives ON
-        the word" a measured claim (tests/test_fireworks_word_shape.py
+        EVERY SPARK'S LAUNCH VELOCITY IS SOLVED FROM THE DRAG IT WILL
+        ACTUALLY BE INTEGRATED WITH — since W5.6 the shaped sparks' own
+        WORD_SHAPE_FLIGHT_HL_S (0.65 s) rather than this effect's
+        `0.6 - 0.5*drag` (0.255 s at his drag), because a 2 s flight under
+        the effect's own kernel would land every spark in its first fifth
+        and leave it sitting. `draw` integrates `x += v*dt` and then
+        `v *= 0.5**(dt/hl)` once per frame, so the distance one unit of
+        launch speed covers over `m` frames is a geometric sum — computed
+        once per burst for the frame rate this effect is actually
+        integrating at — and dividing the target by it lands the spark on
+        the target the frame the FLIGHT ends, which is the word. That is
+        what makes "the shape arrives ON the word" a measured claim
+        (tests/test_fireworks_word_shape.py
         asserts every spark inside one cell of its target) rather than a
         hope.
 
@@ -1368,7 +1608,10 @@ class Fireworks2d(Twod, GradientEffect):
         step = float(min(max(dt, 1e-3), DT_MAX))
         flight = max(float(flight), WORD_SHAPE_MIN_FORM_S)
         frames = max(2, int(round(flight / step)))
-        hl = max(0.6 - 0.5 * self.drag, 0.05)
+        # W5.6: the SHAPED half-life, not the effect's own drag — the whole
+        # point of the slower burst is that the deceleration spans the
+        # flight, and `draw` integrates these sparks with the same constant
+        hl = max(WORD_SHAPE_FLIGHT_HL_S, 0.05)
         decel = 0.5 ** (step / hl)
         span = step * (1.0 - decel ** frames) / max(1.0 - decel, 1e-9)
         flight_eff = frames * step
@@ -1413,6 +1656,77 @@ class Fireworks2d(Twod, GradientEffect):
         # EDGE by `_word_shape_arm` — this burst only joins it
         self._ws_live = True
 
+    def _word_shape_drift(self, n, dt):
+        """W5.6 — THE HANG, WHICH IS NOW A DRIFT: "decelerating to almost a
+        stop, but not quite a stop. The blobs should always be slightly
+        drifting", and then "at the end, the blobs should lightly break
+        apart and fade out".
+
+        W4.3's hang damped the arrived sparks to a dead stop in three frames
+        (a 0.05 s velocity half-life). This replaces it with two things, and
+        touches only the FLAGGED sparks — the ordinary show's physics is
+        exactly what it was:
+
+          * THE ARRIVAL FRAME keeps WORD_SHAPE_DRIFT_KEEP (4%) of the speed
+            the spark arrived with. A fraction of its OWN speed, so a target
+            far from the centre drifts a little faster than a near one,
+            which is what the flight itself already looks like;
+          * EVERY FRAME AFTER IT the velocity rides a MEAN-REVERTING random
+            walk (`v -> (v - mean)*ou + mean + sigma*z`), whose stationary
+            spread is exactly the drift constant and whose mean is zero
+            through the hold and an OUTWARD push over the release. Plain
+            additive jitter would be a diffusing walk — speed growing as
+            sqrt(t), the outline blurring over a 3 s hold — which is why
+            WORD_SHAPE_DRIFT_HL_S exists.
+
+        So a shaped spark's speed is never exactly zero while it is lit
+        (asserted frame by frame in tests/test_fireworks_word_shape.py), and
+        over the release the drift grows tenfold: a common OUTWARD push of
+        WORD_SHAPE_BREAK_DRIFT, with the walk's own spread growing to half
+        of it on top.
+
+        It draws from the effect's own `self._rng`, like everything else
+        random here. That is only ever reached with a shape standing, so an
+        UNTOLD effect's random stream — and therefore its every frame — is
+        untouched.
+
+        A SECOND WORD arriving mid-hold re-arms `_ws_hung`, so the first
+        word's sparks take the 4% scale a second time: they are already
+        drifting at the floor, and the walk pulls them back to it within a
+        second. Nothing else of theirs is retimed (`p_wfade` is per spark)."""
+        held = np.flatnonzero(self.p_wfade[:n] > 0.0)
+        k = held.size
+        if not k:
+            return
+        pitch = float(self._ws_pitch)
+        if not self._ws_hung:
+            self._ws_hung = True
+            self.p_vx[held] *= np.float32(WORD_SHAPE_DRIFT_KEEP)
+            self.p_vy[held] *= np.float32(WORD_SHAPE_DRIFT_KEEP)
+        # how far into the RELEASE: 0 through the hold, 1 at its end
+        rel = 0.0
+        if (self._ws_t is not None and self._ws_release > 0.0
+                and self._ws_t > self._ws_hold_end):
+            rel = float(min(1.0, (self._ws_t - self._ws_hold_end)
+                            / self._ws_release))
+        half_break = 0.5 * WORD_SHAPE_BREAK_DRIFT
+        spread = (WORD_SHAPE_DRIFT
+                  + (half_break - WORD_SHAPE_DRIFT) * rel) * pitch
+        out_speed = WORD_SHAPE_BREAK_DRIFT * rel * pitch
+        ou = 0.5 ** (dt / max(WORD_SHAPE_DRIFT_HL_S, 1e-3))
+        sigma = spread * np.sqrt(max(1.0 - ou * ou, 1e-6))
+        if rel > 0.0:
+            # the break-apart's common push: straight out from the centre,
+            # so the outline loosens outward rather than shuffling in place
+            r = np.maximum(np.hypot(self.p_x[held], self.p_y[held]), 1e-9)
+            mx = out_speed * self.p_x[held] / r
+            my = out_speed * self.p_y[held] / r
+        else:
+            mx = my = np.float32(0.0)
+        noise = self._rng.standard_normal((2, k)) * sigma
+        self.p_vx[held] = (self.p_vx[held] - mx) * ou + mx + noise[0]
+        self.p_vy[held] = (self.p_vy[held] - my) * ou + my + noise[1]
+
     def word_shape_state(self):
         """What the shape is doing this frame — read by the rig, the tests
         and scripts/check_fireworks_word_shape.py, never by the render."""
@@ -1421,15 +1735,33 @@ class Fireworks2d(Twod, GradientEffect):
             "form_fraction": float(self._ws_frac),
             "t": None if self._ws_t is None else float(self._ws_t),
             "hanging": bool(self._ws_hang),
-            # W4.3: the dark canvas, and whether the burst has left yet
+            # W4.3: whether the burst has left yet; W5.6: the quiet is
+            # 0.25 s and `dim` is what the ordinary show is drawn at
             "hushed": bool(self._ws_hush),
+            "dim": float(self._ws_dim),
+            "background": (1.0 - (1.0 - WORD_SHAPE_BACKGROUND_DIM)
+                           * float(self._ws_dim)),
             "armed": self._ws_armed is not None,
             "launch_at": float(self._ws_launch_at),
+            # W5.6: the slowest shaped spark's speed, in cell pitches a
+            # second — the "never quite a stop" measure (0.0 with none lit)
+            "slowest_pitch_s": self._word_shape_slowest_speed(n),
             "sparks": int(np.count_nonzero(self.p_wfade[:n] > 0.0)),
             "outline_sparks": int(np.count_nonzero(
                 (self.p_wfade[:n] > 0.0)
                 & (self.p_bright[:n] >= WORD_SHAPE_OUTLINE_BRIGHT - 1e-6))),
         }
+
+    def _word_shape_slowest_speed(self, n):
+        """The SLOWEST lit shaped spark's speed, in real cell pitches a
+        second — W5.6's "almost a stop, but not quite" read at its worst
+        spark rather than on an average that a few fast ones would carry.
+        0.0 with none of them lit."""
+        held = np.flatnonzero(self.p_wfade[:n] > 0.0)
+        if not held.size:
+            return 0.0
+        speed = np.hypot(self.p_vx[held], self.p_vy[held])
+        return float(speed.min() / max(self._ws_pitch, 1e-9))
 
     def _phase_step(self, dt):
         """Advance the charge/lull/drop state machine. Runs every draw;
@@ -1701,20 +2033,25 @@ class Fireworks2d(Twod, GradientEffect):
                 # drag: velocity half-life shrinks as drag rises
                 hl = 0.6 - 0.5 * self.drag
                 decel = np.float32(0.5 ** (dt / max(hl, 0.05)))
-                self.p_vx[:n] *= decel
-                self.p_vy[:n] *= decel
-                if self._ws_hang:
-                    # WORD SHAPES: its sparks have arrived — damp them to a
-                    # stop where they stand so the shape HANGS instead of
-                    # drifting on through its own outline. Only the flagged
-                    # sparks are touched; the ordinary show's physics is
-                    # exactly what it was.
+                if self._ws_live:
+                    # WORD SHAPES (W5.6): a shaped spark STILL FLYING is
+                    # integrated with WORD_SHAPE_FLIGHT_HL_S instead — the
+                    # relaxed drag the solve was done against, so the
+                    # deceleration spans the whole 2 s flight — and one
+                    # that has ARRIVED is left to the drift below. The
+                    # ordinary show's own physics is exactly what it was.
                     held = self.p_wfade[:n] > 0.0
-                    hang = np.float32(0.5 ** (dt / WORD_SHAPE_HANG_HL_S))
-                    self.p_vx[:n] = np.where(
-                        held, self.p_vx[:n] * hang, self.p_vx[:n])
-                    self.p_vy[:n] = np.where(
-                        held, self.p_vy[:n] * hang, self.p_vy[:n])
+                    ws_decel = np.float32(
+                        1.0 if self._ws_hang
+                        else 0.5 ** (dt / WORD_SHAPE_FLIGHT_HL_S))
+                    mult = np.where(held, ws_decel, decel)
+                    self.p_vx[:n] *= mult
+                    self.p_vy[:n] *= mult
+                else:
+                    self.p_vx[:n] *= decel
+                    self.p_vy[:n] *= decel
+                if self._ws_hang and self._ws_live:
+                    self._word_shape_drift(n, dt)
                 self.p_age[:n] += dt
                 alive = (self.p_age[:n] < self.p_life[:n]) & (
                     np.hypot(self.p_x[:n], self.p_y[:n]) < self.r_max
@@ -1723,14 +2060,17 @@ class Fireworks2d(Twod, GradientEffect):
                 n = self.n
 
             # ── spawn ───────────────────────────────────────────────────
-            # THE HUSH (W4.3) comes first: from the shape's SEQ edge to the
-            # END OF THE HOLD nothing ordinary launches at all — not the
-            # spawn rate, not a beat burst, not the drop tail's shower — so
-            # the shaped burst arrives onto a nearly dark canvas ("no
-            # fireworks right before, or concurrently"). Nothing is
-            # DEFERRED: the accumulators are cleared each hushed frame, so
-            # the release does not open onto a pile of withheld launches.
-            # A phase arriving ends the hush (`_word_shape_clock`).
+            # THE QUIET comes first: for WORD_SHAPE_HUSH_S (0.25 s since
+            # W5.6, and ONLY that) in front of the launch nothing ordinary
+            # launches at all — not the spawn rate, not a beat burst, not
+            # the drop tail's shower — so the shaped burst leaves into a
+            # lull of its own. Everything else of W4.3's hush is now the
+            # DIM instead (the brightness block below): "the background
+            # doesn't need to be clear of other fireworks, just they need
+            # to be dimmer". Nothing is DEFERRED: the accumulators are
+            # cleared each quiet frame, so the launch does not open onto a
+            # pile of withheld launches. A phase arriving ends it
+            # (`_word_shape_clock`).
             if self._ws_hush:
                 self.spawn_acc = 0.0
                 self._beat_pending = False
@@ -1794,8 +2134,8 @@ class Fireworks2d(Twod, GradientEffect):
             # WORD SHAPES: the shaped burst LAUNCHES here, once the
             # shape's own clock (armed at the SEQ edge by
             # `_word_shape_clock`) reaches the flight's own start —
-            # WORD_SHAPE_FLIGHT_S before the word, the hush having emptied
-            # the panel in front of it (W4.3). Ungated exactly like the
+            # WORD_SHAPE_FLIGHT_S before the word, the quiet having held
+            # the last 0.25 s in front of it (W4.3, W5.6). Ungated like the
             # flare burst above — a sung word's shape must land whatever the
             # show is doing — and additive, so nothing live is touched.
             if (self._ws_armed is not None and self._ws_t is not None
@@ -1863,6 +2203,21 @@ class Fireworks2d(Twod, GradientEffect):
                             * twinkle
                         )
                         fade = np.where(held, ws_env, fade)
+                if self._ws_dim > 0.0:
+                    # W5.6 — DIM, NOT DARK: every ORDINARY spark is drawn at
+                    # WORD_SHAPE_BACKGROUND_DIM of its own brightness while
+                    # the shape owns the background, ramped by the envelope
+                    # (`_word_shape_clock`) so neither end of it steps. His
+                    # "the background doesn't need to be clear of other
+                    # fireworks, just they need to be dimmer". A BRIGHTNESS
+                    # and nothing else: no particle is retimed, killed or
+                    # moved by it, and a phase arriving ends it, so a lull's
+                    # rockets and a drop's payoff are never dimmed.
+                    dim = np.float32(
+                        1.0 - (1.0 - WORD_SHAPE_BACKGROUND_DIM)
+                        * self._ws_dim)
+                    plain = self.p_wfade[:n] <= 0.0
+                    fade = np.where(plain, fade * dim, fade)
                 self.p_shown[:n] = self.p_bright[:n] * fade
             shown = self.p_shown[:n]
 

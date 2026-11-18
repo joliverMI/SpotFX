@@ -272,13 +272,16 @@ ignored), and it may carry `min_intensity` / `enabled` /
 settings, Energy-paced per word — `word_shape_form_slow_s` (0.9) /
 `_form_fast_s` (0.5) / `_hold_min_s` (0.8) / `_hold_max_s` (2.0) /
 `_release_ratio` (1.5), all Sonic-tellable, resolved by one pure function
-(`room_controls.word_shape_timing`). **Three showing types stretch that
+(`room_controls.word_shape_timing`). **Two showing types stretch that
 clamped hold half again, since his room verdict of 2026-11-17** ("star and
-black hole look pretty good, but could last a little longer" / Fireworks
-"have it hold 50% longer"): `fx.device_model.WORD_SHAPE_HOLD_X` is `1.5`
-for `radial` (STAR), `blackhole` and `fireworks`, applied AFTER the clamp
-so the maximum stretches too — 1.2–3.0 s on those three, still 0.8–2.0 s on
-Sauron, Orbits and Fish. It is the LARGEST stretch among the showing types
+black hole look pretty good, but could last a little longer"):
+`fx.device_model.WORD_SHAPE_HOLD_X` is `1.5` for `radial` (STAR) and
+`blackhole`, applied AFTER the clamp so the maximum stretches too —
+1.2–3.0 s on those two, still 0.8–2.0 s on Sauron, Orbits and Fish.
+**`fireworks` was the third and the 1.5 was originally its own number**
+("have it hold 50% longer"); his SECOND room verdict of 2026-11-18 ("It
+also holds too long and fades too abruptly", row W5.6) took it back out, so
+Fireworks is on the room's own hold again. It is the LARGEST stretch among the showing types
 (not Sonic-tellable, a code constant like the form floor below) and 1.0
 with no effect types at all, the opposite of the form floor's fallback —
 a hold has no landing to protect, so an unknown room gets the unstretched
