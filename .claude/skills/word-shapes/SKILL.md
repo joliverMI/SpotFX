@@ -959,7 +959,7 @@ hyperbolic in the half-life, so ramping the half-life collapsed it from
 1.2% to 11% per frame over the last few release frames and dumped 23-28%
 of the lit cells in one frame).
 
-### Fish / `fish` (row W1.4, 2026-11-15) — a procession along the outline
+### Fish / `fish` (row W1.4, 2026-11-15; row W5.5, 2026-11-18) — a procession along the outline, RUN
 
 His revision of the row, verbatim: *"Fish: similar to orbits ... they need
 to smoothly accelerate and not have sudden velocity shifts"*, then *"the
@@ -1044,6 +1044,70 @@ because it is about this contract rather than that effect:
   his call, not a build row's; this is his explicit 2026-11-17 ruling to
   ship it as measured. Any effect that concentrates its own light onto the
   outline should expect the same trade.
+
+**ROW W5.5 (2026-11-18) — THE FOUR THINGS THIS CONTRACT SHOULD CARRY, not
+that effect.** His second room verdict: *"Oribits is really good at showing
+shape, we need to get Fish to behave similarly. Ask me questions if it's
+hard to implement, but you might need to override some min turn radii to
+match the effect, especially on the star."* The row gave Fish a registered
+`word_shape_speed_x` (3.0, a FEW lap in 1.83 s), took `WS_TURN_X` 0.25 ->
+0.10, `WS_TURN_GAIN_X` 2.0 -> 12.0 and the pursuit aim 0.030 -> 0.016 of
+the loop, and relaxed the wall's own floor onto the shaped circle.
+`.claude/skills/fish-effect/SKILL.md`'s ROW W5.5 section is the binding
+record; what belongs HERE, because it is about this contract:
+
+1. **FOR AN EFFECT THAT FOLLOWS THE OUTLINE, THE TURN CIRCLE IS NOT WHAT
+   BOUNDS ITS CORNERS — THE AIM IS.** W1.4 wrote the turn-circle law into
+   this skill ("Budget for this before promising a distance bar") and W5.5
+   measured that the law is real but not binding: `WS_TURN_X` 0.25 -> 0.08
+   moved a star's worst corner 5.39 -> 5.45 cell pitches, i.e. not at all,
+   while the heading GAIN moved it 3.88 -> 0.99 and halving the pursuit
+   LEAD 0.99 -> 0.37. The arithmetic for the aim is as clean as the
+   circle's and belongs beside it: **a steer aimed `L` of arc ahead has a
+   chord that passes a corner of exterior angle theta at `(L / 2)
+   sin(theta / 2)`**, whatever it is capable of turning. Any later effect
+   that PURSUES a point on the outline owes that sum as well as the
+   circle's.
+2. **AND A HIGHER GAIN IS WHAT A TIGHTER CLAMP BUYS.** The two are one
+   lever, not two: a proportional steer's lag is a gain problem, the lag
+   gets worse the faster the line runs, and the clamp is what keeps a high
+   gain from being a flip. Fish ships x12 with every frame still bounded by
+   the same single `np.clip` — which is also why its smoothness bar must be
+   read against THE CLAMP IN FORCE (W1.4's rule, unchanged and now
+   load-bearing).
+3. **A HALF-LIFE UNDER A SHAPE IS A LENGTH, NOT A DURATION.** W1.4's trail
+   pair and its 3.0 s trace life are now DIVIDED BY THE LAP'S OWN SPEED-UP,
+   so the smear keeps the length that was measured rather than three times
+   it. Measured, that is also what pays for the clarity: at the unscaled
+   duration white runs to 40.8% against 33.0% at the scaled one, for four
+   points of band share nobody needs (86-100% against bars of 60/70%).
+   **TWO MECHANICAL POINTS a later effect will meet as well.** The division
+   goes on the BLENDED value, not the target: blending toward `want / x`
+   makes the half-life non-monotonic in `m` (0.233 s at mid-ramp against
+   0.200 at the hold), while blending first and dividing after makes the
+   smear LENGTH follow the original ramp exactly. And a (FEW, MANY) pair
+   chosen at one speed may not survive another: W1.4's pair existed because
+   MANY had no water trace and needed the longer trail, and at x3 MANY
+   clears its band bar by 16-30 points at the FEW end too, so the pair
+   collapsed to one number and bought back 4-5 points of white. Any effect
+   that gains a speed multiplier owes its trail the same division —
+   **Orbits' `WORD_SHAPE_TRAIL_S` is a duration and was raised 0.9 -> 1.8
+   at x4, which is the opposite choice; its beads are position-driven and
+   do not lay a body smear, so the trade is not the same, but a third
+   effect should measure rather than copy either.**
+4. **A CORNER BAR WANTS THE PATH, NOT AN INSTANT, AND ITS VERTEX DETECTOR
+   WANTS VERIFYING.** Fish's new measure is the distance from each outline
+   VERTEX to the nearest path through the hold, because a corner is drawn
+   by something going round it at some point in the hold and smeared there
+   afterwards. The vertices come from the signed turn over one cell pitch
+   of arc, clustered — and the count is PINNED against the corners he
+   names (the heart's point and cleft, a star's five points and five
+   notches, the diamond's four tips), which is how the detector is checked
+   rather than trusted. **The turn circle's own minimal-arc depth is a
+   REFERENCE and not a bound**: a follower can come in either side of it,
+   wider when its aim cuts the corner and closer when it overshoots into a
+   cusp and comes back (the heart's cleft: a 1.52-pitch arc depth against
+   0.04 pitches of real path).
 
 ### Sauron / `sauron` (row W1.5, 2026-11-15) — the shaped iris and pupil
 

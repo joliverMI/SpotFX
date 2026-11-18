@@ -16,6 +16,13 @@ bars per shape at both modes and both Energies over 20 seeds, no white, the
 cost, and the restore. It runs as a subprocess, like every fish check script
 here.
 
+ROW W5.5 (2026-11-18) — his second room verdict: *"Oribits is really good
+at showing shape, we need to get Fish to behave similarly ... you might
+need to override some min turn radii to match the effect, especially on the
+star."* Five levers moved (`word_shape_speed_x`, `WS_TURN_X`,
+`WS_TURN_GAIN_X`, the pursuit aim and the wall's own floor), and the
+measured proof gained a CORNER section and a lever SWEEP.
+
 Pinned in-process below:
   * THE CONTRACT — the opt-in (schema, ADVANCED_KEYS, WORD_SHAPE_EFFECTS,
     the registry), the SEQ edge and its creation baseline, and the told
@@ -27,6 +34,11 @@ Pinned in-process below:
   * THE MOTION LAWS that are arithmetic rather than pixels: the envelope's
     restart and release inverses, the entry rule (no two crossing, the
     minimum gap, the ease to even spacing), and the loop's own authority.
+  * ROW W5.5's OWN LAWS: the registered speed and its envelope ramp (x1 at
+    both ends, no step), the lap and the dash cap both taking the
+    multiplier, the turn clamp IN FORCE and his own again after, and the
+    corner budget as arithmetic — the aim's own chord cut and the circle
+    under half a cell pitch.
 """
 from __future__ import annotations
 
@@ -370,7 +382,14 @@ def test_the_trail_and_the_wake_are_exactly_his_again_after_the_release(
     """His note asked for a brighter, longer-lived trail "briefly". The
     quantities `trail_decay` and `ripple_life` DRIVE are scaled by the
     envelope; the params themselves are never written, and both are back to
-    the bit by the release's end."""
+    the bit by the release's end.
+
+    ROW W5.5 reads W1.4's two numbers as SMEAR LENGTHS rather than
+    durations: the lap runs `word_shape_speed_x` times faster, so the same
+    half-life would lay a smear that many times longer, and both targets
+    are divided by the multiplier. W1.4's constants are untouched in the
+    source — what moved is what they mean — so this test asserts the
+    ARITHMETIC rather than the old loose "more than three times"."""
     async def go():
         host, cm, clock, virtual, eff = await _effect(
             tmp_path, "fish-ws-restore", particle_count=3)
@@ -381,9 +400,20 @@ def test_the_trail_and_the_wake_are_exactly_his_again_after_the_release(
                     eff._wake_half_life())
             eff.update_config(_told())
             _render(clock, virtual, int((FORM_S + HOLD_S / 2) / DT))
-            assert eff._trail_half_life() > base[2] * 3
+            # at a standing envelope the targets are the pair and the
+            # trace's life, each divided by the lap's own speed-up
+            few, _many = FX.WS_TRAIL_HALF_LIFE_S
+            want_trail = few / FX.WS_SPEED_X
+            want_wake = (FX.WS_RIPPLE_LIFE_S / FX.WS_SPEED_X
+                         * FX.WAKE_HALF_LIFE_X)
+            assert eff._trail_half_life() == pytest.approx(want_trail)
+            assert eff._wake_half_life() == pytest.approx(want_wake)
+            # ... and both really are LONGER than his own, which is his
+            # note ("lower decay briefly"), just not by the x3 the slow lap
+            # needed
+            assert eff._trail_half_life() > base[2]
+            assert eff._wake_half_life() > base[4]
             assert eff._trail_gain() == pytest.approx(FX.WS_TRAIL_GAIN)
-            assert eff._wake_half_life() > base[4] * 3
             assert (eff.trail_decay, eff.ripple_life) == base[:2]
             _render(clock, virtual, int((HOLD_S / 2 + RELEASE_S) / DT) + 30)
             assert eff._ws is None
@@ -437,8 +467,15 @@ def test_the_water_trace_is_few_fish_only(tmp_path):
                 base = eff._wake_half_life()
                 eff.update_config(_told())
                 _render(clock, virtual, int(FORM_S / DT))
-                longer = eff._wake_half_life() > base * 2
+                # FEW eases the trace's life up to WS_RIPPLE_LIFE_S over
+                # the lap's own speed-up (row W5.5 reads it as a LENGTH —
+                # see `_wake_half_life`); MANY is left exactly as it is
+                want = (FX.WS_RIPPLE_LIFE_S / FX.WS_SPEED_X
+                        * FX.WAKE_HALF_LIFE_X)
+                longer = eff._wake_half_life() > base + 1e-9
                 assert longer is expect, count
+                assert eff._wake_half_life() == pytest.approx(
+                    want if expect else base)
             finally:
                 cm.__exit__(None, None, None)
                 await host.shutdown()
@@ -470,7 +507,15 @@ def test_the_wall_keeps_a_fish_it_is_late_turning_back(tmp_path):
     """The wall's authority is faded by the envelope (the PAUSES
     paragraph) — EXCEPT where it is late turning a fish back from a wall it
     is heading into. "The pond gives way, the wall does not" is what keeps
-    a fish on the panel and a shape is not allowed to spend it."""
+    a fish on the panel and a shape is not allowed to spend it.
+
+    ROW W5.5 relaxed the wall's own FLOOR onto the shaped circle (the third
+    member of `_ws_wall`): the wall is the one authority that still
+    overrides the loop's steer, so a floor left at the fish's own circle
+    would round a corner near the pond's edge wide of the line however
+    tight the shape's circle is. STILL FLOORED, on the same tighter
+    clamp — and `own_floor=True`, which the landing line's own corner
+    rounding and the probe's reach use, keeps the fish's own radius."""
     async def go():
         host, cm, clock, virtual, eff = await _effect(
             tmp_path, "fish-ws-wall", particle_count=3, roam_scale=0.75)
@@ -478,22 +523,233 @@ def test_the_wall_keeps_a_fish_it_is_late_turning_back(tmp_path):
             _render(clock, virtual, 120)
             eff.update_config(_told())
             _render(clock, virtual, int((FORM_S + HOLD_S) / DT))
-            # the look-ahead is shortened and the arc tightened, both by m,
-            # and both still floored at the fish's own turn radius
-            look_s, turn_x = eff._ws_wall
+            # the look-ahead is shortened, the arc tightened and the floor
+            # relaxed onto the shaped circle, all three by m
+            look_s, turn_x, floor_x = eff._ws_wall
             assert look_s == pytest.approx(
                 eff.wall_lookahead * (1.0 - FX.WS_WALL_LOOK_CUT))
             assert turn_x == pytest.approx(FX.WS_WALL_TURN_X)
+            assert floor_x == pytest.approx(FX.WS_TURN_X)
             theta = np.full(4, np.pi / 2, np.float32)
             speed = np.full(4, eff.cruise_px, np.float32)
+            shaped = eff.turn_radius_px * FX.WS_TURN_X
             assert float(eff._glance_radius(theta, speed).min()) >= \
-                eff.turn_radius_px - 1e-6
+                shaped - 1e-6, "the clamp is still a clamp, a tighter one"
+            assert float(eff._glance_radius(
+                theta, speed, own_floor=True).min()) >= \
+                eff.turn_radius_px - 1e-6, (
+                    "the landing line's own rounding keeps HIS radius")
             _render(clock, virtual, int(RELEASE_S / DT) + 30)
             assert eff._ws_wall is None, "his own wall is back"
+            assert float(eff._glance_radius(theta, speed).min()) >= \
+                eff.turn_radius_px - 1e-6, "... and so is the floor"
         finally:
             cm.__exit__(None, None, None)
             await host.shutdown()
     asyncio.run(go())
+
+
+# ── ROW W5.5: SPEED, THE TURN CIRCLE AND THE AIM ──────────────────────────
+
+def test_the_speed_is_registered_and_ramped_by_the_envelope(tmp_path):
+    """ROW W5.5's first lever. `word_shape_speed_x` is a REGISTERED param
+    (so Sonic reaches it per scene entry for free, like `word_shape_size`),
+    it is `1 + (x - 1) * m`, and it is x1 at BOTH ends of the shape — his
+    standing rule, "they need to smoothly accelerate and not have sudden
+    velocity shifts"."""
+    schema = FX.Fish2d.CONFIG_SCHEMA.schema
+    names = {getattr(k, "schema", k) for k in schema}
+    assert "word_shape_speed_x" in names
+    # registered, NOT one of the told keys (which ride only the one write)
+    assert "word_shape_speed_x" not in FX.Fish2d.ADVANCED_KEYS
+    registry = json.loads(
+        (REPO / "config" / "effect_params.json").read_text())
+    params = registry["effects"]["fish"]["params"]
+    assert params["word_shape_speed_x"]["default"] == FX.WS_SPEED_X
+    assert registry["effects"]["fish"]["defaults"]["word_shape_speed_x"] == \
+        FX.WS_SPEED_X
+
+    async def go():
+        host, cm, clock, virtual, eff = await _effect(
+            tmp_path, "fish-ws-speed", particle_count=3)
+        try:
+            assert eff._word_shape_speed_x(0.0) == pytest.approx(1.0)
+            assert eff._word_shape_speed_x(1.0) == pytest.approx(
+                FX.WS_SPEED_X)
+            assert eff._word_shape_speed_x(0.5) == pytest.approx(
+                1.0 + (FX.WS_SPEED_X - 1.0) * 0.5)
+            _render(clock, virtual, 120)
+            eff.update_config(_told())
+            seen = []
+            for _ in range(int((FORM_S + HOLD_S + RELEASE_S) / DT) + 30):
+                _render(clock, virtual, 1)
+                ws = eff._ws
+                if ws is None:
+                    seen.append(1.0)
+                    continue
+                told = ws["told"]
+                seen.append(eff._word_shape_speed_x(wsk.envelope(
+                    ws["t"], told.form_s, told.hold_s, told.release_s)))
+            assert max(seen) == pytest.approx(FX.WS_SPEED_X, abs=1e-3)
+            assert seen[0] == pytest.approx(1.0, abs=0.05), "x1 at the edge"
+            assert seen[-1] == pytest.approx(1.0), "and x1 again after"
+            # ... and never a step: the envelope is a smoothstep, so the
+            # multiplier's own largest one-frame move is bounded by the
+            # steepest that smoothstep can be
+            step = max(abs(b - a) for a, b in zip(seen, seen[1:]))
+            bound = (FX.WS_SPEED_X - 1.0) * 1.5 * DT / min(FORM_S, RELEASE_S)
+            assert step <= bound + 1e-9, (step, bound)
+        finally:
+            cm.__exit__(None, None, None)
+            await host.shutdown()
+    asyncio.run(go())
+
+
+def test_the_lap_and_the_dash_cap_both_take_the_multiplier(tmp_path):
+    """The four quantities of `_word_shape_speed_x`'s docstring, the two
+    that are visible from outside: the LINE's own march really does run a
+    lap in `loop_s / x` seconds, and the DASH CAP scales with it — left
+    alone it binds at x3 (the heart's pace goes 21 -> 64 px/s against a
+    44 px/s cap) and the fish would chase a line it can never catch."""
+    async def go():
+        host, cm, clock, virtual, eff = await _effect(
+            tmp_path, "fish-ws-lap", particle_count=3,
+            # HIS live Fish's own cruise — the cap arithmetic is about his
+            # `base_speed`, not the harness's schema default
+            base_speed=0.3, radius_scale=1.8)
+        try:
+            _render(clock, virtual, 120)
+            eff.update_config(_told(form_s=FORM_S))
+            march = []
+            for _ in range(int((FORM_S + HOLD_S) / DT)):
+                _render(clock, virtual, 1)
+                if eff._ws is not None:
+                    march.append(eff._ws["march"])
+            assert march, "the shape ran"
+            # the march over the HOLD's own frames: one lap per loop_s / x
+            hold_from = int(FORM_S / DT) + 2
+            laps = march[-1] - march[hold_from]
+            secs = (len(march) - 1 - hold_from) * DT
+            want = secs * FX.WS_SPEED_X / FX.WS_LOOP_S_FEW
+            assert laps == pytest.approx(want, rel=0.02), (laps, want)
+            # the cap: the procession's own pace already exceeds the
+            # unscaled WS_DASH_X * cruise, which is why it had to scale
+            pace = eff._word_shape_loop_px(
+                word_shapes.get("heart"),
+                eff._word_shape_size_n()) / FX.WS_LOOP_S_FEW * FX.WS_SPEED_X
+            assert pace > FX.WS_DASH_X * eff.cruise_px, (
+                pace, FX.WS_DASH_X * eff.cruise_px)
+            assert pace < FX.WS_DASH_X * eff.cruise_px * FX.WS_SPEED_X
+        finally:
+            cm.__exit__(None, None, None)
+            await host.shutdown()
+    asyncio.run(go())
+
+
+def test_the_turn_circle_is_overridden_and_is_his_own_again_after(tmp_path):
+    """ROW W5.5's second lever, and HIS OWN instruction for it: "you might
+    need to override some min turn radii to match the effect, especially on
+    the star." The clamp is still a clamp — every per-frame heading change
+    is inside the circle IN FORCE — it is simply `WS_TURN_X` of the fish's
+    own while a shape stands, and exactly his own again by the release's
+    end (W1.4's law at 0.25, unchanged in shape at 0.10)."""
+    async def go():
+        host, cm, clock, virtual, eff = await _effect(
+            tmp_path, "fish-ws-turn", particle_count=3)
+        try:
+            _render(clock, virtual, 120)
+            eff.update_config(_told())
+            worst_in_force = 0.0
+            tight = 0.0
+            hd0 = eff.p_hd[:eff.n].copy()
+            spd0 = eff.p_spd[:eff.n].copy()
+            for _ in range(int((FORM_S + HOLD_S + RELEASE_S) / DT) + 30):
+                _render(clock, virtual, 1)
+                n = eff.n
+                ws = eff._ws
+                m = 0.0
+                if ws is not None:
+                    told = ws["told"]
+                    m = float(wsk.envelope(ws["t"], told.form_s,
+                                           told.hold_s, told.release_s))
+                turn_x = 1.0 - (1.0 - FX.WS_TURN_X) * m
+                tight = max(tight, 1.0 / turn_x)
+                step = np.abs(FX._wrap_pi(eff.p_hd[:n] - hd0[:n]))
+                in_force = np.maximum(
+                    eff.p_spd[:n] / eff.turn_radius_px, 1e-6
+                ) / turn_x * float(eff.passed_dt)
+                worst_in_force = max(
+                    worst_in_force, float(np.max(step / in_force)))
+                hd0 = eff.p_hd[:n].copy()
+                spd0 = eff.p_spd[:n].copy()
+            assert worst_in_force <= 1.0 + 1e-3, worst_in_force
+            assert tight == pytest.approx(1.0 / FX.WS_TURN_X, rel=1e-3)
+            assert eff._ws is None
+            # back to his own: at m = 0 the divisor is exactly 1
+            assert 1.0 - (1.0 - FX.WS_TURN_X) * 0.0 == 1.0
+        finally:
+            cm.__exit__(None, None, None)
+            await host.shutdown()
+    asyncio.run(go())
+
+
+@pytest.mark.parametrize("shape_id", ["heart", "star", "diamond"])
+def test_the_aim_and_the_circle_both_fit_inside_one_cell_pitch(shape_id):
+    """ROW W5.5's CORNER BUDGET, as arithmetic rather than pixels — the two
+    terms that chose `WS_TARGET_LEAD` and `WS_TURN_X`, so a later change
+    that widens either fails here before it reaches the measured proof.
+
+    THE AIM'S OWN CUT is a real bound: a pursuit steer aimed `L` of arc
+    ahead has a chord that passes a corner of exterior angle theta at
+    `(L / 2) sin(theta / 2)` at most, whatever it is capable of turning, so
+    at the shipped lead the aim alone can never spend the row's whole
+    1.0-cell-pitch budget. Read along the panel's TIGHTER axis (a row is
+    sqrt(3)/2 of a pitch), the strict way round.
+
+    THE CIRCLE is asserted as the spec's own sentence — "a turn circle
+    under half a cell pitch" — and NOT as a corner depth, because the
+    minimal-arc depth `R (1 / cos(theta / 2) - 1)` is a reference figure
+    rather than a bound on the measured distance: a fish may also overshoot
+    INTO a cusp and come back, which passes closer than any arc that merely
+    turns the corner (measured, the heart's cleft: a 1.52-pitch arc depth
+    against 0.04 pitches of real path). The bar itself is therefore section
+    9 of scripts/check_fish_word_shape.py — the real paths, every vertex,
+    both modes. This is the budget those paths have to fit in."""
+    import math
+
+    half_w, half_h = (COLS - 1) / 2.0, (ROWS - 1) / 2.0
+    col_pitch, row_pitch = 0.5, math.sqrt(3.0) / 2.0
+    size = 0.62                      # his `word_shape_size`
+    shape = word_shapes.get(shape_id)
+    s = np.linspace(0.0, 1.0, 2880, endpoint=False)
+    ux, uy = shape.at(s)
+    x, y = ux * size * half_w * col_pitch, uy * size * half_h * row_pitch
+    dx, dy = np.roll(x, -1) - x, np.roll(y, -1) - y
+    seg = np.hypot(dx, dy)
+    phi = np.arctan2(dy, dx)
+    step = FX._wrap_pi(np.roll(phi, -1) - phi)
+    win = max(int(round(1.0 / max(seg.mean(), 1e-9))), 1)
+    pad = np.concatenate([step[-win:], step, step[:win]])
+    acc = np.convolve(pad, np.ones(win), mode="same")[win:win + s.size]
+    sharpest = float(np.max(np.abs(acc)))          # radians at a vertex
+    assert sharpest > 0.9, "every shipped shape has a real corner"
+
+    # the AIM's own cut, in cell pitches. The loop's length in pitches is
+    # the sum of its segments; `L` is the arc the chord may span, which is
+    # WS_REACH + WS_TARGET_LEAD of it.
+    loop_pitch = float(seg.sum())
+    lead_arc = (FX.WS_REACH + FX.WS_TARGET_LEAD) * loop_pitch
+    aim_cut = 0.5 * lead_arc * math.sin(min(sharpest, math.pi) / 2.0)
+    deg = math.degrees(sharpest)
+    assert aim_cut <= 1.0, (shape_id, deg, aim_cut)
+    # ... and the circle, as HIS own instruction for the row reads it:
+    # "you might need to override some min turn radii to match the effect,
+    # especially on the star" — under half a cell pitch, measured along the
+    # tighter axis
+    r_px = 0.14 * 1.8 * half_h * FX.WS_TURN_X    # his orbit_radius, shaped
+    assert r_px * row_pitch <= 0.5, (r_px, r_px * row_pitch)
+    # and it really is an override: the fish's OWN circle is nowhere near
+    assert 0.14 * 1.8 * half_h * row_pitch > 2.0
 
 
 def test_a_phase_arriving_mid_shape_wins(tmp_path):
@@ -545,3 +801,41 @@ def test_the_pond_rest_is_held_while_a_shape_runs(tmp_path):
             cm.__exit__(None, None, None)
             await host.shutdown()
     asyncio.run(go())
+
+
+def test_the_help_page_tells_him_about_the_run_and_the_corners():
+    """AGENTS.md's help-content rule: row W5.5 added a user-facing setting
+    and changed what the Fish's shape LOOKS like, so the Help page's own
+    Fish paragraph has to say so in the same change. The topic the params
+    name (`word-shapes`) must exist too, or the Initial Set tab's HelpLink
+    goes nowhere."""
+    content = (REPO / "spectra/web/src/help/helpContent.ts").read_text()
+    assert "id: 'word-shapes'" in content
+    assert "id: 'word-shapes-looks'" in content
+    start = content.index("id: 'word-shapes-looks'")
+    end = content.index("id: 'sung-labels-reading'", start)
+    looks = content[start:end]
+    fish = next(line for line in looks.splitlines()
+                if line.strip().startswith("'Fish draws it as a procession"))
+    for token in ("Word Shape Speed", "three times faster", "corners",
+                  "a lap in under two seconds"):
+        assert token in fish, token
+
+
+def test_the_skill_and_the_map_name_this_rows_proofs():
+    """The skill gate (scripts/check_effect_scene_skills_current.py): row
+    W5.5 changed a mapped effect file, so the effect's own skill carries
+    its levers and its proofs."""
+    skill = (REPO / ".claude/skills/fish-effect/SKILL.md").read_text()
+    assert "ROW W5.5" in skill
+    for token in ("word_shape_speed_x", "WS_TURN_X", "WS_TURN_GAIN_X",
+                  "WS_TARGET_LEAD", "WS_WALL_TURN_X",
+                  "check_fish_word_shape.py"):
+        assert token in skill, token
+    shapes = (REPO / ".claude/skills/word-shapes/SKILL.md").read_text()
+    assert "ROW W5.5" in shapes
+    mapping = json.loads(
+        (REPO / ".claude/skills/EFFECT_SCENE_MAP.json").read_text())
+    files = mapping["effects"]["fish-effect"]["files"]
+    assert "scripts/check_fish_word_shape.py" in files
+    assert "tests/test_fish_word_shape.py" in files

@@ -48,16 +48,38 @@ that misses a bar reports the number rather than moving it:
      the paused features (the wall's authority, the big fish, a swim burst,
      the pond rest) resume after it.
 
+ROW W5.5 (2026-11-18) added the last two, for his second room verdict —
+*"Oribits is really good at showing shape, we need to get Fish to behave
+similarly. Ask me questions if it's hard to implement, but you might need
+to override some min turn radii to match the effect, especially on the
+star."*
+
+  9. THE CORNERS ARE CORNERS — the distance from every outline VERTEX (the
+     heart's point and cleft, a star's five points and five notches, the
+     diamond's four tips) to the nearest fish PATH through the hold, in cell
+     pitches, printed per corner beside the turn-circle law's own bound, and
+     the worst depth any fish reached past the landing line under the
+     relaxed wall clamp. Bar: 1.0 cell pitch, every corner, every shape.
+ 10. THE SWEEP THAT CHOSE THE DEFAULTS — loop x turn x trail, and the two
+     axes the row MEASURED that it also needed (the heading gain and the
+     pursuit aim). OPT IN with `--only sweep`: it is ~230 renders and is
+     not part of the default run.
+
 Read-only, offline. No live access.
 
     .venv/bin/python scripts/check_fish_word_shape.py
     .venv/bin/python scripts/check_fish_word_shape.py --seeds 20
     .venv/bin/python scripts/check_fish_word_shape.py --ascii
+    .venv/bin/python scripts/check_fish_word_shape.py --only corner --ascii
+    .venv/bin/python scripts/check_fish_word_shape.py --only sweep
+    .venv/bin/python scripts/check_fish_word_shape.py --only contrast \
+        --turn-x 0.08 --loop-s 1.4
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import importlib.util
 import math
 import subprocess
@@ -163,6 +185,49 @@ COST_MAX_MS = 1.0              # p50 per frame, added by a holding shape
 # thousand of rounding belongs to the reconstruction, not to the effect.
 RECON_TOL = 1e-3
 SEEDS = 20
+
+# ── ROW W5.5's BAR: THE CORNERS ────────────────────────────────────────
+# His words, 2026-11-18: "Oribits is really good at showing shape, we need
+# to get Fish to behave similarly. ... you might need to override some min
+# turn radii to match the effect, especially on the star."
+#
+# A procession reads as a SHAPE only if its corners are corners, so the
+# row's own new measure is the distance from each OUTLINE VERTEX to the
+# nearest fish PATH through the hold, in cell pitches — the path, not an
+# instant, because a corner is drawn by a fish going round it at some point
+# in the hold and smeared there for a trail half-life afterwards.
+CORNER_BAR = 1.0               # cell pitches, every vertex of every shape
+# A vertex is where the outline turns sharply: the signed turn accumulated
+# over ONE CELL PITCH of arc, clustered, its apex the sample that turns
+# most. On the shipped library that finds exactly the corners he names —
+# the heart's point and cleft (2), a star's five points and five notches
+# (10), the diamond's four tips (4) — which is how this detector is
+# verified rather than trusted.
+CORNER_WINDOW_PITCH = 1.0
+CORNER_TURN_MIN = 0.5          # radians over that window
+CORNER_COUNTS = {"heart": 2, "star": 10, "diamond": 4}
+
+# ── THE LEVERS, so the sweep can move them from the command line ───────
+# Row W5.5's own three axes, Orbits' W4.4 shape: the LAP (`--loop-s`, the
+# seconds a FEW lap takes at a full envelope — applied as the registered
+# `word_shape_speed_x`, so the lever that ships is the param and the flag
+# is only how the sweep names it), the TURN CIRCLE (`--turn-x`) and the
+# TRAIL (`--trail-s`). None means "whatever the module ships".
+# Two more, which the row did not expect to need and MEASURED that it did
+# (section 10's gain and lead tables): the heading GAIN (`--turn-gain-x`,
+# `WS_TURN_GAIN_X`) and the pursuit LEAD (`--lead`, `WS_TARGET_LEAD` and
+# `WS_REACH` together, which is how the aim is one quantity).
+LOOP_S: list[float | None] = [None]
+SPEED_X: list[float | None] = [None]
+TURN_X: list[float | None] = [None]
+TRAIL_S: list[float | None] = [None]
+GAIN_X: list[float | None] = [None]
+LEAD: list[float | None] = [None]
+
+# The config overlay the command line's levers ask for, applied by `run()`
+# to every section's own cfg — the speed is a REGISTERED param, so unlike
+# the turn circle and the trail it cannot be patched onto the module.
+_OVER: list[dict] = [{}]
 
 FAILURES: list[str] = []
 
@@ -328,6 +393,160 @@ def _outline_turn(shape_id, radius_px):
     return out
 
 
+# ── ROW W5.5's CORNER MEASURE ──────────────────────────────────────────
+_CORNERS: dict[str, tuple] = {}
+
+
+def outline_corners(shape_id, samples=2880):
+    """The shape's own VERTICES, in cell pitches: (label, s, x, y, exterior
+    angle in degrees) per corner, convex first.
+
+    A vertex is a cluster of samples where the SIGNED turn accumulated over
+    CORNER_WINDOW_PITCH of arc passes CORNER_TURN_MIN; its apex is the
+    sample that turns most and its exterior angle is the whole turn the
+    cluster makes. The sign separates a point from a notch, because the
+    library's outlines run one way round (`word_shapes.build`, counter-
+    clockwise in the algebra): the same sign as the shape's own circulation
+    is convex.
+
+    VERIFIED, NOT TRUSTED: `CORNER_COUNTS` pins what this must find on the
+    shipped library — the heart's point and cleft, a star's five points and
+    five notches, the diamond's four tips — exactly the corners he names.
+    """
+    if shape_id in _CORNERS:
+        return _CORNERS[shape_id]
+    shape = word_shapes.get(shape_id)
+    s_tab = np.linspace(0.0, 1.0, samples, endpoint=False)
+    ux, uy = shape.at(s_tab)
+    x, y = PANEL.to_physical(ux, uy, SIZE)
+    dx, dy = np.roll(x, -1) - x, np.roll(y, -1) - y
+    seg = np.hypot(dx, dy)
+    step = FX._wrap_pi(np.roll(np.arctan2(dy, dx), -1) - np.arctan2(dy, dx))
+    win = max(int(round(CORNER_WINDOW_PITCH / max(seg.mean(), 1e-9))), 1)
+    pad = np.concatenate([step[-win:], step, step[:win]])
+    acc = np.convolve(pad, np.ones(win), mode="same")[win:win + samples]
+    hot = np.flatnonzero(np.abs(acc) > CORNER_TURN_MIN)
+    runs: list[list[int]] = []
+    if hot.size:
+        cur = [int(hot[0])]
+        for a, b in zip(hot, hot[1:]):
+            if b == a + 1:
+                cur.append(int(b))
+            else:
+                runs.append(cur)
+                cur = [int(b)]
+        runs.append(cur)
+        # the outline is CLOSED, so a cluster can straddle s = 0
+        if len(runs) > 1 and runs[0][0] == 0 and runs[-1][-1] == samples - 1:
+            runs[0] = runs[-1] + runs[0]
+            runs.pop()
+    turn_sign = 1.0 if float(step.sum()) >= 0.0 else -1.0
+    out = []
+    for run_ in runs:
+        r = np.asarray(run_)
+        k = int(r[np.argmax(np.abs(acc[r]))])
+        ext = float(np.abs(step[r].sum()))
+        convex = float(np.sign(acc[k])) == turn_sign
+        out.append(("point" if convex else "notch", float(s_tab[k]),
+                    float(x[k]), float(y[k]), math.degrees(ext)))
+    out.sort(key=lambda c: (c[0] != "point", -c[4]))
+    named = []
+    seen = {"point": 0, "notch": 0}
+    for kind, sv, cx, cy, deg in out:
+        seen[kind] += 1
+        named.append((f"{kind} {seen[kind]}", sv, cx, cy, deg))
+    _CORNERS[shape_id] = tuple(named)
+    return _CORNERS[shape_id]
+
+
+def corner_depth_bound(deg, radius_px):
+    """The depth a radius-R arc that merely TURNS a corner of exterior angle
+    `deg` leaves at it, in px: `R (1 / cos(theta / 2) - 1)`, or the circle's
+    own diameter `2R` past 180 degrees, where the secant runs away.
+
+    A REFERENCE FIGURE, NOT A BOUND, and the table says so: it is the scale
+    the turn circle sets, and a fish can come in either side of it. Wider,
+    when its aim cuts the corner (the `(L / 2) sin(theta / 2)` term, and at
+    row W5.5's lead that is 0.3-0.6 cell pitches); and CLOSER, when it
+    overshoots into a cusp and comes back, which passes nearer than any arc
+    that only turns the corner — measured at the heart's cleft, a
+    1.52-pitch arc depth against 0.04 pitches of real path. It is printed
+    beside the measurement so the measurement can be read against geometry
+    rather than taken on trust, never asserted."""
+    if deg >= 180.0:
+        return 2.0 * radius_px
+    return radius_px * (1.0 / math.cos(math.radians(deg) / 2.0) - 1.0)
+
+
+def fish_pitch(eff, which=None):
+    """Every fish's position in cell pitches (the window's own offset taken
+    off, exactly as `_dist_and_corner` reads it)."""
+    sw = np.flatnonzero(eff.p_mode[:eff.n] < 2) if which is None else which
+    px = eff.cx + eff.p_x[sw] * eff.sx - eff.cam_px
+    py = eff.cy + eff.p_y[sw] * eff.sy - eff.cam_py
+    fx_, fy_ = screen_pitch(px, py)
+    return sw, fx_, fy_
+
+
+def _seg_dist(vx, vy, ax, ay, bx, by):
+    """Point-to-SEGMENT distance, vectorised over the segments — a path is
+    a polyline, not a bag of samples, so a corner taken between two frames
+    is still a path that went through it."""
+    ex, ey = bx - ax, by - ay
+    denom = ex * ex + ey * ey
+    t = np.where(denom > 1e-12, ((vx - ax) * ex + (vy - ay) * ey)
+                 / np.maximum(denom, 1e-12), 0.0)
+    t = np.clip(t, 0.0, 1.0)
+    return np.hypot(vx - (ax + t * ex), vy - (ay + t * ey))
+
+
+def corner_distances(tracks, shape_id):
+    """{corner label: the nearest a fish PATH came, in cell pitches} over
+    `tracks` — {fish id: [(x, y) in pitches, frame by frame]}.
+
+    A path, not an instant: the bar is whether the corner was DRAWN at some
+    point in the hold, which is what the eye reads off the smear. A gap in
+    a fish's samples (it stopped swimming, or its id was reused) breaks the
+    polyline rather than drawing a segment across the panel."""
+    corners = outline_corners(shape_id)
+    best = {c[0]: float("inf") for c in corners}
+    for pts in tracks.values():
+        if len(pts) < 2:
+            continue
+        arr = np.asarray(pts, dtype=np.float64)
+        ax, ay = arr[:-1, 0], arr[:-1, 1]
+        bx, by = arr[1:, 0], arr[1:, 1]
+        for label, _s, cx, cy, _deg in corners:
+            d = float(_seg_dist(cx, cy, ax, ay, bx, by).min())
+            if d < best[label]:
+                best[label] = d
+    return best
+
+
+def _grade(frame, band=None):
+    """The frame LUMINANCE-GRADED on his real cells — Orbits' W4.4 render,
+    carried here: `.` at or under 20, `-` under BAND_LIT_LO, `+` under
+    BAND_LIT_HI, `#` at or over it. `band` restricts the drawing to the
+    shape's own outline band, which is where every contrast bar is read, so
+    the two renders together say "what the eye sees" and "is the LINE
+    whole"."""
+    lum = frame.reshape(ROWS, COLS, 3).max(axis=2)
+    lines = []
+    for row in range(ROWS):
+        chars = []
+        for col in range(COLS):
+            if not PANEL.grid[row, col] or (band is not None
+                                            and not band[row, col]):
+                chars.append(" ")
+                continue
+            v = lum[row, col]
+            chars.append("." if v <= 20 else
+                         "-" if v < BAND_LIT_LO else
+                         "+" if v < BAND_LIT_HI else "#")
+        lines.append("      " + "".join(chars).rstrip())
+    return "\n".join(lines)
+
+
 def body_len_pitch(eff):
     """A body length in cell pitches, taken along the panel's TIGHTER axis
     (a column is 0.5 of a pitch, a row sqrt(3)/2), so the "within 1.5 body
@@ -427,7 +646,8 @@ async def run(cfg, frames, *, seed=7, effect_type="fish", arc=None,
         lows, beats = WB.load_fixture(arc)
     out, kept = [], []
     try:
-        eff = headless.attach_effect(host, virtual, effect_type, dict(cfg))
+        eff = headless.attach_effect(
+            host, virtual, effect_type, dict(cfg, **_OVER[0]))
         eff._rng = np.random.default_rng(seed)
         aud = audio if audio is not None else _Audio()
         for i in range(frames):
@@ -458,6 +678,69 @@ async def run(cfg, frames, *, seed=7, effect_type="fish", arc=None,
 def told_keys(shape_id, seq=1, form_s=FORM_S, hold_s=HOLD_S,
               release_s=RELEASE_S, level=0.5):
     return wsk.keys_for(shape_id, seq, form_s, hold_s, release_s, level)
+
+
+def speed_x_for(loop_s=None, speed_x=None):
+    """The `word_shape_speed_x` a lap of `loop_s` seconds asks for. The
+    multiplier is the quantity the module has; the lap is the quantity the
+    arithmetic is about (`fish.WS_SPEED_X`'s own block), so the sweep names
+    laps and this converts. MANY's lap scales by the same multiplier, which
+    is what the module does."""
+    if speed_x is not None:
+        return float(speed_x)
+    if loop_s is not None:
+        return FX.WS_LOOP_S_FEW / max(float(loop_s), 1e-3)
+    return None
+
+
+@contextlib.contextmanager
+def levers(speed_x=None, turn_x=None, trail_s=None, gain_x=None, lead=None):
+    """Run a block with row W5.5's three levers set. The speed is a
+    REGISTERED param, so it comes back as a config overlay to merge into a
+    run's cfg; the turn circle and the trail are module constants and are
+    patched and restored here.
+
+    THE WALL'S OWN DIVISOR MOVES WITH THE TURN CIRCLE. `FX.WS_WALL_TURN_X`
+    is `1 / WS_TURN_X` at import — the wall's arc tightens exactly as much
+    as the fish's own circle does, so that a glance near the pond's edge
+    cannot re-widen the circle at a corner — and a sweep that moved only
+    `WS_TURN_X` would leave it stale and measure a wall the module never
+    ships. Both move here, together."""
+    keep = (FX.WS_TURN_X, FX.WS_WALL_TURN_X, FX.WS_TRAIL_HALF_LIFE_S,
+            FX.WS_TURN_GAIN_X, FX.WS_TARGET_LEAD, FX.WS_REACH)
+    over = {}
+    if speed_x is not None:
+        over["word_shape_speed_x"] = float(speed_x)
+    try:
+        if turn_x is not None:
+            FX.WS_TURN_X = float(turn_x)
+            FX.WS_WALL_TURN_X = 1.0 / max(float(turn_x), 1e-3)
+        if trail_s is not None:
+            FX.WS_TRAIL_HALF_LIFE_S = (float(trail_s), float(trail_s))
+        if gain_x is not None:
+            FX.WS_TURN_GAIN_X = float(gain_x)
+        if lead is not None:
+            # ONE quantity: the aim is `clip(lag, +-WS_REACH) +
+            # WS_TARGET_LEAD`, so the arc the chord can span is their sum
+            # and sweeping one without the other measures neither.
+            FX.WS_TARGET_LEAD = FX.WS_REACH = float(lead)
+        yield over
+    finally:
+        (FX.WS_TURN_X, FX.WS_WALL_TURN_X, FX.WS_TRAIL_HALF_LIFE_S,
+         FX.WS_TURN_GAIN_X, FX.WS_TARGET_LEAD, FX.WS_REACH) = keep
+
+
+def _cli_levers():
+    """The levers the command line set, as `levers()`'s own arguments —
+    applied around every section so `--turn-x 0.08` re-measures the whole
+    acceptance list on that circle, not just the sweep."""
+    return dict(speed_x=speed_x_for(LOOP_S[0], SPEED_X[0]),
+                turn_x=TURN_X[0], trail_s=TRAIL_S[0],
+                gain_x=GAIN_X[0], lead=LEAD[0])
+
+
+def cfg_with(cfg, over):
+    return dict(cfg, **over) if over else cfg
 
 
 # ═══ 1. UNTOLD IS TODAY'S ══════════════════════════════════════════════
@@ -610,6 +893,106 @@ def section_smooth():
               f"{name}: ... and never tighter than the shape's own circle "
               f"({worst_hd_plain:.4f}x of it, the shape's own limit being "
               f"{1.0 / FX.WS_TURN_X:.2f}x)")
+    _report_the_decomposition()
+
+
+# ROW W5.5 owes row W4.4's own CONTINUITY DECOMPOSITION, and the honest
+# answer here is that this effect does not need it — which is worth printing
+# rather than assuming, because it is a REAL difference between the two
+# effects and not a lucky margin.
+#
+# W4.4 had to decompose because Orbits is POSITION-DRIVEN: its blend moves a
+# blob directly, so a one-frame position change IS a velocity and at the
+# hold's edges neither the plain bar nor the blend's own bound is the whole
+# story. A FISH IS STEERED AND ITS SPEED IS EASED (`SPEED_TAU`): nothing
+# this row writes is a speed, it is a speed TARGET, and the ease turns any
+# step in the target into at most `step * dt / SPEED_TAU` of actual speed
+# change. So the plain bar — the largest per-frame speed change against this
+# effect's own maximum, the swim burst's — holds at EVERY frame of the shape
+# including the hold's two edges, and is asserted there (8-11% of that
+# maximum, measured).
+#
+# What is printed below is the decomposition anyway, in the plain bar's own
+# units, so the two rows can be read against each other:
+#   * THE BLEND's own bound: `|dm| x |shaped - ordinary|`, with the
+#     difference bounded by the largest target the row can ask for (the
+#     scaled dash cap) — the most the envelope's own ramp can move the
+#     TARGET in one frame;
+#   * THE MULTIPLIER's own bound: the pace is PROPORTIONAL to `speed_x`, so
+#     `|dx| / x_max` of the largest target reached in the hold;
+#   * and both of those divided by `SPEED_TAU / dt`, which is what the ease
+#     lets through to the speed itself.
+def _report_the_decomposition():
+    print("\n   THE CONTINUITY DECOMPOSITION (row W4.4's, owed here) — "
+          "and this effect does not need it:")
+    print("   a fish is STEERED and its speed is EASED, so nothing this row "
+          "writes is a speed, only a")
+    print("   speed TARGET, and the plain bar above already holds at every "
+          "frame including the hold's")
+    print("   edges. Printed in the plain bar's own units so the two rows "
+          "can be compared.")
+    edge = 150
+    total = edge + int((FORM_S + HOLD_S + RELEASE_S + 0.5) / DT)
+    # W4.4's four moments — AND the steepest frame anywhere in the shape,
+    # because a smoothstep is FLAT at all four of them (its steepest slope
+    # is in the middle of each ramp), so the four alone would make this
+    # table trivially small and say less than it should.
+    moments = (("the form's start", edge + 1),
+               ("the word", edge + int(FORM_S / DT)),
+               ("the hold's end", edge + int((FORM_S + HOLD_S) / DT)),
+               ("the release's end",
+                edge + int((FORM_S + HOLD_S + RELEASE_S) / DT) - 1),
+               ("the steepest frame anywhere", None))
+
+    def watch(i, eff, _frame):
+        ws = eff._ws
+        m = 0.0
+        if ws is not None:
+            told = ws["told"]
+            m = float(wsk.envelope(ws["t"], told.form_s, told.hold_s,
+                                   told.release_s))
+        return (m, eff._word_shape_speed_x(m), float(eff.cruise_px),
+                float(eff.passed_dt),
+                float(np.max(eff.p_spd[:eff.n])) if eff.n else 0.0)
+
+    for name, cfg in (("few", FEW), ("many", MANY)):
+        seen, _ = asyncio.run(run(
+            cfg, total, seed=1, tell_at=edge, told=told_keys("heart"),
+            watch=watch))
+        ms = [r[0] for r in seen]
+        xs = [r[1] for r in seen]
+        cruise = max(r[2] for r in seen)
+        dt_b = max(r[3] for r in seen)
+        x_max = max(xs) or 1.0
+        cap_target = FX.WS_DASH_X * cruise * x_max
+        v_hold = max(r[4] for r in seen[edge:])
+        # this effect's own maximum per-frame speed change, section 3's
+        # denominator exactly
+        own_max = ((1.0 + FX.SWIM_BURST_SPEED_X + FX.LUNGE_GAIN) * cruise
+                   * dt_b / FX.BURST_SPEED_TAU)
+        ease = dt_b / FX.SPEED_TAU
+        print(f"   {name}: this effect's own maximum per-frame speed change "
+              f"{own_max:.2f} px/s; the ease lets through {ease:.3f} of a "
+              f"target step")
+        print(f"      {'moment':20s} {'blend':>8s} {'x':>8s} "
+              f"{'row total':>10s} {'of own max':>11s}")
+        for label, at in moments:
+            if at is None:
+                lo, hi = 1, len(ms)
+            else:
+                lo, hi = max(1, at - 3), min(len(ms), at + 4)
+            dm = max(abs(ms[k] - ms[k - 1]) for k in range(lo, hi))
+            dx = max(abs(xs[k] - xs[k - 1]) for k in range(lo, hi))
+            blend = dm * cap_target * ease
+            mult = dx / x_max * v_hold * ease
+            row = blend + mult
+            print(f"      {label:20s} {blend:7.2f}  {mult:7.2f}  "
+                  f"{row:9.2f}  {row / max(own_max, 1e-9) * 100:9.1f}%")
+            check(row <= own_max,
+                  f"{name} at {label}: row W5.5 and the blend together can "
+                  f"move a fish's speed by at most {row:.2f} px/s in a "
+                  f"frame, against this effect's own maximum of "
+                  f"{own_max:.2f}")
 
 
 # ═══ 4. IT IS THE SHAPE ════════════════════════════════════════════════
@@ -788,27 +1171,32 @@ def section_the_shape(seeds=SEEDS, draw_ascii=False):
 
 def _corner_bound():
     """What a corner costs, in the turn-circle law's own arithmetic, so the
-    reported corner-fish numbers can be checked against geometry rather
-    than taken on trust: the depth a radius-R arc leaves at a corner of
-    exterior angle `theta` is `R (1 / cos(theta / 2) - 1)`."""
+    reported corner-fish numbers can be read against geometry rather than
+    taken on trust — and ROW W5.5 reads it off the SHARPEST VERTEX OF EACH
+    SHAPE as `outline_corners` finds it, rather than off three figures
+    quoted from the W1.4 note: those were a rolling MAXIMUM over a turn
+    radius of arc and they are a different quantity from a vertex's own
+    exterior angle, which is what the formula takes. See
+    `corner_depth_bound`: a REFERENCE figure, never a bound."""
     r_px = 0.14 * 1.8 * PANEL.half_height * FX.WS_TURN_X   # his orbit_radius
     print(f"\n   the corner allowance, DERIVED not measured: a fish on its "
           f"shaped circle of {r_px:.2f} px")
     print("   leaves R (1 / cos(theta / 2) - 1) px at a corner of exterior "
-          "angle theta:")
-    for label, deg in (("the heart's cleft", 249.0),
-                       ("a star's notch", 154.0),
-                       ("the diamond's tip", 114.0)):
-        if deg >= 180.0:
-            # a REVERSAL: the secant formula runs away, and what actually
-            # bounds the fish is its own circle — it flies round it
-            depth, how = 2.0 * r_px, "a reversal, bounded by 2R"
-        else:
-            depth = r_px * (1.0 / math.cos(math.radians(deg) / 2.0) - 1.0)
-            how = "R (1 / cos(theta / 2) - 1)"
-        print(f"     {label:20s} {deg:5.0f} deg -> {depth:5.2f} px = "
-              f"{depth * CW.COLUMN_PITCH:4.1f}-"
-              f"{depth * CW.ROW_PITCH:4.1f} cell pitches   ({how})")
+          "angle theta (2R past 180):")
+    for shape_id in SHAPES:
+        label, _s, _x, _y, deg = max(
+            outline_corners(shape_id), key=lambda c: c[4])
+        depth = corner_depth_bound(deg, r_px)
+        how = ("a reversal, bounded by 2R" if deg >= 180.0
+               else "R (1 / cos(theta / 2) - 1)")
+        print(f"     {shape_id + ' ' + label:20s} {deg:5.1f} deg -> "
+              f"{depth:5.2f} px = {depth * CW.COLUMN_PITCH:4.2f}-"
+              f"{depth * CW.ROW_PITCH:4.2f} cell pitches   ({how})")
+    print("   A REFERENCE, NOT A BOUND: a fish can come in either side of "
+          "it — wider when its aim")
+    print("   cuts the corner, CLOSER when it overshoots into a cusp and "
+          "comes back. Section 9")
+    print("   measures the real paths against every vertex.")
 
 
 def _draw(frame, shape_id, label):
@@ -1061,10 +1449,27 @@ def section_restored():
               for r in after),
           "the trail's decay and gain and the wake's life are exactly his "
           "again by the release's end")
-    check(max(r[4] for r in held) > hl0 * 3
+    # ROW W5.5 reads W1.4's two half-lives as SMEAR LENGTHS: the lap runs
+    # `word_shape_speed_x` times faster, so the same duration would lay a
+    # smear that many times longer, and both targets are divided by the
+    # multiplier. So the quantities still RISE (his "lower decay briefly")
+    # but by less than the x3 the slow lap needed — asserted as the
+    # arithmetic rather than a loose multiple.
+    few_hl, _many_hl = FX.WS_TRAIL_HALF_LIFE_S
+    speed = float(FEW.get("word_shape_speed_x",
+                          _OVER[0].get("word_shape_speed_x", FX.WS_SPEED_X)))
+    want_hl = few_hl / speed
+    want_wake = FX.WS_RIPPLE_LIFE_S / speed * FX.WAKE_HALF_LIFE_X
+    print(f"   the derived targets at a standing envelope: trail "
+          f"{want_hl:.3f}s (the pair's FEW end {few_hl} over x{speed:.1f}), "
+          f"wake {want_wake:.3f}s")
+    check(abs(max(r[4] for r in held) - want_hl) < 1e-6
           and max(r[5] for r in held) > 1.5
-          and max(r[6] for r in held) > wake0 * 3,
-          "... and really did rise while the shape held (his note)")
+          and abs(max(r[6] for r in held) - want_wake) < 1e-6,
+          "... and really did rise while the shape held, to W1.4's own "
+          "numbers over the lap's speed-up (his note)")
+    check(max(r[4] for r in held) > hl0 and max(r[6] for r in held) > wake0,
+          "... both still LONGER than his own while it holds")
     check(all(r[7] is None for r in after) and any(
         r[7] is not None for r in held),
         "the wall's own look-ahead and arc are back to his while untold")
@@ -1108,6 +1513,367 @@ def section_restored():
     check(later >= 1, "... and its poke is still there afterwards")
 
 
+# ═══ 9. THE CORNERS ARE CORNERS (row W5.5) ═════════════════════════════
+# HIS OWN BAR for this row, and the one thing that separates a procession
+# from a shape: "Oribits is really good at showing shape, we need to get
+# Fish to behave similarly ... you might need to override some min turn
+# radii to match the effect, especially on the star."
+#
+# The measure is the distance from each outline VERTEX to the nearest fish
+# PATH through the hold, in cell pitches, printed per corner. A path and not
+# an instant, because a corner is drawn by a fish going round it at some
+# point in the hold and smeared there for a trail half-life afterwards —
+# which is what the eye reads.
+#
+# THE TURN CIRCLE'S OWN SCALE IS PRINTED BESIDE IT, so the measurement can
+# be read against geometry rather than taken on trust — see
+# `corner_depth_bound`, which is a REFERENCE figure and not a bound (a fish
+# can come in either side of it). What the lap x turn table in section 10
+# found, and the reason this row has two more levers than it expected: the
+# CIRCLE is not what binds here. At x1 a star's worst corner is 5.39 cell
+# pitches at WS_TURN_X 0.25 and 5.45 at 0.08 — no movement at all — while
+# the heading GAIN moves it 3.88 -> 0.99 and the pursuit AIM 0.99 -> 0.37.
+EDGE = 150                     # the frame the shape is told at
+# THE WALL, MEASURED RATHER THAN ASSUMED. Row W5.5 relaxed the wall's own
+# floor onto the shaped circle, and the wall is the one authority that still
+# overrides the loop's steer — so a shape must not be allowed to walk a fish
+# off the panel. Two quantities, because they answer different questions
+# (`_wall_depths`), and both read beside THE SAME SEED UNTOLD.
+#
+# THE LANDING LINE IS NOT THE EDGE: it is the lit silhouette pulled
+# WALL_GRAZE half-widths in with its corners rounded, so an ordinary fish
+# crosses it routinely — measured untold over his real-audio arcs (busy and
+# calm, 3 seeds each), 1.77 px with FEW and 1.78 with MANY, which is this
+# effect's OWN figure and the reference the told numbers are read against.
+WALL_PAST_ARCS = 1.78
+# ... and THE LIT SILHOUETTE IS the edge. Measured told, the deepest
+# middle over three seeds of every (mode, shape) row is 0.48 px INSIDE it —
+# no fish leaves the panel at all — so this pin allows half a pixel of
+# overshoot and still fails the moment one does.
+WALL_PAST_MAX = 3.0           # past the LANDING LINE, the told worst (2.77)
+WALL_PAST_LIT_MAX = 0.5       # past the LIT silhouette (measured -0.48)
+CORNER_SEEDS = 3               # ... and how many seeds section 9 reads
+
+
+def _wall_depths(eff):
+    """(how far past the LANDING LINE, how far past the LIT SILHOUETTE) the
+    deepest swimming fish's middle is, in px. Two numbers because they
+    answer different questions: the landing line is the glance's own target,
+    pulled WALL_GRAZE half-widths inside the lit edge and its corners
+    rounded, so an ordinary fish crosses it routinely (measured untold on
+    his real-audio arcs: 1.77 px few, 1.78 many); the lit silhouette is
+    whether a middle is actually off the panel."""
+    sw = np.flatnonzero(eff.p_mode[:eff.n] < 2)
+    if sw.size == 0:
+        return 0.0, 0.0
+    px = eff.cx + eff.p_x[sw] * eff.sx - eff.cam_px
+    py = eff.cy + eff.p_y[sw] * eff.sy - eff.cam_py
+    g, _nx, _ny = eff._wall_landing(px[:, None], py[:, None])
+    d, _dx, _dy = FX._sample_field(eff._wall, px, py)
+    return float(-g.min()), float(-np.min(d))
+
+
+def _corner_tracks(cfg, shape_id, seed, over, frm, to, told=True):
+    """{(fish, run): [(x, y) in pitches]} over frames [frm, to], plus
+    `_wall_depths`' two worsts over those frames — the wall's own floor is
+    relaxed onto the shaped circle under a shape since this row, so "did
+    they stay on the panel" is MEASURED, not assumed. `told=False` renders
+    the same seed with nothing told, which is the only honest control for
+    those two depths."""
+    tracks: dict = {}
+    last: dict = {}
+    runs: dict = {}
+    worst = [0.0, 0.0]
+
+    def watch(i, eff, _frame):
+        if not (frm <= i <= to):
+            return None
+        land, lit = _wall_depths(eff)
+        worst[0] = max(worst[0], land)
+        worst[1] = max(worst[1], lit)
+        sw, fx_, fy_ = fish_pitch(eff)
+        for j, fx1, fy1 in zip(sw.tolist(), fx_.tolist(), fy_.tolist()):
+            if last.get(j) != i - 1:
+                runs[j] = runs.get(j, -1) + 1
+            last[j] = i
+            tracks.setdefault((j, runs[j]), []).append((fx1, fy1))
+        return None
+
+    asyncio.run(run(cfg_with(cfg, over), to + 2, seed=seed,
+                    tell_at=EDGE if told else None,
+                    told=told_keys(shape_id, level=0.5) if told else None,
+                    watch=watch))
+    return tracks, worst[0], worst[1]
+
+
+def section_corners(seeds=CORNER_SEEDS, draw_ascii=False):
+    lv = _cli_levers()
+    print("\n9. THE CORNERS ARE CORNERS — every outline VERTEX against the "
+          "nearest fish path through the hold")
+    word = EDGE + int(FORM_S / DT)
+    hold_end = EDGE + int((FORM_S + HOLD_S) / DT) - 2
+    with levers(**lv) as over:
+        r_px = float(0.14 * 1.8 * PANEL.half_height) * FX.WS_TURN_X
+        print(f"   the shaped turn circle is {r_px:.3f} px "
+              f"({r_px * CW.COLUMN_PITCH:.2f}-{r_px * CW.ROW_PITCH:.2f} cell "
+              f"pitches) at WS_TURN_X {FX.WS_TURN_X}; "
+              f"word_shape_speed_x "
+              f"{over.get('word_shape_speed_x', FX.WS_SPEED_X)}")
+        print(f"   the bar is {CORNER_BAR:.1f} cell pitch on EVERY corner of "
+              f"EVERY shape, printed per corner, beside the law's own bound")
+        worst_all = 0.0
+        for shape_id in SHAPES:
+            corners = outline_corners(shape_id)
+            want = CORNER_COUNTS[shape_id]
+            print(f"\n   {shape_id}: {len(corners)} corners found "
+                  f"(expected {want})")
+            check(len(corners) == want,
+                  f"{shape_id}: the detector finds its {want} corners "
+                  f"({len(corners)})")
+            got = {}
+            worst_seed = {}
+            past = {}
+            for name, cfg in (("few", FEW), ("many", MANY)):
+                # PER SEED, NEVER POOLED ACROSS THEM. A shape fires once,
+                # on one seed, so the statistic that means anything is the
+                # worst corner WITHIN a seed; taking each corner's best
+                # reading over several seeds mixes runs that never happened
+                # together and reads optimistically (measured: 0.32 cell
+                # pitches pooled against 0.49 per seed, on the same three
+                # seeds). The table prints each corner's WORST seed and the
+                # bar is held on the worst corner of the worst seed.
+                best = {c[0]: 0.0 for c in corners}
+                per_seed = []
+                depths = [0.0, 0.0, 0.0, 0.0]      # told land/lit, untold
+                for seed in range(1, seeds + 1):
+                    tracks, land, lit = _corner_tracks(
+                        cfg, shape_id, seed, over, word, hold_end)
+                    depths[0] = max(depths[0], land)
+                    depths[1] = max(depths[1], lit)
+                    _t, u_land, u_lit = _corner_tracks(
+                        cfg, shape_id, seed, over, word, hold_end,
+                        told=False)
+                    depths[2] = max(depths[2], u_land)
+                    depths[3] = max(depths[3], u_lit)
+                    seen = corner_distances(tracks, shape_id)
+                    per_seed.append(max(seen.values()))
+                    for label, d in seen.items():
+                        best[label] = max(best[label], d)
+                got[name] = best
+                worst_seed[name] = per_seed
+                past[name] = depths
+            print(f"   {'corner':10s} {'ext deg':>8s} {'bound':>7s} "
+                  f"{'few':>6s} {'many':>6s}   (each corner's WORST seed)")
+            for label, _s, _x, _y, deg in corners:
+                bound = corner_depth_bound(deg, r_px)
+                lo = bound * CW.COLUMN_PITCH
+                hi = bound * CW.ROW_PITCH
+                print(f"   {label:10s} {deg:8.1f} {lo:3.2f}-{hi:3.2f} "
+                      f"{got['few'][label]:6.2f} {got['many'][label]:6.2f}")
+            for name in ("few", "many"):
+                worst = max(got[name].values())
+                at = max(got[name], key=lambda k: got[name][k])
+                worst_all = max(worst_all, worst)
+                land, lit, u_land, u_lit = past[name]
+                seeds_worst = worst_seed[name]
+                print(f"   {name:4s}: worst corner {worst:.2f} pitches "
+                      f"({at}), median seed {np.median(seeds_worst):.2f}, "
+                      f"per seed {[round(v, 2) for v in seeds_worst]}")
+                print(f"         past the landing line {land:.2f} px told / "
+                      f"{u_land:.2f} untold (his arcs untold "
+                      f"{WALL_PAST_ARCS:.2f}); past the LIT edge "
+                      f"{lit:.2f} px told / {u_lit:.2f} untold")
+                check(worst <= CORNER_BAR,
+                      f"{name} {shape_id}: every corner within "
+                      f"{CORNER_BAR:.1f} cell pitch of a fish's path "
+                      f"through the hold, on EVERY seed (worst "
+                      f"{worst:.2f}, {at}; median seed "
+                      f"{np.median(seeds_worst):.2f})")
+                check(land <= WALL_PAST_MAX,
+                      f"{name} {shape_id}: the wall still keeps every fish "
+                      f"inside its own landing line about as well as it "
+                      f"does untold (worst {land:.2f} px past it, pinned "
+                      f"{WALL_PAST_MAX:.1f}; this effect's own untold worst "
+                      f"over his real-audio arcs is {WALL_PAST_ARCS:.2f})")
+                check(lit <= WALL_PAST_LIT_MAX,
+                      f"{name} {shape_id}: ... and no middle is further "
+                      f"off the LIT panel than the pinned "
+                      f"{WALL_PAST_LIT_MAX:.1f} px ({lit:.2f})")
+            if draw_ascii:
+                band = outline_mask(shape_id)
+                for name, cfg in (("few", FEW), ("many", MANY)):
+                    for when, at in (("the word", word),
+                                     ("mid-hold", (word + hold_end) // 2),
+                                     ("the hold's end", hold_end)):
+                        grab = {}
+
+                        def w(i, eff, frame, grab=grab, at=at):
+                            if i == at:
+                                grab[i] = frame.copy()
+                            return None
+                        asyncio.run(run(
+                            cfg_with(cfg, over), at + 2, seed=1,
+                            tell_at=EDGE, told=told_keys(shape_id, level=0.5),
+                            watch=w))
+                        print(f"\n   --- {name} {shape_id} at {when}, "
+                              f"luminance-graded (`.` <= 20, `-` < "
+                              f"{BAND_LIT_LO}, `+` < {BAND_LIT_HI}, `#` "
+                              f">= {BAND_LIT_HI}) ---")
+                        print(_grade(grab[at]))
+                        print(f"   --- ... and the outline band alone — is "
+                              f"the LINE whole ---")
+                        print(_grade(grab[at], band))
+        print(f"\n   worst corner over every shape and both modes: "
+              f"{worst_all:.2f} cell pitches (bar {CORNER_BAR:.1f})")
+
+
+# ═══ 10. THE SWEEP THAT CHOSE THE DEFAULTS (row W5.5) ══════════════════
+# Orbits' W4.4 shape, and its finding is the thing this table is built to
+# repeat or refute: *"SPEED AND TRAIL ARE NOT INTERCHANGEABLE LEVERS. The
+# WORST row's band share is the SPEED's and almost not the trail's at all,
+# while the trail moves the MEDIAN and the hold's END."*
+#
+# Three axes: the LAP (seconds for one FEW lap at a full envelope, which is
+# `word_shape_speed_x` the other way round), the TURN CIRCLE and the TRAIL's
+# half-life. Six rows per combination — few/many x the three shapes — and
+# what is printed per combination is what chooses a default: the WORST row's
+# band share (the lever speed owns), the MEDIAN (the lever the trail owns),
+# the worst CORNER over all six rows (the lever the turn circle owns) and
+# the worst WHITE (what the trail costs).
+SWEEP_LAPS = (5.50, 2.75, 1.83, 1.38)       # x1, x2, x3, x4
+SWEEP_TURNS = (0.25, 0.15, 0.10, 0.08)
+SWEEP_TRAILS = (0.6, 1.0, 1.4)
+# ... AND TWO AXES THE ROW DID NOT EXPECT TO NEED. The first lap x turn
+# table said plainly that the turn circle is NOT the corner bar's binding
+# term — at x1 a star's worst corner is 5.39 cell pitches at WS_TURN_X 0.25
+# and 5.45 at 0.08, which is no movement at all — so the row went looking
+# for what is, and found two things, both of them about the AIM rather than
+# the geometry:
+#   * the heading GAIN. A proportional steer needs a heading error to
+#     command a rate, and the lag that error represents gets worse the
+#     faster the line runs. At x3 on the shaped circle a star's worst
+#     corner is 3.88 pitches at the shipped gain of x2 and 0.99 at x12.
+#   * the pursuit LEAD. A steer aimed `L` of arc ahead passes a corner of
+#     exterior angle theta at `(L / 2) sin(theta / 2)` whatever it is
+#     capable of turning — 1.7 px at the heart's cleft on the shipped
+#     0.030 of the loop, which is 0.9-1.5 cell pitches of the bar spent
+#     before the circle is consulted.
+# Both tables are printed below, because they are what actually chose this
+# row's defaults and a later change has to be able to re-choose them.
+SWEEP_GAINS = (2.0, 6.0, 12.0, 24.0)
+SWEEP_LEADS = (0.015, 0.012, 0.008, 0.005)
+
+
+def _sweep_row(cfg, shape_id, seed, over, word, mid, hold_end):
+    """One (mode, shape) of a sweep combination: (band>64 at mid-hold, at
+    the hold's end, band/rest ratio at mid-hold, the worst corner, the
+    worst white over the hold)."""
+    grab = {}
+
+    def watch(i, eff, frame):
+        if i in (mid, hold_end):
+            grab[i] = frame.copy()
+        if word <= i <= hold_end:
+            grab.setdefault("white", []).append(white_share(frame))
+        return None
+
+    asyncio.run(run(cfg_with(cfg, over), hold_end + 2, seed=seed,
+                    tell_at=EDGE, told=told_keys(shape_id, level=0.5),
+                    watch=watch))
+    lo_mid, _hi_mid, rat = band_contrast(grab[mid], shape_id)
+    lo_end, _hi_end, _r = band_contrast(grab[hold_end], shape_id)
+    tracks, _land, _lit = _corner_tracks(
+        cfg, shape_id, seed, over, word, hold_end)
+    worst_corner = max(corner_distances(tracks, shape_id).values())
+    return (lo_mid, lo_end, rat, worst_corner,
+            max(grab.get("white", [0.0])))
+
+
+def _sweep_combo(lap, turn_x, trail_s, seed, word, mid, hold_end,
+                 gain_x=None, lead=None):
+    speed = speed_x_for(loop_s=lap)
+    rows = []
+    with levers(speed_x=speed, turn_x=turn_x, trail_s=trail_s,
+                gain_x=gain_x, lead=lead) as over:
+        for name, cfg in (("few", FEW), ("many", MANY)):
+            for shape_id in SHAPES:
+                rows.append(_sweep_row(cfg, shape_id, seed, over,
+                                       word, mid, hold_end))
+    los = [r[0] for r in rows]
+    return {
+        "lap": lap, "speed": speed, "turn": turn_x, "trail": trail_s,
+        "gain": FX.WS_TURN_GAIN_X if gain_x is None else gain_x,
+        "lead": (FX.WS_REACH + FX.WS_TARGET_LEAD) if lead is None
+                else 2.0 * lead,
+        "worst_lo": float(np.min(los)),
+        "med_lo": float(np.median(los)),
+        "end_lo": float(np.min([r[1] for r in rows])),
+        "worst_ratio": float(np.min([r[2] for r in rows])),
+        "worst_corner": float(np.max([r[3] for r in rows])),
+        "worst_white": float(np.max([r[4] for r in rows])),
+    }
+
+
+def _sweep_print(label, combos):
+    print(f"\n   {label}")
+    print(f"   {'lap s':>6s} {'x':>4s} {'turn':>5s} {'trail':>5s} "
+          f"{'gain':>5s} {'aim':>6s} | "
+          f"{'worst band>64':>13s} {'median':>7s} {'at end':>7s} | "
+          f"{'ratio':>6s} | {'corner':>7s} | {'white':>6s}")
+    for c in combos:
+        print(f"   {c['lap']:6.2f} {c['speed']:4.1f} {c['turn']:5.2f} "
+              f"{c['trail']:5.2f} {c['gain']:5.1f} {c['lead']:6.3f} | "
+              f"{c['worst_lo'] * 100:12.0f}% "
+              f"{c['med_lo'] * 100:6.0f}% {c['end_lo'] * 100:6.0f}% | "
+              f"{c['worst_ratio']:5.2f}x | {c['worst_corner']:6.2f}p | "
+              f"{c['worst_white']:5.1f}%")
+
+
+def section_sweep(_seeds=None):
+    print("\n10. THE SWEEP THAT CHOSE THE DEFAULTS — loop x turn x trail, "
+          "six rows per combination")
+    print("    (few/many x heart/star/diamond; the worst row is the SPEED's "
+          "lever, the median the TRAIL's,")
+    print("     the corner the TURN CIRCLE's — Orbits' W4.4 finding, "
+          "re-measured here rather than assumed)")
+    print("    ONE SEED PER ROW, deliberately and whatever `--seeds` says: "
+          "this table is a RELATIVE")
+    print("    comparison across 19 combinations, not an absolute figure. "
+          "Section 9 is the absolute")
+    print("    corner figure (three seeds, the worst of them), and its "
+          "number is the larger one.")
+    word = EDGE + int(FORM_S / DT)
+    mid = EDGE + int((FORM_S + HOLD_S / 2.0) / DT)
+    hold_end = EDGE + int((FORM_S + HOLD_S) / DT) - 2
+    few_s, _many_s = FX.WS_TRAIL_HALF_LIFE_S
+    ship_lap = FX.WS_LOOP_S_FEW / max(FX.WS_SPEED_X, 1e-3)
+    grid = [_sweep_combo(lap, turn, few_s, 1, word, mid, hold_end)
+            for lap in SWEEP_LAPS for turn in SWEEP_TURNS]
+    _sweep_print(f"LAP x TURN, at the shipped trail ({few_s} s), gain and "
+                 f"aim", grid)
+    print("   READ THE CORNER COLUMN DOWN EACH LAP: the turn circle barely "
+          "moves it, which is")
+    print("   what sent this row looking for the gain and the aim below. "
+          "The band columns are the")
+    print("   SPEED's — Orbits' W4.4 finding, reproduced.")
+    trail = [_sweep_combo(ship_lap, FX.WS_TURN_X, t, 1, word, mid, hold_end)
+             for t in SWEEP_TRAILS]
+    _sweep_print(f"TRAIL, at the shipped lap ({ship_lap:.2f}s) x turn "
+                 f"{FX.WS_TURN_X}", trail)
+    gains = [_sweep_combo(ship_lap, FX.WS_TURN_X, few_s, 1, word, mid,
+                          hold_end, gain_x=g) for g in SWEEP_GAINS]
+    _sweep_print("HEADING GAIN, at the shipped lap x turn x trail", gains)
+    leads = [_sweep_combo(ship_lap, FX.WS_TURN_X, few_s, 1, word, mid,
+                          hold_end, lead=lead) for lead in SWEEP_LEADS]
+    _sweep_print("THE AIM (WS_REACH + WS_TARGET_LEAD), same", leads)
+    print("\n   WHAT THE TABLES SAY is written into "
+          "`fish.WS_SPEED_X`, `WS_TURN_X`, `WS_TURN_GAIN_X` and")
+    print("   `WS_TARGET_LEAD`'s own blocks and "
+          "`.claude/skills/fish-effect/SKILL.md`; this section is")
+    print("   how a later change re-chooses them.")
+    return grid, trail, gains, leads
+
+
 # ═══ main ══════════════════════════════════════════════════════════════
 def main() -> int:
     ap = argparse.ArgumentParser(
@@ -1118,26 +1884,92 @@ def main() -> int:
     ap.add_argument("--ascii", action="store_true",
                     help="draw the hold's frame on the real mask")
     ap.add_argument("--only", action="append",
-                    help="run only these sections (1-8)")
+                    help="run only these sections: 1-10, or the aliases "
+                         "untold/word/smooth/contrast/white/cost/"
+                         "backtoback/restored/corner/sweep")
+    ap.add_argument("--loop-s", type=float, default=None,
+                    help="row W5.5's lever 1, as the SECONDS one FEW lap "
+                         "takes at a full envelope (the shipped "
+                         "WS_LOOP_S_FEW / word_shape_speed_x)")
+    ap.add_argument("--speed-x", type=float, default=None,
+                    help="... or the multiplier directly "
+                         "(`word_shape_speed_x`)")
+    ap.add_argument("--turn-x", type=float, default=None,
+                    help="row W5.5's lever 2: WS_TURN_X, the fraction of "
+                         "its own circle a fish turns on under a shape "
+                         "(the wall's own divisor moves with it)")
+    ap.add_argument("--turn-gain-x", type=float, default=None,
+                    help="row W5.5's lever 4 (measured, not expected): "
+                         "WS_TURN_GAIN_X, the heading gain under a full "
+                         "shape")
+    ap.add_argument("--lead", type=float, default=None,
+                    help="row W5.5's lever 5 (measured, not expected): "
+                         "WS_TARGET_LEAD and WS_REACH together — how far "
+                         "of the loop the aim may be ahead")
+    ap.add_argument("--corner-seeds", type=int, default=CORNER_SEEDS,
+                    help="seeds per row in section 9 (the corner measure)")
+    ap.add_argument("--trail-s", type=float, default=None,
+                    help="row W5.5's lever 3: the body trail's half-life "
+                         "under a full shape, BOTH ends of the (few, many) "
+                         "pair")
     args = ap.parse_args()
-    only = set(args.only or [])
+    LOOP_S[0], SPEED_X[0] = args.loop_s, args.speed_x
+    TURN_X[0], TRAIL_S[0] = args.turn_x, args.trail_s
+    GAIN_X[0], LEAD[0] = args.turn_gain_x, args.lead
+    alias = {"untold": "1", "word": "2", "smooth": "3", "contrast": "4",
+             "shape": "4", "white": "5", "cost": "6", "backtoback": "7",
+             "restored": "8", "corner": "9", "corners": "9", "sweep": "10"}
+    only = {alias.get(v, v) for v in (args.only or [])}
     print(f"THE FISH'S WORD SHAPE PROCESSION — {COLS}x{ROWS} crystal, "
           f"{int(REAL.sum())} real cells, SIZE {SIZE}")
     print(f"his live music Fish: {FEW['particle_count']} fish (few) and "
           f"{MANY['particle_count']} (many), tail drive and pond rest on")
     print(f"told: form {FORM_S}s (Fish's own floor), hold {HOLD_S}s, "
           f"release {RELEASE_S}s")
-    for name, fn in (("1", section_untold),
-                     ("2", section_on_the_word),
-                     ("3", section_smooth),
-                     ("4", lambda: section_the_shape(args.seeds, args.ascii)),
-                     ("5", section_white),
-                     ("6", section_cost),
-                     ("7", section_back_to_back),
-                     ("8", section_restored)):
+    lv = _cli_levers()
+    with levers(**lv) as over:
+        lap_few = FX.WS_LOOP_S_FEW / max(
+            over.get("word_shape_speed_x", FX.WS_SPEED_X), 1e-3)
+        print(f"ROW W5.5's levers: word_shape_speed_x "
+              f"{over.get('word_shape_speed_x', FX.WS_SPEED_X):.2f} "
+              f"(a FEW lap in {lap_few:.2f}s), WS_TURN_X {FX.WS_TURN_X} "
+              f"(a {0.14 * 1.8 * PANEL.half_height * FX.WS_TURN_X:.2f} px "
+              f"circle), trail half-life {FX.WS_TRAIL_HALF_LIFE_S}, "
+              f"heading gain x{FX.WS_TURN_GAIN_X}, aim "
+              f"{FX.WS_REACH + FX.WS_TARGET_LEAD:.3f} of the loop ahead")
+    # EVERY section runs under the command line's own levers, so
+    # `--turn-x 0.08` re-measures the whole acceptance list on that circle
+    # rather than only the sweep. Section 1 is deliberately OUTSIDE them:
+    # it compares an UNTOLD frame with the pinned module, and an untold
+    # frame reads no lever at all.
+    for name, fn, under in (("1", section_untold, False),
+                            ("2", section_on_the_word, True),
+                            ("3", section_smooth, True),
+                            ("4", lambda: section_the_shape(
+                                args.seeds, args.ascii), True),
+                            ("5", section_white, True),
+                            ("6", section_cost, True),
+                            ("7", section_back_to_back, True),
+                            ("8", section_restored, True),
+                            ("9", lambda: section_corners(
+                                args.corner_seeds, args.ascii), False),
+                            ("10", section_sweep, False)):
         if only and name not in only:
             continue
-        fn()
+        if name == "10" and "10" not in only:
+            # THE SWEEP IS OPT-IN: ~230 renders, and it re-measures the
+            # levers rather than asserting them, so it is not part of the
+            # acceptance run the proof test gates on.
+            continue
+        if under:
+            with levers(**lv) as over:
+                _OVER[0] = over
+                try:
+                    fn()
+                finally:
+                    _OVER[0] = {}
+        else:
+            fn()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} CHECK(S) FAILED:")
