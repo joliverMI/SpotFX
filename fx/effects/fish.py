@@ -1355,12 +1355,38 @@ WS_REACH = 0.008            # ... and NEVER further ahead than this, however
                             # follows the line round the corner; the lag is
                             # closed by WS_SPACING_GAIN's speed correction
                             # instead, which cannot pull it off the line.
+# ROW W6.1 — AND THE AIM IS NEVER SHORTER THAN WHAT A FRAME COVERS.
+# THE AIM ABOVE IS AN ARC, AND A FRAME'S TRAVEL IS A LENGTH; at 30 fps the
+# second is the bigger one. Measured frame by frame on the diamond — whose
+# own tangent never reverses, so every reversal read there is the effect's
+# (0.00 per second of geometric floor against 6.0-6.3 measured): the target
+# sits 0.2-1.1 px of arc ahead while the fish covers 1.5 px in one rendered
+# frame, so at a corner the aim point jumps from one side of it to the other
+# WITHIN one frame. The heading error then arrives as 90 degrees in a single
+# step, the steer spends it all at once, and the next three frames bring the
+# fish back: -9, -13, -7 degrees. That is the nose snapping at a corner —
+# his "the fish seem to jitter out of the outline" and the row's own "no
+# twitch at a star's point" — and it is the AIM's length, not the gain.
+#
+# So the aim arc is floored at this many of the fish's OWN frame steps,
+# which makes the target's direction move CONTINUOUSLY at any frame rate.
+# It is read per fish from its own speed, so a dashing fish aims further
+# ahead than a gliding one, exactly as a pursuit should. AT 60 fps IT
+# BARELY BINDS (one step is 0.7 px against the 0.96 px the shipped aim
+# already is), which is why W5.5 never saw this.
+#
+# THE COST IS THE CORNER, and it is arithmetic: a steer aimed `L` of arc
+# ahead passes a corner of exterior angle theta at `(L / 2) sin(theta / 2)`
+# whatever it can turn (WS_TARGET_LEAD's own block). Swept against both
+# bars together — section 10's own aim-step table — and this is where they
+# cross.
+WS_AIM_STEP_X = 1.5
 WS_SPACE_EASE_S = 1.0       # the entries ease to even spacing over this
 WS_ENTRY_MIN_GAP = 0.5      # no two entries closer than this x (1 / n) of
                             # the loop
 WS_SEEK_W = 14.0            # the loop's steer weight — the lull keepers'
                             # own KEEP_SEEK_W, the same job
-WS_TURN_GAIN_X = 12.0       # the heading gain is x (1 + m * this) under a
+WS_TURN_GAIN_X = 24.0       # the heading gain is x (1 + m * this) under a
                             # full shape, still clipped to the turn circle
                             # below so it can never turn a fish tighter
                             # than it can go. The plan asked for DOUBLE and
@@ -1392,6 +1418,43 @@ WS_TURN_GAIN_X = 12.0       # the heading gain is x (1 + m * this) under a
                             # here turns a fish faster than its own
                             # geometry allows — the structural guarantee is
                             # the same single `np.clip` it always was.
+                            #
+                            # ROW W6.1 TOOK IT 12.0 -> 24.0, and what the
+                            # number MEANS changed with it: the step is now
+                            # the exact first-order form
+                            # (`1 - exp(-gain * dt)` of the error, the
+                            # block in draw()), so this names a SETTLING
+                            # TIME and can never command more than the
+                            # error however large it is. Re-swept at HIS
+                            # OWN 30 fps against the corner bar and the
+                            # nose-wag bar together, 2 seeds x 6 rows, at
+                            # the shipped aim floor:
+                            #   gain x6 : corner 3.28 p, wag 6.29/s,
+                            #             61.9% filled, white 40.2%
+                            #   gain x12: corner 1.04 p, wag 6.00/s,
+                            #             75.6% filled, white 33.1%
+                            #   gain x24: corner 0.79 p, wag 6.14/s,
+                            #             77.8% filled, white 33.8%
+                            # x6 is pure lag and costs the band as well as
+                            # the corner; x24 is the best corner and the
+                            # best band, and the WAG IS FLAT ACROSS ALL OF
+                            # THEM — which is the row's own finding that
+                            # the wag is not the gain's to fix (the
+                            # WS_AIM_STEP_X block is).
+# ROW W6.1 — AND A ONE-POLE ON THE TURN COMMAND WAS BUILT AND IS NOT
+# SHIPPED, which is this row's own version of W1.4's curvature feed-forward
+# (that block above) and is recorded for the same reason: it is the textbook
+# answer and it MEASURED WORSE. STAR's `_govern_rotation` smooths that
+# effect's jerk with a unity-DC-gain one-pole on the per-frame advance, so
+# the same filter on the shaped turn command — state `p_om`, the rate the
+# previous frame really applied, in RENDERED frames — is the obvious fix
+# for a pursuit that overshoots a corner. Swept at 30 fps over 0, 1, 1.5,
+# 2.5 and 4 frames it barely touched the WAG (6.00 -> 4.86 at four frames)
+# and destroyed everything the row is for: the worst corner 1.04 -> 10.73
+# cell pitches, the band filled 75.6% -> 29.2%, white 33.1% -> 43.8%. A
+# fish that cannot spend its turn WHEN the corner arrives does not round
+# the corner at all. Do not re-add it without re-running section 12's own
+# table.
 WS_TURN_X = 0.10            # THE TURN ARC TIGHTENS, scaled by m: the circle
                             # a fish turns on is this fraction of its own
                             # under a full shape — HIS OWN NOTE, "They also
@@ -1458,7 +1521,43 @@ WS_TURN_X = 0.10            # THE TURN ARC TIGHTENS, scaled by m: the circle
                             # as at 0.25 — a tighter circle while a shape
                             # runs, his own again by the release's end —
                             # and at 0.10 it is also what makes
-                            # WS_TURN_GAIN_X's x12 safe.
+                            # WS_TURN_GAIN_X's gain safe.
+                            #
+                            # ROW W6.1 RE-SWEPT IT AT HIS OWN 30 fps AND
+                            # LEFT IT HERE. {0.10, 0.15, 0.25} x the gain,
+                            # at the shipped aim floor: 0.15 measured
+                            # 0.75 cell pitches of worst corner against
+                            # 0.79 at 0.10 — inside the noise of two
+                            # seeds — while 0.25 gives it back (1.01) and
+                            # the band with it. So the row keeps 0.10 and
+                            # keeps the spec sentence
+                            # `tests/test_fish_word_shape.py` pins ("a turn
+                            # circle under half a cell pitch"), which 0.15
+                            # would have broken for nothing.
+# ROW W6.1 — AND THE CLAMP HAS TO MEAN AN ARC AT HIS OWN FRAME RATE.
+# `omega_max = speed / turn_radius_px`, tightened by WS_TURN_X above, is
+# the right angular RATE for that circle; what the drawn frame gets is
+# `omega_max * dt` of heading. At the shaped circle (0.45 px) and the x3
+# pace that rate is 140-215 rad/s, so one 30 fps frame is 4.7 to 7.2
+# RADIANS — more than a full turn. MEASURED, before this constant existed:
+# a fish on the loop with the wall's glance saturating the clamp
+# (urgency 1.00, omega 190-214 rad/s) corkscrewed a complete circle every
+# frame and travelled 20.5 px OFF THE LIT PANEL, against 0.00 px on the
+# same seed untold — while at 60 fps the same configuration measured 0.00
+# and the defect was invisible. The turn-circle guarantee's own sentence
+# ("an about-face is always an arc and never a flip") is simply FALSE once
+# `omega_max * dt` passes pi.
+#
+# So the shaped clamp carries a per-RENDERED-FRAME ceiling as well, which
+# is STAR's own precedent one effect over (`ROTATION_CAP_DEG_FRAME`, the
+# spin smooth plan: a cap per rendered frame, whatever dt, because a
+# stalled frame must not be allowed the angle two frames would have had).
+# It is still ONE `np.clip` on omega in draw(); this only bounds the bound.
+# IT CANNOT BIND AT m = 0, by arithmetic rather than by a gate: the
+# ordinary clamp would need a fish at
+# `WS_TURN_MAX_RAD_FRAME / dt * turn_radius_px` = 214 px/s at 30 fps, and
+# the dash cap is 2.04x the procession's own pace.
+WS_TURN_MAX_RAD_FRAME = np.pi / 2.0
 WS_DASH_X = 2.5             # the approach may run this many x cruise
                             # (`dist / time_left`, capped — the swim burst's
                             # own 2.2x + lunge is the precedent for a fish
@@ -1559,6 +1658,67 @@ WS_WALL_TURN_X = 1.0 / WS_TURN_X
 # the thing that would re-open it. The per-lever table is in
 # `.claude/skills/fish-effect/SKILL.md`'s ROW W5.5 section.
 WS_TRAIL_HALF_LIFE_S = (0.6, 0.6)
+# ROW W6.1 — AND NOW IT IS FLOORED AT THE REVISIT GAP, which is THE PORT
+# FROM ORBITS and is the whole of his third room verdict's second half.
+#
+# HIS WORDS, 2026-11-18: *"The shape outline needs to reach at least a
+# moment where it is either filled with fish or trail. ... Also, if we did
+# a highlight of the shape in orbits, do it on fish."*
+#
+# THERE IS NO HIGHLIGHT IN ORBITS TO PORT. `fx/effects/orbits.py` carries
+# exactly four WORD_SHAPE_* constants (FEW, MANY, TRAIL_S 1.8, SPEED_X 4.0)
+# and no shape-time brightness, glow or line lift at all; W4.4's option B
+# ("a shape-time brightness lift") was framed and NEVER BUILT — he settled
+# option A, as built. What makes Orbits' outline read WHOLE is that its
+# trail OUTLIVES THE REVISIT GAP at x4: WORD_SHAPE_TRAIL_S is a DURATION
+# add-on, raised 0.9 -> 1.8 s for exactly that. So what is ported here is
+# the PERSISTENCE, not a highlight.
+#
+# AND ROW W5.5 HAD DONE THE OPPOSITE. It read this pair, and
+# WS_RIPPLE_LIFE_S, as smear LENGTHS — divided by the lap's own speed-up
+# (`_trail_half_life`, `_wake_half_life`) — which at x3 leaves 0.20 s of
+# trail against a revisit gap of 0.61 s (FEW heart) or 0.39 s (MANY): each
+# smear is at 12% of itself by the time the next fish arrives, so the band
+# reads over 64/255 nearly everywhere (93-100%) and is NEVER WHOLE at half
+# of full. Measured before this row changed anything, at his own 30 fps:
+# the most-filled frame of a hold had 44-88% of the band over 128/255
+# against his "filled" and a band/off-band ratio of 7.7-26x.
+# That division bought 5-8 points of white (40.8% -> 33.0%); his new word
+# outranks it, and white stays REPORTED under his standing option A.
+#
+# So the half-life a shape asks for is a DURATION floored at the gap: a
+# smear still at half of its own brightness when the next fish arrives.
+# THE FLOOR IS RAMPED BY `m` LIKE EVERYTHING ELSE HERE — a floor applied
+# flat would step the half-life from 0.165 s to 0.61 s on the first frame
+# of the form, which is the one thing his standing note rules out, and
+# Orbits' own W1.3 finding (a lingering trail's per-frame decay is
+# hyperbolic in its half-life) is why that step would be visible.
+WS_TRAIL_GAP_X = 1.0        # the floor, in revisit gaps. 1.0 = a smear at
+                            # half brightness exactly when the next fish
+                            # arrives.
+# SWEPT {0, 0.7, 1.0, 1.5} against bar 4 and the white share — section 10's
+# own gap table, worst of its six (mode, shape) rows at 30 fps:
+#
+#   gap           band>64   FILLED   band/off   white
+#   0.00 (W5.5's)     61%      36%      12.1x   19.6%
+#   0.70              90%      63%      11.4x   25.0%
+#   1.00 (shipped)    94%      78%      10.5x   31.0%
+#   1.50              98%      86%       8.6x   39.9%
+#
+# (the corner and the wag columns do not move at all down this axis, which
+# is the cleanest evidence in the row that the trail and the steering are
+# separate defects)
+#
+# The row's instruction was "the smallest that makes the outline whole",
+# and NONE of them does: 95% of the band over half of full is not reached
+# at any gap this effect can afford. So the choice is read off BOTH halves
+# of his sentence — "filled with fish or trail" AND "it isn't distinct
+# enough" — and 1.0 is the only value that improves both against what he
+# saw (44-88% filled and 7.7x at the deploy he judged). 1.5 buys eight
+# points of filling by giving the DISTINCTNESS back to 8.2x and spending
+# nine more points of white, which is trading one half of his sentence for
+# the other. Section 11 prints the 1.5 row beside the shipped one so his
+# own eye can overrule this.
 WS_TRAIL_GAIN = 1.6         # ... and his "boost the trail brightness",
                             # through the body layer's own hue-preserving
                             # clip so a brighter smear never goes white
@@ -1572,6 +1732,78 @@ WS_RIPPLE_LIFE_S = 3.0      # THE WATER TRACE (P2 A, few fish only):
                             # which still covers the 0.61 s a point waits
                             # between two of three fish and costs five
                             # points less white than the unscaled 1.26 s.
+# ROW W6.1 — THE FLAP GLIDES ON THE LINE, if the flap is what lights the
+# water off it. His "the fish seem to jitter out of the outline": the drawn
+# lateral throw is a wave down the spine (`_spine_wave`, `SPINE_THROW =
+# SPINE_U ** 1.6`), zero at the NOSE and full at the TAIL, and the W1.4
+# hand-over blends it toward the tail drive's own stroke — which at the x3
+# pace is near FLAP_MAX. So every stroke throws the tail's light a flap
+# amplitude off the band while the fish's middle is on it.
+#
+# Under a full shape the drawn amplitude eases toward the GLIDE size — the
+# tail drive's own `TAIL_AMP_GLIDE`, "its body near straight" — by `m`, and
+# his own stroke is back by the release's end. The scale is this constant,
+# in glide sizes. `None` means LEAVE THE FLAP ALONE.
+#
+# AND IT IS NONE, measured, which is the answer the row owed either way.
+# Section 10's own OFF-BAND table, worst of its six (mode, shape) rows at
+# 30 fps: the flap IS part of the off-band light — easing it to one glide
+# size lifts the band/off-band ratio 10.5x -> 14.6x, so the attribution was
+# right — but it costs FOUR POINTS OF THE BAND HE ASKED FOR (78% -> 74%
+# filled) and FOUR of white (31.0% -> 35.4%, W1.4's own recorded
+# non-monotonicity: a dimmer single-hue layer stops winning `lighten`'s max
+# against the whiter body sum under it). The band is 1 cell pitch wide and
+# the tail's throw lands IN it as often as beside it, so narrowing the body
+# takes light off the line as well as off the water. His own words are
+# "either filled with fish or trail" first, so the row does not spend his
+# band to buy the ratio. `check_fish_word_shape.py --only sweep`'s OFF-BAND
+# table re-measures this and the trace refusal below side by side, which is
+# how a later change overturns either.
+WS_FLAP_X = None
+# ROW W6.1 — AND THE ORDINARY WAKE OFF THE LINE. The row's bar 4 reads the
+# band against the water AROUND it, and half of that water is this effect's
+# ordinary wake: every fish lays a deposit at its own TAIL every frame
+# (`_deposit_wake`, the `laying` block in draw()), and W1.4 left MANY's
+# `ripple_life` "exactly as it is" under a shape. Measured at the whole
+# moment with the off-band light attributed per layer (section 11's
+# `layer_off_band`): FEW 15.2 body / 14.4 water, MANY 13.8 body / 7.7
+# water. So it is BOTH, and this is the water's half — the deposit eased
+# toward this multiple of his own by `m`, his value back by the release's
+# end, and `ripple_amount` itself never written. The TRACE's own deposit is
+# untouched: that one IS the line.
+#
+# MEASURED, section 10's OFF-BAND table, worst of six (mode, shape) rows at
+# 30 fps: easing it OUT costs the band nothing at all (78% filled either
+# way), lifts the band/off-band ratio 8.1x -> 10.5x and takes 2.8 points OFF
+# the white share (33.8% -> 31.0%). It is the only lever in this row that
+# improves every column at once, which is why it goes to zero rather than
+# part way.
+WS_WAKE_FADE = 0.0
+# ROW W6.1 — AND THE TRACE IS NO LONGER FEW-ONLY. W1.4 scoped the water
+# trace (P2 A) to `n <= word_shape_few` deliberately: "with many, the bodies
+# and trails already light the outline and a longer-lived busy wake is where
+# white comes from". Row W6.1's bar 4 measured that premise and it does not
+# hold at HALF OF FULL — with six fish the most-filled frame of a hold reads
+# 77.8-79.8% of the band over 128/255 against his "filled", the worst rows
+# of all six. The trace is the only lever that adds light AT THE LINE rather
+# than at a fish (it is deposited at the loop point each fish's own place
+# has reached, not at its tail), so it is also the cheapest in off-band
+# light and in white — which is exactly why the row reaches for it rather
+# than for more trail. It is HIS OWN existing mechanism extended, not a new
+# drawing: the same deposit, the same palette rule, the same envelope.
+#
+# AND IT IS NOT SHIPPED, because the measurement refused it. Section 10's
+# OFF-BAND table, worst of six rows at 30 fps with the ordinary wake already
+# eased out: extending the trace to MANY at its own amplitude moves the band
+# filled NOT AT ALL (78% -> 78%) and costs FIVE points of white (31.0% ->
+# 36.0%); at WS_TRACE_AMP 1.4 it buys four points of band (-> 82%) for eight
+# of white (-> 39.2%). With six fish the revisit gap is already 0.39 s and the
+# floored trail covers it, so there is no dark stretch for a trace to fill —
+# W1.4's own scoping reason survives bar 4 after all, which is worth the
+# record. `--only sweep`'s OFF-BAND table carries it (and the
+# brighter-trace variant); section 11 and section 5 together are the
+# absolute figures.
+WS_TRACE_MANY = False
 WS_TRACE_AMP = 0.9          # the loop trace's deposit, x the ordinary
                             # wake's own strength
 WS_TRACE_SIZE_BODY = 0.5    # ... sized this many body lengths across
@@ -5108,11 +5340,24 @@ class Fish2d(Twod, GradientEffect):
         s_fish = np.interp(lo + (bearing - lo) % (2.0 * np.pi), ang, s_tab)
         s_fish = s_fish % 1.0
         lag = direction * (((place - s_fish) + 0.5) % 1.0 - 0.5)
-        target_s = (
-            s_fish
-            + direction * (np.clip(lag, -WS_REACH, WS_REACH)
-                           + WS_TARGET_LEAD)
-        ) % 1.0
+        aim = np.clip(lag, -WS_REACH, WS_REACH) + WS_TARGET_LEAD
+        # ROW W6.1: ... and never shorter than WS_AIM_STEP_X of this fish's
+        # own frame step, converted from px into the loop's own arc by the
+        # loop's measured length (that constant's block). The floor goes on
+        # the WHOLE aim and not on the lead alone, because a fish AHEAD of
+        # its station has `lag` negative: at the shipped numbers
+        # `-WS_REACH + WS_TARGET_LEAD` is exactly ZERO, which aims a fish
+        # at its own place and makes the direction to it meaningless.
+        aim = np.maximum(aim, WS_AIM_STEP_X * self.p_spd[idx] * dt
+                         / max(float(st["loop_px"]), 1e-3))
+        # ... and never more than a QUARTER of the loop ahead, whatever the
+        # frame. The floor above is `speed * dt`, and `dt` is capped at
+        # DT_MAX (0.1 s), so one stalled frame at the shaped dash cap would
+        # otherwise ask for 0.55 of the loop — past the halfway point,
+        # where "ahead" wraps round and the aim points BEHIND the fish.
+        # Normal frames are 0.04-0.06, so this never binds in play.
+        aim = np.minimum(aim, 0.25)
+        target_s = (s_fish + direction * aim) % 1.0
         ux, uy = shape.at(target_s)
         tx = cnx + ux * size_n
         ty = cny + uy * size_n
@@ -5162,7 +5407,7 @@ class Fish2d(Twod, GradientEffect):
         # the guard against a frame so long (or a restart) that the step
         # would be a dotted line instead.
         trace = None
-        if st["few"] and m > 0.0:
+        if (st["few"] or WS_TRACE_MANY) and m > 0.0:
             step = 0.0
             if prev is not None and prev[1] == idx.size:
                 step = float(np.max(np.abs(
@@ -5178,6 +5423,27 @@ class Fish2d(Twod, GradientEffect):
                 "tx": tx, "ty": ty, "want": want,
                 "few": bool(st["few"]), "trace": trace,
                 "speed_x": speed_x}
+
+    def _word_shape_revisit_gap(self, m):
+        """ROW W6.1 — HOW LONG A POINT ON THE OUTLINE WAITS between one
+        fish and the next, in seconds: the lap time over the number of fish
+        on the loop, at this frame's own pace multiplier.
+
+        This is the quantity Orbits' W4.4 finding is about and the one
+        `WS_TRAIL_GAP_X` floors the two half-lives at — 0.61 s with his
+        three fish on the heart at x3, 0.39 s with six. The COUNT and the
+        LAP are both the LATCHED ones (`st["count"]`, `st["loop_s"]`, set
+        once when the entries are assigned), so a fish leaving mid-shape
+        cannot step the floor: 0 before the entries exist, which is what
+        makes the floor inert on those frames."""
+        ws = self._ws
+        if ws is None:
+            return 0.0
+        loop_s = float(ws.get("loop_s") or 0.0)
+        if loop_s <= 0.0:
+            return 0.0
+        k = max(int(ws.get("count") or 0), 1)
+        return loop_s / (k * max(self._word_shape_speed_x(m), 1e-3))
 
     def _trail_half_life(self):
         """The body trail's half-life. HIS NOTE on the Word Shapes build:
@@ -5208,8 +5474,13 @@ class Fish2d(Twod, GradientEffect):
         # first and dividing after makes the SMEAR LENGTH — the half-life
         # times the pace — follow W1.4's own ramp exactly, since
         # `(h + m (F - h)) / x * x` is that ramp by construction.
-        return ((half_life + m * (want - half_life))
+        life = ((half_life + m * (want - half_life))
                 / self._word_shape_speed_x(m))
+        # ROW W6.1's FLOOR: the smear outlives the revisit gap, which is
+        # what makes the outline WHOLE for a moment rather than merely lit
+        # (WS_TRAIL_GAP_X's own block — Orbits' persistence, ported). Ramped
+        # by `m` so the first frame of the form is still his own value.
+        return max(life, m * WS_TRAIL_GAP_X * self._word_shape_revisit_gap(m))
 
     def _trail_gain(self):
         """The body's deposit brightness into the trail — 1.0 untold, up to
@@ -5226,18 +5497,23 @@ class Fish2d(Twod, GradientEffect):
         return 1.0 + m * (WS_TRAIL_GAIN - 1.0)
 
     def _wake_half_life(self):
-        """The wake's half-life. Under a shape with FEW fish the water keeps
-        a trace of the loop for the whole hold (P2 A), which is
-        `ripple_life` eased toward WS_RIPPLE_LIFE_S over row W5.5's own
-        pace multiplier (a LENGTH, like the trail's pair — that constant's
-        block) by the told envelope and back down over the release — the
-        authored value never written, and MANY fish left exactly as they are
-        (their own bodies and trails already light the line, and a
-        longer-lived busy wake is where white comes from — the WAKE COLOUR
-        block)."""
+        """The wake's half-life. Under a shape the water keeps a trace of
+        the loop for the whole hold (P2 A), which is `ripple_life` eased
+        toward WS_RIPPLE_LIFE_S over row W5.5's own pace multiplier (a
+        LENGTH, like the trail's pair — that constant's block) by the told
+        envelope, floored at row W6.1's revisit gap, and back down over the
+        release — the authored value never written.
+
+        STILL FEW-FISH ONLY: row W6.1 measured W1.4's scoping reason
+        against its own bar 4 and it SURVIVED — extending the trace to MANY
+        (`WS_TRACE_MANY`, False) moved the band filled 0.0 points and cost
+        five of white, because with six fish the revisit gap is already
+        0.39 s and the floored body trail covers it. That constant's own
+        block carries the table."""
         life = float(self.ripple_life)
+        half = None
         ws = self._ws
-        if ws is not None and ws.get("few"):
+        if ws is not None and (ws.get("few") or WS_TRACE_MANY):
             m = float(word_shape_keys.envelope(
                 ws["t"], ws["told"].form_s, ws["told"].hold_s,
                 ws["told"].release_s))
@@ -5246,7 +5522,17 @@ class Fish2d(Twod, GradientEffect):
                 # reason, the same arithmetic
                 life = ((life + m * (WS_RIPPLE_LIFE_S - life))
                         / self._word_shape_speed_x(m))
-        return max(life * WAKE_HALF_LIFE_X, 0.02)
+                # ... AND ROW W6.1's SAME FLOOR, read on the HALF-LIFE this
+                # returns rather than on `life` (the two differ by
+                # WAKE_HALF_LIFE_X): the trace is what carries the line
+                # between the FEW fish, so it has to outlive the gap for
+                # the same reason the trail does.
+                half = max(
+                    life * WAKE_HALF_LIFE_X,
+                    m * WS_TRAIL_GAP_X * self._word_shape_revisit_gap(m))
+        if half is None:
+            half = life * WAKE_HALF_LIFE_X
+        return max(half, 0.02)
 
     def _word_shape_holds(self):
         """Whether the paused features are held this frame (the PAUSES
@@ -7018,6 +7304,17 @@ class Fish2d(Twod, GradientEffect):
         # wander: a slow smooth swing either side of the current heading
         wander = hd + n_w * (WANDER_SWING + WANDER_SWING_JIGGLE * jiggle)
         w_wander = np.where(steered, WANDER_W, 0.0)
+        if ws is not None:
+            # WORD SHAPES, ROW W6.1: the wander hands over to the loop
+            # exactly as the swirl and the beat's kicks already do (the
+            # `bias * (1 - m)` block in the steering below) — THE LOOP IS
+            # THE CURRENT while a shape runs, and a meander is a heading
+            # noise by construction. It was the one steering term left
+            # ungated: WANDER_W is 1.0 against the loop's WS_SEEK_W of 14,
+            # so it moved the DESIRED heading about 0.7 deg every frame,
+            # which the shaped gain then chased — the noise that re-excited
+            # the overshoot above. His own again by the release's end.
+            w_wander = w_wander * (1.0 - ws["m_fish"])
         desired_x += np.cos(wander) * w_wander
         desired_y += np.sin(wander) * w_wander
 
@@ -7422,6 +7719,11 @@ class Fish2d(Twod, GradientEffect):
             # it is just a tighter circle while the shape runs.
             omega_max = omega_max / np.maximum(
                 1.0 - (1.0 - WS_TURN_X) * ws["m_fish"], 1e-3)
+            # ROW W6.1: ... and no more than WS_TURN_MAX_RAD_FRAME of
+            # heading in ONE RENDERED FRAME, so the clamp still means an
+            # ARC at his crystal's 30 fps (that constant's own block).
+            omega_max = np.minimum(
+                omega_max, WS_TURN_MAX_RAD_FRAME / max(dt, 1e-6))
         if kst is not None and "turn" in kst:
             # THE PRE-DROP: the keepers turn on PRE_DROP_TURN of their circle
             omega_max[kidx] = omega_max[kidx] / max(float(kst["turn"]), 1e-3)
@@ -7443,14 +7745,46 @@ class Fish2d(Twod, GradientEffect):
         turn_gain = TURN_GAIN
         bias = swirl + self.p_jog[:n]
         if ws is not None:
-            # WORD SHAPES: the heading gain is DOUBLED under a full shape
+            # WORD SHAPES: the heading gain is RAISED under a full shape
             # (still clipped to the turn circle below, so no fish ever turns
             # tighter than it can — "tightened WITHIN the clamp"), and the
             # current's steady swirl and the beat's turn kicks hand over to
             # the loop: the loop IS the current while a shape runs, and a
             # kick is exactly the sudden heading shift his note rules out.
-            turn_gain = TURN_GAIN * (1.0 + WS_TURN_GAIN_X * ws["m_fish"])
-            bias = bias * (1.0 - ws["m_fish"])
+            #
+            # ROW W6.1 — AND IT IS THE EXACT FIRST-ORDER STEP, NOT THE
+            # PROPORTIONAL ONE. `omega = d_hd * gain` then
+            # `hd += omega * dt` corrects `gain * dt` of the heading error
+            # in one frame, so at the shaped gain of
+            # TURN_GAIN * (1 + WS_TURN_GAIN_X) = 39 /s it corrects 0.65 of
+            # it at 60 fps — the rate every W5.5 number was measured at —
+            # and 1.30 at HIS CRYSTAL'S 30: PAST the target, with the error
+            # alternating sign every frame and the clamp no longer binding
+            # (at WS_TURN_X 0.10 the clamp in force is ~140 rad/s at the x3
+            # pace). Measured at 30 fps before this was written: 18.6 to
+            # 27.7 nose WAGS per fish-second against a 0.5 bar, the head's
+            # p95 2.75-8.18 cell pitches from the band while its middle sat
+            # at 0.06-0.34 — his "the fish seem to jitter out of the
+            # outline", drawn by `_draw_bodies`' own straight extrapolation
+            # of the CURRENT heading — and, worse, fish up to 14.5 px OFF
+            # THE LIT PANEL, because an alternating steer defeats the wall's
+            # glance too (section 9's own two depths).
+            #
+            # So the step a shape takes is the closed form of the same
+            # first-order law: `k = 1 - exp(-gain_ws * dt)` of the error per
+            # frame, commanded as a rate `d_hd * k / dt`. NEVER more than
+            # the error, at any dt — 0.73 at 30 fps, 0.48 at 60 — so there
+            # is no alternation to excite and the SETTLING TIME rather than
+            # the per-frame step is what `WS_TURN_GAIN_X` now names. It is
+            # BLENDED by `m_fish`, so at m = 0 this is `TURN_GAIN * 1.0 +
+            # (...) * 0.0`, the ordinary expression to the bit, and the
+            # whole block is gated on `ws is not None` exactly as every
+            # shape block is (section 1, both frame rates).
+            m_f = ws["m_fish"]
+            gain_ws = TURN_GAIN * (1.0 + WS_TURN_GAIN_X)
+            k_ws = -np.expm1(-gain_ws * dt) / max(dt, 1e-6)
+            turn_gain = TURN_GAIN * (1.0 - m_f) + k_ws * m_f
+            bias = bias * (1.0 - m_f)
         omega = (
             d_hd * turn_gain
             + np.where(steered & ~keeping, bias, 0.0)
@@ -7641,6 +7975,16 @@ class Fish2d(Twod, GradientEffect):
             flap_amp, flap_freq = self._tail_drive_flap(
                 pulse_eligible, flap_amp, flap_freq, half_w, tail_w
             )
+        if ws is not None and WS_FLAP_X is not None:
+            # WORD SHAPES, ROW W6.1: THE FLAP GLIDES ON THE LINE
+            # (WS_FLAP_X's own block). Drawing only — the tail drive's
+            # THRUST is untouched, so nothing about how a fish moves
+            # changes here; and it lands before the wake deposit below, so
+            # a gliding fish lays a narrower wake too, which is the same
+            # fact about its tail.
+            glide = (self.flap_amount * half_w * self.body_aspect
+                     * TAIL_AMP_GLIDE * WS_FLAP_X)
+            flap_amp = flap_amp + (glide - flap_amp) * ws["m_fish"]
         self.p_flap[:n] = (
             self.p_flap[:n] + 2 * np.pi * flap_freq * dt
         ) % (2 * np.pi * 64)
@@ -7733,6 +8077,13 @@ class Fish2d(Twod, GradientEffect):
                 * bright[laying]
                 * min(dt * WAKE_DEPOSIT_HZ, 1.0)
             ).astype(np.float32)
+            if ws is not None and WS_WAKE_FADE < 1.0:
+                # WORD SHAPES, ROW W6.1: the ORDINARY wake eases out of the
+                # water a shaped fish swims through (WS_WAKE_FADE's own
+                # block) — per fish, by its own `m_fish`, so a fish that is
+                # not on the loop keeps its whole wake.
+                amp = (amp * (1.0 - (1.0 - WS_WAKE_FADE)
+                              * ws["m_fish"][laying])).astype(np.float32)
             self._deposit_wake(
                 tail_px, tail_py, amp, sizes, self.p_grad[:n][laying]
             )

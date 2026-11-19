@@ -62,8 +62,39 @@ star."*
      relaxed wall clamp. Bar: 1.0 cell pitch, every corner, every shape.
  10. THE SWEEP THAT CHOSE THE DEFAULTS — loop x turn x trail, and the two
      axes the row MEASURED that it also needed (the heading gain and the
-     pursuit aim). OPT IN with `--only sweep`: it is ~230 renders and is
-     not part of the default run.
+     pursuit aim), plus row W6.1's own three (the clamp's per-frame
+     ceiling, the aim's frame-step floor and the trail's revisit-gap
+     floor). OPT IN with `--only sweep`: it is ~330 renders and is not part
+     of the default run.
+
+ROW W6.1 (2026-11-18) added the last two, for his THIRD room verdict —
+*"Only thing left is the fish needs a little more tuning. ... The shape
+outline needs to reach at least a moment where it is either filled with
+fish or trail. Right now, the fish seem to jitter out of the outline and so
+it isn't distinct enough. Also, if we did a highlight of the shape in
+orbits, do it on fish."*
+
+**AND IT MOVED THE WHOLE RIG TO 30 fps**, which is his crystal's own rate
+(`.claude/skills/radial-effect`: the `crystal` WLED device's `refresh_rate`
+is 30 and a virtual renders at its slowest device). EVERY W5.5 number was
+read at 60 — twice the live rate — and three of this row's four findings
+only exist at 30. `--fps 60` is kept as the cross-check.
+
+ 11. THE OUTLINE IS WHOLE FOR A MOMENT — his own bar for the row. The hold
+     frame that MAXIMISES the band's share over half of full, and at that
+     same frame the OFF-band light (outside the band and outside a one-cell
+     margin), attributed between the BODY layer and the WATER layer so the
+     row's levers are chosen rather than guessed. Bars: 95% of the band
+     over 128/255 and band/off-band 20x, every seed, both modes, all three
+     shapes.
+ 12. THE NOSE DOES NOT WAG — the signed per-frame heading change per fish
+     through the hold, its sign REVERSALS counted per fish-second, and the
+     distance from the band of the HEAD `_draw_bodies` actually draws (the
+     middle extrapolated half a body along `p_hd`). Both printed against a
+     DERIVED GEOMETRIC FLOOR — the outline's own tangent reversals, and
+     where a perfect fish's nose lands — because at his `blob_size` one of
+     the plan's two bars is unreachable and the other is reachable on two
+     shapes of three.
 
 Read-only, offline. No live access.
 
@@ -72,6 +103,8 @@ Read-only, offline. No live access.
     .venv/bin/python scripts/check_fish_word_shape.py --ascii
     .venv/bin/python scripts/check_fish_word_shape.py --only corner --ascii
     .venv/bin/python scripts/check_fish_word_shape.py --only sweep
+    .venv/bin/python scripts/check_fish_word_shape.py --only whole --ascii
+    .venv/bin/python scripts/check_fish_word_shape.py --only untold --fps 60
     .venv/bin/python scripts/check_fish_word_shape.py --only contrast \
         --turn-x 0.08 --loop-s 1.4
 """
@@ -102,8 +135,22 @@ from fx.effects import fish as FX  # noqa: E402
 from fx.effects import word_shape_keys as wsk  # noqa: E402
 from fx.effects import word_shapes  # noqa: E402
 
-DT = 1.0 / 60.0
+# ROW W6.1: HIS CRYSTAL RENDERS AT 30 fps, AND THIS RIG MEASURED AT 60.
+# The `crystal` WLED device's `refresh_rate` is 30 and a virtual renders at
+# its slowest device (`fx/virtuals.py`; `.claude/skills/radial-effect`'s own
+# note, and `scripts/check_fireworks_word_shape.py:88` had already corrected
+# itself). EVERY W5.5 number — the corner bar, the smoothness bars, the
+# sweep that chose x12 — was therefore read at twice the live frame rate,
+# and a PROPORTIONAL steer's stability is a function of `gain * dt`: at
+# WS_TURN_GAIN_X 12 the shaped gain is 39 /s, which corrects 0.65 of the
+# heading error per frame at 60 fps and 1.3 at 30 — past the target, with
+# the error alternating sign every frame. So 30 fps is the default here now
+# and `--fps 60` is kept as the CROSS-CHECK (the rate every W5.5 figure was
+# measured at), never as the figure that ships.
+DT = 1.0 / 30.0
 ROWS, COLS = 37, 72
+BEAT_S = 0.4         # the steady fallback's beat period (24 frames
+                     # at 60 fps, which is what this rig had)
 REAL = W.crystal_real_mask()
 PANEL = CW.load_panel()
 SHAPES = ("heart", "star", "diamond")
@@ -217,12 +264,19 @@ CORNER_COUNTS = {"heart": 2, "star": 10, "diamond": 4}
 # (section 10's gain and lead tables): the heading GAIN (`--turn-gain-x`,
 # `WS_TURN_GAIN_X`) and the pursuit LEAD (`--lead`, `WS_TARGET_LEAD` and
 # `WS_REACH` together, which is how the aim is one quantity).
+# ROW W6.1 adds two more: the TRAIL's own revisit-gap FLOOR (`--gap-x`,
+# `WS_TRAIL_GAP_X` — the row's own port of Orbits' persistence) and the
+# drawn FLAP under a shape (`--flap-x`, `WS_FLAP_X`, in glide sizes).
 LOOP_S: list[float | None] = [None]
 SPEED_X: list[float | None] = [None]
 TURN_X: list[float | None] = [None]
 TRAIL_S: list[float | None] = [None]
 GAIN_X: list[float | None] = [None]
 LEAD: list[float | None] = [None]
+GAP_X: list[float | None] = [None]
+FLAP_X: list[float | None] = [None]
+AIM_X: list[float | None] = [None]
+WAKE_FADE: list[float | None] = [None]
 
 # The config overlay the command line's levers ask for, applied by `run()`
 # to every section's own cfg — the speed is a REGISTERED param, so unlike
@@ -650,12 +704,17 @@ async def run(cfg, frames, *, seed=7, effect_type="fish", arc=None,
             host, virtual, effect_type, dict(cfg, **_OVER[0]))
         eff._rng = np.random.default_rng(seed)
         aud = audio if audio is not None else _Audio()
+        # THE AUDIO IS INDEXED BY TIME, NOT BY FRAME (row W6.1), so the
+        # same arc and the same beat drive the effect at either rate — at
+        # 60 fps `int(i * DT * 60)` IS `i` and `round(BEAT_S / DT)` IS 24,
+        # so this is expression for expression what it was.
+        beat_every = max(int(round(BEAT_S / DT)), 1)
         for i in range(frames):
             if lows is not None:
-                j = i % lows.size
+                j = int(i * DT * 60.0) % lows.size
                 aud.lows, aud.beat = float(lows[j]), bool(beats[j])
             else:
-                aud.lows, aud.beat = 0.22, (i % 24 == 0)
+                aud.lows, aud.beat = 0.22, (i % beat_every == 0)
             if pokes and i in pokes:
                 eff.update_config(dict(pokes[i]))
             if tell_at is not None and i == tell_at and told is not None:
@@ -694,7 +753,8 @@ def speed_x_for(loop_s=None, speed_x=None):
 
 
 @contextlib.contextmanager
-def levers(speed_x=None, turn_x=None, trail_s=None, gain_x=None, lead=None):
+def levers(speed_x=None, turn_x=None, trail_s=None, gain_x=None, lead=None,
+           gap_x=None, flap_x=None, aim_x=None, wake_fade=None):
     """Run a block with row W5.5's three levers set. The speed is a
     REGISTERED param, so it comes back as a config overlay to merge into a
     run's cfg; the turn circle and the trail are module constants and are
@@ -707,7 +767,9 @@ def levers(speed_x=None, turn_x=None, trail_s=None, gain_x=None, lead=None):
     `WS_TURN_X` would leave it stale and measure a wall the module never
     ships. Both move here, together."""
     keep = (FX.WS_TURN_X, FX.WS_WALL_TURN_X, FX.WS_TRAIL_HALF_LIFE_S,
-            FX.WS_TURN_GAIN_X, FX.WS_TARGET_LEAD, FX.WS_REACH)
+            FX.WS_TURN_GAIN_X, FX.WS_TARGET_LEAD, FX.WS_REACH,
+            FX.WS_TRAIL_GAP_X, FX.WS_FLAP_X, FX.WS_AIM_STEP_X,
+            FX.WS_WAKE_FADE)
     over = {}
     if speed_x is not None:
         over["word_shape_speed_x"] = float(speed_x)
@@ -724,10 +786,23 @@ def levers(speed_x=None, turn_x=None, trail_s=None, gain_x=None, lead=None):
             # WS_TARGET_LEAD`, so the arc the chord can span is their sum
             # and sweeping one without the other measures neither.
             FX.WS_TARGET_LEAD = FX.WS_REACH = float(lead)
+        if gap_x is not None:
+            FX.WS_TRAIL_GAP_X = float(gap_x)
+        if aim_x is not None:
+            FX.WS_AIM_STEP_X = float(aim_x)
+        if wake_fade is not None:
+            FX.WS_WAKE_FADE = float(wake_fade)
+        if flap_x is not None:
+            # a NEGATIVE value is the sentinel for "leave the flap alone"
+            # (`WS_FLAP_X = None`), so the sweep can carry the off case in
+            # the same float axis as the glide multiples
+            FX.WS_FLAP_X = None if flap_x < 0.0 else float(flap_x)
         yield over
     finally:
         (FX.WS_TURN_X, FX.WS_WALL_TURN_X, FX.WS_TRAIL_HALF_LIFE_S,
-         FX.WS_TURN_GAIN_X, FX.WS_TARGET_LEAD, FX.WS_REACH) = keep
+         FX.WS_TURN_GAIN_X, FX.WS_TARGET_LEAD, FX.WS_REACH,
+         FX.WS_TRAIL_GAP_X, FX.WS_FLAP_X, FX.WS_AIM_STEP_X,
+         FX.WS_WAKE_FADE) = keep
 
 
 def _cli_levers():
@@ -736,7 +811,9 @@ def _cli_levers():
     acceptance list on that circle, not just the sweep."""
     return dict(speed_x=speed_x_for(LOOP_S[0], SPEED_X[0]),
                 turn_x=TURN_X[0], trail_s=TRAIL_S[0],
-                gain_x=GAIN_X[0], lead=LEAD[0])
+                gain_x=GAIN_X[0], lead=LEAD[0],
+                gap_x=GAP_X[0], flap_x=FLAP_X[0], aim_x=AIM_X[0],
+                wake_fade=WAKE_FADE[0])
 
 
 def cfg_with(cfg, over):
@@ -752,14 +829,15 @@ def _kin(i, eff, _frame):
 
 def section_untold():
     print("\n1. UNTOLD IS TODAY'S — no told keys, against the pinned "
-          f"pre-change module {WS_BASELINE_REF[:9]}")
+          f"pre-change module {WS_BASELINE_REF[:9]}, at {1.0 / DT:.0f} fps")
     pinned = load_baseline()
     for arc in ("busy", "calm"):
+        n_frames = int(round(WB.SECONDS / DT))
         kin_new, frames_new = asyncio.run(run(
-            FEW, int(WB.SECONDS * 60), arc=arc, watch=_kin,
+            FEW, n_frames, arc=arc, watch=_kin,
             keep_frames=True))
         kin_old, frames_old = asyncio.run(run(
-            FEW, int(WB.SECONDS * 60), arc=arc, watch=_kin,
+            FEW, n_frames, arc=arc, watch=_kin,
             keep_frames=True, effect_type=pinned))
         same_kin = W.same_kinematics(kin_new, kin_old)
         same_px = (frames_new.shape == frames_old.shape
@@ -814,9 +892,23 @@ def section_on_the_word():
 
 
 # ═══ 3. NOTHING JUMPS ══════════════════════════════════════════════════
+# ROW W6.1 pins what row W5.5 read at 60 fps, so the rate's own effect on
+# these two bars is visible in the output rather than only in the skill.
+W55_SMOOTH_AT_60 = {"few": (2.14, 8.3), "many": (1.70, 10.4)}
+W55_CORNER_AT_60 = 0.49        # cell pitches, worst corner, worst of 3 seeds
+
+
 def section_smooth():
     print("\n3. NOTHING JUMPS — lit cells, speed and heading through the "
-          "form and the release")
+          f"form and the release, at {1.0 / DT:.0f} fps")
+    print("   W5.5 read these at 60 fps (twice his crystal's rate): few "
+          f"{W55_SMOOTH_AT_60['few'][0]:.2f}% / "
+          f"{W55_SMOOTH_AT_60['few'][1]:.1f}%, many "
+          f"{W55_SMOOTH_AT_60['many'][0]:.2f}% / "
+          f"{W55_SMOOTH_AT_60['many'][1]:.1f}% — printed beside each row so "
+          "the rate's")
+    print("   own effect on these two bars is visible here and not only in "
+          "the skill.")
     edge = 150
     total = edge + int((FORM_S + HOLD_S + RELEASE_S + 1.0) / DT)
 
@@ -877,6 +969,9 @@ def section_smooth():
                         worst_hd, float(np.max(step / (plain / turn_x))))
                     worst_hd_plain = max(
                         worst_hd_plain, float(np.max(step / plain)))
+        w55_lit, w55_spd = W55_SMOOTH_AT_60[name]
+        print(f"   {name}: [W5.5 at 60 fps: {w55_lit:.2f}% lit-cell, "
+              f"{w55_spd:.1f}% speed]")
         print(f"   {name}: worst lit-cell change {worst_lit * 100:5.2f}% "
               f"(bar {JUMP_MAX_SHARE * 100:.0f}%), worst speed change "
               f"{worst_spd * 100:5.1f}% of the burst's own maximum, worst "
@@ -1255,8 +1350,21 @@ WHITE_TAIL_SEEDS = 8
 # the ordinary (median) frame. They are NOT the plan's bar: that bar is
 # this effect's own worst busy frame today, printed per row beside them and
 # marked where it is exceeded.
-WHITE_TAIL_MAX = 35.0          # measured worst 33.78% (many diamond)
-WHITE_MEDIAN_MAX = 28.0        # measured worst median 26.36% (many diamond)
+# ROW W6.1 RE-PINNED BOTH AT HIS OWN 30 fps, AND THE WHITE STORY GOT
+# BETTER RATHER THAN WORSE — which is only visible once the DENOMINATOR is
+# read at the right rate too. W5.5 measured the shaped worst at 23.9-33.8%
+# against this effect's own untold busy worst of 24.5-26.0%, so five of six
+# rows exceeded the plan's bar. At 30 fps the effect's own untold busy
+# worst is **31.24-33.25%** — a slower frame lays a longer smear untold as
+# well as told — and the shaped worst is 30.35-34.49%, so only TWO rows
+# exceed it at all (many star by 1.6 points, many diamond by 3.3) and the
+# MEDIAN frame is under it on every row. Part of W5.5's "open exceedance"
+# was a frame-rate artefact in its own control.
+# The ceilings below therefore rise with the floor they sit on: the row's
+# revisit-gap trail floor is a longer smear and that is where the median's
+# 2-3 points come from.
+WHITE_TAIL_MAX = 36.0          # measured worst 34.49% (many diamond)
+WHITE_MEDIAN_MAX = 32.0        # measured worst median 30.61% (few diamond)
 
 
 def section_white():
@@ -1272,7 +1380,7 @@ def section_white():
         for arc in ("busy", "calm"):
             for seed in (1, 2, 3):
                 vals, _ = asyncio.run(run(
-                    cfg, int(WB.SECONDS * 60), seed=seed, arc=arc,
+                    cfg, int(round(WB.SECONDS / DT)), seed=seed, arc=arc,
                     watch=lambda i, eff, f: white_share(f)))
                 today.extend(vals)
         today = np.asarray(today)
@@ -1323,8 +1431,9 @@ async def _timed(cfg, frames, told=None, tell_at=None):
         eff = headless.attach_effect(host, virtual, "fish", dict(cfg))
         eff._rng = np.random.default_rng(5)
         aud = _Audio()
+        beat_every = max(int(round(BEAT_S / DT)), 1)
         for i in range(frames):
-            aud.lows, aud.beat = 0.22, (i % 24 == 0)
+            aud.lows, aud.beat = 0.22, (i % beat_every == 0)
             if tell_at is not None and i == tell_at and told is not None:
                 eff.update_config(dict(told))
             clock.advance(DT)
@@ -1458,16 +1567,26 @@ def section_restored():
     few_hl, _many_hl = FX.WS_TRAIL_HALF_LIFE_S
     speed = float(FEW.get("word_shape_speed_x",
                           _OVER[0].get("word_shape_speed_x", FX.WS_SPEED_X)))
-    want_hl = few_hl / speed
-    want_wake = FX.WS_RIPPLE_LIFE_S / speed * FX.WAKE_HALF_LIFE_X
+    # ROW W6.1: each target is the W5.5 smear LENGTH *floored at the
+    # revisit gap* (WS_TRAIL_GAP_X), and with his three fish at x3 the
+    # floor is what binds — 0.611 s against the pair's own 0.200 s. The
+    # gap is read off the effect itself so this cannot drift from the law.
+    gap = FX.WS_TRAIL_GAP_X * (FX.WS_LOOP_S_FEW / (3 * speed))
+    want_hl = max(few_hl / speed, gap)
+    want_wake = max(FX.WS_RIPPLE_LIFE_S / speed * FX.WAKE_HALF_LIFE_X, gap)
     print(f"   the derived targets at a standing envelope: trail "
-          f"{want_hl:.3f}s (the pair's FEW end {few_hl} over x{speed:.1f}), "
-          f"wake {want_wake:.3f}s")
+          f"{want_hl:.3f}s and wake {want_wake:.3f}s — the pair's FEW end "
+          f"{few_hl} over x{speed:.1f} ({few_hl / speed:.3f}s), FLOORED at "
+          f"row W6.1's {FX.WS_TRAIL_GAP_X} revisit gap(s) ({gap:.3f}s)")
     check(abs(max(r[4] for r in held) - want_hl) < 1e-6
           and max(r[5] for r in held) > 1.5
           and abs(max(r[6] for r in held) - want_wake) < 1e-6,
           "... and really did rise while the shape held, to W1.4's own "
-          "numbers over the lap's speed-up (his note)")
+          "numbers over the lap's speed-up, floored at the revisit gap "
+          "(his note, and row W6.1's port from Orbits)")
+    check(gap > few_hl / speed,
+          f"... and the GAP is what binds, not the pair ({gap:.3f}s "
+          f"against {few_hl / speed:.3f}s) — which is the row's own point")
     check(max(r[4] for r in held) > hl0 and max(r[6] for r in held) > wake0,
           "... both still LONGER than his own while it holds")
     check(all(r[7] is None for r in after) and any(
@@ -1724,7 +1843,15 @@ def section_corners(seeds=CORNER_SEEDS, draw_ascii=False):
                               f"the LINE whole ---")
                         print(_grade(grab[at], band))
         print(f"\n   worst corner over every shape and both modes: "
-              f"{worst_all:.2f} cell pitches (bar {CORNER_BAR:.1f})")
+              f"{worst_all:.2f} cell pitches (bar {CORNER_BAR:.1f}), read at "
+              f"{1.0 / DT:.0f} fps")
+        print(f"   ROW W5.5 READ {W55_CORNER_AT_60:.2f} AT 60 fps, and the "
+              f"SAME code read 0.72 at his own 30 before row W6.1 — the "
+              f"corner bar")
+        print("   is the one W5.5 bar the frame rate did not break, and "
+              "the wall's own two depths above are")
+        print("   the one it did (20.65 px past the landing line and "
+              "13.76 px off the LIT panel at 30 fps).")
 
 
 # ═══ 10. THE SWEEP THAT CHOSE THE DEFAULTS (row W5.5) ══════════════════
@@ -1762,12 +1889,20 @@ SWEEP_TRAILS = (0.6, 1.0, 1.4)
 # row's defaults and a later change has to be able to re-choose them.
 SWEEP_GAINS = (2.0, 6.0, 12.0, 24.0)
 SWEEP_LEADS = (0.015, 0.012, 0.008, 0.005)
+# ... AND ROW W6.1's OWN THREE, every one of them a thing that only exists
+# because the rig moved to his crystal's 30 fps: the clamp's per-RENDERED-
+# FRAME ceiling, the aim's floor in frame steps, and the trail's floor in
+# revisit gaps.
+SWEEP_CAPS = (180.0, 90.0, 60.0, 45.0)
+SWEEP_AIMS = (0.0, 1.0, 1.5, 2.0)
+SWEEP_GAPS = (0.0, 0.7, 1.0, 1.5)
 
 
 def _sweep_row(cfg, shape_id, seed, over, word, mid, hold_end):
     """One (mode, shape) of a sweep combination: (band>64 at mid-hold, at
     the hold's end, band/rest ratio at mid-hold, the worst corner, the
-    worst white over the hold)."""
+    worst white over the hold, and — ROW W6.1 — the WHOLE moment's own
+    share over 128/255 with its band/off-band ratio, and the nose WAG)."""
     grab = {}
 
     def watch(i, eff, frame):
@@ -1775,6 +1910,12 @@ def _sweep_row(cfg, shape_id, seed, over, word, mid, hold_end):
             grab[i] = frame.copy()
         if word <= i <= hold_end:
             grab.setdefault("white", []).append(white_share(frame))
+            grab.setdefault("whole", []).append(
+                whole_moment(frame, shape_id))
+        if word - 1 <= i <= hold_end:
+            grab.setdefault("hd", []).append(
+                (i, eff.p_hd[:eff.n].copy(),
+                 np.flatnonzero(eff.p_mode[:eff.n] < 2)))
         return None
 
     asyncio.run(run(cfg_with(cfg, over), hold_end + 2, seed=seed,
@@ -1785,48 +1926,99 @@ def _sweep_row(cfg, shape_id, seed, over, word, mid, hold_end):
     tracks, _land, _lit = _corner_tracks(
         cfg, shape_id, seed, over, word, hold_end)
     worst_corner = max(corner_distances(tracks, shape_id).values())
+    best = max(grab.get("whole", [(0.0, 0.0, 0.0, 0.0)]),
+               key=lambda r: (r[0], r[3]))
     return (lo_mid, lo_end, rat, worst_corner,
-            max(grab.get("white", [0.0])))
+            max(grab.get("white", [0.0])), best[0], best[3],
+            _wag_rate(grab.get("hd", [])))
+
+
+def _wag_rate(hd_rows):
+    """Wags per fish-second over `hd_rows` — section 12's own definition,
+    reused here so the sweep can be read against its bar."""
+    if len(hd_rows) < 3:
+        return 0.0
+    last: dict = {}
+    wags, fish_s = 0, 0.0
+    for a, b in zip(hd_rows, hd_rows[1:]):
+        if b[0] != a[0] + 1:
+            continue
+        both = np.intersect1d(a[2], b[2])
+        if both.size == 0:
+            continue
+        d = FX._wrap_pi(b[1][both] - a[1][both])
+        for j, dv in zip(both.tolist(), d.tolist()):
+            fish_s += DT
+            prev = last.get(j)
+            if (prev is not None and prev[0] == b[0] - 1
+                    and prev[1] * dv < 0.0
+                    and abs(prev[1]) > math.radians(WAG_DEG_MIN)
+                    and abs(dv) > math.radians(WAG_DEG_MIN)):
+                wags += 1
+            last[j] = (b[0], dv)
+    return wags / max(fish_s, 1e-6)
 
 
 def _sweep_combo(lap, turn_x, trail_s, seed, word, mid, hold_end,
-                 gain_x=None, lead=None):
+                 gain_x=None, lead=None, gap_x=None, aim_x=None,
+                 cap_deg=None, flap_x=None, wake_fade=None,
+                 trace_many=None):
     speed = speed_x_for(loop_s=lap)
     rows = []
+    keep_cap = FX.WS_TURN_MAX_RAD_FRAME
+    keep_many = FX.WS_TRACE_MANY
+    if cap_deg is not None:
+        FX.WS_TURN_MAX_RAD_FRAME = math.radians(float(cap_deg))
+    if trace_many is not None:
+        FX.WS_TRACE_MANY = bool(trace_many)
     with levers(speed_x=speed, turn_x=turn_x, trail_s=trail_s,
-                gain_x=gain_x, lead=lead) as over:
+                gain_x=gain_x, lead=lead, gap_x=gap_x,
+                aim_x=aim_x, flap_x=flap_x, wake_fade=wake_fade) as over:
         for name, cfg in (("few", FEW), ("many", MANY)):
             for shape_id in SHAPES:
                 rows.append(_sweep_row(cfg, shape_id, seed, over,
                                        word, mid, hold_end))
+    FX.WS_TURN_MAX_RAD_FRAME = keep_cap
+    FX.WS_TRACE_MANY = keep_many
     los = [r[0] for r in rows]
     return {
         "lap": lap, "speed": speed, "turn": turn_x, "trail": trail_s,
         "gain": FX.WS_TURN_GAIN_X if gain_x is None else gain_x,
         "lead": (FX.WS_REACH + FX.WS_TARGET_LEAD) if lead is None
                 else 2.0 * lead,
+        "gap": FX.WS_TRAIL_GAP_X if gap_x is None else gap_x,
+        "aim": FX.WS_AIM_STEP_X if aim_x is None else aim_x,
+        "cap": (math.degrees(FX.WS_TURN_MAX_RAD_FRAME) if cap_deg is None
+                else cap_deg),
         "worst_lo": float(np.min(los)),
         "med_lo": float(np.median(los)),
         "end_lo": float(np.min([r[1] for r in rows])),
         "worst_ratio": float(np.min([r[2] for r in rows])),
         "worst_corner": float(np.max([r[3] for r in rows])),
         "worst_white": float(np.max([r[4] for r in rows])),
+        "worst_whole": float(np.min([r[5] for r in rows])),
+        "worst_whole_ratio": float(np.min([r[6] for r in rows])),
+        "worst_wag": float(np.max([r[7] for r in rows])),
     }
 
 
 def _sweep_print(label, combos):
     print(f"\n   {label}")
     print(f"   {'lap s':>6s} {'x':>4s} {'turn':>5s} {'trail':>5s} "
-          f"{'gain':>5s} {'aim':>6s} | "
+          f"{'gain':>5s} {'aim':>6s} {'gap':>5s} {'step':>5s} {'cap':>5s} | "
           f"{'worst band>64':>13s} {'median':>7s} {'at end':>7s} | "
-          f"{'ratio':>6s} | {'corner':>7s} | {'white':>6s}")
+          f"{'ratio':>6s} | {'corner':>7s} | {'white':>6s} | "
+          f"{'WHOLE':>6s} {'b/off':>6s} | {'wag/s':>6s}")
     for c in combos:
         print(f"   {c['lap']:6.2f} {c['speed']:4.1f} {c['turn']:5.2f} "
-              f"{c['trail']:5.2f} {c['gain']:5.1f} {c['lead']:6.3f} | "
+              f"{c['trail']:5.2f} {c['gain']:5.1f} {c['lead']:6.3f} "
+              f"{c['gap']:5.2f} {c['aim']:5.2f} {c['cap']:5.0f} | "
               f"{c['worst_lo'] * 100:12.0f}% "
               f"{c['med_lo'] * 100:6.0f}% {c['end_lo'] * 100:6.0f}% | "
               f"{c['worst_ratio']:5.2f}x | {c['worst_corner']:6.2f}p | "
-              f"{c['worst_white']:5.1f}%")
+              f"{c['worst_white']:5.1f}% | "
+              f"{c['worst_whole'] * 100:5.0f}% {c['worst_whole_ratio']:5.1f}x"
+              f" | {c['worst_wag']:6.2f}")
 
 
 def section_sweep(_seeds=None):
@@ -1866,27 +2058,615 @@ def section_sweep(_seeds=None):
     leads = [_sweep_combo(ship_lap, FX.WS_TURN_X, few_s, 1, word, mid,
                           hold_end, lead=lead) for lead in SWEEP_LEADS]
     _sweep_print("THE AIM (WS_REACH + WS_TARGET_LEAD), same", leads)
+    # ── ROW W6.1's OWN FOUR AXES, all re-read at the rate this run is
+    # measuring (30 fps by default, which is his crystal's) ────────────
+    caps = [_sweep_combo(ship_lap, FX.WS_TURN_X, few_s, 1, word, mid,
+                         hold_end, cap_deg=c) for c in SWEEP_CAPS]
+    _sweep_print("ROW W6.1 — THE CLAMP'S PER-FRAME CEILING "
+                 "(WS_TURN_MAX_RAD_FRAME), everything else shipped", caps)
+    print("   180 deg is NO CEILING at this rate: read the `land`/`lit` "
+          "depths in section 9, where")
+    print("   that row walks a fish 20 px OFF THE LIT PANEL. The corner "
+          "column is the other half.")
+    aims = [_sweep_combo(ship_lap, FX.WS_TURN_X, few_s, 1, word, mid,
+                         hold_end, aim_x=a) for a in SWEEP_AIMS]
+    _sweep_print("ROW W6.1 — THE AIM'S OWN FRAME-STEP FLOOR "
+                 "(WS_AIM_STEP_X)", aims)
+    print("   THE WAG AND THE CORNER PULL AGAINST EACH OTHER HERE and "
+          "that is the row's own trade:")
+    print("   a longer aim moves the target continuously through a corner "
+          "(fewer reversals) and cuts")
+    print("   the corner by `(L / 2) sin(theta / 2)`. The corner bar of "
+          "1.0 is what bounds it.")
+    gaps = [_sweep_combo(ship_lap, FX.WS_TURN_X, few_s, 1, word, mid,
+                         hold_end, gap_x=g) for g in SWEEP_GAPS]
+    _sweep_print("ROW W6.1 — THE TRAIL'S REVISIT-GAP FLOOR "
+                 "(WS_TRAIL_GAP_X): Orbits' persistence, ported", gaps)
+    print("   THE `WHOLE` COLUMN IS THE ROW'S OWN BAR (section 11) and "
+          "this axis is the only lever that")
+    print("   moves it. 0.00 is row W5.5's own behaviour — the pair read "
+          "as a smear LENGTH.")
+    # the two REFUSALS, so a later change can re-measure them rather than
+    # taking this row's word for them (both carry their own `None`/`False`
+    # constant and the prose beside it)
+    off = []
+    for label, kw in (
+            ("as shipped (flap his own, wake eased out, trace FEW)", {}),
+            ("the FLAP eased to 1 glide size", {"flap_x": 1.0}),
+            ("the FLAP eased to 3 glide sizes", {"flap_x": 3.0}),
+            ("the ORDINARY WAKE left as W1.4 had it", {"wake_fade": 1.0}),
+            ("the TRACE extended to MANY too", {"trace_many": True}),
+            ("the TRACE to MANY and brighter (amp x1.4)",
+             {"trace_many": True}),
+    ):
+        keep_amp = FX.WS_TRACE_AMP
+        if "brighter" in label:
+            FX.WS_TRACE_AMP = 1.4
+        try:
+            off.append((label, _sweep_combo(
+                ship_lap, FX.WS_TURN_X, few_s, 1, word, mid, hold_end,
+                **kw)))
+        finally:
+            FX.WS_TRACE_AMP = keep_amp
+    print("\n   ROW W6.1 — THE OFF-BAND LEVERS, and the row's TWO REFUSALS")
+    print(f"   {'configuration':44s} {'band>64':>8s} {'FILLED':>7s} "
+          f"{'b/off':>7s} {'white':>7s} {'corner':>7s}")
+    for label, c in off:
+        print(f"   {label:44s} {c['worst_lo'] * 100:7.0f}% "
+              f"{c['worst_whole'] * 100:6.0f}% "
+              f"{c['worst_whole_ratio']:6.1f}x {c['worst_white']:6.1f}% "
+              f"{c['worst_corner']:6.2f}p")
+    print("   THE FLAP IS PART OF THE OFF-BAND LIGHT and easing it still "
+          "costs the FILLED share he")
+    print("   asked for first, which is why `WS_FLAP_X` ships as None. "
+          "EXTENDING THE TRACE TO MANY buys")
+    print("   the FILLED share little and costs white, which is why "
+          "`WS_TRACE_MANY` ships as False.")
     print("\n   WHAT THE TABLES SAY is written into "
-          "`fish.WS_SPEED_X`, `WS_TURN_X`, `WS_TURN_GAIN_X` and")
-    print("   `WS_TARGET_LEAD`'s own blocks and "
-          "`.claude/skills/fish-effect/SKILL.md`; this section is")
-    print("   how a later change re-chooses them.")
-    return grid, trail, gains, leads
+          "`fish.WS_SPEED_X`, `WS_TURN_X`, `WS_TURN_GAIN_X`,")
+    print("   `WS_TARGET_LEAD`, `WS_AIM_STEP_X`, `WS_TURN_MAX_RAD_FRAME` "
+          "`WS_TRAIL_GAP_X`, `WS_WAKE_FADE`, `WS_FLAP_X` and "
+          "`WS_TRACE_MANY`'s own")
+    print("   blocks and `.claude/skills/fish-effect/SKILL.md`; this "
+          "section is how a later change")
+    print("   re-chooses them.")
+    return grid, trail, gains, leads, caps, aims, gaps, off
+
+
+# ═══ 11. THE OUTLINE IS WHOLE FOR A MOMENT (row W6.1) ══════════════════
+# HIS THIRD ROOM VERDICT, verbatim, 2026-11-18: *"Only thing left is the
+# fish needs a little more tuning. ... The shape outline needs to reach at
+# least a moment where it is either filled with fish or trail. Right now,
+# the fish seem to jitter out of the outline and so it isn't distinct
+# enough. Also, if we did a highlight of the shape in orbits, do it on
+# fish."*
+#
+# THIS IS A DIFFERENT, TIGHTER QUESTION THAN SECTION 4's, and it is the one
+# he asked. Section 4 reads EVERY hold frame's share of the band over
+# 64/255 (93-100%) and its band/rest ratio (3.6-8.0x) — "is the line
+# there". He is asking whether the line is ever WHOLE: one moment, in a
+# hold, where the band is FILLED (over half of full) and there is nothing
+# but dark water around it. So:
+#
+#   * the frame searched for is the hold frame that MAXIMISES the band's
+#     share over BAND_LIT_HI (128/255, "filled" and not merely "lit"),
+#     printed with its own frame index so the moment can be looked at;
+#   * the OFF-BAND half is read on every real cell outside the band AND
+#     outside a one-cell margin around it — a body is a cell wide and its
+#     own width is not "jitter", so the margin is what stops this
+#     measuring the procession against itself;
+#   * and the bar is held on EVERY seed of three, both modes, all three
+#     shapes, because a shape fires once, on one seed (section 9's own
+#     per-seed lesson).
+WHOLE_SHARE_MIN = 0.95         # THE PLAN'S own bar: the band over 128/255
+WHOLE_RATIO_MIN = 20.0         # THE PLAN'S own bar: band / OFF-band mean
+WHOLE_SEEDS = 3
+# AND BOTH OF THE PLAN'S BARS ARE MISSED, which is reported here rather
+# than moved — section 5's own shape for the white tail it exceeds. What is
+# ASSERTED is a regression FLOOR under the measured worst, so the script
+# stays a gate.
+#
+# What row W6.1 moved, worst row of six, three seeds, at his own 30 fps:
+#
+#   band FILLED (over 128/255) at the fullest hold frame   44.0% -> 76.7%
+#   ... best row                                           88.2% -> 89.9%
+#   band / OFF-band at that same frame                      7.7x -> 9.3x
+#   ... best row                                           26.1x -> 34.2x
+#
+# WHY 95% IS NOT REACHED, read off the attribution this section prints: at
+# the moment, the off-band light is now almost entirely the BODY layer
+# (MANY reads 11.2-14.6 body against 0.07-0.67 water, the ordinary wake
+# having been eased out), and the band is ONE CELL PITCH wide. A body on
+# the line deposits into the cells just outside it and a body between two
+# band cells leaves the one behind it at less than half of full until the
+# next fish arrives. The only lever left that would fill those cells is the
+# drawn body's own width — the flap — and easing it to a glide costs SEVEN
+# points of the filled share to buy 4x of ratio, which is trading the half
+# of his sentence he asked for first. That table is in the skill, and this
+# section prints the renders of the frame so his eye can overrule it.
+WHOLE_SHARE_SEEN = 0.74        # measured worst 76.7% (many star)
+WHOLE_RATIO_SEEN = 8.8         # measured worst 9.3x (few heart)
+
+_MARGIN: dict[str, np.ndarray] = {}
+
+
+def off_band_mask(shape_id, margin_pitch=1.0):
+    """Every REAL cell outside the shape's own band and outside a
+    `margin_pitch` margin around it.
+
+    The band is every real cell within ONE cell pitch of the outline
+    (`check_word_shapes.measure`, the denominator every coverage bar in
+    this wave is a fraction of), so this is every real cell further than
+    1 + `margin_pitch` pitches from the outline. THE MARGIN IS WHY: a fish
+    body is about a cell wide and its light spreads a cell either side of
+    wherever its middle is, so a body ON the line deposits into the cells
+    just outside the band. Counting those as "off the line" would measure
+    the procession against its own width rather than against the water he
+    is looking at."""
+    key = f"{shape_id}:{margin_pitch}"
+    if key not in _MARGIN:
+        real_x, real_y = PANEL.real_physical()
+        lx, ly = loop_pitch(shape_id)
+        d = np.hypot(real_x[:, None] - lx[None, :],
+                     real_y[:, None] - ly[None, :]).min(axis=1)
+        out = np.zeros_like(PANEL.grid)
+        rows_idx, cols_idx = np.nonzero(PANEL.grid)
+        far = d > (CW.CELL_PITCH + float(margin_pitch))
+        out[rows_idx[far], cols_idx[far]] = True
+        _MARGIN[key] = out
+    return _MARGIN[key]
+
+
+def whole_moment(frame, shape_id):
+    """(share of the band over 128/255, band mean, OFF-band mean,
+    band/off-band ratio) on one frame — the quartet bar 4 is read on."""
+    lum = frame.reshape(ROWS, COLS, 3).max(axis=2)
+    band = outline_mask(shape_id)
+    off = off_band_mask(shape_id)
+    b = lum[band]
+    o = lum[off]
+    b_mean = float(b.mean()) if b.size else 0.0
+    o_mean = float(o.mean()) if o.size else 0.0
+    return (float((b > BAND_LIT_HI).mean()) if b.size else 0.0,
+            b_mean, o_mean, b_mean / max(o_mean, 1e-6))
+
+
+def layer_off_band(eff, shape_id):
+    """(the BODY layer's off-band mean luminance, the WATER layer's) on this
+    frame — the attribution row W6.1 owes before it touches either.
+
+    `eff.trail` is the bodies and their persistent smear; `eff.wake` is the
+    water (the ordinary wake, plus the FEW loop trace). They are the two
+    layers `_composite` mixes, in the same (rows, cols, 3) screen space the
+    assembled frame is, so reading each one's own off-band mean says which
+    of the two is the light beside the line — the bodies' own width and
+    flap, or the wake — rather than guessing. Buffer values, so they are
+    read as a RATIO between the two and not against the frame's 255."""
+    off = off_band_mask(shape_id)
+    out = []
+    for buf in (eff.trail, eff.wake):
+        if buf is None:
+            out.append(0.0)
+            continue
+        arr = np.asarray(buf, dtype=np.float32)
+        if arr.shape[:2] != off.shape:
+            out.append(float("nan"))
+            continue
+        lum = arr.max(axis=2)
+        out.append(float(lum[off].mean()))
+    return tuple(out)
+
+
+def section_whole(seeds=WHOLE_SEEDS, draw_ascii=False):
+    print("\n11. THE OUTLINE IS WHOLE FOR A MOMENT — the row's own bar, his "
+          "words")
+    print("    \"The shape outline needs to reach at least a moment where "
+          "it is either filled with")
+    print("     fish or trail.\" So: the hold frame that MAXIMISES the "
+          f"band's share over {BAND_LIT_HI}/255")
+    print(f"    (\"filled\", not \"lit\"), and at THAT frame the off-band "
+          f"light — every real cell outside")
+    print("    the band and outside a one-cell margin around it (a body is "
+          "a cell wide; its own")
+    print(f"    width is not jitter). Bars: >= "
+          f"{WHOLE_SHARE_MIN * 100:.0f}% of the band over {BAND_LIT_HI}, "
+          f"AND band/off-band >= {WHOLE_RATIO_MIN:.0f}x,")
+    print(f"    on EVERY seed of {seeds}, both modes, all three shapes.")
+    print()
+    word = EDGE + int(FORM_S / DT)
+    hold_end = EDGE + int((FORM_S + HOLD_S) / DT) - 2
+    print("    AND THE OFF-BAND LIGHT IS ATTRIBUTED (row W6.1 owes this "
+          "before it eases anything):")
+    print("    the BODY layer (`eff.trail` — the bodies, their own width "
+          "and flap, and their smear)")
+    print("    and the WATER layer (`eff.wake` — the ordinary wake, plus "
+          "the FEW loop trace), each")
+    print("    read on the same off-band cells. Buffer values: the RATIO "
+          "between the two is the answer.")
+    print()
+    print(f"    mode shape    seed | best frame (of {word}..{hold_end}) | "
+          f"band>{BAND_LIT_HI} | band mean | off-band | ratio | "
+          f"off-band body/water")
+    worst_share, worst_ratio = 1.0, float("inf")
+    best_frames = {}
+    for name, cfg in (("few", FEW), ("many", MANY)):
+        for shape_id in SHAPES:
+            told = told_keys(shape_id, level=0.5)
+            shares, ratios = [], []
+            for seed in range(1, seeds + 1):
+                seen, _ = asyncio.run(run(
+                    cfg_with(cfg, _OVER[0]), hold_end + 2, seed=seed,
+                    tell_at=EDGE, told=told,
+                    watch=lambda i, eff, f, sid=shape_id: (
+                        (i,) + whole_moment(f, sid)
+                        + layer_off_band(eff, sid) + (f.copy(),)
+                        if word <= i <= hold_end else None)))
+                hold = [r for r in seen if r is not None]
+                # THE MOMENT: the hold frame whose band is most FILLED
+                best = max(hold, key=lambda r: (r[1], r[4]))
+                (i_at, share, b_mean, o_mean, ratio,
+                 l_body, l_water, frame) = best
+                shares.append(share)
+                ratios.append(ratio)
+                if seed == 1:
+                    best_frames[(name, shape_id)] = (i_at, frame)
+                print(f"    {name:4s} {shape_id:8s} {seed:4d} | "
+                      f"{i_at:18d} | {share * 100:7.1f}% | "
+                      f"{b_mean:9.1f} | {o_mean:8.2f} | {ratio:6.1f}x | "
+                      f"{l_body:8.2f} /{l_water:7.2f}")
+                worst_share = min(worst_share, share)
+                worst_ratio = min(worst_ratio, ratio)
+            tag = f"{name} {shape_id}"
+            met_share = min(shares) >= WHOLE_SHARE_MIN
+            met_ratio = min(ratios) >= WHOLE_RATIO_MIN
+            if not (met_share and met_ratio):
+                print(f"      <-- {tag}: the plan's bars are "
+                      f"{'MET' if met_share else 'MISSED'} on the filled "
+                      f"share and "
+                      f"{'MET' if met_ratio else 'MISSED'} on the ratio, "
+                      f"reported")
+            check(min(shares) >= WHOLE_SHARE_SEEN,
+                  f"{tag}: the outline is as WHOLE at some moment of the "
+                  f"hold as row W6.1 measured — at least the pinned "
+                  f"{WHOLE_SHARE_SEEN * 100:.0f}% of the band over "
+                  f"{BAND_LIT_HI}/255 on EVERY seed "
+                  f"({min(shares) * 100:.1f}%). THE PLAN'S BAR of "
+                  f"{WHOLE_SHARE_MIN * 100:.0f}% is "
+                  f"{'met' if met_share else 'MISSED and reported'}")
+            check(min(ratios) >= WHOLE_RATIO_SEEN,
+                  f"{tag}: ... with as little light around it as row W6.1 "
+                  f"measured — band/off-band at least the pinned "
+                  f"{WHOLE_RATIO_SEEN:.1f}x at that same frame on EVERY "
+                  f"seed ({min(ratios):.1f}x). THE PLAN'S BAR of "
+                  f"{WHOLE_RATIO_MIN:.0f}x is "
+                  f"{'met' if met_ratio else 'MISSED and reported'}")
+    print(f"\n    worst over every row: {worst_share * 100:.1f}% of the band "
+          f"filled (the plan's bar {WHOLE_SHARE_MIN * 100:.0f}%, pinned "
+          f"floor {WHOLE_SHARE_SEEN * 100:.0f}%), band/off-band "
+          f"{worst_ratio:.1f}x (the plan's bar {WHOLE_RATIO_MIN:.0f}x, "
+          f"pinned floor {WHOLE_RATIO_SEEN:.1f}x)")
+    print("    BOTH OF THE PLAN'S BARS ARE MISSED AND REPORTED — see this "
+          "section's own block for")
+    print("    what row W6.1 moved (44.0% -> 76.7% filled on the worst "
+          "row, 7.7x -> 9.3x) and for")
+    print("    why the last of it is the drawn BODY's own width against a "
+          "one-pitch band.")
+    if draw_ascii:
+        for (name, shape_id), (i_at, frame) in best_frames.items():
+            band = outline_mask(shape_id)
+            print(f"\n    --- {name} {shape_id}, seed 1, THE MOMENT "
+                  f"(frame {i_at}), luminance-graded (`.` <= 20, `-` < "
+                  f"{BAND_LIT_LO}, `+` < {BAND_LIT_HI}, `#` >= "
+                  f"{BAND_LIT_HI}) ---")
+            print(_grade(frame))
+            print(f"    --- ... and the outline band alone — is the LINE "
+                  f"whole ---")
+            print(_grade(frame, band))
+
+
+# ═══ 12. THE NOSE DOES NOT WAG (row W6.1) ══════════════════════════════
+# HIS WORDS: *"the fish seem to jitter out of the outline and so it isn't
+# distinct enough"* — and the arithmetic that says where that comes from.
+#
+# THE HEAD IS DRAWN BY EXTRAPOLATING THE CURRENT HEADING. `_draw_bodies`'s
+# own docstring: "The HEAD (the front half of the spine, u<=0.5) still
+# points the CURRENT heading by straight extrapolation ... a fish's nose
+# really does lead where it is going." So a heading that moves a few
+# degrees one way and a few degrees back, frame after frame, is DRAWN as
+# the nose crossing the band and crossing back — while the MIDDLE that
+# section 4 measures sits 0.10 cell pitches from the line the whole time.
+# The nose node carries NO lateral throw (`SPINE_THROW = SPINE_U ** 1.6`,
+# so its own is 0), which is what makes this a heading measure and not a
+# flap one.
+#
+# AND A PROPORTIONAL STEER DOES EXACTLY THAT WHEN `gain * dt` PASSES 1.
+# `omega = d_hd * turn_gain` then `hd += omega * dt` corrects
+# `turn_gain * dt` of the heading error each frame: at the shaped gain of
+# TURN_GAIN * (1 + WS_TURN_GAIN_X) = 39 /s that is 0.65 of it at 60 fps —
+# the rate every W5.5 number was measured at — and 1.30 at HIS 30, which
+# overshoots by 30% and alternates sign.
+#
+# TWO MEASURES, both over the hold:
+#   * THE WAG. Per fish per frame, the SIGNED heading change `d_hd`; a wag
+#     is a sign reversal between consecutive frames with BOTH |d_hd| past
+#     WAG_DEG_MIN. Reported as wags per fish-SECOND, so the two frame rates
+#     are comparable at all. The bar is WAG_PER_S_MAX: a fish following a
+#     current does not reverse its turn twice a second.
+#   * THE HEAD'S OWN DISTANCE from the band, at p50 and p95 over the hold —
+#     the point `_draw_bodies` actually draws, which is the middle
+#     extrapolated HALF A BODY along `p_hd`, not the middle `fish_pitch`
+#     reads.
+WAG_DEG_MIN = 2.0              # both frames' |d_hd|, in degrees
+WAG_PER_S_MAX = 0.5            # THE PLAN'S own bar, wags per fish-second
+HEAD_P95_MAX = 1.0             # THE PLAN'S own bar, cell pitches
+NOSE_SEEDS = 3
+# AND BOTH OF THE PLAN'S BARS HAVE A GEOMETRIC FLOOR UNDER THEM, which is
+# DERIVED here and printed beside every number — section 5's own shape (the
+# plan's bar named, the measured worst PINNED, so the script stays a
+# regression gate rather than a permanent red).
+#
+#   * THE WAG'S FLOOR is the OUTLINE's own tangent reversals, for a point
+#     walking it at the procession's pace at the rate being measured
+#     (`outline_wag_floor`). A perfect tracker wags exactly that often, and
+#     the heart's cleft turns in and back out, so its floor is 1.3-1.6 per
+#     second at 30 fps — already past the plan's 0.5. The star's and the
+#     diamond's are 0.00, so for those two shapes the plan's bar is
+#     reachable in principle and is simply MISSED, which is reported.
+#   * THE HEAD'S FLOOR is where the NOSE of a fish exactly on the line,
+#     pointing exactly along its tangent, actually lands
+#     (`head_geom_floor`). His fish is 4.33 cell pitches long and the nose
+#     is half of that ahead, so on a curve it leaves the band by
+#     construction: p95 1.32 (heart), 2.14 (star), 2.07 (diamond). The
+#     plan's 1.0-pitch bar is therefore UNREACHABLE for every shape at his
+#     own `blob_size`, and that is arithmetic rather than tuning — the same
+#     reading W5.5 gave many-star's 2-cell bar ("a star's notch cannot meet
+#     2 cells by geometry") and W1.6 gave two of STAR's.
+#
+# The PINNED figures are what row W6.1 measured at 30 fps with everything
+# below it shipped. Row W6.1 took the wag from 18.57-27.71 per fish-second
+# (master, at his own frame rate) to these, and the head's p95 from
+# 2.75-8.18 cell pitches to these.
+WAG_PER_S_SEEN = 9.0           # the measured worst, with headroom
+HEAD_P95_SEEN = 4.2            # ... and the head's own
+
+
+_WAG_FLOOR: dict[tuple, float] = {}
+
+
+def outline_wag_floor(shape_id, loop_s, count):
+    """THE WAG'S OWN GEOMETRIC FLOOR: how often per second the OUTLINE's own
+    tangent REVERSES by more than WAG_DEG_MIN between consecutive frames,
+    for a point walking the outline at the procession's pace at the frame
+    rate being measured.
+
+    A fish that followed the line perfectly would score exactly this, so
+    this is the number the plan's 0.5 bar has to be read against — the same
+    role `corner_depth_bound` plays for section 9. Derived, never tuned:
+    the pace is `loop_s / word_shape_speed_x` and the frame is `DT`."""
+    lap = float(loop_s) / max(FX.WS_SPEED_X, 1e-3)
+    key = (shape_id, round(lap, 4), round(DT, 6))
+    if key not in _WAG_FLOOR:
+        shape = word_shapes.get(shape_id)
+        frames = max(int(round(lap / DT)), 8)
+        s_tab = (np.arange(frames) / frames) % 1.0
+        ux, uy = shape.at(s_tab)
+        x = ux * SIZE * PANEL.half_width
+        y = uy * SIZE * PANEL.half_height
+        dx, dy = np.roll(x, -1) - x, np.roll(y, -1) - y
+        phi = np.arctan2(dy, dx)
+        step = FX._wrap_pi(np.roll(phi, -1) - phi)
+        hot = np.abs(step) > math.radians(WAG_DEG_MIN)
+        rev = int(np.sum((step[:-1] * step[1:] < 0.0)
+                         & hot[:-1] & hot[1:]))
+        _WAG_FLOOR[key] = rev / lap
+    return _WAG_FLOOR[key]
+
+
+_HEAD_FLOOR: dict[tuple, tuple] = {}
+
+
+def head_geom_floor(shape_id, body_len_px):
+    """THE HEAD'S OWN GEOMETRIC FLOOR, (p50, p95, worst) in cell pitches: a
+    fish exactly ON the outline, pointing exactly along its tangent — how
+    far from the band is the point `_draw_bodies` draws as its nose?
+
+    Weighted by arc length, which is what a fish at constant speed samples.
+    A fish is 4.33 cell pitches long at his `blob_size` and its nose is
+    half of that ahead of its middle, so on anything but a straight run the
+    nose is off the band BY CONSTRUCTION. Nothing a steer does can beat
+    this; it is what the plan's 1.0-pitch bar is read against."""
+    key = (shape_id, round(float(body_len_px), 3))
+    if key not in _HEAD_FLOOR:
+        half = 0.5 * float(body_len_px)
+        shape = word_shapes.get(shape_id)
+        s_tab = np.linspace(0.0, 1.0, 2880, endpoint=False)
+        ux, uy = shape.at(s_tab)
+        x = ux * SIZE * PANEL.half_width
+        y = uy * SIZE * PANEL.half_height
+        dx, dy = np.roll(x, -1) - x, np.roll(y, -1) - y
+        seg = np.hypot(dx, dy)
+        tx = dx / np.maximum(seg, 1e-9)
+        ty = dy / np.maximum(seg, 1e-9)
+        hx = (x + tx * half) * CW.COLUMN_PITCH
+        hy = (y + ty * half) * CW.ROW_PITCH
+        lx, ly = loop_pitch(shape_id)
+        d = np.hypot(hx[:, None] - lx[None, :],
+                     hy[:, None] - ly[None, :]).min(axis=1)
+        w = seg / max(seg.sum(), 1e-9)
+        order = np.argsort(d)
+        cw = np.cumsum(w[order])
+        _HEAD_FLOOR[key] = (
+            float(d[order][min(int(np.searchsorted(cw, 0.50)), d.size - 1)]),
+            float(d[order][min(int(np.searchsorted(cw, 0.95)), d.size - 1)]),
+            float(d.max()))
+    return _HEAD_FLOOR[key]
+
+
+def head_pitch(eff):
+    """Every swimming fish's HEAD in cell pitches — its middle extrapolated
+    HALF A BODY along its current heading, which is the node
+    `_draw_bodies` lays at `SPINE_U[0]` (`along_front = (0.5 - 0) *
+    length`, `length = half_w * 2 * body_aspect`, i.e. half a body length
+    forward along `p_hd`). The nose node's own lateral throw is zero
+    (`SPINE_THROW = SPINE_U ** 1.6`), so this IS the point drawn."""
+    sw, fx_, fy_ = fish_pitch(eff)
+    if sw.size == 0:
+        return sw, fx_, fy_
+    half_body = 0.5 * float(eff._body_len_px())
+    hd = eff.p_hd[sw]
+    return (sw,
+            fx_ + np.cos(hd) * half_body * CW.COLUMN_PITCH,
+            fy_ + np.sin(hd) * half_body * CW.ROW_PITCH)
+
+
+def head_dist(eff, shape_id):
+    """Each swimming fish's HEAD distance from the loop, in cell pitches."""
+    sw, hx, hy = head_pitch(eff)
+    if sw.size == 0:
+        return np.zeros(0)
+    lx, ly = loop_pitch(shape_id)
+    d = np.hypot(hx[:, None] - lx[None, :], hy[:, None] - ly[None, :])
+    return d.min(axis=1)
+
+
+def section_nose(seeds=NOSE_SEEDS):
+    print("\n12. THE NOSE DOES NOT WAG — the signed heading change per fish "
+          "per frame of the hold")
+    print("    His words: \"the fish seem to jitter out of the outline and "
+          "so it isn't distinct enough\".")
+    print("    A WAG is a SIGN REVERSAL between consecutive frames with "
+          f"BOTH |d_hd| past {WAG_DEG_MIN:.0f} deg, counted")
+    print("    per fish-SECOND so the two frame rates compare. The HEAD is "
+          "the point `_draw_bodies`")
+    print("    draws — the middle extrapolated half a body along `p_hd` — "
+          "and NOT the middle section 4")
+    print(f"    reads. THE PLAN'S BARS are <= {WAG_PER_S_MAX} wags per "
+          f"fish-second and the head's p95 within")
+    print(f"    {HEAD_P95_MAX:.1f} cell pitch; BOTH ARE PRINTED AGAINST A "
+          f"DERIVED FLOOR (this section's own block) —")
+    print("    the OUTLINE's own tangent reversals at the same pace and "
+          "rate, and where the nose of a")
+    print("    fish exactly on the line pointing exactly along its tangent "
+          "actually lands. What is")
+    print("    ASSERTED is the measured worst, pinned, so a regression "
+          "still fails.")
+    step_k = -np.expm1(-FX.TURN_GAIN * (1.0 + FX.WS_TURN_GAIN_X) * DT)
+    print(f"    (at {1.0 / DT:.0f} fps the shaped heading step corrects "
+          f"{step_k:.2f} of the error per frame — row W6.1's exact "
+          f"first-order")
+    print(f"     form, so NEVER past 1.0; the proportional step it replaced "
+          f"was "
+          f"{FX.TURN_GAIN * (1.0 + FX.WS_TURN_GAIN_X) * DT:.2f} here)")
+    print()
+    word = EDGE + int(FORM_S / DT)
+    hold_end = EDGE + int((FORM_S + HOLD_S) / DT) - 2
+    print("    mode shape    | wags/fish-s  floor | worst fish | head p95  "
+          "floor | middle p50  p95")
+    for name, cfg in (("few", FEW), ("many", MANY)):
+        for shape_id in SHAPES:
+            told = told_keys(shape_id, level=0.5)
+            rates, worst_fish, heads, mids = [], [], [], []
+            body_len = [0.0]
+            for seed in range(1, seeds + 1):
+                seen, _ = asyncio.run(run(
+                    cfg_with(cfg, _OVER[0]), hold_end + 2, seed=seed,
+                    tell_at=EDGE, told=told,
+                    watch=lambda i, eff, _f, sid=shape_id: (
+                        (i, eff.p_hd[:eff.n].copy(),
+                         np.flatnonzero(eff.p_mode[:eff.n] < 2),
+                         head_dist(eff, sid), dist_to_loop(eff, sid),
+                         body_len.__setitem__(0, body_len_pitch(eff)))
+                        if word - 1 <= i <= hold_end else None)))
+                hold = [r for r in seen if r is not None]
+                for _i, _hd, _sw, hdist, mdist, _bl in hold[1:]:
+                    heads.extend(hdist.tolist())
+                    mids.extend(mdist.tolist())
+                # the signed per-frame heading change, per fish id, over
+                # the hold — a fish that stopped swimming breaks its own
+                # series rather than contributing a step across the gap
+                steps: dict[int, list[tuple[int, float]]] = {}
+                for a, b in zip(hold, hold[1:]):
+                    ia, hda, swa = a[0], a[1], a[2]
+                    ib, hdb, swb = b[0], b[1], b[2]
+                    both = np.intersect1d(swa, swb)
+                    if both.size == 0:
+                        continue
+                    d = FX._wrap_pi(hdb[both] - hda[both])
+                    for j, dv in zip(both.tolist(), d.tolist()):
+                        steps.setdefault(j, []).append((ib, dv))
+                wags, fish_s, per_fish = 0, 0.0, []
+                span = max((hold_end - word) * DT, 1e-6)
+                for j, series in steps.items():
+                    fish_s += len(series) * DT
+                    w = 0
+                    for (i0, d0), (i1, d1) in zip(series, series[1:]):
+                        if i1 != i0 + 1:
+                            continue
+                        if (d0 * d1 < 0.0
+                                and abs(d0) > math.radians(WAG_DEG_MIN)
+                                and abs(d1) > math.radians(WAG_DEG_MIN)):
+                            w += 1
+                    wags += w
+                    per_fish.append(w / span)
+                rates.append(wags / max(fish_s, 1e-6))
+                worst_fish.append(max(per_fish) if per_fish else 0.0)
+            rate = float(np.max(rates))
+            w_fish = float(np.max(worst_fish))
+            h50, h95 = (float(np.percentile(heads, 50)),
+                        float(np.percentile(heads, 95))) if heads else (0, 0)
+            m50, m95 = (float(np.percentile(mids, 50)),
+                        float(np.percentile(mids, 95))) if mids else (0, 0)
+            loop_s = (FX.WS_LOOP_S_FEW if name == "few"
+                      else FX.WS_LOOP_S_MANY)
+            n_on = FEW["particle_count"] if name == "few" else \
+                MANY["particle_count"]
+            wag_floor = outline_wag_floor(shape_id, loop_s, n_on)
+            # the body length the HEAD floor is derived from, read off
+            # the real effect in cell pitches and back into px
+            blen_px = body_len[0] / max(CW.COLUMN_PITCH, 1e-9)
+            _f50, hf95, _fw = head_geom_floor(shape_id, blen_px)
+            print(f"    {name:4s} {shape_id:8s} | {rate:11.2f} "
+                  f"{wag_floor:6.2f} | {w_fish:10.2f} | {h95:8.2f} "
+                  f"{hf95:6.2f} | {m50:10.2f} {m95:5.2f}")
+            tag = f"{name} {shape_id}"
+            met_wag = rate <= WAG_PER_S_MAX
+            met_head = h95 <= HEAD_P95_MAX
+            check(rate <= WAG_PER_S_SEEN,
+                  f"{tag}: the nose holds the line no worse than the "
+                  f"pinned {WAG_PER_S_SEEN:.1f} wags per fish-second "
+                  f"({rate:.2f}; worst single fish {w_fish:.2f}). THE "
+                  f"PLAN'S BAR of {WAG_PER_S_MAX} is "
+                  f"{'met' if met_wag else 'MISSED and reported'}; the "
+                  f"outline's own floor here is {wag_floor:.2f}")
+            check(h95 <= HEAD_P95_SEEN,
+                  f"{tag}: ... and the HEAD's p95 is no worse than the "
+                  f"pinned {HEAD_P95_SEEN:.1f} cell pitches ({h95:.2f}; "
+                  f"its middle's p95 is {m95:.2f}). THE PLAN'S BAR of "
+                  f"{HEAD_P95_MAX:.1f} is "
+                  f"{'met' if met_head else 'UNREACHABLE at his own '
+                     'blob_size and reported'}; a perfect fish's own p95 "
+                  f"here is {hf95:.2f}")
 
 
 # ═══ main ══════════════════════════════════════════════════════════════
 def main() -> int:
+    global DT
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seeds", type=int, default=SEEDS,
                     help="seeds per row in section 4")
+    ap.add_argument("--fps", type=float, default=1.0 / DT,
+                    help="the rendered frame rate every section measures "
+                         "at. HIS CRYSTAL IS 30 (the default, row W6.1); "
+                         "60 is the rate every W5.5 figure was read at and "
+                         "is kept as the cross-check")
     ap.add_argument("--ascii", action="store_true",
                     help="draw the hold's frame on the real mask")
     ap.add_argument("--only", action="append",
                     help="run only these sections: 1-10, or the aliases "
                          "untold/word/smooth/contrast/white/cost/"
-                         "backtoback/restored/corner/sweep")
+                         "backtoback/restored/corner/sweep/whole/nose")
     ap.add_argument("--loop-s", type=float, default=None,
                     help="row W5.5's lever 1, as the SECONDS one FEW lap "
                          "takes at a full envelope (the shipped "
@@ -1908,20 +2688,49 @@ def main() -> int:
                          "of the loop the aim may be ahead")
     ap.add_argument("--corner-seeds", type=int, default=CORNER_SEEDS,
                     help="seeds per row in section 9 (the corner measure)")
+    ap.add_argument("--whole-seeds", type=int, default=WHOLE_SEEDS,
+                    help="seeds per row in section 11 (THE OUTLINE IS "
+                         "WHOLE — his own bar for row W6.1)")
+    ap.add_argument("--nose-seeds", type=int, default=NOSE_SEEDS,
+                    help="seeds per row in section 12 (THE NOSE DOES NOT "
+                         "WAG)")
     ap.add_argument("--trail-s", type=float, default=None,
                     help="row W5.5's lever 3: the body trail's half-life "
                          "under a full shape, BOTH ends of the (few, many) "
                          "pair")
+    ap.add_argument("--aim-step-x", type=float, default=None,
+                    help="row W6.1's lever: WS_AIM_STEP_X, the frame steps "
+                         "the aim arc is floored at")
+    ap.add_argument("--wake-fade", type=float, default=None,
+                    help="row W6.1's lever: WS_WAKE_FADE, the ORDINARY "
+                         "wake's deposit under a full shape as a multiple "
+                         "of his own (1.0 = today, 0.0 = gone)")
+    ap.add_argument("--gap-x", type=float, default=None,
+                    help="row W6.1's lever: WS_TRAIL_GAP_X, the revisit "
+                         "gaps the trail's and the trace's half-lives are "
+                         "floored at under a full shape")
+    ap.add_argument("--flap-x", type=float, default=None,
+                    help="row W6.1's lever: WS_FLAP_X, the drawn flap "
+                         "under a full shape in GLIDE sizes (1.0 = the "
+                         "glide; a big number is today's stroke)")
     args = ap.parse_args()
+    DT = 1.0 / max(float(args.fps), 1e-3)
     LOOP_S[0], SPEED_X[0] = args.loop_s, args.speed_x
     TURN_X[0], TRAIL_S[0] = args.turn_x, args.trail_s
     GAIN_X[0], LEAD[0] = args.turn_gain_x, args.lead
+    GAP_X[0], FLAP_X[0] = args.gap_x, args.flap_x
+    AIM_X[0], WAKE_FADE[0] = args.aim_step_x, args.wake_fade
     alias = {"untold": "1", "word": "2", "smooth": "3", "contrast": "4",
              "shape": "4", "white": "5", "cost": "6", "backtoback": "7",
-             "restored": "8", "corner": "9", "corners": "9", "sweep": "10"}
+             "restored": "8", "corner": "9", "corners": "9", "sweep": "10",
+             "whole": "11", "nose": "12", "wag": "12"}
     only = {alias.get(v, v) for v in (args.only or [])}
     print(f"THE FISH'S WORD SHAPE PROCESSION — {COLS}x{ROWS} crystal, "
           f"{int(REAL.sum())} real cells, SIZE {SIZE}")
+    print(f"AT {1.0 / DT:.0f} fps (dt {DT:.5f} s)"
+          + ("  — HIS CRYSTAL'S OWN RATE (row W6.1)" if abs(1.0 / DT - 30.0)
+             < 0.5 else
+             "  — the CROSS-CHECK rate; his crystal renders at 30"))
     print(f"his live music Fish: {FEW['particle_count']} fish (few) and "
           f"{MANY['particle_count']} (many), tail drive and pond rest on")
     print(f"told: form {FORM_S}s (Fish's own floor), hold {HOLD_S}s, "
@@ -1937,6 +2746,11 @@ def main() -> int:
               f"circle), trail half-life {FX.WS_TRAIL_HALF_LIFE_S}, "
               f"heading gain x{FX.WS_TURN_GAIN_X}, aim "
               f"{FX.WS_REACH + FX.WS_TARGET_LEAD:.3f} of the loop ahead")
+        print(f"ROW W6.1's levers: aim floored at "
+              f"{FX.WS_AIM_STEP_X} frame step(s), the clamp at "
+              f"{math.degrees(FX.WS_TURN_MAX_RAD_FRAME):.0f} deg a rendered "
+              f"frame, trail floored at {FX.WS_TRAIL_GAP_X} revisit "
+              f"gap(s), drawn flap {FX.WS_FLAP_X} glide size(s)")
     # EVERY section runs under the command line's own levers, so
     # `--turn-x 0.08` re-measures the whole acceptance list on that circle
     # rather than only the sweep. Section 1 is deliberately OUTSIDE them:
@@ -1953,6 +2767,10 @@ def main() -> int:
                             ("8", section_restored, True),
                             ("9", lambda: section_corners(
                                 args.corner_seeds, args.ascii), False),
+                            ("11", lambda: section_whole(
+                                args.whole_seeds, args.ascii), True),
+                            ("12", lambda: section_nose(
+                                args.nose_seeds), True),
                             ("10", section_sweep, False)):
         if only and name not in only:
             continue
