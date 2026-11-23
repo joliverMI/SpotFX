@@ -2,23 +2,38 @@
 name: sauron-scene
 description: >
   The "Sauron" SPECTRA scene — a copy of Eye V2 with Matrix `sauron`
-  (Strips `blackhole1d`, Singles unchanged). NOT YET CREATED: its seed
-  script scripts/seed_sauron_scene.py is written and gated on his live
-  tuning session. Load before running or editing that script, or before
-  editing the scene's bands/kinds once it exists.
+  (Strips `blackhole1d`, Singles unchanged). Created `disabled: true` on
+  2026-10-10 for his live tuning session, reached by Force Scene, out of
+  automatic rotation; its Words band was written at the W3 Word Shapes
+  deploy. Load before running or editing scripts/seed_sauron_scene.py, or
+  before editing the scene's bands/kinds.
 ---
 
 # Sauron (scene)
 
 Load `sauron-effect` first.
 
-## Not seeded — the tuning gate stands
+## Created, disabled, for his tuning session
 
 `scripts/seed_sauron_scene.py` (dry-run default, `--apply` backs up both
-stores, uuid5 ids so a re-run upserts) is WRITTEN, NOT RUN. The order is
-docs/ADDING_EFFECTS.md's: he tunes Sauron live on the crystal (set by hand,
-no scene), his values go into the script's `MATRIX_TUNED` (and the
-registry defaults), THEN the script runs. Do not run it before his word.
+stores, uuid5 ids so a re-run upserts) was run — dry run then `--apply` —
+on 2026-10-10, against the live checkout, backing up
+`storage/spectra/backups/{scenes,sequencer}-pre-sauron-20261011T012820Z.json`
+(`data/sauron-tuning-setup/report.md`). The scene exists: id
+`4874012c-709b-511d-aad4-d3455532a1cd`, `disabled: true` (born that way
+because live Eye V2 was disabled at the time the script ran), out of
+`scene_sequencer`'s automatic candidate pool, reached for his tuning only
+through an explicit Force Scene pin on `force_scene_scene_id` (set to this
+id, `overrode_disabled: true` in the fire result — expected and correct).
+Whether the scene is enabled in rotation TODAY is not recorded in this
+repo — check the live API (`GET /spectra/api/scenes`, read-only) before
+claiming either way; do not assume the disabled flag from this file or
+from this scene's age.
+
+His verdict on Sauron's shaped eye (Word Shapes row W1.5), 2026-11-22,
+verbatim: "sauron looks good." The W3-list departure for his eye — the
+shaped iris reading 1.5–1.65× taller than wide, the eye's own aspect — is
+accepted; see the `sauron-effect` skill's word-shape note.
 
 ## What the copy is
 
@@ -47,10 +62,12 @@ speed_audio, impulse_decay, x/y offsets).
 ## Words band — one `Word Shape` kind, full range (Word Shapes W2.5)
 
 `scripts/add_word_shapes.py` is the one thing that turns Word Shapes on in
-his room — and because this scene is NOT SEEDED YET (the tuning gate above),
-the script reports it as absent and skips it rather than inventing it: run
-it again, or with `--scene Sauron`, once the seed has landed. On this scene
-it writes exactly two keys:
+his room. It ran, `--apply`, at the W3 Word Shapes deploy, 2026-11-17
+(`data/ws-w3-deploy/report.md`): Sauron's scene already existed by then
+(seeded 2026-10-10, above), so the script found it and wrote its Words
+band like the other five scenes — this write is unconditional on the
+scene's own `disabled` flag, which it never touches. On this scene it
+wrote exactly two keys:
 
 - `flare_kinds` gains ONE entry, `{"name": "Word Shape", "type":
   "word_shape", ...}` — offset 0, no minimum intensity, enabled. The type

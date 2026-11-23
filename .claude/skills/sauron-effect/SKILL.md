@@ -216,6 +216,7 @@ still holds the flames down.
    MULTIPLIER of the iris radius (1.0 = the eye's own edge), not the
    plan's fraction-of-the-panel — with his `iris_size` 0.62 the two happen
    to coincide, which is why the clarity bars are measured at SIZE 0.62.
+   Accepted by his word, 2026-11-22: "sauron looks good."
 2. **`sdf_fast`'s far field is clamped, not used raw** (`SHAPE_FAST_LIMIT`,
    `_shape_field`). Past its grid box `sdf_fast` is a lower-bound estimate
    that steps down at the boundary — 0.055 eye units, a whole rendered

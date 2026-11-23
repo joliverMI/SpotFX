@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create the SAURON scene, copied from his stored Eye V2. WRITTEN, NOT RUN.
+"""Create the SAURON scene, copied from his stored Eye V2. RUN 2026-10-10.
 
 The Admiral, 2026-10-10: "copy our current scene Effect called [Eye] and
 make it look a lot more like the eye of Sauron" — answers: "1) Copy",

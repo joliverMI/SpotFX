@@ -115,6 +115,25 @@ quoted only where they are the ruling.
     show it, not the library's internal convention — the same discipline
     §14 already asks of an approved mechanism, one step earlier, at the
     picture itself.
+19. **Measure at the device's own frame rate.** A rig's dt is part of the
+    claim: a proportional steer that is stable at 60 fps (gain·dt 0.65)
+    overshoots at 30 (1.30), and row W6.1 — the one row that measured Fish
+    at the crystal's own 30 fps rather than the rig's inherited 60 — found
+    a fish 14–20 px off the lit panel that five earlier rows at 60 had
+    never seen. See `docs/agents/fx-effects.md`'s "MEASURE A SHAPED EFFECT
+    AT 30 fps" rule (~line 1234) for the arithmetic; this entry only banks
+    the discipline.
+20. **"Lit", "filled" and "distinct" are three different bars, not one.**
+    His three verdicts on Fish/Orbits asked for each in turn — W1: lit; W4:
+    "not clear enough"; W6: "filled with fish or trail … not distinct
+    enough" — and each one survived the last bar without meeting the next.
+    Set the bar at DISTINCT from the first row: a half-brightness threshold
+    AND a band/off-band ratio, both at ONE frame, not an average. Give every
+    motion bar a derived geometric floor instead of a round number — a
+    4.33-pitch fish cannot draw its nose within 1 pitch of a line; a heart's
+    cusp forces 1.3–1.6 heading reversals a second by its own geometry — and
+    pick a dimming lever by attributing the off-band light per layer before
+    touching anything.
 
 ## How he answers
 
@@ -278,7 +297,7 @@ first test of the workflow: that session's entry goes here next.
 - Confirmation: "yes to both questions"; "do 18 degrees per frame for now".
 - Room verdict: pending (after deploy).
 
-### 2026-11-15/17 — shape-flares-lead (new, a shared shape library + a new
+### 2026-11-15/22 — shape-flares-lead (new, a shared shape library + a new
 response class + six effects, Black Hole V2 / STAR / Orbits V2 / Fish /
 Sauron / Fireworks V2)
 
@@ -421,6 +440,33 @@ design-session technique; only the design-session half is recorded here.
   magnitude is a first guess, not a target) and §18 (the orientation ask
   itself — every tile through W4 showed the math's own frame, never the
   panel's).
+- Third room verdict (2026-11-18, msg 105), verbatim: "Only thing left is
+  the fish needs a little more tuning. Everything else was good. The shape
+  outline needs to reach at least a moment where it is either filled with
+  fish or trail. Right now, the fish seem to jitter out of the outline and
+  so it isn't distinct enough. Also, if we did a highlight of the shape in
+  orbits, do it on fish." Everything else in waves 0–5 was accepted by his
+  own word; one row, W6.1, answered it. W6.1 (PR #551, `d1def3e3`): the
+  Fish rig had measured at 60 fps while the crystal renders at 30, so every
+  W5.5 number was read at twice the live rate; at 30 fps the proportional
+  steer overshot and fish walked off the panel outright. Four arithmetic
+  causes were found and fixed (a proportional steer past `gain·dt < 1`, a
+  turn clamp expressed as an angular rate rather than a per-frame ceiling,
+  a pursuit aim arc shorter than a frame's own travel, and an ungated
+  wander term) — none of it a guess. "A highlight of the shape in orbits"
+  did not exist to port: Orbits has no shape-time brightness lift at all,
+  so what Fish actually took was Orbits' trail-outlives-the-revisit-gap
+  PERSISTENCE, reversing W5.5's own choice to divide the trail half-life by
+  the lap speed-up. The row's own bars (95% of the band filled at the
+  fullest hold frame, a 20× band/off-band ratio) were missed on four of six
+  rows and reported with their derived geometric floors rather than moved
+  to force a pass. Deployed 2026-11-19 09:36 EST (`data/ws-w6-deploy/report.md`).
+- Fourth room verdict (2026-11-19, msg 110), verbatim: "I'm happy with
+  fish." Fish is accepted; with it every wave of the plan (0–6) is built,
+  deployed and accepted by his own word.
+- His verdict on Sauron's shaped eye, W1.5 (2026-11-22, msg 112), verbatim:
+  "sauron looks good." The W3-list departure for his eye — the shaped iris
+  reading 1.5–1.65× taller than wide, the eye's own aspect — is accepted.
 
 ### Template for the next entry
 ```
