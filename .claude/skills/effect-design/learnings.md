@@ -119,8 +119,8 @@ quoted only where they are the ruling.
     claim: a proportional steer that is stable at 60 fps (gain·dt 0.65)
     overshoots at 30 (1.30), and row W6.1 — the one row that measured Fish
     at the crystal's own 30 fps rather than the rig's inherited 60 — found
-    a fish 14–20 px off the lit panel that five earlier rows at 60 had
-    never seen. See `docs/agents/fx-effects.md`'s "MEASURE A SHAPED EFFECT
+    a fish 14–20 px off the lit panel that the two Fish rows measured at 60
+    (W1.4, W5.5) had never seen. See `docs/agents/fx-effects.md`'s "MEASURE A SHAPED EFFECT
     AT 30 fps" rule (~line 1234) for the arithmetic; this entry only banks
     the discipline.
 20. **"Lit", "filled" and "distinct" are three different bars, not one.**
